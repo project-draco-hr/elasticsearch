@@ -1,0 +1,53 @@
+{
+  if (ignoreBackups() || shards.size() == 1) {
+    if (alreadyThreaded || !request.listenerThreaded()) {
+      listener.onResponse(response);
+    }
+ else {
+      threadPool.execute(new Runnable(){
+        @Override public void run(){
+          listener.onResponse(response);
+        }
+      }
+);
+    }
+    return;
+  }
+  int backupCounter=0;
+  for (  final ShardRouting shard : shards.reset()) {
+    if (shard.primary()) {
+      continue;
+    }
+    backupCounter++;
+    if (shard.relocating()) {
+      backupCounter++;
+    }
+  }
+  AtomicInteger counter=new AtomicInteger(backupCounter);
+  for (  final ShardRouting shard : shards.reset()) {
+    if (shard.primary()) {
+      continue;
+    }
+    if (shard.unassigned()) {
+      if (counter.decrementAndGet() == 0) {
+        if (alreadyThreaded || !request.listenerThreaded()) {
+          listener.onResponse(response);
+        }
+ else {
+          threadPool.execute(new Runnable(){
+            @Override public void run(){
+              listener.onResponse(response);
+            }
+          }
+);
+        }
+        break;
+      }
+      continue;
+    }
+    performOnBackup(response,counter,shard,shard.currentNodeId());
+    if (shard.relocating()) {
+      performOnBackup(response,counter,shard,shard.relocatingNodeId());
+    }
+  }
+}

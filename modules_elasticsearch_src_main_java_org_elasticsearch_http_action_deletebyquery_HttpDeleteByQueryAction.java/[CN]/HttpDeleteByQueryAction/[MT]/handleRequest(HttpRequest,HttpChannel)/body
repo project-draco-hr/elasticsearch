@@ -1,0 +1,55 @@
+{
+  DeleteByQueryRequest deleteByQueryRequest=new DeleteByQueryRequest(splitIndices(request.param("index")));
+  deleteByQueryRequest.listenerThreaded(false);
+  try {
+    deleteByQueryRequest.querySource(HttpActions.parseQuerySource(request));
+    deleteByQueryRequest.queryParserName(request.param("queryParserName"));
+    String typesParam=request.param("type");
+    if (typesParam != null) {
+      deleteByQueryRequest.types(HttpActions.splitTypes(typesParam));
+    }
+    deleteByQueryRequest.timeout(TimeValue.parseTimeValue(request.param("timeout"),ShardDeleteByQueryRequest.DEFAULT_TIMEOUT));
+  }
+ catch (  Exception e) {
+    try {
+      channel.sendResponse(new JsonHttpResponse(request,PRECONDITION_FAILED,JsonBuilder.cached().startObject().field("error",e.getMessage()).endObject()));
+    }
+ catch (    IOException e1) {
+      logger.error("Failed to send failure response",e1);
+    }
+    return;
+  }
+  client.execDeleteByQuery(deleteByQueryRequest,new ActionListener<DeleteByQueryResponse>(){
+    @Override public void onResponse(    DeleteByQueryResponse result){
+      try {
+        JsonBuilder builder=HttpJsonBuilder.cached(request);
+        builder.startObject().field("ok",true);
+        builder.startObject("_indices");
+        for (        IndexDeleteByQueryResponse indexDeleteByQueryResponse : result.indices().values()) {
+          builder.startObject(indexDeleteByQueryResponse.index());
+          builder.startObject("_shards");
+          builder.field("total",indexDeleteByQueryResponse.totalShards());
+          builder.field("successful",indexDeleteByQueryResponse.successfulShards());
+          builder.field("failed",indexDeleteByQueryResponse.failedShards());
+          builder.endObject();
+          builder.endObject();
+        }
+        builder.endObject();
+        builder.endObject();
+        channel.sendResponse(new JsonHttpResponse(request,OK,builder));
+      }
+ catch (      Exception e) {
+        onFailure(e);
+      }
+    }
+    @Override public void onFailure(    Throwable e){
+      try {
+        channel.sendResponse(new JsonThrowableHttpResponse(request,e));
+      }
+ catch (      IOException e1) {
+        logger.error("Failed to send failure response",e1);
+      }
+    }
+  }
+);
+}

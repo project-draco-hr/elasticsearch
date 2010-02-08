@@ -1,0 +1,41 @@
+{
+  if (recovered.compareAndSet(false,true)) {
+    if (!indexShard.routingEntry().primary()) {
+      throw new ElasticSearchIllegalStateException("Trying to recover when the shard is in backup state");
+    }
+    try {
+      store.deleteContent();
+    }
+ catch (    IOException e) {
+      logger.debug("Failed to delete store before recovery from gateway",e);
+    }
+    indexShard.recovering();
+    logger.debug("Starting recovery from {}",shardGateway);
+    StopWatch stopWatch=new StopWatch().start();
+    RecoveryStatus recoveryStatus=shardGateway.recover();
+    indexShard.snapshot(new Engine.SnapshotHandler(){
+      @Override public void snapshot(      SnapshotIndexCommit snapshotIndexCommit,      Translog.Snapshot translogSnapshot) throws EngineException {
+        lastIndexVersion=snapshotIndexCommit.getVersion();
+        lastTranslogId=translogSnapshot.translogId();
+        lastTranslogSize=translogSnapshot.size();
+      }
+    }
+);
+    if (indexShard.state() != IndexShardState.STARTED) {
+      indexShard.start();
+    }
+    stopWatch.stop();
+    if (logger.isDebugEnabled()) {
+      StringBuilder sb=new StringBuilder();
+      sb.append("Recovery completed from ").append(shardGateway).append(", took [").append(stopWatch.totalTime()).append("]\n");
+      sb.append("    Index    : numberOfFiles      [").append(recoveryStatus.index().numberOfFiles()).append("] with totalSize [").append(recoveryStatus.index().totalSize()).append("]\n");
+      sb.append("    Translog : numberOfOperations [").append(recoveryStatus.translog().numberOfOperations()).append("] with totalSize [").append(recoveryStatus.translog().totalSize()).append("]");
+      logger.debug(sb.toString());
+    }
+    indexShard.refresh(false);
+    scheduleSnapshotIfNeeded();
+  }
+ else {
+    throw new IgnoreGatewayRecoveryException(shardId,"Already recovered");
+  }
+}

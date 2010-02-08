@@ -1,0 +1,124 @@
+{
+  boolean indexDirty=false;
+  boolean translogDirty=false;
+  if (lastIndexVersion != snapshotIndexCommit.getVersion()) {
+    indexDirty=true;
+    final CountDownLatch latch=new CountDownLatch(snapshotIndexCommit.getFiles().length);
+    final AtomicReference<Exception> lastException=new AtomicReference<Exception>();
+    for (    final String fileName : snapshotIndexCommit.getFiles()) {
+      if (fileName.equals(snapshotIndexCommit.getSegmentsFileName())) {
+        latch.countDown();
+        continue;
+      }
+      try {
+        IndexInput indexInput=snapshotIndexCommit.getDirectory().openInput(fileName);
+        File snapshotFile=new File(locationIndex,fileName);
+        if (snapshotFile.exists() && (snapshotFile.length() == indexInput.length())) {
+          latch.countDown();
+          continue;
+        }
+        indexInput.close();
+      }
+ catch (      Exception e) {
+        logger.debug("Failed to verify file equality based on length, copying...",e);
+      }
+      threadPool.execute(new Runnable(){
+        @Override public void run(){
+          try {
+            copyFromDirectory(snapshotIndexCommit.getDirectory(),fileName,new File(locationIndex,fileName));
+          }
+ catch (          Exception e) {
+            lastException.set(e);
+          }
+ finally {
+            latch.countDown();
+          }
+        }
+      }
+);
+    }
+    try {
+      latch.await();
+    }
+ catch (    InterruptedException e) {
+      lastException.set(e);
+    }
+    if (lastException.get() != null) {
+      throw new IndexShardGatewaySnapshotFailedException(shardId(),"Failed to perform snapshot (index files)",lastException.get());
+    }
+  }
+  if (translogSnapshot.translogId() != lastTranslogId || translogFile == null) {
+    translogDirty=true;
+    if (translogFile != null) {
+      try {
+        translogFile.close();
+      }
+ catch (      IOException e) {
+      }
+    }
+    try {
+      File f=new File(locationTranslog,"translog-" + translogSnapshot.translogId());
+      translogFile=new RandomAccessFile(f,"rw");
+      translogFile.writeInt(-1);
+      translogFile.seek(0);
+      if (translogFile.readInt() != -1) {
+        throw new ElasticSearchIllegalStateException("Wrote to snapshot file [" + f + "] but did not read...");
+      }
+      for (      Translog.Operation operation : translogSnapshot) {
+        writeTranslogOperation(translogFile,operation);
+      }
+    }
+ catch (    Exception e) {
+      try {
+        translogFile.close();
+      }
+ catch (      IOException e1) {
+      }
+      translogFile=null;
+      throw new IndexShardGatewaySnapshotFailedException(shardId(),"Failed to snapshot translog",e);
+    }
+  }
+ else   if (translogSnapshot.size() > lastTranslogSize) {
+    translogDirty=true;
+    try {
+      for (      Translog.Operation operation : translogSnapshot.skipTo(lastTranslogSize)) {
+        writeTranslogOperation(translogFile,operation);
+      }
+    }
+ catch (    Exception e) {
+      try {
+        translogFile.close();
+      }
+ catch (      IOException e1) {
+      }
+      translogFile=null;
+      throw new IndexShardGatewaySnapshotFailedException(shardId(),"Failed to snapshot translog",e);
+    }
+  }
+  try {
+    if (indexDirty) {
+      copyFromDirectory(snapshotIndexCommit.getDirectory(),snapshotIndexCommit.getSegmentsFileName(),new File(locationIndex,snapshotIndexCommit.getSegmentsFileName()));
+    }
+    if (translogDirty) {
+      translogFile.seek(0);
+      translogFile.writeInt(translogSnapshot.size());
+      translogFile.seek(translogFile.length());
+      translogFile.getFD().sync();
+    }
+  }
+ catch (  Exception e) {
+    try {
+      translogFile.close();
+    }
+ catch (    IOException e1) {
+    }
+    translogFile=null;
+    throw new IndexShardGatewaySnapshotFailedException(shardId(),"Failed to finalize snapshot",e);
+  }
+  if (lastTranslogId != translogSnapshot.translogId()) {
+    new File(locationTranslog,"translog-" + lastTranslogId).delete();
+  }
+  lastIndexVersion=snapshotIndexCommit.getVersion();
+  lastTranslogId=translogSnapshot.translogId();
+  lastTranslogSize=translogSnapshot.size();
+}

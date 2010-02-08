@@ -1,0 +1,50 @@
+{
+  Preconditions.checkNotNull(instance,"Cannot make an MBean wrapper for null instance");
+  this.obj=instance;
+  this.logger=logger;
+  MapBuilder<String,AttributeEntry> attributesBuilder=newMapBuilder();
+  List<MBeanOperationInfo> operationsBuilder=new ArrayList<MBeanOperationInfo>();
+  MBean mBean=obj.getClass().getAnnotation(MBean.class);
+  this.groupName=findGroupName();
+  if (mBean != null && Strings.hasLength(mBean.objectName())) {
+    objectName=mBean.objectName();
+  }
+ else {
+    if (Strings.hasLength(groupName)) {
+      objectName="";
+    }
+ else {
+      objectName=obj.getClass().getSimpleName();
+    }
+  }
+  StringBuilder sb=new StringBuilder(groupName);
+  if (Strings.hasLength(groupName) && Strings.hasLength(objectName)) {
+    sb.append(",");
+  }
+  sb.append(objectName);
+  this.fullObjectName=sb.toString();
+  this.description=findDescription();
+  findFields(attributesBuilder);
+  findMethods(attributesBuilder,operationsBuilder);
+  this.attributes=attributesBuilder.immutableMap();
+  this.operations=ImmutableList.copyOf(operationsBuilder);
+  attributesInfo=new MBeanAttributeInfo[attributes.size()];
+  int i=0;
+  MBeanAttributeInfo info;
+  for (  AttributeEntry entry : attributes.values()) {
+    info=entry.getInfo();
+    attributesInfo[i++]=info;
+    if (logger.isInfoEnabled()) {
+      logger.trace("Attribute " + info.getName() + "[r="+ info.isReadable()+ ",w="+ info.isWritable()+ ",is="+ info.isIs()+ ",type="+ info.getType()+ "]");
+    }
+  }
+  operationsInfo=new MBeanOperationInfo[operations.size()];
+  operations.toArray(operationsInfo);
+  if (logger.isTraceEnabled()) {
+    if (operations.size() > 0)     logger.trace("Operations are:");
+    for (    MBeanOperationInfo op : operationsInfo) {
+      logger.trace("Operation " + op.getReturnType() + " "+ op.getName());
+    }
+  }
+  this.mBeanInfo=new MBeanInfo(getObject().getClass().getCanonicalName(),description,attributesInfo,null,operationsInfo,null);
+}

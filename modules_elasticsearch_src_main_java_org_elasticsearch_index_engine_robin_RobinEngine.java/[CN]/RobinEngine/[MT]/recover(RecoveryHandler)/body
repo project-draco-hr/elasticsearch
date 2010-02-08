@@ -1,0 +1,68 @@
+{
+  rwl.writeLock().lock();
+  try {
+    disableFlushCounter++;
+  }
+  finally {
+    rwl.writeLock().unlock();
+  }
+  SnapshotIndexCommit phase1Snapshot;
+  try {
+    phase1Snapshot=deletionPolicy.snapshot();
+  }
+ catch (  IOException e) {
+    --disableFlushCounter;
+    throw new RecoveryEngineException(shardId,1,"Snapshot failed",e);
+  }
+  try {
+    recoveryHandler.phase1(phase1Snapshot);
+  }
+ catch (  Exception e) {
+    --disableFlushCounter;
+    phase1Snapshot.release();
+    throw new RecoveryEngineException(shardId,1,"Execution failed",e);
+  }
+  Translog.Snapshot phase2Snapshot;
+  try {
+    phase2Snapshot=translog.snapshot();
+  }
+ catch (  Exception e) {
+    --disableFlushCounter;
+    phase1Snapshot.release();
+    throw new RecoveryEngineException(shardId,2,"Snapshot failed",e);
+  }
+  try {
+    recoveryHandler.phase2(phase2Snapshot);
+  }
+ catch (  Exception e) {
+    --disableFlushCounter;
+    phase1Snapshot.release();
+    phase2Snapshot.release();
+    throw new RecoveryEngineException(shardId,2,"Execution failed",e);
+  }
+  rwl.writeLock().lock();
+  Translog.Snapshot phase3Snapshot;
+  try {
+    phase3Snapshot=translog.snapshot(phase2Snapshot);
+  }
+ catch (  Exception e) {
+    --disableFlushCounter;
+    rwl.writeLock().unlock();
+    phase1Snapshot.release();
+    phase2Snapshot.release();
+    throw new RecoveryEngineException(shardId,3,"Snapshot failed",e);
+  }
+  try {
+    recoveryHandler.phase3(phase3Snapshot);
+  }
+ catch (  Exception e) {
+    throw new RecoveryEngineException(shardId,3,"Execution failed",e);
+  }
+ finally {
+    --disableFlushCounter;
+    rwl.writeLock().unlock();
+    phase1Snapshot.release();
+    phase2Snapshot.release();
+    phase3Snapshot.release();
+  }
+}

@@ -1,0 +1,58 @@
+{
+  if (request.hasContent()) {
+    return request.contentAsString();
+  }
+  String queryString=request.param("q");
+  if (queryString == null) {
+    throw new ElasticSearchIllegalArgumentException("No query to execute, not in body, and not bounded to 'q' parameter");
+  }
+  QueryStringJsonQueryBuilder queryBuilder=JsonQueryBuilders.queryString(queryString);
+  queryBuilder.defaultField(request.param("df"));
+  queryBuilder.analyzer(request.param("analyzer"));
+  String defaultOperator=request.param("defaultOperator");
+  if (defaultOperator != null) {
+    if ("OR".equals(defaultOperator)) {
+      queryBuilder.defualtOperator(QueryStringJsonQueryBuilder.Operator.OR);
+    }
+ else     if ("AND".equals(defaultOperator)) {
+      queryBuilder.defualtOperator(QueryStringJsonQueryBuilder.Operator.AND);
+    }
+ else {
+      throw new ElasticSearchIllegalArgumentException("Unsupported defaultOperator [" + defaultOperator + "], can either be [OR] or [AND]");
+    }
+  }
+  SearchSourceBuilder searchSourceBuilder=new SearchSourceBuilder().query(queryBuilder);
+  searchSourceBuilder.queryParserName(request.param("queryParserName"));
+  String explain=request.param("explain");
+  if (explain != null) {
+    searchSourceBuilder.explain(Boolean.parseBoolean(explain));
+  }
+  List<String> fields=request.params("field");
+  if (fields != null && !fields.isEmpty()) {
+    searchSourceBuilder.fields(fields);
+  }
+  String sField=request.param("fields");
+  if (sField != null) {
+    String[] sFields=fieldsPattern.split(sField);
+    if (sFields != null) {
+      for (      String field : sFields) {
+        searchSourceBuilder.field(field);
+      }
+    }
+  }
+  List<String> sorts=request.params("sort");
+  if (sorts != null && !sorts.isEmpty()) {
+    for (    String sort : sorts) {
+      int delimiter=sort.lastIndexOf(":");
+      if (delimiter != -1) {
+        String sortField=sort.substring(0,delimiter);
+        String reverse=sort.substring(delimiter + 1);
+        searchSourceBuilder.sort(sortField,reverse.equals("reverse"));
+      }
+ else {
+        searchSourceBuilder.sort(sort);
+      }
+    }
+  }
+  return searchSourceBuilder.build();
+}

@@ -1,0 +1,85 @@
+{
+  if (!lifecycle.moveToStarted()) {
+    return this;
+  }
+  this.serverOpenChannels=new OpenChannelsHandler();
+  serverBootstrap=new ServerBootstrap(new NioServerSocketChannelFactory(Executors.newCachedThreadPool(daemonThreadFactory(settings,"httpBoss")),Executors.newCachedThreadPool(daemonThreadFactory(settings,"httpIoWorker")),workerCount));
+  final HashedWheelTimer keepAliveTimer=new HashedWheelTimer(daemonThreadFactory(settings,"keepAliveTimer"),httpKeepAliveTickDuration.millis(),TimeUnit.MILLISECONDS);
+  final HttpRequestHandler requestHandler=new HttpRequestHandler(this);
+  ChannelPipelineFactory pipelineFactory=new ChannelPipelineFactory(){
+    @Override public ChannelPipeline getPipeline() throws Exception {
+      ChannelPipeline pipeline=Channels.pipeline();
+      pipeline.addLast("openChannels",serverOpenChannels);
+      pipeline.addLast("keepAliveTimeout",new ReadTimeoutHandler(keepAliveTimer,httpKeepAlive.millis(),TimeUnit.MILLISECONDS));
+      pipeline.addLast("decoder",new HttpRequestDecoder());
+      pipeline.addLast("encoder",new HttpResponseEncoder());
+      pipeline.addLast("handler",requestHandler);
+      return pipeline;
+    }
+  }
+;
+  serverBootstrap.setPipelineFactory(pipelineFactory);
+  if (tcpNoDelay != null) {
+    serverBootstrap.setOption("child.tcpNoDelay",tcpNoDelay);
+  }
+  if (tcpKeepAlive != null) {
+    serverBootstrap.setOption("child.keepAlive",tcpKeepAlive);
+  }
+  if (tcpSendBufferSize != null) {
+    serverBootstrap.setOption("child.sendBufferSize",tcpSendBufferSize.bytes());
+  }
+  if (tcpReceiveBufferSize != null) {
+    serverBootstrap.setOption("child.receiveBufferSize",tcpReceiveBufferSize.bytes());
+  }
+  if (reuseAddress != null) {
+    serverBootstrap.setOption("reuseAddress",reuseAddress);
+    serverBootstrap.setOption("child.reuseAddress",reuseAddress);
+  }
+  InetAddress hostAddressX;
+  try {
+    hostAddressX=resultBindHostAddress(bindHost,settings);
+  }
+ catch (  IOException e) {
+    throw new BindHttpException("Failed to resolve host [" + bindHost + "]",e);
+  }
+  final InetAddress hostAddress=hostAddressX;
+  PortsRange portsRange=new PortsRange(port);
+  final AtomicReference<Exception> lastException=new AtomicReference<Exception>();
+  boolean success=portsRange.iterate(new PortsRange.PortCallback(){
+    @Override public boolean onPortNumber(    int portNumber){
+      try {
+        serverChannel=serverBootstrap.bind(new InetSocketAddress(hostAddress,portNumber));
+      }
+ catch (      Exception e) {
+        lastException.set(e);
+        return false;
+      }
+      return true;
+    }
+  }
+);
+  if (!success) {
+    throw new BindHttpException("Failed to bind to [" + port + "]",lastException.get());
+  }
+  InetSocketAddress boundAddress=(InetSocketAddress)serverChannel.getLocalAddress();
+  InetSocketAddress publishAddress;
+  try {
+    InetAddress publishAddressX=resultPublishHostAddress(publishHost,settings);
+    if (publishAddressX == null) {
+      if (boundAddress.getAddress().isAnyLocalAddress()) {
+        publishAddress=new InetSocketAddress(resultPublishHostAddress(publishHost,settings,LOCAL_IP),boundAddress.getPort());
+      }
+ else {
+        publishAddress=boundAddress;
+      }
+    }
+ else {
+      publishAddress=new InetSocketAddress(publishAddressX,boundAddress.getPort());
+    }
+  }
+ catch (  Exception e) {
+    throw new BindTransportException("Failed to resolve publish address",e);
+  }
+  this.boundAddress=new BoundTransportAddress(new InetSocketTransportAddress(boundAddress),new InetSocketTransportAddress(publishAddress));
+  return this;
+}

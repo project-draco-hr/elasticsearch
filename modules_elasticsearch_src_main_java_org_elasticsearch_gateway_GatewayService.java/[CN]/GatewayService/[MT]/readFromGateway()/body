@@ -1,0 +1,41 @@
+{
+  logger.debug("First master in the cluster, reading state from gateway");
+  executor.execute(new Runnable(){
+    @Override public void run(){
+      MetaData metaData;
+      try {
+        metaData=gateway.read();
+      }
+ catch (      Exception e) {
+        logger.error("Failed to read from gateway",e);
+        return;
+      }
+      if (metaData == null) {
+        logger.debug("No state read from gateway");
+        return;
+      }
+      final MetaData fMetaData=metaData;
+      clusterService.submitStateUpdateTask("gateway (recovered meta-data)",new ClusterStateUpdateTask(){
+        @Override public ClusterState execute(        ClusterState currentState){
+          MetaData.Builder metaDataBuilder=newMetaDataBuilder().metaData(currentState.metaData()).maxNumberOfShardsPerNode(fMetaData.maxNumberOfShardsPerNode());
+          for (          final IndexMetaData indexMetaData : fMetaData) {
+            threadPool.execute(new Runnable(){
+              @Override public void run(){
+                try {
+                  metaDataService.createIndex(indexMetaData.index(),indexMetaData.settings(),timeValueMillis(10));
+                }
+ catch (                Exception e) {
+                  logger.error("Failed to create index [" + indexMetaData.index() + "]",e);
+                }
+              }
+            }
+);
+          }
+          return newClusterStateBuilder().state(currentState).metaData(metaDataBuilder).build();
+        }
+      }
+);
+    }
+  }
+);
+}

@@ -1,0 +1,51 @@
+{
+  Facets facets=null;
+  if (!queryResults.isEmpty()) {
+    QuerySearchResult queryResult=queryResults.values().iterator().next().queryResult();
+    if (queryResult.facets() != null && queryResult.facets().facets() != null && !queryResult.facets().facets().isEmpty()) {
+      List<Facet> mergedFacets=Lists.newArrayListWithCapacity(2);
+      for (      Facet facet : queryResult.facets().facets()) {
+        if (facet.type() == Facet.Type.COUNT) {
+          mergedFacets.add(new CountFacet(facet.name(),0));
+        }
+ else {
+          throw new ElasticSearchIllegalStateException("Can't handle type [" + facet.type() + "]");
+        }
+      }
+      for (      QuerySearchResultProvider queryResultProvider : queryResults.values()) {
+        List<Facet> queryFacets=queryResultProvider.queryResult().facets().facets();
+        for (int i=0; i < mergedFacets.size(); i++) {
+          Facet queryFacet=queryFacets.get(i);
+          Facet mergedFacet=mergedFacets.get(i);
+          if (queryFacet.type() == Facet.Type.COUNT) {
+            ((CountFacet)mergedFacet).increment(((CountFacet)queryFacet).count());
+          }
+        }
+      }
+      facets=new Facets(mergedFacets);
+    }
+  }
+  long totalHits=0;
+  for (  QuerySearchResultProvider queryResultProvider : queryResults.values()) {
+    totalHits+=queryResultProvider.queryResult().topDocs().totalHits;
+  }
+  for (  FetchSearchResultProvider fetchSearchResultProvider : fetchResults.values()) {
+    fetchSearchResultProvider.fetchResult().initCounter();
+  }
+  List<SearchHit> hits=new ArrayList<SearchHit>();
+  if (!fetchResults.isEmpty()) {
+    for (    ShardDoc shardDoc : sortedDocs) {
+      FetchSearchResultProvider fetchResultProvider=fetchResults.get(shardDoc.shardTarget());
+      if (fetchResultProvider == null) {
+        continue;
+      }
+      FetchSearchResult fetchResult=fetchResultProvider.fetchResult();
+      int index=fetchResult.counterGetAndIncrement();
+      SearchHit searchHit=fetchResult.hits().hits()[index];
+      ((InternalSearchHit)searchHit).shard(fetchResult.shardTarget());
+      hits.add(searchHit);
+    }
+  }
+  InternalSearchHits searchHits=new InternalSearchHits(hits.toArray(new SearchHit[hits.size()]),totalHits);
+  return new InternalSearchResponse(searchHits,facets);
+}

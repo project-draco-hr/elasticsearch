@@ -1,0 +1,51 @@
+{
+  while (shardsIt.hasNext()) {
+    final ShardRouting shard=shardsIt.next();
+    if (!shard.active()) {
+      continue;
+    }
+    if (!shard.currentNodeId().equals(nodes.localNodeId())) {
+      Node node=nodes.get(shard.currentNodeId());
+      transportService.sendRequest(node,transportShardAction(),new ShardSingleOperationRequest(request,shard.id()),new BaseTransportResponseHandler<Response>(){
+        @Override public Response newInstance(){
+          return newResponse();
+        }
+        @Override public void handleResponse(        final Response response){
+          if (request.listenerThreaded()) {
+            threadPool.execute(new Runnable(){
+              @Override public void run(){
+                listener.onResponse(response);
+              }
+            }
+);
+          }
+ else {
+            listener.onResponse(response);
+          }
+        }
+        @Override public void handleException(        RemoteTransportException exp){
+          onFailure(shard,exp);
+        }
+        @Override public boolean spawn(){
+          return false;
+        }
+      }
+);
+      return;
+    }
+  }
+  if (!shardsIt.hasNext()) {
+    final NoShardAvailableActionException failure=new NoShardAvailableActionException(shards.shardId(),"No shard available for [" + request.type() + "#"+ request.id()+ "]",lastException);
+    if (request.listenerThreaded()) {
+      threadPool.execute(new Runnable(){
+        @Override public void run(){
+          listener.onFailure(failure);
+        }
+      }
+);
+    }
+ else {
+      listener.onFailure(failure);
+    }
+  }
+}

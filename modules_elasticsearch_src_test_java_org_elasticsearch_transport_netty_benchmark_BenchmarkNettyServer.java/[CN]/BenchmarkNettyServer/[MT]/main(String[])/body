@@ -1,0 +1,36 @@
+{
+  final boolean spawn=true;
+  Settings settings=ImmutableSettings.settingsBuilder().putInt("transport.netty.port",9999).build();
+  final ThreadPool threadPool=new CachedThreadPool();
+  final TransportService transportService=new TransportService(new NettyTransport(settings,threadPool)).start();
+  transportService.registerHandler("benchmark",new BaseTransportRequestHandler<BenchmarkMessage>(){
+    @Override public BenchmarkMessage newInstance(){
+      return new BenchmarkMessage();
+    }
+    @Override public void messageReceived(    BenchmarkMessage request,    TransportChannel channel) throws Exception {
+      channel.sendResponse(request);
+    }
+    @Override public boolean spawn(){
+      return spawn;
+    }
+  }
+);
+  final Object mutex=new Object();
+  Runtime.getRuntime().addShutdownHook(new Thread(){
+    @Override public void run(){
+      transportService.close();
+      threadPool.shutdownNow();
+synchronized (mutex) {
+        mutex.notifyAll();
+      }
+    }
+  }
+);
+synchronized (mutex) {
+    try {
+      mutex.wait();
+    }
+ catch (    InterruptedException e) {
+    }
+  }
+}

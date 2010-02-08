@@ -1,0 +1,53 @@
+{
+  if (Iterables.isEmpty(results)) {
+    return EMPTY;
+  }
+  QuerySearchResultProvider queryResultProvider=Iterables.get(results,0);
+  int totalNumDocs=0;
+  int queueSize=queryResultProvider.queryResult().from() + queryResultProvider.queryResult().size();
+  if (queryResultProvider.includeFetch()) {
+    queueSize*=results.size();
+  }
+  PriorityQueue queue;
+  if (queryResultProvider.queryResult().topDocs() instanceof TopFieldDocs) {
+    queue=new ShardFieldDocSortedHitQueue(((TopFieldDocs)queryResultProvider.queryResult().topDocs()).fields,queueSize);
+    for (    QuerySearchResultProvider resultProvider : results) {
+      QuerySearchResult result=resultProvider.queryResult();
+      ScoreDoc[] scoreDocs=result.topDocs().scoreDocs;
+      totalNumDocs+=scoreDocs.length;
+      for (      ScoreDoc doc : scoreDocs) {
+        ShardFieldDoc nodeFieldDoc=new ShardFieldDoc(result.shardTarget(),doc.doc,doc.score,((FieldDoc)doc).fields);
+        if (queue.insertWithOverflow(nodeFieldDoc) == nodeFieldDoc) {
+          break;
+        }
+      }
+    }
+  }
+ else {
+    queue=new ScoreDocQueue(queueSize);
+    for (    QuerySearchResultProvider resultProvider : results) {
+      QuerySearchResult result=resultProvider.queryResult();
+      ScoreDoc[] scoreDocs=result.topDocs().scoreDocs;
+      totalNumDocs+=scoreDocs.length;
+      for (      ScoreDoc doc : scoreDocs) {
+        ShardScoreDoc nodeScoreDoc=new ShardScoreDoc(result.shardTarget(),doc.doc,doc.score);
+        if (queue.insertWithOverflow(nodeScoreDoc) == nodeScoreDoc) {
+          break;
+        }
+      }
+    }
+  }
+  int resultDocsSize=queryResultProvider.queryResult().size();
+  if (queryResultProvider.includeFetch()) {
+    resultDocsSize*=results.size();
+  }
+  if (totalNumDocs < queueSize) {
+    resultDocsSize=totalNumDocs - queryResultProvider.queryResult().from();
+  }
+  if (resultDocsSize <= 0) {
+    return EMPTY;
+  }
+  ShardDoc[] shardDocs=new ShardDoc[resultDocsSize];
+  for (int i=resultDocsSize - 1; i >= 0; i--)   shardDocs[i]=(ShardDoc)queue.pop();
+  return shardDocs;
+}

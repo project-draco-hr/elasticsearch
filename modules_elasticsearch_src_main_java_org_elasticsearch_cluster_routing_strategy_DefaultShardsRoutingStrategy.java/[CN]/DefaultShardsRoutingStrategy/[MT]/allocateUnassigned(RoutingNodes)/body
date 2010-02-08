@@ -1,0 +1,36 @@
+{
+  boolean changed=false;
+  List<RoutingNode> nodes=routingNodes.sortedNodesLeastToHigh();
+  Iterator<MutableShardRouting> unassignedIterator=routingNodes.unassigned().iterator();
+  int lastNode=0;
+  while (unassignedIterator.hasNext()) {
+    MutableShardRouting shard=unassignedIterator.next();
+    for (int i=0; i < nodes.size(); i++) {
+      RoutingNode node=nodes.get(lastNode);
+      lastNode++;
+      if (lastNode == nodes.size())       lastNode=0;
+      if (node.canAllocate(routingNodes.metaData(),routingNodes.routingTable()) && node.canAllocate(shard)) {
+        int numberOfShardsToAllocate=routingNodes.requiredAverageNumberOfShardsPerNode() - node.shards().size();
+        if (numberOfShardsToAllocate == 0) {
+          continue;
+        }
+        changed=true;
+        node.add(shard);
+        unassignedIterator.remove();
+        break;
+      }
+    }
+  }
+  for (Iterator<MutableShardRouting> it=routingNodes.unassigned().iterator(); it.hasNext(); ) {
+    MutableShardRouting shardRoutingEntry=it.next();
+    for (    RoutingNode routingNode : routingNodes.nodesToShards().values()) {
+      if (routingNode.canAllocate(routingNodes.metaData(),routingNodes.routingTable()) && routingNode.canAllocate(shardRoutingEntry)) {
+        changed=true;
+        routingNode.add(shardRoutingEntry);
+        it.remove();
+        break;
+      }
+    }
+  }
+  return changed;
+}

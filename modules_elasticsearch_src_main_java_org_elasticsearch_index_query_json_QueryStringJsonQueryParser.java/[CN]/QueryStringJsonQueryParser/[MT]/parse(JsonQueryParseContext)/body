@@ -1,0 +1,99 @@
+{
+  JsonParser jp=parseContext.jp();
+  String queryString=null;
+  String defaultField=null;
+  MapperQueryParser.Operator defaultOperator=QueryParser.Operator.OR;
+  boolean allowLeadingWildcard=true;
+  boolean lowercaseExpandedTerms=true;
+  boolean enablePositionIncrements=true;
+  float fuzzyMinSim=FuzzyQuery.defaultMinSimilarity;
+  int fuzzyPrefixLength=FuzzyQuery.defaultPrefixLength;
+  int phraseSlop=0;
+  float boost=1.0f;
+  Analyzer analyzer=null;
+  String currentFieldName=null;
+  JsonToken token;
+  while ((token=jp.nextToken()) != JsonToken.END_OBJECT) {
+    if (token == JsonToken.FIELD_NAME) {
+      currentFieldName=jp.getCurrentName();
+    }
+ else     if (token == JsonToken.VALUE_STRING) {
+      if ("query".equals(currentFieldName)) {
+        queryString=jp.getText();
+      }
+ else       if ("defaultField".equals(currentFieldName)) {
+        defaultField=parseContext.indexName(jp.getText());
+      }
+ else       if ("defaultOperator".equals(currentFieldName)) {
+        String op=jp.getText();
+        if ("or".equalsIgnoreCase(op)) {
+          defaultOperator=QueryParser.Operator.OR;
+        }
+ else         if ("and".equalsIgnoreCase(op)) {
+          defaultOperator=QueryParser.Operator.AND;
+        }
+ else {
+          throw new QueryParsingException(index,"Query default operator [" + op + "] is not allowed");
+        }
+      }
+ else       if ("analyzer".equals(currentFieldName)) {
+        analyzer=analysisService.analyzer(jp.getText());
+      }
+    }
+ else     if (token == JsonToken.VALUE_FALSE || token == JsonToken.VALUE_TRUE) {
+      if ("allowLeadingWildcard".equals(currentFieldName)) {
+        allowLeadingWildcard=token == JsonToken.VALUE_TRUE;
+      }
+ else       if ("lowercaseExpandedTerms".equals(currentFieldName)) {
+        lowercaseExpandedTerms=token == JsonToken.VALUE_TRUE;
+      }
+ else       if ("enablePositionIncrements".equals(currentFieldName)) {
+        enablePositionIncrements=token == JsonToken.VALUE_TRUE;
+      }
+    }
+ else     if (token == JsonToken.VALUE_NUMBER_FLOAT) {
+      if ("fuzzyMinSim".equals(currentFieldName)) {
+        fuzzyMinSim=jp.getFloatValue();
+      }
+ else       if ("boost".equals(currentFieldName)) {
+        boost=jp.getFloatValue();
+      }
+    }
+ else     if (token == JsonToken.VALUE_NUMBER_INT) {
+      if ("fuzzyPrefixLength".equals(currentFieldName)) {
+        fuzzyPrefixLength=jp.getIntValue();
+      }
+ else       if ("phraseSlop".equals(currentFieldName)) {
+        phraseSlop=jp.getIntValue();
+      }
+ else       if ("fuzzyMinSim".equals(currentFieldName)) {
+        fuzzyMinSim=jp.getFloatValue();
+      }
+ else       if ("boost".equals(currentFieldName)) {
+        boost=jp.getFloatValue();
+      }
+    }
+  }
+  if (queryString == null) {
+    throw new QueryParsingException(index,"QueryString must be provided with a [query]");
+  }
+  if (analyzer == null) {
+    analyzer=parseContext.mapperService().searchAnalyzer();
+  }
+  MapperQueryParser queryParser=new MapperQueryParser(defaultField,analyzer,parseContext.mapperService(),parseContext.filterCache());
+  queryParser.setEnablePositionIncrements(enablePositionIncrements);
+  queryParser.setLowercaseExpandedTerms(lowercaseExpandedTerms);
+  queryParser.setAllowLeadingWildcard(allowLeadingWildcard);
+  queryParser.setDefaultOperator(defaultOperator);
+  queryParser.setFuzzyMinSim(fuzzyMinSim);
+  queryParser.setFuzzyPrefixLength(fuzzyPrefixLength);
+  queryParser.setPhraseSlop(phraseSlop);
+  try {
+    Query query=queryParser.parse(queryString);
+    query.setBoost(boost);
+    return query;
+  }
+ catch (  ParseException e) {
+    throw new QueryParsingException(index,"Failed to parse query [" + queryString + "]",e);
+  }
+}

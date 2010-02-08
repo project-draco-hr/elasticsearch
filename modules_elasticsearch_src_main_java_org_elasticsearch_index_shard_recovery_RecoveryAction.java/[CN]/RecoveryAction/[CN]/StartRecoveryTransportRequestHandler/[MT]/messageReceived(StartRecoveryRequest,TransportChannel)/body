@@ -1,0 +1,96 @@
+{
+  logger.trace("Starting recovery to {}, markAsRelocated {}",startRecoveryRequest.node,startRecoveryRequest.markAsRelocated);
+  final Node node=startRecoveryRequest.node;
+  cleanOpenIndex();
+  final RecoveryStatus recoveryStatus=new RecoveryStatus();
+  indexShard.recover(new Engine.RecoveryHandler(){
+    @Override public void phase1(    SnapshotIndexCommit snapshot) throws ElasticSearchException {
+      long totalSize=0;
+      try {
+        StopWatch stopWatch=new StopWatch().start();
+        for (        String name : snapshot.getFiles()) {
+          IndexInput indexInput=store.directory().openInput(name);
+          recoveryStatus.phase1FileNames.add(name);
+          recoveryStatus.phase1FileSizes.add(indexInput.length());
+          totalSize+=indexInput.length();
+          indexInput.close();
+        }
+        recoveryStatus.phase1TotalSize=totalSize;
+        logger.trace("Recovery [phase1] to {}: recovering [{}] files with total size of [{}]",new Object[]{node,snapshot.getFiles().length,new SizeValue(totalSize)});
+        final CountDownLatch latch=new CountDownLatch(snapshot.getFiles().length);
+        final AtomicReference<Exception> lastException=new AtomicReference<Exception>();
+        for (        final String name : snapshot.getFiles()) {
+          threadPool.execute(new Runnable(){
+            @Override public void run(){
+              try {
+                final int BUFFER_SIZE=(int)fileChunkSize.bytes();
+                byte[] buf=new byte[BUFFER_SIZE];
+                IndexInput indexInput=store.directory().openInput(name);
+                long len=indexInput.length();
+                long readCount=0;
+                while (readCount < len) {
+                  int toRead=readCount + BUFFER_SIZE > len ? (int)(len - readCount) : BUFFER_SIZE;
+                  long position=indexInput.getFilePointer();
+                  indexInput.readBytes(buf,0,toRead,false);
+                  transportService.submitRequest(node,fileChunkTransportAction,new FileChunk(name,position,len,buf,toRead),VoidTransportResponseHandler.INSTANCE).txGet(30,SECONDS);
+                  readCount+=toRead;
+                }
+                indexInput.close();
+              }
+ catch (              Exception e) {
+                lastException.set(e);
+              }
+ finally {
+                latch.countDown();
+              }
+            }
+          }
+);
+        }
+        latch.await();
+        if (lastException.get() != null) {
+          throw lastException.get();
+        }
+        stopWatch.stop();
+        logger.trace("Recovery [phase1] to {}: took [{}]",node,stopWatch.totalTime());
+        recoveryStatus.phase1Time=stopWatch.totalTime().millis();
+      }
+ catch (      Throwable e) {
+        throw new RecoverFilesRecoveryException(shardId,snapshot.getFiles().length,new SizeValue(totalSize),e);
+      }
+    }
+    @Override public void phase2(    Translog.Snapshot snapshot) throws ElasticSearchException {
+      logger.trace("Recovery [phase2] to {}: sending [{}] transaction log operations",node,snapshot.size());
+      StopWatch stopWatch=new StopWatch().start();
+      sendSnapshot(snapshot,false);
+      stopWatch.stop();
+      logger.trace("Recovery [phase2] to {}: took [{}]",node,stopWatch.totalTime());
+      recoveryStatus.phase2Time=stopWatch.totalTime().millis();
+      recoveryStatus.phase2Operations=snapshot.size();
+    }
+    @Override public void phase3(    Translog.Snapshot snapshot) throws ElasticSearchException {
+      logger.trace("Recovery [phase3] to {}: sending [{}] transaction log operations",node,snapshot.size());
+      StopWatch stopWatch=new StopWatch().start();
+      sendSnapshot(snapshot,true);
+      if (startRecoveryRequest.markAsRelocated) {
+        indexShard.relocated();
+      }
+      stopWatch.stop();
+      logger.trace("Recovery [phase3] to {}: took [{}]",node,stopWatch.totalTime());
+      recoveryStatus.phase3Time=stopWatch.totalTime().millis();
+      recoveryStatus.phase3Operations=snapshot.size();
+    }
+    private void sendSnapshot(    Translog.Snapshot snapshot,    boolean phase3) throws ElasticSearchException {
+      MemorySnapshot memorySnapshot;
+      if (snapshot instanceof MemorySnapshot) {
+        memorySnapshot=(MemorySnapshot)snapshot;
+      }
+ else {
+        memorySnapshot=new MemorySnapshot(snapshot);
+      }
+      transportService.submitRequest(node,snapshotTransportAction,new SnapshotWrapper(memorySnapshot,phase3),VoidTransportResponseHandler.INSTANCE).txGet();
+    }
+  }
+);
+  channel.sendResponse(recoveryStatus);
+}

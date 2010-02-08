@@ -1,0 +1,50 @@
+{
+  if (!addressSet) {
+    try {
+      channel.send(new Message(newView.getCreator(),channel.getAddress(),nodeMessagePayload()));
+      logger.debug("Sent address [{}] to master [{}]",localNode.address(),newView.getCreator());
+      addressSet=true;
+    }
+ catch (    Exception e) {
+      logger.warn("Can't send address to master [" + newView.getCreator() + "] will try again later...",e);
+    }
+  }
+  if (channel.getAddress().equals(newView.getCreator())) {
+    final Set<String> newMembers=newHashSet();
+    for (    Address address : newView.getMembers()) {
+      newMembers.add(address.toString());
+    }
+    clusterService.submitStateUpdateTask("jgroups-disco-view",new ClusterStateUpdateTask(){
+      @Override public ClusterState execute(      ClusterState currentState){
+        Nodes newNodes=currentState.nodes().removeDeadMembers(newMembers,newView.getCreator().toString());
+        Nodes.Delta delta=newNodes.delta(currentState.nodes());
+        if (delta.added()) {
+          logger.warn("No new nodes should be created when a new discovery view is accepted");
+        }
+        return newClusterStateBuilder().state(currentState).nodes(newNodes).build();
+      }
+    }
+);
+  }
+ else {
+    final String me=channel.getAddress().toString();
+    boolean foundMe=false;
+    for (    Node node : clusterService.state().nodes()) {
+      if (node.id().equals(me)) {
+        foundMe=true;
+        break;
+      }
+    }
+    if (!foundMe) {
+      logger.warn("Disconnected from cluster, resending address [{}] to master [{}]",localNode.address(),newView.getCreator());
+      try {
+        channel.send(new Message(newView.getCreator(),channel.getAddress(),nodeMessagePayload()));
+        addressSet=true;
+      }
+ catch (      Exception e) {
+        addressSet=false;
+        logger.warn("Can't send address to master [" + newView.getCreator() + "] will try again later...",e);
+      }
+    }
+  }
+}

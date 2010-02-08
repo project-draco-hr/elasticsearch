@@ -1,0 +1,93 @@
+{
+  List<Method> methods=new ArrayList<Method>(Arrays.asList(getObject().getClass().getMethods()));
+  List<Method> objectMethods=new ArrayList<Method>(Arrays.asList(Object.class.getMethods()));
+  methods.removeAll(objectMethods);
+  for (  Method method : methods) {
+    ManagedAttribute attr=method.getAnnotation(ManagedAttribute.class);
+    if (attr != null) {
+      String methodName=method.getName();
+      if (!methodName.startsWith("get") && !methodName.startsWith("set") && !methodName.startsWith("is")) {
+        if (logger.isWarnEnabled())         logger.warn("method name " + methodName + " doesn't start with \"get\", \"set\", or \"is\""+ ", but is annotated with @ManagedAttribute: will be ignored");
+      }
+ else {
+        MBeanAttributeInfo info;
+        String attributeName=null;
+        boolean writeAttribute=false;
+        if (isSetMethod(method)) {
+          attributeName=methodName.substring(3);
+          info=new MBeanAttributeInfo(attributeName,method.getParameterTypes()[0].getCanonicalName(),attr.description(),true,true,false);
+          writeAttribute=true;
+        }
+ else {
+          if (method.getParameterTypes().length == 0 && method.getReturnType() != java.lang.Void.TYPE) {
+            boolean hasSetter=attributesBuilder.containsKey(attributeName);
+            if (methodName.startsWith("is")) {
+              attributeName=methodName.substring(2);
+              info=new MBeanAttributeInfo(attributeName,method.getReturnType().getCanonicalName(),attr.description(),true,hasSetter,true);
+            }
+ else {
+              attributeName=methodName.substring(3);
+              info=new MBeanAttributeInfo(attributeName,method.getReturnType().getCanonicalName(),attr.description(),true,hasSetter,false);
+            }
+          }
+ else {
+            if (logger.isWarnEnabled()) {
+              logger.warn("Method " + method.getName() + " must have a valid return type and zero parameters");
+            }
+            continue;
+          }
+        }
+        AttributeEntry ae=attributesBuilder.get(attributeName);
+        if (!writeAttribute) {
+          if (ae instanceof FieldAttributeEntry && ae.getInfo().isReadable()) {
+            logger.warn("not adding annotated method " + method + " since we already have read attribute");
+          }
+ else           if (ae instanceof MethodAttributeEntry) {
+            MethodAttributeEntry mae=(MethodAttributeEntry)ae;
+            if (mae.hasSetMethod()) {
+              attributesBuilder.put(attributeName,new MethodAttributeEntry(mae.getInfo(),mae.getSetMethod(),method));
+            }
+          }
+ else {
+            attributesBuilder.put(attributeName,new MethodAttributeEntry(info,null,method));
+          }
+        }
+ else {
+          if (ae instanceof FieldAttributeEntry) {
+            if (ae.getInfo().isWritable()) {
+              logger.warn("Not adding annotated method " + methodName + " since we already have writable attribute");
+            }
+ else {
+              Field f=((FieldAttributeEntry)ae).getField();
+              MBeanAttributeInfo i=new MBeanAttributeInfo(ae.getInfo().getName(),f.getType().getCanonicalName(),attr.description(),true,!Modifier.isFinal(f.getModifiers()),false);
+              attributesBuilder.put(attributeName,new FieldAttributeEntry(i,f));
+            }
+          }
+ else           if (ae instanceof MethodAttributeEntry) {
+            MethodAttributeEntry mae=(MethodAttributeEntry)ae;
+            if (mae.hasIsOrGetMethod()) {
+              attributesBuilder.put(attributeName,new MethodAttributeEntry(info,method,mae.getIsOrGetMethod()));
+            }
+          }
+ else {
+            attributesBuilder.put(attributeName,new MethodAttributeEntry(info,method,null));
+          }
+        }
+      }
+    }
+ else     if (method.isAnnotationPresent(ManagedOperation.class)) {
+      ManagedOperation op=method.getAnnotation(ManagedOperation.class);
+      String attName=method.getName();
+      if (isSetMethod(method) || isGetMethod(method)) {
+        attName=attName.substring(3);
+      }
+ else       if (isIsMethod(method)) {
+        attName=attName.substring(2);
+      }
+      boolean isAlreadyExposed=attributesBuilder.containsKey(attName);
+      if (!isAlreadyExposed) {
+        ops.add(new MBeanOperationInfo(op != null ? op.description() : "",method));
+      }
+    }
+  }
+}

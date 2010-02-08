@@ -1,0 +1,46 @@
+{
+  if (!lifecycle.moveToStarted()) {
+    return this;
+  }
+  try {
+    channel.connect(clusterName.value());
+    channel.setReceiver(this);
+    logger.debug("Connected to cluster [{}], address [{}]",channel.getClusterName(),channel.getAddress());
+    this.localNode=new Node(settings.get("name"),settings.getAsBoolean("node.data",true),channel.getAddress().toString(),transportService.boundAddress().publishAddress());
+    if (isMaster()) {
+      clusterService.submitStateUpdateTask("jgroups-disco-initialconnect(master)",new ProcessedClusterStateUpdateTask(){
+        @Override public ClusterState execute(        ClusterState currentState){
+          Nodes.Builder builder=new Nodes.Builder().localNodeId(localNode.id()).masterNodeId(localNode.id()).put(localNode);
+          return newClusterStateBuilder().state(currentState).nodes(builder).build();
+        }
+        @Override public void clusterStateProcessed(        ClusterState clusterState){
+          sendInitialStateEventIfNeeded();
+        }
+      }
+);
+      firstMaster=true;
+      addressSet=true;
+    }
+ else {
+      clusterService.submitStateUpdateTask("jgroups-disco-initialconnect",new ClusterStateUpdateTask(){
+        @Override public ClusterState execute(        ClusterState currentState){
+          Nodes.Builder builder=new Nodes.Builder().localNodeId(localNode.id()).put(localNode);
+          return newClusterStateBuilder().state(currentState).nodes(builder).build();
+        }
+      }
+);
+      try {
+        channel.send(new Message(channel.getView().getCreator(),channel.getAddress(),nodeMessagePayload()));
+        addressSet=true;
+        logger.debug("Sent address [{}] to master [{}]",transportService.boundAddress().publishAddress(),channel.getView().getCreator());
+      }
+ catch (      Exception e) {
+        logger.warn("Can't send address to master [" + channel.getView().getCreator() + "] will try again later...",e);
+      }
+    }
+  }
+ catch (  ChannelException e) {
+    throw new DiscoveryException("Can't connect to group [" + clusterName + "]",e);
+  }
+  return this;
+}

@@ -1,0 +1,35 @@
+{
+  final AtomicInteger counter=new AtomicInteger(scrollId.values().length);
+  for (  Tuple<String,Long> target : scrollId.values()) {
+    Node node=nodes.get(target.v1());
+    if (node == null) {
+      if (logger.isDebugEnabled()) {
+        logger.debug("Node [" + target.v1() + "] not available for scroll request ["+ scrollId.source()+ "]");
+      }
+      successfulOps.decrementAndGet();
+      if (counter.decrementAndGet() == 0) {
+        executeFetchPhase();
+      }
+    }
+ else {
+      searchService.sendExecuteQuery(node,TransportSearchHelper.internalScrollSearchRequest(target.v2(),request),new SearchServiceListener<QuerySearchResult>(){
+        @Override public void onResult(        QuerySearchResult result){
+          queryResults.put(result.shardTarget(),result);
+          if (counter.decrementAndGet() == 0) {
+            executeFetchPhase();
+          }
+        }
+        @Override public void onFailure(        Throwable t){
+          if (logger.isDebugEnabled()) {
+            logger.debug("Failed to execute query phase",t);
+          }
+          successfulOps.decrementAndGet();
+          if (counter.decrementAndGet() == 0) {
+            executeFetchPhase();
+          }
+        }
+      }
+);
+    }
+  }
+}

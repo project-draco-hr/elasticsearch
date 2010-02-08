@@ -1,0 +1,51 @@
+{
+  JsonParser jp=parseContext.jp();
+  float boost=1.0f;
+  int slop=-1;
+  boolean inOrder=true;
+  boolean collectPayloads=true;
+  List<SpanQuery> clauses=newArrayList();
+  String currentFieldName=null;
+  JsonToken token;
+  while ((token=jp.nextToken()) != JsonToken.END_OBJECT) {
+    if (token == JsonToken.FIELD_NAME) {
+      currentFieldName=jp.getCurrentName();
+    }
+ else     if (token == JsonToken.START_ARRAY) {
+      if ("clauses".equals(currentFieldName)) {
+        while ((token=jp.nextToken()) != JsonToken.END_ARRAY) {
+          Query query=parseContext.parseInnerQuery();
+          if (!(query instanceof SpanQuery)) {
+            throw new QueryParsingException(index,"spanNear [clauses] must be of type span query");
+          }
+          clauses.add((SpanQuery)query);
+        }
+      }
+    }
+ else     if (token == JsonToken.VALUE_FALSE || token == JsonToken.VALUE_TRUE) {
+      if ("inOrder".equals(currentFieldName)) {
+        inOrder=token == JsonToken.VALUE_TRUE;
+      }
+ else       if ("collectPayloads".equals(currentFieldName)) {
+        collectPayloads=token == JsonToken.VALUE_TRUE;
+      }
+    }
+ else {
+      if ("boost".equals(currentFieldName)) {
+        boost=jp.getFloatValue();
+      }
+ else       if ("slop".equals(currentFieldName)) {
+        slop=jp.getIntValue();
+      }
+    }
+  }
+  if (clauses.isEmpty()) {
+    throw new QueryParsingException(index,"spanNear must include [clauses]");
+  }
+  if (slop == -1) {
+    throw new QueryParsingException(index,"spanNear must include [slop]");
+  }
+  SpanNearQuery query=new SpanNearQuery(clauses.toArray(new SpanQuery[clauses.size()]),slop,inOrder,collectPayloads);
+  query.setBoost(boost);
+  return query;
+}

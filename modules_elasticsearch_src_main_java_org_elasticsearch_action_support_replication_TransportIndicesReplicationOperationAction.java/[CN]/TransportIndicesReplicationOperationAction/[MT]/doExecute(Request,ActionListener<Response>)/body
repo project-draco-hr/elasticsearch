@@ -1,0 +1,49 @@
+{
+  String[] indices=Actions.processIndices(clusterService.state(),request.indices());
+  final AtomicInteger indexCounter=new AtomicInteger();
+  final AtomicInteger completionCounter=new AtomicInteger(indices.length);
+  final AtomicReferenceArray<Object> indexResponses=new AtomicReferenceArray<Object>(indices.length);
+  for (  final String index : indices) {
+    IndexRequest indexRequest=newIndexRequestInstance(request,index);
+    indexRequest.listenerThreaded(false);
+    indexAction.execute(indexRequest,new ActionListener<IndexResponse>(){
+      @Override public void onResponse(      IndexResponse result){
+        indexResponses.set(indexCounter.getAndIncrement(),result);
+        if (completionCounter.decrementAndGet() == 0) {
+          if (request.listenerThreaded()) {
+            threadPool.execute(new Runnable(){
+              @Override public void run(){
+                listener.onResponse(newResponseInstance(request,indexResponses));
+              }
+            }
+);
+          }
+ else {
+            listener.onResponse(newResponseInstance(request,indexResponses));
+          }
+        }
+      }
+      @Override public void onFailure(      Throwable e){
+        e.printStackTrace();
+        int index=indexCounter.getAndIncrement();
+        if (accumulateExceptions()) {
+          indexResponses.set(index,e);
+        }
+        if (completionCounter.decrementAndGet() == 0) {
+          if (request.listenerThreaded()) {
+            threadPool.execute(new Runnable(){
+              @Override public void run(){
+                listener.onResponse(newResponseInstance(request,indexResponses));
+              }
+            }
+);
+          }
+ else {
+            listener.onResponse(newResponseInstance(request,indexResponses));
+          }
+        }
+      }
+    }
+);
+  }
+}

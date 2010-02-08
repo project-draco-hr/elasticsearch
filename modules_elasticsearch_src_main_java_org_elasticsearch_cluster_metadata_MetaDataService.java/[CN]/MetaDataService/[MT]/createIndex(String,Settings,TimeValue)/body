@@ -1,0 +1,66 @@
+{
+  if (clusterService.state().routingTable().hasIndex(index)) {
+    throw new IndexAlreadyExistsException(new Index(index));
+  }
+  if (index.contains(" ")) {
+    throw new InvalidIndexNameException(new Index(index),index,"must not contain whitespace");
+  }
+  if (index.contains(",")) {
+    throw new InvalidIndexNameException(new Index(index),index,"must not contain ',");
+  }
+  if (index.contains("#")) {
+    throw new InvalidIndexNameException(new Index(index),index,"must not contain '#");
+  }
+  if (index.charAt(0) == '_') {
+    throw new InvalidIndexNameException(new Index(index),index,"must not start with '_'");
+  }
+  if (!index.toLowerCase().equals(index)) {
+    throw new InvalidIndexNameException(new Index(index),index,"must be lowercase");
+  }
+  if (!Strings.validFileName(index)) {
+    throw new InvalidIndexNameException(new Index(index),index,"must not contain the following characters " + Strings.INVALID_FILENAME_CHARS);
+  }
+  final CountDownLatch latch=new CountDownLatch(clusterService.state().nodes().size());
+  NodeIndexCreatedAction.Listener nodeCreatedListener=new NodeIndexCreatedAction.Listener(){
+    @Override public void onNodeIndexCreated(    String mIndex,    String nodeId){
+      if (index.equals(mIndex)) {
+        latch.countDown();
+      }
+    }
+  }
+;
+  nodeIndexCreatedAction.add(nodeCreatedListener);
+  clusterService.submitStateUpdateTask("create-index [" + index + "]",new ClusterStateUpdateTask(){
+    @Override public ClusterState execute(    ClusterState currentState){
+      RoutingTable.Builder routingTableBuilder=new RoutingTable.Builder();
+      for (      IndexRoutingTable indexRoutingTable : currentState.routingTable().indicesRouting().values()) {
+        routingTableBuilder.add(indexRoutingTable);
+      }
+      ImmutableSettings.Builder indexSettingsBuilder=new ImmutableSettings.Builder().putAll(indexSettings);
+      if (indexSettings.get(SETTING_NUMBER_OF_SHARDS) == null) {
+        indexSettingsBuilder.putInt(SETTING_NUMBER_OF_SHARDS,settings.getAsInt(SETTING_NUMBER_OF_SHARDS,5));
+      }
+      if (indexSettings.get(SETTING_NUMBER_OF_REPLICAS) == null) {
+        indexSettingsBuilder.putInt(SETTING_NUMBER_OF_REPLICAS,settings.getAsInt(SETTING_NUMBER_OF_REPLICAS,1));
+      }
+      Settings actualIndexSettings=indexSettingsBuilder.build();
+      IndexMetaData indexMetaData=newIndexMetaDataBuilder(index).settings(actualIndexSettings).build();
+      MetaData newMetaData=newMetaDataBuilder().metaData(currentState.metaData()).put(indexMetaData).build();
+      IndexRoutingTable.Builder indexRoutingBuilder=new IndexRoutingTable.Builder(index).initializeEmpty(newMetaData.index(index));
+      routingTableBuilder.add(indexRoutingBuilder);
+      logger.info("Creating Index [{}], shards [{}]/[{}]",new Object[]{index,indexMetaData.numberOfShards(),indexMetaData.numberOfReplicas()});
+      RoutingTable newRoutingTable=shardsRoutingStrategy.reroute(newClusterStateBuilder().state(currentState).routingTable(routingTableBuilder).metaData(newMetaData).build());
+      return newClusterStateBuilder().state(currentState).routingTable(newRoutingTable).metaData(newMetaData).build();
+    }
+  }
+);
+  try {
+    return latch.await(timeout.millis(),TimeUnit.MILLISECONDS);
+  }
+ catch (  InterruptedException e) {
+    return false;
+  }
+ finally {
+    nodeIndexCreatedAction.remove(nodeCreatedListener);
+  }
+}

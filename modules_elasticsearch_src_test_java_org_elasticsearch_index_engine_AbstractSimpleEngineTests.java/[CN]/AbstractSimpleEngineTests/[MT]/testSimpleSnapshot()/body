@@ -1,0 +1,43 @@
+{
+  engine.create(new Engine.Create(doc().add(field("_uid","1")).add(field("value","test")).build(),Lucene.STANDARD_ANALYZER,"test","1","{1}"));
+  final ExecutorService executorService=Executors.newCachedThreadPool();
+  engine.snapshot(new Engine.SnapshotHandler(){
+    @Override public void snapshot(    final SnapshotIndexCommit snapshotIndexCommit1,    final Translog.Snapshot translogSnapshot1){
+      assertThat(snapshotIndexCommit1,snapshotIndexCommitExists());
+      assertThat(translogSnapshot1,translogSize(1));
+      Translog.Create create1=(Translog.Create)translogSnapshot1.iterator().next();
+      assertThat(create1.source(),equalTo("{1}"));
+      Future<Object> future=executorService.submit(new Callable<Object>(){
+        @Override public Object call() throws Exception {
+          engine.flush();
+          engine.create(new Engine.Create(doc().add(field("_uid","2")).add(field("value","test")).build(),Lucene.STANDARD_ANALYZER,"test","2","{2}"));
+          engine.flush();
+          engine.create(new Engine.Create(doc().add(field("_uid","3")).add(field("value","test")).build(),Lucene.STANDARD_ANALYZER,"test","3","{3}"));
+          return null;
+        }
+      }
+);
+      try {
+        future.get();
+      }
+ catch (      Exception e) {
+        e.printStackTrace();
+        assertThat(e.getMessage(),false,equalTo(true));
+      }
+      assertThat(snapshotIndexCommit1,snapshotIndexCommitExists());
+      engine.snapshot(new Engine.SnapshotHandler(){
+        @Override public void snapshot(        SnapshotIndexCommit snapshotIndexCommit2,        Translog.Snapshot translogSnapshot2) throws EngineException {
+          assertThat(snapshotIndexCommit1,snapshotIndexCommitExists());
+          assertThat(snapshotIndexCommit2,snapshotIndexCommitExists());
+          assertThat(snapshotIndexCommit2.getSegmentsFileName(),not(equalTo(snapshotIndexCommit1.getSegmentsFileName())));
+          assertThat(translogSnapshot2,translogSize(1));
+          Translog.Create create3=(Translog.Create)translogSnapshot2.iterator().next();
+          assertThat(create3.source(),equalTo("{3}"));
+        }
+      }
+);
+    }
+  }
+);
+  engine.close();
+}

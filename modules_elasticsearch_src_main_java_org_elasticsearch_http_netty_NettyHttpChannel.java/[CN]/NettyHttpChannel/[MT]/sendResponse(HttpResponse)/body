@@ -1,0 +1,52 @@
+{
+  boolean http10=request.getProtocolVersion().equals(HttpVersion.HTTP_1_0);
+  boolean close=HttpHeaders.Values.CLOSE.equalsIgnoreCase(request.getHeader(HttpHeaders.Names.CONNECTION)) || (http10 && !HttpHeaders.Values.KEEP_ALIVE.equalsIgnoreCase(request.getHeader(HttpHeaders.Names.CONNECTION)));
+  HttpResponseStatus status=getStatus(response.status());
+  org.jboss.netty.handler.codec.http.HttpResponse resp;
+  if (http10) {
+    resp=new DefaultHttpResponse(HttpVersion.HTTP_1_0,status);
+    if (!close) {
+      resp.addHeader(HttpHeaders.Names.CONNECTION,"Keep-Alive");
+    }
+  }
+ else {
+    resp=new DefaultHttpResponse(HttpVersion.HTTP_1_1,status);
+  }
+  ChannelBuffer buf;
+  if (response.contentThreadSafe()) {
+    buf=ChannelBuffers.wrappedBuffer(response.content(),0,response.contentLength());
+  }
+ else {
+    buf=ChannelBuffers.copiedBuffer(response.content(),0,response.contentLength());
+  }
+  if (response.prefixContent() != null || response.suffixContent() != null) {
+    ChannelBuffer prefixBuf=ChannelBuffers.EMPTY_BUFFER;
+    if (response.prefixContent() != null) {
+      prefixBuf=ChannelBuffers.copiedBuffer(response.prefixContent(),0,response.prefixContentLength());
+    }
+    ChannelBuffer suffixBuf=ChannelBuffers.EMPTY_BUFFER;
+    if (response.suffixContent() != null) {
+      suffixBuf=ChannelBuffers.copiedBuffer(response.suffixContent(),0,response.suffixContentLength());
+    }
+    buf=ChannelBuffers.wrappedBuffer(prefixBuf,buf,suffixBuf);
+  }
+  resp.setContent(buf);
+  resp.setHeader(HttpHeaders.Names.CONTENT_TYPE,response.contentType());
+  resp.setHeader(HttpHeaders.Names.CONTENT_LENGTH,String.valueOf(buf.readableBytes()));
+  String cookieString=request.getHeader(HttpHeaders.Names.COOKIE);
+  if (cookieString != null) {
+    CookieDecoder cookieDecoder=new CookieDecoder();
+    Set<Cookie> cookies=cookieDecoder.decode(cookieString);
+    if (!cookies.isEmpty()) {
+      CookieEncoder cookieEncoder=new CookieEncoder(true);
+      for (      Cookie cookie : cookies) {
+        cookieEncoder.addCookie(cookie);
+      }
+      resp.addHeader(HttpHeaders.Names.SET_COOKIE,cookieEncoder.encode());
+    }
+  }
+  ChannelFuture future=channel.write(resp);
+  if (close) {
+    future.addListener(ChannelFutureListener.CLOSE);
+  }
+}

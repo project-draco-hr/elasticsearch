@@ -1,0 +1,27 @@
+{
+  ChannelBuffer buffer=ChannelBuffers.dynamicBuffer();
+  ChannelBufferOutputStream os=new ChannelBufferOutputStream(buffer);
+  os.write(LENGTH_PLACEHOLDER);
+  os.writeLong(requestId);
+  byte status=0;
+  status=setResponse(status);
+  status=setError(status);
+  os.writeByte(status);
+  os.flush();
+  buffer.markWriterIndex();
+  try {
+    RemoteTransportException tx=new RemoteTransportException(transport.settings().get("name"),transport.wrapAddress(channel.getLocalAddress()),action,error);
+    ThrowableObjectOutputStream too=new ThrowableObjectOutputStream(os);
+    too.writeObject(tx);
+    too.close();
+  }
+ catch (  NotSerializableException e) {
+    buffer.resetWriterIndex();
+    RemoteTransportException tx=new RemoteTransportException(transport.settings().get("name"),transport.wrapAddress(channel.getLocalAddress()),action,new NotSerializableTransportException(error));
+    ThrowableObjectOutputStream too=new ThrowableObjectOutputStream(os);
+    too.writeObject(tx);
+    too.close();
+  }
+  buffer.setInt(0,buffer.writerIndex() - 4);
+  channel.write(buffer);
+}

@@ -1,0 +1,31 @@
+{
+  RandomAccessFile raf=null;
+  try {
+    long recoveryTranslogId=findLatestTranslogId(locationTranslog);
+    if (recoveryTranslogId == -1) {
+      indexShard.start();
+      return new RecoveryStatus.Translog(0,new SizeValue(0,SizeUnit.BYTES));
+    }
+    File recoveryTranslogFile=new File(locationTranslog,"translog-" + recoveryTranslogId);
+    raf=new RandomAccessFile(recoveryTranslogFile,"r");
+    int numberOfOperations=raf.readInt();
+    ArrayList<Translog.Operation> operations=newArrayListWithExpectedSize(numberOfOperations);
+    for (int i=0; i < numberOfOperations; i++) {
+      operations.add(readTranslogOperation(raf));
+    }
+    indexShard.performRecovery(operations);
+    return new RecoveryStatus.Translog(operations.size(),new SizeValue(recoveryTranslogFile.length(),SizeUnit.BYTES));
+  }
+ catch (  Exception e) {
+    throw new IndexShardGatewayRecoveryException(shardId(),"Failed to perform recovery of translog",e);
+  }
+ finally {
+    if (raf != null) {
+      try {
+        raf.close();
+      }
+ catch (      IOException e) {
+      }
+    }
+  }
+}

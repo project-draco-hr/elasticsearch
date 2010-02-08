@@ -1,0 +1,54 @@
+{
+  if (infoLen <= maxNumSegments)   return null;
+  MergeSpecification spec=new MergeSpecification();
+  boolean useCompoundFile=getUseCompoundFile();
+  double[][] variance=createVarianceTable(infos,infoLen,maxNumSegments);
+  final int maxMergeSegments=infoLen - maxNumSegments + 1;
+  double[] sumVariance=new double[maxMergeSegments];
+  int[][] backLink=new int[maxNumSegments][maxMergeSegments];
+  for (int i=(maxMergeSegments - 1); i >= 0; i--) {
+    sumVariance[i]=variance[0][i];
+    backLink[0][i]=0;
+  }
+  for (int i=1; i < maxNumSegments; i++) {
+    for (int j=(maxMergeSegments - 1); j >= 0; j--) {
+      double minV=Double.MAX_VALUE;
+      int minK=0;
+      for (int k=j; k >= 0; k--) {
+        double v=sumVariance[k] + variance[i + k][j - k];
+        if (v < minV) {
+          minV=v;
+          minK=k;
+        }
+      }
+      sumVariance[j]=minV;
+      backLink[i][j]=minK;
+    }
+  }
+  int mergeEnd=infoLen;
+  int prev=maxMergeSegments - 1;
+  int expungeCandidate=-1;
+  int maxDelCount=0;
+  for (int i=maxNumSegments - 1; i >= 0; i--) {
+    prev=backLink[i][prev];
+    int mergeStart=i + prev;
+    if ((mergeEnd - mergeStart) > 1) {
+      spec.add(new OneMerge(infos.range(mergeStart,mergeEnd),useCompoundFile));
+    }
+ else {
+      if (partialExpunge) {
+        SegmentInfo info=infos.info(mergeStart);
+        int delCount=info.getDelCount();
+        if (delCount > maxDelCount) {
+          expungeCandidate=mergeStart;
+          maxDelCount=delCount;
+        }
+      }
+    }
+    mergeEnd=mergeStart;
+  }
+  if (partialExpunge && maxDelCount > 0) {
+    spec.add(new OneMerge(infos.range(expungeCandidate,expungeCandidate + 1),useCompoundFile));
+  }
+  return spec;
+}

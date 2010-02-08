@@ -1,0 +1,40 @@
+{
+  RoutingTable routingTable=clusterService.state().routingTable();
+  if (!routingTable.hasIndex(index)) {
+    throw new IndexMissingException(new Index(index));
+  }
+  logger.info("Deleting index [{}]",index);
+  final CountDownLatch latch=new CountDownLatch(clusterService.state().nodes().size());
+  NodeIndexDeletedAction.Listener listener=new NodeIndexDeletedAction.Listener(){
+    @Override public void onNodeIndexDeleted(    String fIndex,    String nodeId){
+      if (fIndex.equals(index)) {
+        latch.countDown();
+      }
+    }
+  }
+;
+  nodeIndexDeletedAction.add(listener);
+  clusterService.submitStateUpdateTask("delete-index [" + index + "]",new ClusterStateUpdateTask(){
+    @Override public ClusterState execute(    ClusterState currentState){
+      RoutingTable.Builder routingTableBuilder=new RoutingTable.Builder();
+      for (      IndexRoutingTable indexRoutingTable : currentState.routingTable().indicesRouting().values()) {
+        if (!indexRoutingTable.index().equals(index)) {
+          routingTableBuilder.add(indexRoutingTable);
+        }
+      }
+      MetaData newMetaData=newMetaDataBuilder().metaData(currentState.metaData()).remove(index).build();
+      RoutingTable newRoutingTable=shardsRoutingStrategy.reroute(newClusterStateBuilder().state(currentState).routingTable(routingTableBuilder).metaData(newMetaData).build());
+      return newClusterStateBuilder().state(currentState).routingTable(newRoutingTable).metaData(newMetaData).build();
+    }
+  }
+);
+  try {
+    return latch.await(timeout.millis(),TimeUnit.MILLISECONDS);
+  }
+ catch (  InterruptedException e) {
+    return false;
+  }
+ finally {
+    nodeIndexDeletedAction.remove(listener);
+  }
+}

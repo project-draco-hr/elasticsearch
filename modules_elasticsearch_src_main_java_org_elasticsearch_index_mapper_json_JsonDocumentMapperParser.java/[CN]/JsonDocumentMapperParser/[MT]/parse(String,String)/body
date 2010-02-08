@@ -1,0 +1,66 @@
+{
+  JsonNode root;
+  try {
+    root=objectMapper.readValue(new FastStringReader(source),JsonNode.class);
+  }
+ catch (  IOException e) {
+    throw new MapperParsingException("Failed to parse json mapping definition",e);
+  }
+  String rootName=root.getFieldNames().next();
+  ObjectNode rootObj;
+  if (type == null) {
+    rootObj=(ObjectNode)root.get(rootName);
+    type=rootName;
+  }
+ else {
+    if (type.equals(rootName)) {
+      JsonNode tmpNode=root.get(type);
+      if (!tmpNode.isObject()) {
+        throw new MapperParsingException("Expected root node name [" + rootName + "] to be of json object type, but its not");
+      }
+      rootObj=(ObjectNode)tmpNode;
+    }
+ else {
+      rootObj=(ObjectNode)root;
+    }
+  }
+  JsonDocumentMapper.Builder docBuilder=JsonMapperBuilders.doc(parseObject(type,rootObj));
+  for (Iterator<Map.Entry<String,JsonNode>> fieldsIt=rootObj.getFields(); fieldsIt.hasNext(); ) {
+    Map.Entry<String,JsonNode> entry=fieldsIt.next();
+    String fieldName=entry.getKey();
+    JsonNode fieldNode=entry.getValue();
+    if ("sourceField".equals(fieldName)) {
+      docBuilder.sourceField(parseSourceField((ObjectNode)fieldNode));
+    }
+ else     if ("idField".equals(fieldName)) {
+      docBuilder.idField(parseIdField((ObjectNode)fieldNode));
+    }
+ else     if ("typeField".equals(fieldName)) {
+      docBuilder.typeField(parseTypeField((ObjectNode)fieldNode));
+    }
+ else     if ("uidField".equals(fieldName)) {
+      docBuilder.uidField(parseUidField((ObjectNode)fieldNode));
+    }
+ else     if ("boostField".equals(fieldName)) {
+      docBuilder.boostField(parseBoostField((ObjectNode)fieldNode));
+    }
+ else     if ("indexAnalyzer".equals(fieldName)) {
+      docBuilder.indexAnalyzer(analysisService.analyzer(fieldNode.getTextValue()));
+    }
+ else     if ("searchAnalyzer".equals(fieldName)) {
+      docBuilder.searchAnalyzer(analysisService.analyzer(fieldNode.getTextValue()));
+    }
+ else     if ("analyzer".equals(fieldName)) {
+      docBuilder.indexAnalyzer(analysisService.analyzer(fieldNode.getTextValue()));
+      docBuilder.searchAnalyzer(analysisService.analyzer(fieldNode.getTextValue()));
+    }
+  }
+  if (!docBuilder.hasIndexAnalyzer()) {
+    docBuilder.indexAnalyzer(analysisService.defaultIndexAnalyzer());
+  }
+  if (!docBuilder.hasSearchAnalyzer()) {
+    docBuilder.searchAnalyzer(analysisService.defaultSearchAnalyzer());
+  }
+  docBuilder.mappingSource(source);
+  return docBuilder.build();
+}

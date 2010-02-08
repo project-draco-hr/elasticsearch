@@ -1,0 +1,109 @@
+{
+  final IndexService indexService=indicesService.indexServiceSafe(shardRouting.index());
+  final int shardId=shardRouting.id();
+  if (indexService.hasShard(shardId)) {
+    IndexShard indexShard=indexService.shardSafe(shardId);
+    if (indexShard.state() == IndexShardState.STARTED) {
+      if (logger.isTraceEnabled()) {
+        logger.trace("[" + shardRouting.index() + "]["+ shardRouting.shardId().id()+ "] Master "+ nodes.masterNode()+ " marked shard as initializing, but shard already started, mark shard as started");
+      }
+      shardStateAction.shardStarted(shardRouting);
+      return;
+    }
+ else {
+      if (indexShard.ignoreRecoveryAttempt()) {
+        return;
+      }
+    }
+  }
+  if (!indexService.hasShard(shardId)) {
+    try {
+      if (logger.isDebugEnabled()) {
+        logger.debug("Index [{}]: Creating shard [{}]",shardRouting.index(),shardId);
+      }
+      InternalIndexShard indexShard=(InternalIndexShard)indexService.createShard(shardId);
+      indexShard.routingEntry(shardRouting);
+    }
+ catch (    IndexShardAlreadyExistsException e) {
+    }
+catch (    Exception e) {
+      logger.warn("Failed to create shard for index [" + indexService.index().name() + "] and shard id ["+ shardRouting.id()+ "]",e);
+      try {
+        indexService.deleteShard(shardId);
+      }
+ catch (      Exception e1) {
+        logger.warn("Failed to delete shard after failed creation for index [" + indexService.index().name() + "] and shard id ["+ shardRouting.id()+ "]",e1);
+      }
+      shardStateAction.shardFailed(shardRouting);
+      return;
+    }
+  }
+  final InternalIndexShard indexShard=(InternalIndexShard)indexService.shardSafe(shardId);
+  if (indexShard.ignoreRecoveryAttempt()) {
+    return;
+  }
+  threadPool.execute(new Runnable(){
+    @Override public void run(){
+      if (indexShard.ignoreRecoveryAttempt()) {
+        return;
+      }
+      try {
+        RecoveryAction recoveryAction=indexService.shardInjector(shardId).getInstance(RecoveryAction.class);
+        if (!shardRouting.primary()) {
+          IndexShardRoutingTable shardRoutingTable=routingTable.index(shardRouting.index()).shard(shardRouting.id());
+          for (          ShardRouting entry : shardRoutingTable) {
+            if (entry.primary() && entry.started()) {
+              Node node=nodes.get(entry.currentNodeId());
+              try {
+                recoveryAction.startRecovery(nodes.localNode(),node,false);
+                shardStateAction.shardStarted(shardRouting);
+              }
+ catch (              IgnoreRecoveryException e) {
+                break;
+              }
+              break;
+            }
+          }
+        }
+ else {
+          if (shardRouting.relocatingNodeId() == null) {
+            IndexShardGatewayService shardGatewayService=indexService.shardInjector(shardId).getInstance(IndexShardGatewayService.class);
+            try {
+              shardGatewayService.recover();
+              shardStateAction.shardStarted(shardRouting);
+            }
+ catch (            IgnoreGatewayRecoveryException e) {
+            }
+          }
+ else {
+            Node node=nodes.get(shardRouting.relocatingNodeId());
+            try {
+              recoveryAction.startRecovery(nodes.localNode(),node,true);
+              shardStateAction.shardStarted(shardRouting);
+            }
+ catch (            IgnoreRecoveryException e) {
+            }
+          }
+        }
+      }
+ catch (      Exception e) {
+        logger.warn("Failed to start shard for index [" + indexService.index().name() + "] and shard id ["+ shardRouting.id()+ "]",e);
+        if (indexService.hasShard(shardId)) {
+          try {
+            indexService.deleteShard(shardId);
+          }
+ catch (          Exception e1) {
+            logger.warn("Failed to delete shard after failed startup for index [" + indexService.index().name() + "] and shard id ["+ shardRouting.id()+ "]",e1);
+          }
+        }
+        try {
+          shardStateAction.shardFailed(shardRouting);
+        }
+ catch (        Exception e1) {
+          logger.warn("Failed to mark shard as failed after a failed start for index [" + indexService.index().name() + "] and shard id ["+ shardRouting.id()+ "]",e);
+        }
+      }
+    }
+  }
+);
+}

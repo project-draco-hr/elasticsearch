@@ -1,0 +1,82 @@
+{
+  final ShardOperationRequest shardRequest=new ShardOperationRequest(shards.shardId().id(),request);
+  if (!nodeId.equals(nodes.localNodeId())) {
+    Node node=nodes.get(nodeId);
+    transportService.sendRequest(node,transportBackupAction(),shardRequest,new VoidTransportResponseHandler(){
+      @Override public void handleResponse(      VoidStreamable vResponse){
+        finishIfPossible();
+      }
+      @Override public void handleException(      RemoteTransportException exp){
+        if (!ignoreBackupException(exp.unwrapCause())) {
+          logger.warn("Failed to perform " + transportAction() + " on backup "+ shards.shardId(),exp);
+          shardStateAction.shardFailed(shard);
+        }
+        finishIfPossible();
+      }
+      private void finishIfPossible(){
+        if (counter.decrementAndGet() == 0) {
+          if (request.listenerThreaded()) {
+            threadPool.execute(new Runnable(){
+              @Override public void run(){
+                listener.onResponse(response);
+              }
+            }
+);
+          }
+ else {
+            listener.onResponse(response);
+          }
+        }
+      }
+      @Override public boolean spawn(){
+        return false;
+      }
+    }
+);
+  }
+ else {
+    if (request.operationThreaded()) {
+      threadPool.execute(new Runnable(){
+        @Override public void run(){
+          try {
+            shardOperationOnBackup(shardRequest);
+          }
+ catch (          Exception e) {
+            if (!ignoreBackupException(e)) {
+              logger.warn("Failed to perform " + transportAction() + " on backup "+ shards.shardId(),e);
+              shardStateAction.shardFailed(shard);
+            }
+          }
+          if (counter.decrementAndGet() == 0) {
+            listener.onResponse(response);
+          }
+        }
+      }
+);
+    }
+ else {
+      try {
+        shardOperationOnBackup(shardRequest);
+      }
+ catch (      Exception e) {
+        if (!ignoreBackupException(e)) {
+          logger.warn("Failed to perform " + transportAction() + " on backup "+ shards.shardId(),e);
+          shardStateAction.shardFailed(shard);
+        }
+      }
+      if (counter.decrementAndGet() == 0) {
+        if (request.listenerThreaded()) {
+          threadPool.execute(new Runnable(){
+            @Override public void run(){
+              listener.onResponse(response);
+            }
+          }
+);
+        }
+ else {
+          listener.onResponse(response);
+        }
+      }
+    }
+  }
+}

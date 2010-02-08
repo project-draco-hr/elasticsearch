@@ -1,0 +1,56 @@
+{
+  GroupShardsIterator groups;
+  try {
+    groups=shards(request);
+  }
+ catch (  Exception e) {
+    listener.onFailure(e);
+    return;
+  }
+  final AtomicInteger indexCounter=new AtomicInteger();
+  final AtomicInteger completionCounter=new AtomicInteger(groups.size());
+  final AtomicReferenceArray<Object> shardsResponses=new AtomicReferenceArray<Object>(groups.size());
+  for (  final ShardsIterator shards : groups) {
+    ShardRequest shardRequest=newShardRequestInstance(request,shards.shardId().id());
+    shardRequest.operationThreaded(true);
+    shardRequest.listenerThreaded(false);
+    shardAction.execute(shardRequest,new ActionListener<ShardResponse>(){
+      @Override public void onResponse(      ShardResponse result){
+        shardsResponses.set(indexCounter.getAndIncrement(),result);
+        if (completionCounter.decrementAndGet() == 0) {
+          if (request.listenerThreaded()) {
+            threadPool.execute(new Runnable(){
+              @Override public void run(){
+                listener.onResponse(newResponseInstance(request,shardsResponses));
+              }
+            }
+);
+          }
+ else {
+            listener.onResponse(newResponseInstance(request,shardsResponses));
+          }
+        }
+      }
+      @Override public void onFailure(      Throwable e){
+        int index=indexCounter.getAndIncrement();
+        if (accumulateExceptions()) {
+          shardsResponses.set(index,e);
+        }
+        if (completionCounter.decrementAndGet() == 0) {
+          if (request.listenerThreaded()) {
+            threadPool.execute(new Runnable(){
+              @Override public void run(){
+                listener.onResponse(newResponseInstance(request,shardsResponses));
+              }
+            }
+);
+          }
+ else {
+            listener.onResponse(newResponseInstance(request,shardsResponses));
+          }
+        }
+      }
+    }
+);
+  }
+}

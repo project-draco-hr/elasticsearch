@@ -1,0 +1,37 @@
+{
+  startServer("server1");
+  client("server1").admin().indices().create(createIndexRequest("test")).actionGet(5000);
+  client("server1").index(indexRequest("test").type("type1").id("1").source(source("1","test"))).actionGet();
+  client("server1").admin().indices().flush(flushRequest("test")).actionGet();
+  client("server1").index(indexRequest("test").type("type1").id("2").source(source("2","test"))).actionGet();
+  client("server1").admin().indices().refresh(refreshRequest("test")).actionGet();
+  startServer("server2");
+  Thread.sleep(5000);
+  GetResponse getResult;
+  for (int i=0; i < 5; i++) {
+    getResult=client("server1").get(getRequest("test").type("type1").id("1").threadedOperation(false)).actionGet(1000);
+    assertThat(getResult.source(),equalTo(source("1","test")));
+    getResult=client("server2").get(getRequest("test").type("type1").id("1").threadedOperation(false)).actionGet(1000);
+    assertThat(getResult.source(),equalTo(source("1","test")));
+    getResult=client("server1").get(getRequest("test").type("type1").id("2").threadedOperation(true)).actionGet(1000);
+    assertThat(getResult.source(),equalTo(source("2","test")));
+    getResult=client("server2").get(getRequest("test").type("type1").id("2").threadedOperation(true)).actionGet(1000);
+    assertThat(getResult.source(),equalTo(source("2","test")));
+  }
+  startServer("server3");
+  Thread.sleep(5000);
+  for (int i=0; i < 5; i++) {
+    getResult=client("server1").get(getRequest("test").type("type1").id("1")).actionGet(1000);
+    assertThat(getResult.source(),equalTo(source("1","test")));
+    getResult=client("server2").get(getRequest("test").type("type1").id("1")).actionGet(1000);
+    assertThat(getResult.source(),equalTo(source("1","test")));
+    getResult=client("server3").get(getRequest("test").type("type1").id("1")).actionGet(1000);
+    assertThat(getResult.source(),equalTo(source("1","test")));
+    getResult=client("server1").get(getRequest("test").type("type1").id("2").threadedOperation(true)).actionGet(1000);
+    assertThat(getResult.source(),equalTo(source("2","test")));
+    getResult=client("server2").get(getRequest("test").type("type1").id("2").threadedOperation(true)).actionGet(1000);
+    assertThat(getResult.source(),equalTo(source("2","test")));
+    getResult=client("server3").get(getRequest("test").type("type1").id("2").threadedOperation(true)).actionGet(1000);
+    assertThat(getResult.source(),equalTo(source("2","test")));
+  }
+}

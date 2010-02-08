@@ -1,0 +1,36 @@
+{
+  File[] files=locationIndex.listFiles();
+  final CountDownLatch latch=new CountDownLatch(files.length);
+  final AtomicReference<Exception> lastException=new AtomicReference<Exception>();
+  for (  final File file : files) {
+    threadPool.execute(new Runnable(){
+      @Override public void run(){
+        try {
+          copyToDirectory(file,store.directory(),file.getName());
+        }
+ catch (        Exception e) {
+          logger.debug("Failed to read [" + file + "] into ["+ store+ "]",e);
+          lastException.set(e);
+        }
+ finally {
+          latch.countDown();
+        }
+      }
+    }
+);
+  }
+  try {
+    latch.await();
+  }
+ catch (  InterruptedException e) {
+    lastException.set(e);
+  }
+  if (lastException.get() != null) {
+    throw new IndexShardGatewayRecoveryException(shardId(),"Failed to recover index files",lastException.get());
+  }
+  long totalSize=0;
+  for (  File file : files) {
+    totalSize+=file.length();
+  }
+  return new RecoveryStatus.Index(files.length,new SizeValue(totalSize,SizeUnit.BYTES));
+}

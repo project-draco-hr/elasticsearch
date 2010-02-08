@@ -1,0 +1,42 @@
+{
+  int localOperations=0;
+  for (  final ShardRouting shard : shards) {
+    if (shard.active()) {
+      if (shard.currentNodeId().equals(nodes.localNodeId())) {
+        localOperations++;
+      }
+ else {
+        performOperation(shard,true);
+      }
+    }
+ else {
+      onFailure(shard,new ShardNotActiveException(shard.shardId()),false);
+    }
+  }
+  if (localOperations > 0) {
+    if (request.operationThreading() == ShardsOperationThreading.SINGLE_THREAD) {
+      threadPool.execute(new Runnable(){
+        @Override public void run(){
+          for (          final ShardRouting shard : shards) {
+            if (shard.active()) {
+              if (shard.currentNodeId().equals(nodes.localNodeId())) {
+                performOperation(shard,false);
+              }
+            }
+          }
+        }
+      }
+);
+    }
+ else {
+      boolean localAsync=request.operationThreading() == ShardsOperationThreading.THREAD_PER_SHARD;
+      for (      final ShardRouting shard : shards) {
+        if (shard.active()) {
+          if (shard.currentNodeId().equals(nodes.localNodeId())) {
+            performOperation(shard,localAsync);
+          }
+        }
+      }
+    }
+  }
+}

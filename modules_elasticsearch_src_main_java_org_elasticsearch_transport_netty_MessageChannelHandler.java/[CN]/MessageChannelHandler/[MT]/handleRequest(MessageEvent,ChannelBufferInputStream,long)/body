@@ -1,0 +1,43 @@
+{
+  final String action=buffer.readUTF();
+  final NettyTransportChannel transportChannel=new NettyTransportChannel(transport,action,event.getChannel(),requestId);
+  try {
+    final TransportRequestHandler handler=transportServiceAdapter.handler(action);
+    if (handler == null) {
+      throw new ActionNotFoundTransportException("Action [" + action + "] not found");
+    }
+    final Streamable streamable=handler.newInstance();
+    streamable.readFrom(buffer);
+    if (handler.spawn()) {
+      threadPool.execute(new Runnable(){
+        @SuppressWarnings({"unchecked"}) @Override public void run(){
+          try {
+            handler.messageReceived(streamable,transportChannel);
+          }
+ catch (          Throwable e) {
+            try {
+              transportChannel.sendResponse(e);
+            }
+ catch (            IOException e1) {
+              logger.warn("Failed to send error message back to client for action [" + action + "]",e1);
+              logger.warn("Actual Exception",e);
+            }
+          }
+        }
+      }
+);
+    }
+ else {
+      handler.messageReceived(streamable,transportChannel);
+    }
+  }
+ catch (  Exception e) {
+    try {
+      transportChannel.sendResponse(e);
+    }
+ catch (    IOException e1) {
+      logger.warn("Failed to send error message back to client for action [" + action + "]",e);
+      logger.warn("Actual Exception",e1);
+    }
+  }
+}

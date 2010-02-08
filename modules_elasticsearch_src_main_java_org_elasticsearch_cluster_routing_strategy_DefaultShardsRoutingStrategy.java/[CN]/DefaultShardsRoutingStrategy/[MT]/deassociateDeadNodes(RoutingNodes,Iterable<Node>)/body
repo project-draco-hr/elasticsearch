@@ -1,0 +1,44 @@
+{
+  boolean changed=false;
+  Set<String> liveNodeIds=newHashSet();
+  for (  Node liveNode : liveNodes) {
+    liveNodeIds.add(liveNode.id());
+  }
+  Set<String> nodeIdsToRemove=newHashSet();
+  for (  RoutingNode routingNode : routingNodes) {
+    for (Iterator<MutableShardRouting> shardsIterator=routingNode.shards().iterator(); shardsIterator.hasNext(); ) {
+      MutableShardRouting shardRoutingEntry=shardsIterator.next();
+      if (shardRoutingEntry.assignedToNode()) {
+        boolean relocating=shardRoutingEntry.relocating();
+        String relocatingNodeId=shardRoutingEntry.relocatingNodeId();
+        boolean isRelocationDestinationShard=relocatingNodeId != null && shardRoutingEntry.initializing();
+        boolean currentNodeIsDead=false;
+        if (!liveNodeIds.contains(shardRoutingEntry.currentNodeId())) {
+          changed=true;
+          nodeIdsToRemove.add(shardRoutingEntry.currentNodeId());
+          if (!isRelocationDestinationShard) {
+            routingNodes.unassigned().add(shardRoutingEntry);
+          }
+          shardRoutingEntry.deassignNode();
+          currentNodeIsDead=true;
+          shardsIterator.remove();
+        }
+        if (relocating && !liveNodeIds.contains(relocatingNodeId)) {
+          nodeIdsToRemove.add(relocatingNodeId);
+          if (!currentNodeIsDead) {
+            changed=true;
+            shardRoutingEntry.cancelRelocation();
+          }
+        }
+        if (isRelocationDestinationShard && !liveNodeIds.contains(relocatingNodeId)) {
+          changed=true;
+          shardsIterator.remove();
+        }
+      }
+    }
+  }
+  for (  String nodeIdToRemove : nodeIdsToRemove) {
+    routingNodes.nodesToShards().remove(nodeIdToRemove);
+  }
+  return changed;
+}

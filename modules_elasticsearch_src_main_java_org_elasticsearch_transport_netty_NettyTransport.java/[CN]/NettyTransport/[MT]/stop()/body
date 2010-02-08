@@ -1,0 +1,46 @@
+{
+  if (!lifecycle.moveToStopped()) {
+    return this;
+  }
+  if (serverChannel != null) {
+    try {
+      serverChannel.close().awaitUninterruptibly();
+    }
+  finally {
+      serverChannel=null;
+    }
+  }
+  if (serverOpenChannels != null) {
+    serverOpenChannels.close();
+    serverOpenChannels=null;
+  }
+  if (serverBootstrap != null) {
+    serverBootstrap.releaseExternalResources();
+    serverBootstrap=null;
+  }
+  for (Iterator<NodeConnections> it=clientChannels.values().iterator(); it.hasNext(); ) {
+    NodeConnections nodeConnections=it.next();
+    it.remove();
+    nodeConnections.close();
+  }
+  if (clientBootstrap != null) {
+    ScheduledFuture<?> scheduledFuture=threadPool.schedule(new Runnable(){
+      @Override public void run(){
+        try {
+          for (Iterator<NodeConnections> it=clientChannels.values().iterator(); it.hasNext(); ) {
+            NodeConnections nodeConnections=it.next();
+            it.remove();
+            nodeConnections.close();
+          }
+        }
+ catch (        Exception e) {
+        }
+      }
+    }
+,500,TimeUnit.MILLISECONDS);
+    clientBootstrap.releaseExternalResources();
+    scheduledFuture.cancel(false);
+    clientBootstrap=null;
+  }
+  return this;
+}

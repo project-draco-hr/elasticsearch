@@ -1,0 +1,55 @@
+{
+  int localOperations=0;
+  for (  final ShardsIterator shardIt : shardsIts) {
+    final ShardRouting shard=shardIt.next();
+    if (shard.active()) {
+      if (shard.currentNodeId().equals(nodes.localNodeId())) {
+        localOperations++;
+      }
+ else {
+        performFirstPhase(shardIt.reset());
+      }
+    }
+ else {
+      onFirstPhaseResult(shard,shardIt,null);
+    }
+  }
+  if (localOperations > 0) {
+    if (request.operationThreading() == SearchOperationThreading.SINGLE_THREAD) {
+      threadPool.execute(new Runnable(){
+        @Override public void run(){
+          for (          final ShardsIterator shardIt : shardsIts) {
+            final ShardRouting shard=shardIt.reset().next();
+            if (shard.active()) {
+              if (shard.currentNodeId().equals(nodes.localNodeId())) {
+                performFirstPhase(shardIt.reset());
+              }
+            }
+          }
+        }
+      }
+);
+    }
+ else {
+      boolean localAsync=request.operationThreading() == SearchOperationThreading.THREAD_PER_SHARD;
+      for (      final ShardsIterator shardIt : shardsIts) {
+        final ShardRouting shard=shardIt.reset().next();
+        if (shard.active()) {
+          if (shard.currentNodeId().equals(nodes.localNodeId())) {
+            if (localAsync) {
+              threadPool.execute(new Runnable(){
+                @Override public void run(){
+                  performFirstPhase(shardIt.reset());
+                }
+              }
+);
+            }
+ else {
+              performFirstPhase(shardIt.reset());
+            }
+          }
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,36 @@
+{
+  System.out.println("Creating [" + staticFiles.length + "] static files with size ["+ staticFileSize+ "]");
+  for (int i=0; i < staticFiles.length; i++) {
+    staticFiles[i]="static" + i;
+    IndexOutput io=store.directory().createOutput(staticFiles[i]);
+    for (long sizeCounter=0; sizeCounter < staticFileSize.bytes(); sizeCounter++) {
+      io.writeByte((byte)1);
+    }
+    io.close();
+  }
+  System.out.println("Using [" + dynamicFileSize + "] size for dynamic files");
+  StopWatch stopWatch=new StopWatch("warmup");
+  stopWatch.start();
+  for (  String staticFile : staticFiles) {
+    IndexInput ii=store.directory().openInput(staticFile);
+    for (long counter=0; counter < ii.length(); counter++) {
+      byte result=ii.readByte();
+      if (result != 1) {
+        System.out.println("Failure, read wrong value [" + result + "]");
+      }
+    }
+    store.directory().listAll();
+  }
+  stopWatch.stop();
+  System.out.println("Warmup Took: " + stopWatch.shortSummary());
+  for (int i=0; i < readerThreads.length; i++) {
+    readerThreads[i]=new Thread(new ReaderThread(),"Reader[" + i + "]");
+  }
+  for (int i=0; i < writerThreads.length; i++) {
+    writerThreads[i]=new Thread(new WriterThread(),"Writer[" + i + "]");
+  }
+  latch=new CountDownLatch(readerThreads.length + writerThreads.length);
+  barrier1=new CyclicBarrier(readerThreads.length + writerThreads.length + 1);
+  barrier2=new CyclicBarrier(readerThreads.length + writerThreads.length + 1);
+  return this;
+}

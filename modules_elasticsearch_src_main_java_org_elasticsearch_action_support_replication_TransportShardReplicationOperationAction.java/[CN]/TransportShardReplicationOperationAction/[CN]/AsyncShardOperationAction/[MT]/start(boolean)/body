@@ -1,0 +1,71 @@
+{
+  ClusterState clusterState=clusterService.state();
+  nodes=clusterState.nodes();
+  try {
+    shards=shards(request);
+  }
+ catch (  Exception e) {
+    listener.onFailure(new ShardOperationFailedException(shards.shardId(),e));
+    return true;
+  }
+  boolean foundPrimary=false;
+  for (  final ShardRouting shard : shards) {
+    if (shard.primary()) {
+      if (!shard.active()) {
+        retryPrimary(fromClusterEvent,shard);
+        return false;
+      }
+      if (!primaryOperationStarted.compareAndSet(false,true)) {
+        return false;
+      }
+      foundPrimary=true;
+      if (shard.currentNodeId().equals(nodes.localNodeId())) {
+        if (request.operationThreaded()) {
+          threadPool.execute(new Runnable(){
+            @Override public void run(){
+              performOnPrimary(shard.id(),fromClusterEvent,true,shard);
+            }
+          }
+);
+        }
+ else {
+          performOnPrimary(shard.id(),fromClusterEvent,false,shard);
+        }
+      }
+ else {
+        Node node=nodes.get(shard.currentNodeId());
+        transportService.sendRequest(node,transportAction(),request,new BaseTransportResponseHandler<Response>(){
+          @Override public Response newInstance(){
+            return newResponseInstance();
+          }
+          @Override public void handleResponse(          Response response){
+            listener.onResponse(response);
+          }
+          @Override public void handleException(          RemoteTransportException exp){
+            listener.onFailure(exp);
+          }
+          @Override public boolean spawn(){
+            return request.listenerThreaded();
+          }
+        }
+);
+      }
+      break;
+    }
+  }
+  if (!foundPrimary) {
+    final PrimaryNotStartedActionException failure=new PrimaryNotStartedActionException(shards.shardId(),"Primary not found");
+    if (request.listenerThreaded()) {
+      threadPool.execute(new Runnable(){
+        @Override public void run(){
+          listener.onFailure(failure);
+        }
+      }
+);
+    }
+ else {
+      listener.onFailure(failure);
+    }
+  }
+  return true;
+}

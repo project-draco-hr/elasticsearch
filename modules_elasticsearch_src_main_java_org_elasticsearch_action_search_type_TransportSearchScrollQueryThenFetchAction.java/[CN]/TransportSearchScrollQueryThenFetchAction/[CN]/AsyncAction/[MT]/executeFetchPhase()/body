@@ -1,0 +1,32 @@
+{
+  sortedShardList=searchPhaseController.sortDocs(queryResults.values());
+  Map<SearchShardTarget,ExtTIntArrayList> docIdsToLoad=searchPhaseController.docIdsToLoad(sortedShardList);
+  if (docIdsToLoad.isEmpty()) {
+    finishHim();
+  }
+  final AtomicInteger counter=new AtomicInteger(docIdsToLoad.size());
+  for (  Map.Entry<SearchShardTarget,ExtTIntArrayList> entry : docIdsToLoad.entrySet()) {
+    SearchShardTarget shardTarget=entry.getKey();
+    ExtTIntArrayList docIds=entry.getValue();
+    FetchSearchRequest fetchSearchRequest=new FetchSearchRequest(queryResults.get(shardTarget).id(),docIds);
+    Node node=nodes.get(shardTarget.nodeId());
+    searchService.sendExecuteFetch(node,fetchSearchRequest,new SearchServiceListener<FetchSearchResult>(){
+      @Override public void onResult(      FetchSearchResult result){
+        fetchResults.put(result.shardTarget(),result);
+        if (counter.decrementAndGet() == 0) {
+          finishHim();
+        }
+      }
+      @Override public void onFailure(      Throwable t){
+        if (logger.isDebugEnabled()) {
+          logger.debug("Failed to execute fetch phase",t);
+        }
+        successfulOps.decrementAndGet();
+        if (counter.decrementAndGet() == 0) {
+          finishHim();
+        }
+      }
+    }
+);
+  }
+}
