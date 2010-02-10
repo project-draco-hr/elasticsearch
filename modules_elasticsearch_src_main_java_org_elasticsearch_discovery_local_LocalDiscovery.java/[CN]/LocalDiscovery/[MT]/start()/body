@@ -1,0 +1,46 @@
+{
+  if (!lifecycle.moveToStarted()) {
+    return this;
+  }
+synchronized (clusterGroups) {
+    ClusterGroup clusterGroup=clusterGroups.get(clusterName);
+    if (clusterGroup == null) {
+      clusterGroup=new ClusterGroup();
+      clusterGroups.put(clusterName,clusterGroup);
+    }
+    logger.debug("Connected to cluster [{}]",clusterName);
+    this.localNode=new Node(settings.get("name"),settings.getAsBoolean("node.data",true),Long.toString(nodeIdGenerator.incrementAndGet()),transportService.boundAddress().publishAddress());
+    clusterGroup.members().add(this);
+    if (clusterGroup.members().size() == 1) {
+      master=true;
+      firstMaster=true;
+      clusterService.submitStateUpdateTask("local-disco-initialconnect(master)",new ProcessedClusterStateUpdateTask(){
+        @Override public ClusterState execute(        ClusterState currentState){
+          Nodes.Builder builder=new Nodes.Builder().localNodeId(localNode.id()).masterNodeId(localNode.id()).put(localNode);
+          return newClusterStateBuilder().state(currentState).nodes(builder).build();
+        }
+        @Override public void clusterStateProcessed(        ClusterState clusterState){
+          sendInitialStateEventIfNeeded();
+        }
+      }
+);
+    }
+ else {
+      LocalDiscovery master=clusterGroup.members().peek();
+      master.clusterService.submitStateUpdateTask("local-disco-receive(from node[" + localNode + "])",new ProcessedClusterStateUpdateTask(){
+        @Override public ClusterState execute(        ClusterState currentState){
+          if (currentState.nodes().nodeExists(localNode.id())) {
+            logger.warn("Received an address [{}] for an existing node [{}]",localNode.address(),localNode);
+            return currentState;
+          }
+          return newClusterStateBuilder().state(currentState).nodes(currentState.nodes().newNode(localNode)).build();
+        }
+        @Override public void clusterStateProcessed(        ClusterState clusterState){
+          sendInitialStateEventIfNeeded();
+        }
+      }
+);
+    }
+  }
+  return this;
+}

@@ -1,0 +1,32 @@
+{
+  if (!master) {
+    throw new ElasticSearchIllegalStateException("Shouldn't publish state when not master");
+  }
+  ClusterGroup clusterGroup=clusterGroups.get(clusterName);
+  if (clusterGroup == null) {
+    return;
+  }
+  try {
+    final byte[] clusterStateBytes=Builder.toBytes(clusterState);
+    for (    LocalDiscovery discovery : clusterGroup.members()) {
+      if (discovery.master) {
+        continue;
+      }
+      final ClusterState nodeSpecificClusterState=ClusterState.Builder.fromBytes(clusterStateBytes,discovery.settings,discovery.localNode);
+      if (nodeSpecificClusterState.nodes().localNode() != null) {
+        discovery.clusterService.submitStateUpdateTask("local-disco-receive(from master)",new ProcessedClusterStateUpdateTask(){
+          @Override public ClusterState execute(          ClusterState currentState){
+            return nodeSpecificClusterState;
+          }
+          @Override public void clusterStateProcessed(          ClusterState clusterState){
+            sendInitialStateEventIfNeeded();
+          }
+        }
+);
+      }
+    }
+  }
+ catch (  Exception e) {
+    throw new ElasticSearchIllegalStateException("Cluster state failed to serialize",e);
+  }
+}
