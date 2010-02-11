@@ -1,0 +1,26 @@
+{
+  ByteArrayDataOutputStream stream;
+  try {
+    stream=ByteArrayDataOutputStream.Cached.cached();
+    writeResponseExceptionHeader(stream);
+    RemoteTransportException tx=new RemoteTransportException(targetTransport.nodeName(),targetTransport.boundAddress().boundAddress(),action,error);
+    ThrowableObjectOutputStream too=new ThrowableObjectOutputStream(stream);
+    too.writeObject(tx);
+    too.close();
+  }
+ catch (  NotSerializableException e) {
+    stream=ByteArrayDataOutputStream.Cached.cached();
+    writeResponseExceptionHeader(stream);
+    RemoteTransportException tx=new RemoteTransportException(targetTransport.nodeName(),targetTransport.boundAddress().boundAddress(),action,new NotSerializableTransportException(error));
+    ThrowableObjectOutputStream too=new ThrowableObjectOutputStream(stream);
+    too.writeObject(tx);
+    too.close();
+  }
+  final byte[] data=stream.copiedByteArray();
+  targetTransport.threadPool().execute(new Runnable(){
+    @Override public void run(){
+      targetTransport.messageReceived(data,action,sourceTransport,null);
+    }
+  }
+);
+}
