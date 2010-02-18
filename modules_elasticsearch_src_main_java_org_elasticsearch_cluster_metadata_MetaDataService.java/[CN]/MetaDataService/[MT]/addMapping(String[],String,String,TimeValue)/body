@@ -26,6 +26,18 @@
     throw new InvalidTypeNameException("Document mapping type name can't start with '_'");
   }
   logger.info("Indices [" + Arrays.toString(indices) + "]: Creating mapping ["+ mappingType+ "] with source ["+ mappingSource+ "]");
+  final CountDownLatch latch=new CountDownLatch(clusterService.state().nodes().size() * indices.length);
+  final Set<String> indicesSet=Sets.newHashSet(indices);
+  final String fMappingType=mappingType;
+  NodeMappingCreatedAction.Listener listener=new NodeMappingCreatedAction.Listener(){
+    @Override public void onNodeMappingCreated(    NodeMappingCreatedAction.NodeMappingCreatedResponse response){
+      if (indicesSet.contains(response.index()) && response.type().equals(fMappingType)) {
+        latch.countDown();
+      }
+    }
+  }
+;
+  nodeMappingCreatedAction.add(listener);
   final String mappingTypeP=mappingType;
   clusterService.submitStateUpdateTask("create-mapping [" + mappingTypeP + "]",new ClusterStateUpdateTask(){
     @Override public ClusterState execute(    ClusterState currentState){
@@ -41,4 +53,13 @@
     }
   }
 );
+  try {
+    return latch.await(timeout.millis(),TimeUnit.MILLISECONDS);
+  }
+ catch (  InterruptedException e) {
+    return false;
+  }
+ finally {
+    nodeMappingCreatedAction.remove(listener);
+  }
 }
