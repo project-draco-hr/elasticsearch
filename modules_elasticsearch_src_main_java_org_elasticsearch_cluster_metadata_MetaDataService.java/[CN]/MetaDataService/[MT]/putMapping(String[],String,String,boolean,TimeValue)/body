@@ -1,0 +1,89 @@
+{
+  ClusterState clusterState=clusterService.state();
+  for (  String index : indices) {
+    IndexRoutingTable indexTable=clusterState.routingTable().indicesRouting().get(index);
+    if (indexTable == null) {
+      throw new IndexMissingException(new Index(index));
+    }
+  }
+  Map<String,DocumentMapper> newMappers=newHashMap();
+  Map<String,DocumentMapper> existingMappers=newHashMap();
+  for (  String index : indices) {
+    IndexService indexService=indicesService.indexService(index);
+    if (indexService != null) {
+      DocumentMapper newMapper=indexService.mapperService().parse(mappingType,mappingSource);
+      newMappers.put(index,newMapper);
+      DocumentMapper existingMapper=indexService.mapperService().documentMapper(mappingType);
+      if (existingMapper != null) {
+        existingMapper.merge(newMapper,mergeFlags().simulate(true).ignoreDuplicates(ignoreDuplicates));
+        existingMappers.put(index,newMapper);
+      }
+    }
+ else {
+      throw new IndexMissingException(new Index(index));
+    }
+  }
+  if (mappingType == null) {
+    mappingType=newMappers.values().iterator().next().type();
+  }
+ else   if (!mappingType.equals(newMappers.values().iterator().next().type())) {
+    throw new InvalidTypeNameException("Type name provided does not match type name within mapping definition");
+  }
+  if (mappingType.charAt(0) == '_') {
+    throw new InvalidTypeNameException("Document mapping type name can't start with '_'");
+  }
+  final Map<String,Tuple<String,String>> mappings=newHashMap();
+  for (  Map.Entry<String,DocumentMapper> entry : newMappers.entrySet()) {
+    Tuple<String,String> mapping;
+    String index=entry.getKey();
+    DocumentMapper newMapper=entry.getValue();
+    if (existingMappers.containsKey(entry.getKey())) {
+      DocumentMapper existingMapper=existingMappers.get(entry.getKey());
+      existingMapper.merge(newMapper,mergeFlags().simulate(false).ignoreDuplicates(ignoreDuplicates));
+      mapping=new Tuple<String,String>(existingMapper.type(),existingMapper.buildSource());
+    }
+ else {
+      mapping=new Tuple<String,String>(newMapper.type(),newMapper.buildSource());
+    }
+    mappings.put(index,mapping);
+    logger.info("Index [" + index + "]: Put mapping ["+ mapping.v1()+ "] with source ["+ mapping.v2()+ "]");
+  }
+  final CountDownLatch latch=new CountDownLatch(clusterService.state().nodes().size() * indices.length);
+  final Set<String> indicesSet=Sets.newHashSet(indices);
+  final String fMappingType=mappingType;
+  NodeMappingCreatedAction.Listener listener=new NodeMappingCreatedAction.Listener(){
+    @Override public void onNodeMappingCreated(    NodeMappingCreatedAction.NodeMappingCreatedResponse response){
+      if (indicesSet.contains(response.index()) && response.type().equals(fMappingType)) {
+        latch.countDown();
+      }
+    }
+  }
+;
+  nodeMappingCreatedAction.add(listener);
+  clusterService.submitStateUpdateTask("put-mapping [" + mappingType + "]",new ClusterStateUpdateTask(){
+    @Override public ClusterState execute(    ClusterState currentState){
+      MetaData.Builder builder=newMetaDataBuilder().metaData(currentState.metaData());
+      for (      String indexName : indices) {
+        IndexMetaData indexMetaData=currentState.metaData().index(indexName);
+        if (indexMetaData == null) {
+          throw new IndexMissingException(new Index(indexName));
+        }
+        Tuple<String,String> mapping=mappings.get(indexName);
+        builder.put(newIndexMetaDataBuilder(indexMetaData).putMapping(mapping.v1(),mapping.v2()));
+      }
+      return newClusterStateBuilder().state(currentState).metaData(builder).build();
+    }
+  }
+);
+  boolean acknowledged;
+  try {
+    acknowledged=latch.await(timeout.millis(),TimeUnit.MILLISECONDS);
+  }
+ catch (  InterruptedException e) {
+    acknowledged=false;
+  }
+ finally {
+    nodeMappingCreatedAction.remove(listener);
+  }
+  return new PutMappingResult(acknowledged);
+}
