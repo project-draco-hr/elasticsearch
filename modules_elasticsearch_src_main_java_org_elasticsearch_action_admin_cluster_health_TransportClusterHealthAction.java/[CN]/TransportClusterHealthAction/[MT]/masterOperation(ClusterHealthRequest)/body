@@ -1,0 +1,37 @@
+{
+  int waitFor=2;
+  if (request.waitForStatus() == null) {
+    waitFor--;
+  }
+  if (request.waitForRelocatingShards() == -1) {
+    waitFor--;
+  }
+  if (waitFor == 0) {
+    return clusterHealth(request);
+  }
+  long endTime=System.currentTimeMillis() + request.timeout().millis();
+  while (true) {
+    int waitForCounter=0;
+    ClusterHealthResponse response=clusterHealth(request);
+    if (request.waitForStatus() != null && response.status() == request.waitForStatus()) {
+      waitForCounter++;
+    }
+    if (request.waitForRelocatingShards() != -1 && response.relocatingShards() <= request.waitForRelocatingShards()) {
+      waitForCounter++;
+    }
+    if (waitForCounter == waitFor) {
+      return response;
+    }
+    if (timerService.estimatedTimeInMillis() > endTime) {
+      response.timedOut=true;
+      return response;
+    }
+    try {
+      Thread.sleep(200);
+    }
+ catch (    InterruptedException e) {
+      response.timedOut=true;
+      return response;
+    }
+  }
+}

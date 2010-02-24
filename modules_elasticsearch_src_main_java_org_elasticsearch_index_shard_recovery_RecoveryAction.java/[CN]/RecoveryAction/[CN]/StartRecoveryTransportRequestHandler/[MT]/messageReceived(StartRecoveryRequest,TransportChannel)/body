@@ -20,7 +20,7 @@
         final CountDownLatch latch=new CountDownLatch(snapshot.getFiles().length);
         final AtomicReference<Exception> lastException=new AtomicReference<Exception>();
         for (        final String name : snapshot.getFiles()) {
-          threadPool.execute(new Runnable(){
+          sendFileChunksRecoveryFutures.add(threadPool.submit(new Runnable(){
             @Override public void run(){
               IndexInput indexInput=null;
               try {
@@ -53,7 +53,7 @@
               }
             }
           }
-);
+));
         }
         latch.await();
         if (lastException.get() != null) {
@@ -66,27 +66,48 @@
  catch (      Throwable e) {
         throw new RecoverFilesRecoveryException(shardId,snapshot.getFiles().length,new SizeValue(totalSize),e);
       }
+ finally {
+        sendFileChunksRecoveryFutures.clear();
+      }
     }
     @Override public void phase2(    Translog.Snapshot snapshot) throws ElasticSearchException {
-      logger.trace("Recovery [phase2] to {}: sending [{}] transaction log operations",node,snapshot.size());
-      StopWatch stopWatch=new StopWatch().start();
-      sendSnapshot(snapshot,false);
-      stopWatch.stop();
-      logger.trace("Recovery [phase2] to {}: took [{}]",node,stopWatch.totalTime());
-      recoveryStatus.phase2Time=stopWatch.totalTime().millis();
-      recoveryStatus.phase2Operations=snapshot.size();
+      sendSnapshotRecoveryThread=Thread.currentThread();
+      try {
+        if (closed) {
+          throw new IndexShardClosedException(shardId);
+        }
+        logger.trace("Recovery [phase2] to {}: sending [{}] transaction log operations",node,snapshot.size());
+        StopWatch stopWatch=new StopWatch().start();
+        sendSnapshot(snapshot,false);
+        stopWatch.stop();
+        logger.trace("Recovery [phase2] to {}: took [{}]",node,stopWatch.totalTime());
+        recoveryStatus.phase2Time=stopWatch.totalTime().millis();
+        recoveryStatus.phase2Operations=snapshot.size();
+      }
+  finally {
+        sendSnapshotRecoveryThread=null;
+      }
     }
     @Override public void phase3(    Translog.Snapshot snapshot) throws ElasticSearchException {
-      logger.trace("Recovery [phase3] to {}: sending [{}] transaction log operations",node,snapshot.size());
-      StopWatch stopWatch=new StopWatch().start();
-      sendSnapshot(snapshot,true);
-      if (startRecoveryRequest.markAsRelocated) {
-        indexShard.relocated();
+      sendSnapshotRecoveryThread=Thread.currentThread();
+      try {
+        if (closed) {
+          throw new IndexShardClosedException(shardId);
+        }
+        logger.trace("Recovery [phase3] to {}: sending [{}] transaction log operations",node,snapshot.size());
+        StopWatch stopWatch=new StopWatch().start();
+        sendSnapshot(snapshot,true);
+        if (startRecoveryRequest.markAsRelocated) {
+          indexShard.relocated();
+        }
+        stopWatch.stop();
+        logger.trace("Recovery [phase3] to {}: took [{}]",node,stopWatch.totalTime());
+        recoveryStatus.phase3Time=stopWatch.totalTime().millis();
+        recoveryStatus.phase3Operations=snapshot.size();
       }
-      stopWatch.stop();
-      logger.trace("Recovery [phase3] to {}: took [{}]",node,stopWatch.totalTime());
-      recoveryStatus.phase3Time=stopWatch.totalTime().millis();
-      recoveryStatus.phase3Operations=snapshot.size();
+  finally {
+        sendSnapshotRecoveryThread=null;
+      }
     }
     private void sendSnapshot(    Translog.Snapshot snapshot,    boolean phase3) throws ElasticSearchException {
       MemorySnapshot memorySnapshot;

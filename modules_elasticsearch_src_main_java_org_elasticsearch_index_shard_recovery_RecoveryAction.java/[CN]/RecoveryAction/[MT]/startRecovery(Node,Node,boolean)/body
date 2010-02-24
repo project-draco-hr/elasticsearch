@@ -1,48 +1,63 @@
 {
-  IndexShardState preRecoveringState;
+  sendStartRecoveryThread=Thread.currentThread();
   try {
-    preRecoveringState=indexShard.recovering();
-  }
- catch (  IndexShardRecoveringException e) {
-    throw new IgnoreRecoveryException("Already in recovering process",e);
-  }
-catch (  IndexShardStartedException e) {
-    throw new IgnoreRecoveryException("Already in recovering process",e);
-  }
-catch (  IndexShardRelocatedException e) {
-    throw new IgnoreRecoveryException("Already in recovering process",e);
-  }
-catch (  IndexShardClosedException e) {
-    throw new IgnoreRecoveryException("can't recover a closed shard.",e);
-  }
-  logger.debug("Starting recovery from {}",targetNode);
-  StopWatch stopWatch=new StopWatch().start();
-  try {
-    RecoveryStatus recoveryStatus=transportService.submitRequest(targetNode,startTransportAction,new StartRecoveryRequest(node,markAsRelocated),new FutureTransportResponseHandler<RecoveryStatus>(){
-      @Override public RecoveryStatus newInstance(){
-        return new RecoveryStatus();
+    IndexShardState preRecoveringState;
+    try {
+      preRecoveringState=indexShard.recovering();
+    }
+ catch (    IndexShardRecoveringException e) {
+      throw new IgnoreRecoveryException("Already in recovering process",e);
+    }
+catch (    IndexShardStartedException e) {
+      throw new IgnoreRecoveryException("Already in recovering process",e);
+    }
+catch (    IndexShardRelocatedException e) {
+      throw new IgnoreRecoveryException("Already in recovering process",e);
+    }
+catch (    IndexShardClosedException e) {
+      throw new IgnoreRecoveryException("Can't recover a closed shard.",e);
+    }
+    logger.debug("Starting recovery from {}",targetNode);
+    StopWatch stopWatch=new StopWatch().start();
+    try {
+      if (closed) {
+        throw new IgnoreRecoveryException("Recovery closed");
+      }
+      RecoveryStatus recoveryStatus=transportService.submitRequest(targetNode,startTransportAction,new StartRecoveryRequest(node,markAsRelocated),new FutureTransportResponseHandler<RecoveryStatus>(){
+        @Override public RecoveryStatus newInstance(){
+          return new RecoveryStatus();
+        }
+      }
+).txGet();
+      stopWatch.stop();
+      if (logger.isDebugEnabled()) {
+        StringBuilder sb=new StringBuilder();
+        sb.append("Recovery completed from ").append(targetNode).append(", took [").append(stopWatch.totalTime()).append("]\n");
+        sb.append("   Phase1: recovered [").append(recoveryStatus.phase1FileNames.size()).append("]").append(" files with total size of [").append(new SizeValue(recoveryStatus.phase1TotalSize)).append("]").append(", took [").append(new TimeValue(recoveryStatus.phase1Time,MILLISECONDS)).append("]").append("\n");
+        sb.append("   Phase2: recovered [").append(recoveryStatus.phase2Operations).append("]").append(" transaction log operations").append(", took [").append(new TimeValue(recoveryStatus.phase2Time,MILLISECONDS)).append("]").append("\n");
+        sb.append("   Phase3: recovered [").append(recoveryStatus.phase3Operations).append("]").append(" transaction log operations").append(", took [").append(new TimeValue(recoveryStatus.phase3Time,MILLISECONDS)).append("]");
+        logger.debug(sb.toString());
       }
     }
-).txGet();
-    stopWatch.stop();
-    if (logger.isDebugEnabled()) {
-      StringBuilder sb=new StringBuilder();
-      sb.append("Recovery completed from ").append(targetNode).append(", took [").append(stopWatch.totalTime()).append("]\n");
-      sb.append("   Phase1: recovered [").append(recoveryStatus.phase1FileNames.size()).append("]").append(" files with total size of [").append(new SizeValue(recoveryStatus.phase1TotalSize)).append("]").append(", took [").append(new TimeValue(recoveryStatus.phase1Time,MILLISECONDS)).append("]").append("\n");
-      sb.append("   Phase2: recovered [").append(recoveryStatus.phase2Operations).append("]").append(" transaction log operations").append(", took [").append(new TimeValue(recoveryStatus.phase2Time,MILLISECONDS)).append("]").append("\n");
-      sb.append("   Phase3: recovered [").append(recoveryStatus.phase3Operations).append("]").append(" transaction log operations").append(", took [").append(new TimeValue(recoveryStatus.phase3Time,MILLISECONDS)).append("]");
-      logger.debug(sb.toString());
+ catch (    RemoteTransportException e) {
+      if (closed) {
+        throw new IgnoreRecoveryException("Recovery closed",e);
+      }
+      Throwable cause=ExceptionsHelper.unwrapCause(e);
+      if (cause instanceof ActionNotFoundTransportException || cause instanceof IndexShardNotStartedException) {
+        indexShard.restoreRecoveryState(preRecoveringState);
+        throw new IgnoreRecoveryException("Ignoring recovery attempt, remote shard not started",e);
+      }
+      throw new RecoveryFailedException(shardId,node,targetNode,e);
+    }
+catch (    Exception e) {
+      if (closed) {
+        throw new IgnoreRecoveryException("Recovery closed",e);
+      }
+      throw new RecoveryFailedException(shardId,node,targetNode,e);
     }
   }
- catch (  RemoteTransportException e) {
-    Throwable cause=ExceptionsHelper.unwrapCause(e);
-    if (cause instanceof ActionNotFoundTransportException || cause instanceof IndexShardNotStartedException) {
-      indexShard.restoreRecoveryState(preRecoveringState);
-      throw new IgnoreRecoveryException("Ignoring recovery attempt, remote shard not started",e);
-    }
-    throw new RecoveryFailedException(shardId,node,targetNode,e);
-  }
-catch (  Exception e) {
-    throw new RecoveryFailedException(shardId,node,targetNode,e);
+  finally {
+    sendStartRecoveryThread=null;
   }
 }

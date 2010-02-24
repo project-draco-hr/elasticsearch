@@ -1,0 +1,73 @@
+{
+  ClusterHealthResponse response=new ClusterHealthResponse(clusterName.value());
+  ClusterState clusterState=clusterService.state();
+  String[] indices=processIndices(clusterState,request.indices());
+  for (  String index : indices) {
+    IndexRoutingTable indexRoutingTable=clusterState.routingTable().index(index);
+    IndexMetaData indexMetaData=clusterState.metaData().index(index);
+    if (indexRoutingTable == null) {
+      continue;
+    }
+    ClusterIndexHealth indexHealth=new ClusterIndexHealth(index,indexMetaData.numberOfShards(),indexMetaData.numberOfReplicas());
+    for (    IndexShardRoutingTable shardRoutingTable : indexRoutingTable) {
+      ClusterShardHealth shardHealth=new ClusterShardHealth(shardRoutingTable.shardId().id());
+      for (      ShardRouting shardRouting : shardRoutingTable) {
+        if (shardRouting.active()) {
+          shardHealth.activeShards++;
+          if (shardRouting.relocating()) {
+            shardHealth.relocatingShards++;
+          }
+          if (shardRouting.primary()) {
+            shardHealth.primaryActive=true;
+          }
+        }
+      }
+      if (shardHealth.primaryActive) {
+        if (shardHealth.activeShards == shardRoutingTable.size()) {
+          shardHealth.status=ClusterHealthStatus.GREEN;
+        }
+ else {
+          shardHealth.status=ClusterHealthStatus.YELLOW;
+        }
+      }
+ else {
+        shardHealth.status=ClusterHealthStatus.RED;
+      }
+      indexHealth.shards.put(shardHealth.id(),shardHealth);
+    }
+    for (    ClusterShardHealth shardHealth : indexHealth) {
+      if (shardHealth.primaryActive()) {
+        indexHealth.activePrimaryShards++;
+      }
+      indexHealth.activeShards+=shardHealth.activeShards;
+      indexHealth.relocatingShards+=shardHealth.relocatingShards;
+    }
+    indexHealth.status=ClusterHealthStatus.GREEN;
+    for (    ClusterShardHealth shardHealth : indexHealth) {
+      if (shardHealth.status() == ClusterHealthStatus.RED) {
+        indexHealth.status=ClusterHealthStatus.RED;
+        break;
+      }
+      if (shardHealth.status() == ClusterHealthStatus.YELLOW) {
+        indexHealth.status=ClusterHealthStatus.YELLOW;
+      }
+    }
+    response.indices.put(indexHealth.index(),indexHealth);
+  }
+  for (  ClusterIndexHealth indexHealth : response) {
+    response.activePrimaryShards+=indexHealth.activePrimaryShards;
+    response.activeShards+=indexHealth.activeShards;
+    response.relocatingShards+=indexHealth.relocatingShards;
+  }
+  response.status=ClusterHealthStatus.GREEN;
+  for (  ClusterIndexHealth indexHealth : response) {
+    if (indexHealth.status() == ClusterHealthStatus.RED) {
+      response.status=ClusterHealthStatus.RED;
+      break;
+    }
+    if (indexHealth.status() == ClusterHealthStatus.YELLOW) {
+      response.status=ClusterHealthStatus.YELLOW;
+    }
+  }
+  return response;
+}
