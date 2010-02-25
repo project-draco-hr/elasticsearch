@@ -1,6 +1,7 @@
 {
-  ClusterHealthResponse response=new ClusterHealthResponse(clusterName.value());
   ClusterState clusterState=clusterService.state();
+  RoutingTableValidation validation=clusterState.routingTable().validate(clusterState.metaData());
+  ClusterHealthResponse response=new ClusterHealthResponse(clusterName.value(),validation.failures());
   String[] indices=processIndices(clusterState,request.indices());
   for (  String index : indices) {
     IndexRoutingTable indexRoutingTable=clusterState.routingTable().index(index);
@@ -8,7 +9,7 @@
     if (indexRoutingTable == null) {
       continue;
     }
-    ClusterIndexHealth indexHealth=new ClusterIndexHealth(index,indexMetaData.numberOfShards(),indexMetaData.numberOfReplicas());
+    ClusterIndexHealth indexHealth=new ClusterIndexHealth(index,indexMetaData.numberOfShards(),indexMetaData.numberOfReplicas(),validation.indexFailures(indexMetaData.index()));
     for (    IndexShardRoutingTable shardRoutingTable : indexRoutingTable) {
       ClusterShardHealth shardHealth=new ClusterShardHealth(shardRoutingTable.shardId().id());
       for (      ShardRouting shardRouting : shardRoutingTable) {
@@ -43,13 +44,18 @@
       indexHealth.relocatingShards+=shardHealth.relocatingShards;
     }
     indexHealth.status=ClusterHealthStatus.GREEN;
-    for (    ClusterShardHealth shardHealth : indexHealth) {
-      if (shardHealth.status() == ClusterHealthStatus.RED) {
-        indexHealth.status=ClusterHealthStatus.RED;
-        break;
-      }
-      if (shardHealth.status() == ClusterHealthStatus.YELLOW) {
-        indexHealth.status=ClusterHealthStatus.YELLOW;
+    if (!indexHealth.validationFailures().isEmpty()) {
+      indexHealth.status=ClusterHealthStatus.RED;
+    }
+ else {
+      for (      ClusterShardHealth shardHealth : indexHealth) {
+        if (shardHealth.status() == ClusterHealthStatus.RED) {
+          indexHealth.status=ClusterHealthStatus.RED;
+          break;
+        }
+        if (shardHealth.status() == ClusterHealthStatus.YELLOW) {
+          indexHealth.status=ClusterHealthStatus.YELLOW;
+        }
       }
     }
     response.indices.put(indexHealth.index(),indexHealth);
@@ -60,13 +66,18 @@
     response.relocatingShards+=indexHealth.relocatingShards;
   }
   response.status=ClusterHealthStatus.GREEN;
-  for (  ClusterIndexHealth indexHealth : response) {
-    if (indexHealth.status() == ClusterHealthStatus.RED) {
-      response.status=ClusterHealthStatus.RED;
-      break;
-    }
-    if (indexHealth.status() == ClusterHealthStatus.YELLOW) {
-      response.status=ClusterHealthStatus.YELLOW;
+  if (!response.validationFailures().isEmpty()) {
+    response.status=ClusterHealthStatus.RED;
+  }
+ else {
+    for (    ClusterIndexHealth indexHealth : response) {
+      if (indexHealth.status() == ClusterHealthStatus.RED) {
+        response.status=ClusterHealthStatus.RED;
+        break;
+      }
+      if (indexHealth.status() == ClusterHealthStatus.YELLOW) {
+        response.status=ClusterHealthStatus.YELLOW;
+      }
     }
   }
   return response;
