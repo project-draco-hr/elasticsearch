@@ -1,0 +1,62 @@
+{
+  GetRequest getRequest=getRequest(request.index()).type(request.type()).id(request.id()).listenerThreaded(false);
+  getAction.execute(getRequest,new ActionListener<GetResponse>(){
+    @Override public void onResponse(    GetResponse getResponse){
+      if (getResponse.empty()) {
+        listener.onFailure(new ElasticSearchException("document missing"));
+        return;
+      }
+      final BoolJsonQueryBuilder boolBuilder=boolQuery();
+      try {
+        DocumentMapper docMapper=indicesService.indexServiceSafe(request.index()).mapperService().documentMapper(request.type());
+        final Set<String> fields=Sets.newHashSet();
+        if (request.fields() != null) {
+          for (          String field : request.fields()) {
+            FieldMappers fieldMappers=docMapper.mappers().smartName(field);
+            if (fieldMappers != null) {
+              fields.add(fieldMappers.mapper().names().indexName());
+            }
+ else {
+              fields.add(field);
+            }
+          }
+        }
+        docMapper.parse(request.type(),request.id(),getResponse.source(),new DocumentMapper.ParseListenerAdapter(){
+          @Override public boolean beforeFieldAdded(          FieldMapper fieldMapper,          Fieldable field,          Object parseContext){
+            if (fieldMapper instanceof InternalMapper) {
+              return true;
+            }
+            String value=fieldMapper.valueAsString(field);
+            if (value == null) {
+              return false;
+            }
+            if (fields.isEmpty() || fields.contains(field.name())) {
+              addMoreLikeThis(request,boolBuilder,fieldMapper,field);
+            }
+            return false;
+          }
+        }
+);
+        Term uidTerm=docMapper.uidMapper().term(request.type(),request.id());
+        boolBuilder.mustNot(termQuery(uidTerm.field(),uidTerm.text()));
+      }
+ catch (      Exception e) {
+        listener.onFailure(e);
+      }
+      SearchRequest searchRequest=searchRequest(request.index()).types(request.type()).listenerThreaded(request.listenerThreaded()).source(searchSource().query(boolBuilder));
+      searchAction.execute(searchRequest,new ActionListener<SearchResponse>(){
+        @Override public void onResponse(        SearchResponse response){
+          listener.onResponse(response);
+        }
+        @Override public void onFailure(        Throwable e){
+          listener.onFailure(e);
+        }
+      }
+);
+    }
+    @Override public void onFailure(    Throwable e){
+      listener.onFailure(e);
+    }
+  }
+);
+}
