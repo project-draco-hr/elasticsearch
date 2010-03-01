@@ -1,0 +1,54 @@
+{
+  SequenceNode snode=(SequenceNode)node;
+  if (List.class.isAssignableFrom(node.getType()) || node.getType().isArray()) {
+    if (node.isTwoStepsConstruction()) {
+      return createDefaultList(snode.getValue().size());
+    }
+ else {
+      return constructSequence(snode);
+    }
+  }
+ else {
+    List<java.lang.reflect.Constructor> possibleConstructors=new ArrayList<java.lang.reflect.Constructor>(snode.getValue().size());
+    for (    java.lang.reflect.Constructor constructor : node.getType().getConstructors()) {
+      if (snode.getValue().size() == constructor.getParameterTypes().length) {
+        possibleConstructors.add(constructor);
+      }
+    }
+    if (possibleConstructors.isEmpty()) {
+      throw new YAMLException("No constructors with " + String.valueOf(snode.getValue().size()) + " arguments found for "+ node.getType());
+    }
+    List<Object> argumentList;
+    if (possibleConstructors.size() == 1) {
+      argumentList=new ArrayList<Object>(snode.getValue().size());
+      java.lang.reflect.Constructor c=possibleConstructors.get(0);
+      int index=0;
+      for (      Node argumentNode : snode.getValue()) {
+        Class type=c.getParameterTypes()[index];
+        argumentNode.setType(type);
+        Object argumentValue=constructObject(argumentNode);
+        argumentList.add(argumentValue);
+        index++;
+      }
+    }
+ else {
+      argumentList=(List<Object>)constructSequence(snode);
+    }
+    Class[] parameterTypes=new Class[argumentList.size()];
+    int index=0;
+    for (    Object parameter : argumentList) {
+      parameterTypes[index]=parameter.getClass();
+      index++;
+    }
+    java.lang.reflect.Constructor javaConstructor;
+    try {
+      Class cl=node.getType();
+      javaConstructor=cl.getConstructor(parameterTypes);
+      Object[] initargs=argumentList.toArray();
+      return javaConstructor.newInstance(initargs);
+    }
+ catch (    Exception e) {
+      throw new YAMLException(e);
+    }
+  }
+}

@@ -1,0 +1,86 @@
+{
+  Class<? extends Object> beanType=node.getType();
+  List<NodeTuple> nodeValue=(List<NodeTuple>)node.getValue();
+  for (  NodeTuple tuple : nodeValue) {
+    ScalarNode keyNode;
+    if (tuple.getKeyNode() instanceof ScalarNode) {
+      keyNode=(ScalarNode)tuple.getKeyNode();
+    }
+ else {
+      throw new YAMLException("Keys must be scalars but found: " + tuple.getKeyNode());
+    }
+    Node valueNode=tuple.getValueNode();
+    keyNode.setType(String.class);
+    String key=(String)constructObject(keyNode);
+    boolean isArray=false;
+    try {
+      Property property=getProperty(beanType,key);
+      valueNode.setType(property.getType());
+      if (property.getType().isArray()) {
+        isArray=true;
+      }
+      TypeDescription memberDescription=typeDefinitions.get(beanType);
+      boolean typeDetected=false;
+      if (memberDescription != null) {
+switch (valueNode.getNodeId()) {
+case sequence:
+          SequenceNode snode=(SequenceNode)valueNode;
+        Class<? extends Object> memberType=memberDescription.getListPropertyType(key);
+      if (memberType != null) {
+        snode.setListType(memberType);
+        typeDetected=true;
+      }
+ else       if (property.getType().isArray()) {
+        isArray=true;
+        snode.setListType(property.getType().getComponentType());
+        typeDetected=true;
+      }
+    break;
+case mapping:
+  MappingNode mnode=(MappingNode)valueNode;
+Class<? extends Object> keyType=memberDescription.getMapKeyType(key);
+if (keyType != null) {
+mnode.setKeyType(keyType);
+mnode.setValueType(memberDescription.getMapValueType(key));
+typeDetected=true;
+}
+break;
+}
+}
+if (!typeDetected && valueNode.getNodeId() != NodeId.scalar) {
+Type[] arguments=property.getActualTypeArguments();
+if (arguments != null) {
+if (valueNode.getNodeId() == NodeId.sequence) {
+Class t=(Class)arguments[0];
+SequenceNode snode=(SequenceNode)valueNode;
+snode.setListType(t);
+}
+ else if (valueNode.getTag().equals(Tag.SET)) {
+Class t=(Class)arguments[0];
+MappingNode mnode=(MappingNode)valueNode;
+mnode.setKeyType(t);
+mnode.setUseClassConstructor(true);
+}
+ else if (valueNode.getNodeId() == NodeId.mapping) {
+Class ketType=(Class)arguments[0];
+Class valueType=(Class)arguments[1];
+MappingNode mnode=(MappingNode)valueNode;
+mnode.setKeyType(ketType);
+mnode.setValueType(valueType);
+mnode.setUseClassConstructor(true);
+}
+}
+}
+Object value=constructObject(valueNode);
+if (isArray && value instanceof List) {
+List<Object> list=(List<Object>)value;
+value=list.toArray(createArray(property.getType()));
+}
+property.set(object,value);
+}
+ catch (Exception e) {
+throw new YAMLException("Cannot create property=" + key + " for JavaBean="+ object+ "; "+ e.getMessage(),e);
+}
+}
+return object;
+}

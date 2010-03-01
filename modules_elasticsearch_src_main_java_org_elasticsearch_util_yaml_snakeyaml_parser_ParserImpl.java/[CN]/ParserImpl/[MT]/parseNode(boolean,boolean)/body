@@ -1,0 +1,118 @@
+{
+  Event event;
+  Mark startMark=null;
+  Mark endMark=null;
+  Mark tagMark=null;
+  if (scanner.checkToken(Token.ID.Alias)) {
+    AliasToken token=(AliasToken)scanner.getToken();
+    event=new AliasEvent(token.getValue(),token.getStartMark(),token.getEndMark());
+    state=states.pop();
+  }
+ else {
+    String anchor=null;
+    TagTuple tagTokenTag=null;
+    if (scanner.checkToken(Token.ID.Anchor)) {
+      AnchorToken token=(AnchorToken)scanner.getToken();
+      startMark=token.getStartMark();
+      endMark=token.getEndMark();
+      anchor=token.getValue();
+      if (scanner.checkToken(Token.ID.Tag)) {
+        TagToken tagToken=(TagToken)scanner.getToken();
+        tagMark=tagToken.getStartMark();
+        endMark=tagToken.getEndMark();
+        tagTokenTag=tagToken.getValue();
+      }
+    }
+ else     if (scanner.checkToken(Token.ID.Tag)) {
+      TagToken tagToken=(TagToken)scanner.getToken();
+      startMark=tagToken.getStartMark();
+      tagMark=startMark;
+      endMark=tagToken.getEndMark();
+      tagTokenTag=tagToken.getValue();
+      if (scanner.checkToken(Token.ID.Anchor)) {
+        AnchorToken token=(AnchorToken)scanner.getToken();
+        endMark=token.getEndMark();
+        anchor=token.getValue();
+      }
+    }
+    String tag=null;
+    if (tagTokenTag != null) {
+      String handle=tagTokenTag.getHandle();
+      String suffix=tagTokenTag.getSuffix();
+      if (handle != null) {
+        if (!tagHandles.containsKey(handle)) {
+          throw new ParserException("while parsing a node",startMark,"found undefined tag handle " + handle,tagMark);
+        }
+        tag=tagHandles.get(handle) + suffix;
+      }
+ else {
+        tag=suffix;
+      }
+    }
+    if (startMark == null) {
+      startMark=scanner.peekToken().getStartMark();
+      endMark=startMark;
+    }
+    event=null;
+    boolean implicit=(tag == null || tag.equals("!"));
+    if (indentlessSequence && scanner.checkToken(Token.ID.BlockEntry)) {
+      endMark=scanner.peekToken().getEndMark();
+      event=new SequenceStartEvent(anchor,tag,implicit,startMark,endMark,Boolean.FALSE);
+      state=new ParseIndentlessSequenceEntry();
+    }
+ else {
+      if (scanner.checkToken(Token.ID.Scalar)) {
+        ScalarToken token=(ScalarToken)scanner.getToken();
+        endMark=token.getEndMark();
+        ImplicitTuple implicitValues;
+        if ((token.getPlain() && tag == null) || "!".equals(tag)) {
+          implicitValues=new ImplicitTuple(true,false);
+        }
+ else         if (tag == null) {
+          implicitValues=new ImplicitTuple(false,true);
+        }
+ else {
+          implicitValues=new ImplicitTuple(false,false);
+        }
+        event=new ScalarEvent(anchor,tag,implicitValues,token.getValue(),startMark,endMark,token.getStyle());
+        state=states.pop();
+      }
+ else       if (scanner.checkToken(Token.ID.FlowSequenceStart)) {
+        endMark=scanner.peekToken().getEndMark();
+        event=new SequenceStartEvent(anchor,tag,implicit,startMark,endMark,Boolean.TRUE);
+        state=new ParseFlowSequenceFirstEntry();
+      }
+ else       if (scanner.checkToken(Token.ID.FlowMappingStart)) {
+        endMark=scanner.peekToken().getEndMark();
+        event=new MappingStartEvent(anchor,tag,implicit,startMark,endMark,Boolean.TRUE);
+        state=new ParseFlowMappingFirstKey();
+      }
+ else       if (block && scanner.checkToken(Token.ID.BlockSequenceStart)) {
+        endMark=scanner.peekToken().getStartMark();
+        event=new SequenceStartEvent(anchor,tag,implicit,startMark,endMark,Boolean.FALSE);
+        state=new ParseBlockSequenceFirstEntry();
+      }
+ else       if (block && scanner.checkToken(Token.ID.BlockMappingStart)) {
+        endMark=scanner.peekToken().getStartMark();
+        event=new MappingStartEvent(anchor,tag,implicit,startMark,endMark,Boolean.FALSE);
+        state=new ParseBlockMappingFirstKey();
+      }
+ else       if (anchor != null || tag != null) {
+        event=new ScalarEvent(anchor,tag,new ImplicitTuple(implicit,false),"",startMark,endMark,(char)0);
+        state=states.pop();
+      }
+ else {
+        String node;
+        if (block) {
+          node="block";
+        }
+ else {
+          node="flow";
+        }
+        Token token=scanner.peekToken();
+        throw new ParserException("while parsing a " + node + " node",startMark,"expected the node content, but found " + token.getTokenId(),token.getStartMark());
+      }
+    }
+  }
+  return event;
+}
