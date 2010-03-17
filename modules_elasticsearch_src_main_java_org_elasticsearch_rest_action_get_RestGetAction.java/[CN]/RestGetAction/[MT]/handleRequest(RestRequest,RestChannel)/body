@@ -2,26 +2,64 @@
   final GetRequest getRequest=new GetRequest(request.param("index"),request.param("type"),request.param("id"));
   getRequest.listenerThreaded(false);
   getRequest.threadedOperation(true);
+  List<String> fields=request.params("field");
+  String sField=request.param("fields");
+  if (sField != null) {
+    String[] sFields=fieldsPattern.split(sField);
+    if (sFields != null) {
+      if (fields == null) {
+        fields=newArrayListWithExpectedSize(sField.length());
+      }
+      for (      String field : sFields) {
+        fields.add(field);
+      }
+    }
+  }
+  if (fields != null) {
+    getRequest.fields(fields.toArray(new String[fields.size()]));
+  }
   client.get(getRequest,new ActionListener<GetResponse>(){
-    @Override public void onResponse(    GetResponse result){
+    @Override public void onResponse(    GetResponse response){
       try {
-        if (!result.exists()) {
+        if (!response.exists()) {
           JsonBuilder builder=restJsonBuilder(request);
           builder.startObject();
-          builder.field("_index",result.index());
-          builder.field("_type",result.type());
-          builder.field("_id",result.id());
+          builder.field("_index",response.index());
+          builder.field("_type",response.type());
+          builder.field("_id",response.id());
           builder.endObject();
           channel.sendResponse(new JsonRestResponse(request,NOT_FOUND,builder));
         }
  else {
           JsonBuilder builder=restJsonBuilder(request);
           builder.startObject();
-          builder.field("_index",result.index());
-          builder.field("_type",result.type());
-          builder.field("_id",result.id());
-          builder.raw(", \"_source\" : ");
-          builder.raw(result.source());
+          builder.field("_index",response.index());
+          builder.field("_type",response.type());
+          builder.field("_id",response.id());
+          if (response.source() != null) {
+            builder.raw(", \"_source\" : ");
+            builder.raw(response.source());
+          }
+          if (response.fields() != null && !response.fields().isEmpty()) {
+            builder.startObject("fields");
+            for (            GetField field : response.fields().values()) {
+              if (field.values().isEmpty()) {
+                continue;
+              }
+              if (field.values().size() == 1) {
+                builder.field(field.name(),field.values().get(0));
+              }
+ else {
+                builder.field(field.name());
+                builder.startArray();
+                for (                Object value : field.values()) {
+                  builder.value(value);
+                }
+                builder.endArray();
+              }
+            }
+            builder.endObject();
+          }
           builder.endObject();
           channel.sendResponse(new JsonRestResponse(request,OK,builder));
         }
