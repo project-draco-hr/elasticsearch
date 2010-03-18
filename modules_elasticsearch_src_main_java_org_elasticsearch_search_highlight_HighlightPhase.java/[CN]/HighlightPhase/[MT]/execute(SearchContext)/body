@@ -1,0 +1,38 @@
+{
+  if (context.highlight() == null) {
+    return;
+  }
+  FragListBuilder fragListBuilder=new SimpleFragListBuilder();
+  FragmentsBuilder fragmentsBuilder;
+  if (context.highlight().scoreOrdered()) {
+    fragmentsBuilder=new ScoreOrderFragmentsBuilder(context.highlight().preTags(),context.highlight().postTags());
+  }
+ else {
+    fragmentsBuilder=new SimpleFragmentsBuilder(context.highlight().preTags(),context.highlight().postTags());
+  }
+  FastVectorHighlighter highlighter=new FastVectorHighlighter(true,false,fragListBuilder,fragmentsBuilder);
+  FieldQuery fieldQuery=highlighter.getFieldQuery(context.query());
+  for (  SearchHit hit : context.fetchResult().hits().hits()) {
+    InternalSearchHit internalHit=(InternalSearchHit)hit;
+    DocumentMapper documentMapper=context.mapperService().type(internalHit.type());
+    int docId=internalHit.docId();
+    Map<String,HighlightField> highlightFields=new HashMap<String,HighlightField>();
+    for (    SearchContextHighlight.ParsedHighlightField parsedHighlightField : context.highlight().fields()) {
+      String indexName=parsedHighlightField.field();
+      FieldMapper mapper=documentMapper.mappers().smartNameFieldMapper(parsedHighlightField.field());
+      if (mapper != null) {
+        indexName=mapper.names().indexName();
+      }
+      String[] fragments=null;
+      try {
+        fragments=highlighter.getBestFragments(fieldQuery,context.searcher().getIndexReader(),docId,indexName,parsedHighlightField.fragmentCharSize(),parsedHighlightField.numberOfFragments());
+      }
+ catch (      IOException e) {
+        throw new FetchPhaseExecutionException(context,"Failed to highlight field [" + parsedHighlightField.field() + "]",e);
+      }
+      HighlightField highlightField=new HighlightField(parsedHighlightField.field(),fragments);
+      highlightFields.put(highlightField.name(),highlightField);
+    }
+    internalHit.highlightFields(highlightFields);
+  }
+}
