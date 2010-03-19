@@ -1,27 +1,22 @@
 {
-  ChannelBuffer buffer=ChannelBuffers.dynamicBuffer(512,channel.getConfig().getBufferFactory());
-  ChannelBufferOutputStream os=new ChannelBufferOutputStream(buffer);
-  os.write(LENGTH_PLACEHOLDER);
-  os.writeLong(requestId);
-  byte status=0;
-  status=setResponse(status);
-  status=setError(status);
-  os.writeByte(status);
-  os.flush();
-  buffer.markWriterIndex();
+  BytesStreamOutput stream;
   try {
+    stream=BytesStreamOutput.Cached.cached();
+    writeResponseExceptionHeader(stream);
     RemoteTransportException tx=new RemoteTransportException(transport.nodeName(),transport.wrapAddress(channel.getLocalAddress()),action,error);
-    ThrowableObjectOutputStream too=new ThrowableObjectOutputStream(os);
+    ThrowableObjectOutputStream too=new ThrowableObjectOutputStream(stream);
     too.writeObject(tx);
     too.close();
   }
  catch (  NotSerializableException e) {
-    buffer.resetWriterIndex();
+    stream=BytesStreamOutput.Cached.cached();
+    writeResponseExceptionHeader(stream);
     RemoteTransportException tx=new RemoteTransportException(transport.nodeName(),transport.wrapAddress(channel.getLocalAddress()),action,new NotSerializableTransportException(error));
-    ThrowableObjectOutputStream too=new ThrowableObjectOutputStream(os);
+    ThrowableObjectOutputStream too=new ThrowableObjectOutputStream(stream);
     too.writeObject(tx);
     too.close();
   }
+  ChannelBuffer buffer=ChannelBuffers.wrappedBuffer(stream.copiedByteArray());
   buffer.setInt(0,buffer.writerIndex() - 4);
   channel.write(buffer);
 }
