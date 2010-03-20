@@ -1,8 +1,20 @@
 {
+  if (scrollId.values().length == 0) {
+    invokeListener(new SearchPhaseExecutionException("query","no nodes to search on",null));
+  }
   final AtomicInteger counter=new AtomicInteger(scrollId.values().length);
+  int localOperations=0;
   for (  Tuple<String,Long> target : scrollId.values()) {
     Node node=nodes.get(target.v1());
-    if (node == null) {
+    if (node != null) {
+      if (nodes.localNodeId().equals(node.id())) {
+        localOperations++;
+      }
+ else {
+        executeQueryPhase(counter,node,target.v2());
+      }
+    }
+ else {
       if (logger.isDebugEnabled()) {
         logger.debug("Node [" + target.v1() + "] not available for scroll request ["+ scrollId.source()+ "]");
       }
@@ -11,26 +23,39 @@
         executeFetchPhase();
       }
     }
- else {
-      searchService.sendExecuteQuery(node,TransportSearchHelper.internalScrollSearchRequest(target.v2(),request),new SearchServiceListener<QuerySearchResult>(){
-        @Override public void onResult(        QuerySearchResult result){
-          queryResults.put(result.shardTarget(),result);
-          if (counter.decrementAndGet() == 0) {
-            executeFetchPhase();
-          }
-        }
-        @Override public void onFailure(        Throwable t){
-          if (logger.isDebugEnabled()) {
-            logger.debug("Failed to execute query phase",t);
-          }
-          shardFailures.add(new ShardSearchFailure(t));
-          successfulOps.decrementAndGet();
-          if (counter.decrementAndGet() == 0) {
-            executeFetchPhase();
+  }
+  if (localOperations > 0) {
+    if (request.operationThreading() == SearchOperationThreading.SINGLE_THREAD) {
+      threadPool.execute(new Runnable(){
+        @Override public void run(){
+          for (          Tuple<String,Long> target : scrollId.values()) {
+            Node node=nodes.get(target.v1());
+            if (node != null && nodes.localNodeId().equals(node.id())) {
+              executeQueryPhase(counter,node,target.v2());
+            }
           }
         }
       }
 );
+    }
+ else {
+      boolean localAsync=request.operationThreading() == SearchOperationThreading.THREAD_PER_SHARD;
+      for (      final Tuple<String,Long> target : scrollId.values()) {
+        final Node node=nodes.get(target.v1());
+        if (node != null && nodes.localNodeId().equals(node.id())) {
+          if (localAsync) {
+            threadPool.execute(new Runnable(){
+              @Override public void run(){
+                executeQueryPhase(counter,node,target.v2());
+              }
+            }
+);
+          }
+ else {
+            executeQueryPhase(counter,node,target.v2());
+          }
+        }
+      }
     }
   }
 }
