@@ -1,7 +1,26 @@
 {
   out.writeVLong(totalHits);
   out.writeVInt(hits.length);
-  for (  SearchHit hit : hits) {
-    hit.writeTo(out);
+  if (hits.length > 0) {
+    IdentityHashMap<SearchShardTarget,Integer> shardLookupMap=new IdentityHashMap<SearchShardTarget,Integer>();
+    int counter=1;
+    for (    InternalSearchHit hit : hits) {
+      if (hit.shard() != null) {
+        Integer handle=shardLookupMap.get(hit.shard());
+        if (handle == null) {
+          shardLookupMap.put(hit.shard(),counter++);
+        }
+      }
+    }
+    out.writeVInt(shardLookupMap.size());
+    if (!shardLookupMap.isEmpty()) {
+      for (      Map.Entry<SearchShardTarget,Integer> entry : shardLookupMap.entrySet()) {
+        out.writeVInt(entry.getValue());
+        entry.getKey().writeTo(out);
+      }
+    }
+    for (    InternalSearchHit hit : hits) {
+      hit.writeTo(out,shardLookupMap.isEmpty() ? null : shardLookupMap);
+    }
   }
 }
