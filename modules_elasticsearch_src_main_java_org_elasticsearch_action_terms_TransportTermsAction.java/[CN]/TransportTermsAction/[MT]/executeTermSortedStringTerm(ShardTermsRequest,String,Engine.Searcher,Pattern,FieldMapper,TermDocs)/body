@@ -1,0 +1,86 @@
+{
+  TObjectIntHashMap<Object> termsFreqs=new TObjectIntHashMap<Object>();
+  String from=request.from();
+  if (from == null) {
+    from=request.prefix();
+  }
+  if (from == null) {
+    from="";
+  }
+  Term fromTerm=new Term(indexFieldName,from);
+  String to=request.to();
+  if (to != null && fieldMapper != null) {
+    to=fieldMapper.indexedValue(to);
+  }
+  Term toTerm=to == null ? null : new Term(indexFieldName,to);
+  TermEnum termEnum=null;
+  try {
+    termEnum=searcher.reader().terms(fromTerm);
+    if (!request.fromInclusive() && request.from() != null) {
+      Term term=termEnum.term();
+      if (term != null && indexFieldName == term.field() && term.text().equals(request.from())) {
+        termEnum.next();
+      }
+    }
+    if (request.sortType() == TermsRequest.SortType.TERM) {
+      int counter=0;
+      while (counter < request.size()) {
+        Term term=termEnum.term();
+        if (term == null || indexFieldName != term.field()) {
+          break;
+        }
+        if (fieldMapper != null) {
+          Object termObj=fieldMapper.valueFromTerm(term.text());
+          if (fieldMapper.shouldBreakTermEnumeration(termObj)) {
+            break;
+          }
+          if (termObj == null) {
+            termEnum.next();
+            continue;
+          }
+        }
+        if (request.prefix() != null && !term.text().startsWith(request.prefix())) {
+          break;
+        }
+        if (regexpPattern != null && !regexpPattern.matcher(term.text()).matches()) {
+          termEnum.next();
+          continue;
+        }
+        if (toTerm != null) {
+          int toCompareResult=term.compareTo(toTerm);
+          if (toCompareResult > 0 || (toCompareResult == 0 && !request.toInclusive())) {
+            break;
+          }
+        }
+        int docFreq=termEnum.docFreq();
+        if (request.exact()) {
+          if (termDocs == null) {
+            termDocs=searcher.reader().termDocs();
+          }
+          termDocs.seek(termEnum);
+          docFreq=0;
+          while (termDocs.next()) {
+            if (!searcher.reader().isDeleted(termDocs.doc())) {
+              docFreq++;
+            }
+          }
+        }
+        termsFreqs.put(term.text(),docFreq);
+        if (!termEnum.next()) {
+          break;
+        }
+        counter++;
+      }
+    }
+  }
+  finally {
+    if (termEnum != null) {
+      try {
+        termEnum.close();
+      }
+ catch (      IOException e) {
+      }
+    }
+  }
+  return new ExecuteTermResult(termsFreqs,termDocs);
+}

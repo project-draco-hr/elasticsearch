@@ -5,7 +5,7 @@
   long maxDoc=0;
   long numDeletedDocs=0;
   List<ShardOperationFailedException> shardFailures=null;
-  ShardTermsResponse aggregator=null;
+  Map<String,TObjectIntHashMap<Object>> aggregator=Maps.newHashMap();
   for (int i=0; i < shardsResponses.length(); i++) {
     Object shardResponse=shardsResponses.get(i);
     if (shardResponse == null) {
@@ -20,21 +20,23 @@
     }
  else {
       ShardTermsResponse shardTermsResponse=(ShardTermsResponse)shardResponse;
-      if (aggregator == null) {
-        aggregator=shardTermsResponse;
-      }
- else {
-        for (        Map.Entry<String,TObjectIntHashMap<String>> entry : shardTermsResponse.fieldsTermsFreqs().entrySet()) {
-          String fieldName=entry.getKey();
-          TObjectIntHashMap<String> termsFreqs=aggregator.fieldsTermsFreqs().get(fieldName);
-          if (termsFreqs == null) {
-            termsFreqs=new TObjectIntHashMap<String>();
-            aggregator.put(fieldName,termsFreqs);
+      IndexService indexService=indicesService.indexServiceSafe(shardTermsResponse.index());
+      for (      Map.Entry<String,TObjectIntHashMap<Object>> entry : shardTermsResponse.fieldsTermsFreqs().entrySet()) {
+        String fieldName=entry.getKey();
+        FieldMapper fieldMapper=indexService.mapperService().smartNameFieldMapper(fieldName);
+        TObjectIntHashMap<Object> termsFreqs=aggregator.get(fieldName);
+        if (termsFreqs == null) {
+          termsFreqs=new TObjectIntHashMap<Object>();
+          aggregator.put(fieldName,termsFreqs);
+        }
+        for (TObjectIntIterator<Object> it=entry.getValue().iterator(); it.hasNext(); ) {
+          it.advance();
+          Object termValue=it.key();
+          int freq=it.value();
+          if (fieldMapper != null) {
+            termValue=fieldMapper.valueForSearch(termValue);
           }
-          for (TObjectIntIterator<String> it=entry.getValue().iterator(); it.hasNext(); ) {
-            it.advance();
-            termsFreqs.adjustOrPutValue(it.key(),it.value(),it.value());
-          }
+          termsFreqs.adjustOrPutValue(termValue,freq,freq);
         }
       }
       numDocs+=shardTermsResponse.numDocs();
@@ -45,7 +47,7 @@
   }
   Map<String,NavigableSet<TermFreq>> fieldTermsFreqs=new HashMap<String,NavigableSet<TermFreq>>();
   if (aggregator != null) {
-    for (    Map.Entry<String,TObjectIntHashMap<String>> entry : aggregator.fieldsTermsFreqs().entrySet()) {
+    for (    Map.Entry<String,TObjectIntHashMap<Object>> entry : aggregator.entrySet()) {
       String fieldName=entry.getKey();
       NavigableSet<TermFreq> sortedFreqs=fieldTermsFreqs.get(fieldName);
       if (sortedFreqs == null) {
@@ -53,7 +55,7 @@
         sortedFreqs=new BoundedTreeSet<TermFreq>(comparator,request.size());
         fieldTermsFreqs.put(fieldName,sortedFreqs);
       }
-      for (TObjectIntIterator<String> it=entry.getValue().iterator(); it.hasNext(); ) {
+      for (TObjectIntIterator<Object> it=entry.getValue().iterator(); it.hasNext(); ) {
         it.advance();
         if (it.value() >= request.minFreq() && it.value() <= request.maxFreq()) {
           sortedFreqs.add(new TermFreq(it.key(),it.value()));

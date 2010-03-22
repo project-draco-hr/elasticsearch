@@ -10,152 +10,25 @@
       regexpPattern=Pattern.compile(request.regexp(),Pattern.DOTALL | Pattern.CASE_INSENSITIVE);
     }
     for (    String fieldName : request.fields()) {
-      TObjectIntHashMap<String> termsFreqs=new TObjectIntHashMap<String>();
       FieldMapper fieldMapper=indexService.mapperService().smartNameFieldMapper(fieldName);
       String indexFieldName=fieldName;
       if (fieldMapper != null) {
         indexFieldName=fieldMapper.names().indexName();
       }
       indexFieldName=StringHelper.intern(indexFieldName);
-      String from=request.from();
-      if (from == null) {
-        from=request.prefix();
-      }
- else {
-        if (request.convert()) {
-          if (fieldMapper != null) {
-            from=fieldMapper.indexedValue(from);
-          }
-        }
-      }
-      if (from == null) {
-        from="";
-      }
-      Term fromTerm=new Term(indexFieldName,from);
-      String to=request.to();
-      if (to != null && request.convert() && fieldMapper != null) {
-        to=fieldMapper.indexedValue(to);
-      }
-      Term toTerm=to == null ? null : new Term(indexFieldName,to);
-      TermEnum termEnum=null;
       try {
-        termEnum=searcher.reader().terms(fromTerm);
-        if (!request.fromInclusive() && request.from() != null) {
-          termEnum.next();
+        ExecuteTermResult executeTermResult;
+        if (request.sortType() == TermsRequest.SortType.TERM && fieldMapper != null && (fieldMapper.sortType() == SortField.STRING || fieldMapper.sortType() == SortField.STRING_VAL)) {
+          executeTermResult=executeTermSortedStringTerm(request,indexFieldName,searcher,regexpPattern,fieldMapper,termDocs);
         }
-        if (request.sortType() == TermsRequest.SortType.TERM) {
-          int counter=0;
-          while (counter < request.size()) {
-            Term term=termEnum.term();
-            if (term == null || indexFieldName != term.field()) {
-              break;
-            }
-            if (fieldMapper != null && fieldMapper.requiresStringToStringConversion()) {
-              term=term.createTerm(fieldMapper.valueAsString(term.text()));
-              if (fieldMapper.shouldBreakTermEnumeration(term.text())) {
-                break;
-              }
-              if (term.text() == null) {
-                continue;
-              }
-            }
-            if (request.prefix() != null && !term.text().startsWith(request.prefix())) {
-              break;
-            }
-            if (regexpPattern != null && !regexpPattern.matcher(term.text()).matches()) {
-              termEnum.next();
-              continue;
-            }
-            if (toTerm != null) {
-              int toCompareResult=term.compareTo(toTerm);
-              if (toCompareResult > 0 || (toCompareResult == 0 && !request.toInclusive())) {
-                break;
-              }
-            }
-            int docFreq=termEnum.docFreq();
-            if (request.exact()) {
-              if (termDocs == null) {
-                termDocs=searcher.reader().termDocs();
-              }
-              termDocs.seek(termEnum);
-              docFreq=0;
-              while (termDocs.next()) {
-                if (!searcher.reader().isDeleted(termDocs.doc())) {
-                  docFreq++;
-                }
-              }
-            }
-            termsFreqs.put(term.text(),docFreq);
-            if (!termEnum.next()) {
-              break;
-            }
-            counter++;
-          }
+ else {
+          executeTermResult=executeTerms(request,indexFieldName,searcher,regexpPattern,fieldMapper,termDocs);
         }
- else         if (request.sortType() == TermsRequest.SortType.FREQ) {
-          BoundedTreeSet<TermFreq> sortedFreq=new BoundedTreeSet<TermFreq>(TermFreq.freqComparator(),request.size());
-          while (true) {
-            Term term=termEnum.term();
-            if (term == null || indexFieldName != term.field()) {
-              break;
-            }
-            if (fieldMapper != null && fieldMapper.requiresStringToStringConversion()) {
-              term=term.createTerm(fieldMapper.valueAsString(term.text()));
-              if (fieldMapper.shouldBreakTermEnumeration(term.text())) {
-                break;
-              }
-              if (term.text() == null) {
-                continue;
-              }
-            }
-            if (request.prefix() != null && !term.text().startsWith(request.prefix())) {
-              break;
-            }
-            if (regexpPattern != null && !regexpPattern.matcher(term.text()).matches()) {
-              termEnum.next();
-              continue;
-            }
-            if (toTerm != null) {
-              int toCompareResult=term.compareTo(toTerm);
-              if (toCompareResult > 0 || (toCompareResult == 0 && !request.toInclusive())) {
-                break;
-              }
-            }
-            int docFreq=termEnum.docFreq();
-            if (request.exact()) {
-              if (termDocs == null) {
-                termDocs=searcher.reader().termDocs();
-              }
-              termDocs.seek(termEnum);
-              docFreq=0;
-              while (termDocs.next()) {
-                if (!searcher.reader().isDeleted(termDocs.doc())) {
-                  docFreq++;
-                }
-              }
-            }
-            sortedFreq.add(new TermFreq(term.text(),docFreq));
-            if (!termEnum.next()) {
-              break;
-            }
-          }
-          for (          TermFreq termFreq : sortedFreq) {
-            termsFreqs.put(termFreq.term(),termFreq.docFreq());
-          }
-        }
-        response.put(fieldName,termsFreqs);
+        termDocs=executeTermResult.termDocs;
+        response.put(fieldName,executeTermResult.termsFreqs);
       }
  catch (      Exception e) {
-        logger.debug("Failed to get term enum from term [" + fromTerm + "]",e);
-      }
- finally {
-        if (termEnum != null) {
-          try {
-            termEnum.close();
-          }
- catch (          IOException e) {
-          }
-        }
+        logger.warn("Failed to fetch terms for field [" + fieldName + "]",e);
       }
     }
     return response;
