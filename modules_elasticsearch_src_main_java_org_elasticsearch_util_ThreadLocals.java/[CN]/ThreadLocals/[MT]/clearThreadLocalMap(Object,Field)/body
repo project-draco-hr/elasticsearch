@@ -1,0 +1,45 @@
+{
+  if (map != null) {
+    Method mapRemove=map.getClass().getDeclaredMethod("remove",ThreadLocal.class);
+    mapRemove.setAccessible(true);
+    Object[] table=(Object[])internalTableField.get(map);
+    int staleEntriesCount=0;
+    if (table != null) {
+      for (int j=0; j < table.length; j++) {
+        if (table[j] != null) {
+          boolean remove=false;
+          Object key=((Reference<?>)table[j]).get();
+          Field valueField=table[j].getClass().getDeclaredField("value");
+          valueField.setAccessible(true);
+          Object value=valueField.get(table[j]);
+          if ((value != null && CleanableValue.class.isAssignableFrom(value.getClass()))) {
+            remove=true;
+          }
+          if (remove) {
+            Object[] args=new Object[4];
+            if (key != null) {
+              args[0]=key.getClass().getCanonicalName();
+              args[1]=key.toString();
+            }
+            args[2]=value.getClass().getCanonicalName();
+            args[3]=value.toString();
+            if (logger.isDebugEnabled()) {
+              logger.debug("ThreadLocal with key of type [{0}] (value [{1}]) and a value of type [{2}] (value [{3}]):  The ThreadLocal has been forcibly removed.",args);
+            }
+            if (key == null) {
+              staleEntriesCount++;
+            }
+ else {
+              mapRemove.invoke(map,key);
+            }
+          }
+        }
+      }
+    }
+    if (staleEntriesCount > 0) {
+      Method mapRemoveStale=map.getClass().getDeclaredMethod("expungeStaleEntries");
+      mapRemoveStale.setAccessible(true);
+      mapRemoveStale.invoke(map);
+    }
+  }
+}
