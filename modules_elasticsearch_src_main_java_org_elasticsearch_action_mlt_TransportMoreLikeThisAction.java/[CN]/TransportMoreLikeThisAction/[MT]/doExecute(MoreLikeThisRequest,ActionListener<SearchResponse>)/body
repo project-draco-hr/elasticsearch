@@ -1,5 +1,10 @@
 {
-  GetRequest getRequest=getRequest(request.index()).type(request.type()).id(request.id()).listenerThreaded(false);
+  Set<String> getFields=newHashSet();
+  if (request.fields() != null) {
+    Collections.addAll(getFields,request.fields());
+  }
+  getFields.add(SourceFieldMapper.NAME);
+  GetRequest getRequest=getRequest(request.index()).fields(getFields.toArray(new String[getFields.size()])).type(request.type()).id(request.id()).listenerThreaded(false);
   getAction.execute(getRequest,new ActionListener<GetResponse>(){
     @Override public void onResponse(    GetResponse getResponse){
       if (!getResponse.exists()) {
@@ -9,7 +14,7 @@
       final BoolJsonQueryBuilder boolBuilder=boolQuery();
       try {
         DocumentMapper docMapper=indicesService.indexServiceSafe(request.index()).mapperService().documentMapper(request.type());
-        final Set<String> fields=Sets.newHashSet();
+        final Set<String> fields=newHashSet();
         if (request.fields() != null) {
           for (          String field : request.fields()) {
             FieldMappers fieldMappers=docMapper.mappers().smartName(field);
@@ -21,22 +26,28 @@
             }
           }
         }
-        docMapper.parse(request.type(),request.id(),getResponse.source(),new DocumentMapper.ParseListenerAdapter(){
-          @Override public boolean beforeFieldAdded(          FieldMapper fieldMapper,          Fieldable field,          Object parseContext){
-            if (fieldMapper instanceof InternalMapper) {
-              return true;
+        if (!fields.isEmpty()) {
+          for (Iterator<String> it=fields.iterator(); it.hasNext(); ) {
+            String field=it.next();
+            GetField getField=getResponse.field(field);
+            if (getField != null) {
+              for (              Object value : getField.values()) {
+                addMoreLikeThis(request,boolBuilder,getField.name(),value.toString());
+              }
+              it.remove();
             }
-            String value=fieldMapper.valueAsString(field);
-            if (value == null) {
-              return false;
-            }
-            if (fields.isEmpty() || fields.contains(field.name())) {
-              addMoreLikeThis(request,boolBuilder,fieldMapper,field);
-            }
-            return false;
+          }
+          if (!fields.isEmpty()) {
+            parseSource(getResponse,boolBuilder,docMapper,fields,request);
           }
         }
-);
+ else {
+          parseSource(getResponse,boolBuilder,docMapper,fields,request);
+        }
+        if (boolBuilder.clauses().isEmpty()) {
+          listener.onFailure(new ElasticSearchException("No fields found to fetch the 'likeText' from"));
+          return;
+        }
         Term uidTerm=docMapper.uidMapper().term(request.type(),request.id());
         boolBuilder.mustNot(termQuery(uidTerm.field(),uidTerm.text()));
       }
