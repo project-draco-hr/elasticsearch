@@ -47,23 +47,17 @@
       throw new IndexShardGatewaySnapshotFailedException(shardId(),"Failed to perform snapshot (index files)",lastException.get());
     }
   }
-  if (translogSnapshot.translogId() != lastTranslogId || translogFile == null) {
+  File translogFile=new File(locationTranslog,"translog-" + translogSnapshot.translogId());
+  RandomAccessFile translogRaf=null;
+  if (translogSnapshot.translogId() != lastTranslogId || !translogFile.exists()) {
     translogDirty=true;
-    if (translogFile != null) {
-      try {
-        translogFile.close();
-      }
- catch (      IOException e) {
-      }
-    }
     try {
-      File f=new File(locationTranslog,"translog-" + translogSnapshot.translogId());
-      translogFile=new RandomAccessFile(f,"rw");
-      StreamOutput out=new DataOutputStreamOutput(translogFile);
+      translogRaf=new RandomAccessFile(translogFile,"rw");
+      StreamOutput out=new DataOutputStreamOutput(translogRaf);
       out.writeInt(-1);
-      translogFile.seek(0);
-      if (translogFile.readInt() != -1) {
-        throw new ElasticSearchIllegalStateException("Wrote to snapshot file [" + f + "] but did not read...");
+      translogRaf.seek(0);
+      if (translogRaf.readInt() != -1) {
+        throw new ElasticSearchIllegalStateException("Wrote to snapshot file [" + translogFile + "] but did not read...");
       }
       for (      Translog.Operation operation : translogSnapshot) {
         writeTranslogOperation(out,operation);
@@ -71,29 +65,29 @@
     }
  catch (    Exception e) {
       try {
-        translogFile.close();
+        translogRaf.close();
       }
  catch (      IOException e1) {
       }
-      translogFile=null;
       throw new IndexShardGatewaySnapshotFailedException(shardId(),"Failed to snapshot translog",e);
     }
   }
  else   if (translogSnapshot.size() > lastTranslogSize) {
     translogDirty=true;
     try {
-      StreamOutput out=new DataOutputStreamOutput(translogFile);
+      translogRaf=new RandomAccessFile(translogFile,"rw");
+      translogRaf.seek(translogRaf.length());
+      StreamOutput out=new DataOutputStreamOutput(translogRaf);
       for (      Translog.Operation operation : translogSnapshot.skipTo(lastTranslogSize)) {
         writeTranslogOperation(out,operation);
       }
     }
  catch (    Exception e) {
       try {
-        translogFile.close();
+        translogRaf.close();
       }
  catch (      IOException e1) {
       }
-      translogFile=null;
       throw new IndexShardGatewaySnapshotFailedException(shardId(),"Failed to snapshot translog",e);
     }
   }
@@ -102,19 +96,18 @@
       copyFromDirectory(snapshotIndexCommit.getDirectory(),snapshotIndexCommit.getSegmentsFileName(),new File(locationIndex,snapshotIndexCommit.getSegmentsFileName()));
     }
     if (translogDirty) {
-      translogFile.seek(0);
-      translogFile.writeInt(translogSnapshot.size());
-      translogFile.seek(translogFile.length());
-      translogFile.getFD().sync();
+      translogRaf.seek(0);
+      translogRaf.writeInt(translogSnapshot.size());
+      translogRaf.close();
+      syncFile(translogFile);
     }
   }
  catch (  Exception e) {
     try {
-      translogFile.close();
+      translogRaf.close();
     }
  catch (    IOException e1) {
     }
-    translogFile=null;
     throw new IndexShardGatewaySnapshotFailedException(shardId(),"Failed to finalize snapshot",e);
   }
   if (lastTranslogId != translogSnapshot.translogId()) {
