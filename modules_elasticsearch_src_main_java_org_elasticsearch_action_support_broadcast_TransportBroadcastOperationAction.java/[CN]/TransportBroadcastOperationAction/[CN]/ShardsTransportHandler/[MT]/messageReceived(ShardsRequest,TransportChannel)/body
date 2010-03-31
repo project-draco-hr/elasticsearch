@@ -1,0 +1,69 @@
+{
+  if (request.operationThreading() == BroadcastOperationThreading.THREAD_PER_SHARD) {
+    final AtomicInteger counter=new AtomicInteger(request.requests().size());
+    final AtomicInteger index=new AtomicInteger();
+    final AtomicReferenceArray results=new AtomicReferenceArray(request.requests().size());
+    for (    final ShardRequest singleRequest : request.requests()) {
+      threadPool.execute(new Runnable(){
+        @Override public void run(){
+          int arrIndex=index.getAndIncrement();
+          try {
+            results.set(arrIndex,shardOperation(singleRequest));
+          }
+ catch (          Exception e) {
+            results.set(arrIndex,new BroadcastShardOperationFailedException(new ShardId(singleRequest.index(),singleRequest.shardId()),e));
+          }
+          if (counter.decrementAndGet() == 0) {
+            List<ShardResponse> responses=newArrayListWithCapacity(request.requests().size());
+            List<BroadcastShardOperationFailedException> exceptions=null;
+            for (int i=0; i < results.length(); i++) {
+              Object result=results.get(i);
+              if (result instanceof BroadcastShardOperationFailedException) {
+                if (exceptions == null) {
+                  exceptions=newArrayList();
+                }
+                exceptions.add((BroadcastShardOperationFailedException)result);
+              }
+ else {
+                responses.add((ShardResponse)result);
+              }
+            }
+            try {
+              channel.sendResponse(new ShardsResponse(responses,exceptions));
+            }
+ catch (            IOException e) {
+              logger.warn("Failed to send broadcast response",e);
+            }
+          }
+        }
+      }
+);
+    }
+  }
+ else {
+    threadPool.execute(new Runnable(){
+      @Override public void run(){
+        List<ShardResponse> responses=newArrayListWithCapacity(request.requests().size());
+        List<BroadcastShardOperationFailedException> exceptions=null;
+        for (        ShardRequest singleRequest : request.requests()) {
+          try {
+            responses.add(shardOperation(singleRequest));
+          }
+ catch (          Exception e) {
+            if (exceptions == null) {
+              exceptions=newArrayList();
+            }
+            exceptions.add(new BroadcastShardOperationFailedException(new ShardId(singleRequest.index(),singleRequest.shardId()),e));
+          }
+        }
+        try {
+          channel.sendResponse(new ShardsResponse(responses,exceptions));
+        }
+ catch (        IOException e) {
+          logger.warn("Failed to send broadcast response",e);
+        }
+      }
+    }
+);
+  }
+}
