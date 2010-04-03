@@ -1,0 +1,48 @@
+{
+  logger.debug("First master in the cluster, reading state from gateway");
+  MetaData metaData;
+  try {
+    metaData=gateway.read();
+  }
+ catch (  Exception e) {
+    logger.error("Failed to read from gateway",e);
+    return false;
+  }
+  if (metaData == null) {
+    logger.debug("No state read from gateway");
+    return false;
+  }
+  final MetaData fMetaData=metaData;
+  final CountDownLatch latch=new CountDownLatch(fMetaData.indices().size());
+  clusterService.submitStateUpdateTask("gateway (recovered meta-data)",new ClusterStateUpdateTask(){
+    @Override public ClusterState execute(    ClusterState currentState){
+      MetaData.Builder metaDataBuilder=newMetaDataBuilder().metaData(currentState.metaData()).maxNumberOfShardsPerNode(fMetaData.maxNumberOfShardsPerNode());
+      for (      final IndexMetaData indexMetaData : fMetaData) {
+        threadPool.execute(new Runnable(){
+          @Override public void run(){
+            try {
+              metaDataService.createIndex("gateway",indexMetaData.index(),indexMetaData.settings(),indexMetaData.mappings(),timeValueMillis(initialStateTimeout.millis() - 1000));
+            }
+ catch (            Exception e) {
+              logger.error("Failed to create index [" + indexMetaData.index() + "]",e);
+            }
+ finally {
+              latch.countDown();
+            }
+          }
+        }
+);
+      }
+      return newClusterStateBuilder().state(currentState).metaData(metaDataBuilder).build();
+    }
+  }
+);
+  if (waitTimeout != null) {
+    try {
+      return latch.await(waitTimeout.millis(),TimeUnit.MILLISECONDS);
+    }
+ catch (    InterruptedException e) {
+    }
+  }
+  return false;
+}
