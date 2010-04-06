@@ -1,0 +1,28 @@
+{
+  RoutingNode routingNodes=event.state().readOnlyRoutingNodes().nodesToShards().get(event.state().nodes().localNodeId());
+  if (routingNodes == null) {
+    return;
+  }
+  for (  final String index : indicesService.indices()) {
+    if (event.state().metaData().hasIndex(index)) {
+      Set<Integer> newShardIds=newHashSet();
+      for (      final ShardRouting shardRouting : routingNodes) {
+        if (shardRouting.index().equals(index)) {
+          newShardIds.add(shardRouting.id());
+        }
+      }
+      final IndexService indexService=indicesService.indexService(index);
+      if (indexService == null) {
+        continue;
+      }
+      for (      Integer existingShardId : indexService.shardIds()) {
+        if (!newShardIds.contains(existingShardId)) {
+          if (logger.isDebugEnabled()) {
+            logger.debug("Index [{}]: Deleting shard [{}]",index,existingShardId);
+          }
+          indexService.deleteShard(existingShardId);
+        }
+      }
+    }
+  }
+}
