@@ -6,17 +6,28 @@
     return;
   }
   try {
-    indexShard.snapshot(new Engine.SnapshotHandler(){
-      @Override public void snapshot(      SnapshotIndexCommit snapshotIndexCommit,      Translog.Snapshot translogSnapshot) throws EngineException {
+    IndexShardGateway.SnapshotStatus snapshotStatus=indexShard.snapshot(new Engine.SnapshotHandler<IndexShardGateway.SnapshotStatus>(){
+      @Override public IndexShardGateway.SnapshotStatus snapshot(      SnapshotIndexCommit snapshotIndexCommit,      Translog.Snapshot translogSnapshot) throws EngineException {
         if (lastIndexVersion != snapshotIndexCommit.getVersion() || lastTranslogId != translogSnapshot.translogId() || lastTranslogSize != translogSnapshot.size()) {
-          shardGateway.snapshot(new IndexShardGateway.Snapshot(snapshotIndexCommit,translogSnapshot,lastIndexVersion,lastTranslogId,lastTranslogSize));
+          IndexShardGateway.SnapshotStatus snapshotStatus=shardGateway.snapshot(new IndexShardGateway.Snapshot(snapshotIndexCommit,translogSnapshot,lastIndexVersion,lastTranslogId,lastTranslogSize));
           lastIndexVersion=snapshotIndexCommit.getVersion();
           lastTranslogId=translogSnapshot.translogId();
           lastTranslogSize=translogSnapshot.size();
+          return snapshotStatus;
         }
+        return IndexShardGateway.SnapshotStatus.NA;
       }
     }
 );
+    if (snapshotStatus != IndexShardGateway.SnapshotStatus.NA) {
+      if (logger.isDebugEnabled()) {
+        StringBuilder sb=new StringBuilder();
+        sb.append("Snapshot completed to ").append(shardGateway).append(", took[").append(snapshotStatus.totalTime()).append("]\n");
+        sb.append("    Index    : number_of_files[").append(snapshotStatus.index().numberOfFiles()).append("] with total_size[").append(snapshotStatus.index().totalSize()).append("], took[").append(snapshotStatus.index().time()).append("]\n");
+        sb.append("    Translog : number_of_operations[").append(snapshotStatus.translog().numberOfOperations()).append("], took[").append(snapshotStatus.translog().time()).append("]");
+        logger.debug(sb.toString());
+      }
+    }
   }
  catch (  IllegalIndexShardStateException e) {
   }
