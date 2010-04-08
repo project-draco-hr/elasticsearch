@@ -1,0 +1,43 @@
+{
+  int sweeps=0;
+  int r=seed;
+  ForkJoinPool p=pool;
+  p.releaseWaiters();
+  while (joinMe.status >= 0) {
+    ForkJoinWorkerThread[] ws=p.workers;
+    int n=ws.length;
+    int k=r;
+    for (int j=-n; j < n; ++j) {
+      ForkJoinWorkerThread v=ws[k & (n - 1)];
+      r^=r << 13;
+      r^=r >>> 17;
+      r^=r << 5;
+      if (v != null) {
+        int b=v.base;
+        ForkJoinTask<?>[] q;
+        if (b != v.sp && (q=v.queue) != null) {
+          int i=(q.length - 1) & b;
+          ForkJoinTask<?> t=q[i];
+          if (t != null) {
+            if (joinMe.status < 0)             return null;
+            if (UNSAFE.compareAndSwapObject(q,(i << qShift) + qBase,t,null)) {
+              if (joinMe.status < 0) {
+                writeSlot(q,i,t);
+                return null;
+              }
+              v.base=b + 1;
+              seed=r;
+              ++stealCount;
+              return t;
+            }
+          }
+          sweeps=0;
+        }
+      }
+      k=j >= 0 ? k + ((n >>> 1) | 1) : r;
+      if ((j & 7) == 0 && joinMe.status < 0)       return null;
+    }
+    if ((sweeps=p.inactiveCount() == 0 ? sweeps + 1 : 0) > n)     return null;
+  }
+  return null;
+}

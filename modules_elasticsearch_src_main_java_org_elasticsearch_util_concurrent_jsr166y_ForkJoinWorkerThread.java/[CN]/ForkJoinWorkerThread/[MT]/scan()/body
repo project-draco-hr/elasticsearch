@@ -1,0 +1,30 @@
+{
+  ForkJoinPool p=pool;
+  ForkJoinWorkerThread[] ws=p.workers;
+  int n=ws.length;
+  boolean canSteal=active;
+  int r=seed;
+  int k=r;
+  for (int j=-n; j < n; ++j) {
+    ForkJoinWorkerThread v=ws[k & (n - 1)];
+    r^=r << 13;
+    r^=r >>> 17;
+    r^=r << 5;
+    if (v != null && v.base != v.sp) {
+      if (canSteal || (canSteal=active=p.tryIncrementActiveCount())) {
+        int b, i;
+        ForkJoinTask<?> t;
+        ForkJoinTask<?>[] q;
+        if ((b=v.base) != v.sp && (q=v.queue) != null && (t=q[i=(q.length - 1) & b]) != null && UNSAFE.compareAndSwapObject(q,(i << qShift) + qBase,t,null)) {
+          v.base=b + 1;
+          seed=r;
+          ++stealCount;
+          return t;
+        }
+      }
+      j=-n;
+    }
+    k=j >= 0 ? k + ((n >>> 1) | 1) : r;
+  }
+  return null;
+}

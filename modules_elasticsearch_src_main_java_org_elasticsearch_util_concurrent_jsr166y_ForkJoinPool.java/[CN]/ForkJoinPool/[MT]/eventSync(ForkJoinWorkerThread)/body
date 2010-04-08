@@ -1,0 +1,17 @@
+{
+  if (!w.active) {
+    int prev=w.lastEventCount;
+    long nextTop=(((long)prev << EVENT_COUNT_SHIFT) | ((long)(w.poolIndex + 1)));
+    long top;
+    while ((runState < SHUTDOWN || !tryTerminate(false)) && (((int)(top=eventWaiters) & WAITER_INDEX_MASK) == 0 || (int)(top >>> EVENT_COUNT_SHIFT) == prev) && eventCount == prev) {
+      if (UNSAFE.compareAndSwapLong(this,eventWaitersOffset,w.nextWaiter=top,nextTop)) {
+        accumulateStealCount(w);
+        Thread.interrupted();
+        while (eventCount == prev)         w.doPark();
+        break;
+      }
+    }
+    w.lastEventCount=eventCount;
+  }
+  releaseWaiters();
+}

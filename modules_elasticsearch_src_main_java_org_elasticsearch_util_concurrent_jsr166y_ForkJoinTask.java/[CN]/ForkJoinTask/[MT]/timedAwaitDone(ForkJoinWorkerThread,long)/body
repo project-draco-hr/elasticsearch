@@ -1,0 +1,32 @@
+{
+  if (status >= 0) {
+    long startTime=System.nanoTime();
+    ForkJoinPool pool=w.pool;
+    pool.preJoin(this);
+    while (status >= 0) {
+      long nt=nanos - (System.nanoTime() - startTime);
+      if (nt > 0) {
+        long ms=nt / 1000000;
+        int ns=(int)(nt % 1000000);
+        try {
+synchronized (this) {
+            if (status >= 0)             wait(ms,ns);
+          }
+        }
+ catch (        InterruptedException ie) {
+          cancelIfTerminating();
+        }
+      }
+ else {
+        int s;
+        while ((s=status) >= 0 && (s & INTERNAL_SIGNAL_MASK) != 0) {
+          if (UNSAFE.compareAndSwapInt(this,statusOffset,s,s - 1)) {
+            pool.updateRunningCount(1);
+            break;
+          }
+        }
+        break;
+      }
+    }
+  }
+}
