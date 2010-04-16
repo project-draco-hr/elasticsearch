@@ -1,0 +1,77 @@
+{
+  MemcachedRestRequest request=this.request;
+  if (request == null) {
+    buffer.markReaderIndex();
+    boolean done=false;
+    StringBuffer sb=this.sb;
+    int readableBytes=buffer.readableBytes();
+    for (int i=0; i < readableBytes; i++) {
+      byte next=buffer.readByte();
+      if (next == CR) {
+        next=buffer.readByte();
+        if (next == LF) {
+          done=true;
+          break;
+        }
+      }
+ else       if (next == LF) {
+        done=true;
+        break;
+      }
+ else {
+        sb.append((char)next);
+      }
+    }
+    if (!done) {
+      buffer.resetReaderIndex();
+      return null;
+    }
+    String[] args=lineSplit.split(sb);
+    sb.setLength(0);
+    String cmd=args[0];
+    String uri=args[1];
+    if ("get".equals(cmd)) {
+      request=new MemcachedRestRequest(RestRequest.Method.GET,uri,-1,false);
+      if (args.length > 3) {
+        request.setData(Unicode.fromStringAsBytes(args[2]));
+      }
+      return request;
+    }
+ else     if ("delete".equals(cmd)) {
+      request=new MemcachedRestRequest(RestRequest.Method.DELETE,uri,-1,false);
+      return request;
+    }
+ else     if ("set".equals(cmd)) {
+      this.request=new MemcachedRestRequest(RestRequest.Method.POST,uri,Integer.parseInt(args[4]),false);
+      buffer.markReaderIndex();
+    }
+ else     if ("quit".equals(cmd)) {
+      channel.disconnect();
+    }
+  }
+ else {
+    if (buffer.readableBytes() < (request.getDataSize() + 2)) {
+      return null;
+    }
+    byte[] data=new byte[request.getDataSize()];
+    buffer.readBytes(data,0,data.length);
+    byte next=buffer.readByte();
+    if (next == CR) {
+      next=buffer.readByte();
+      if (next == LF) {
+        request.setData(data);
+        this.request=null;
+        return request;
+      }
+ else {
+        this.request=null;
+        throw new StreamCorruptedException("Expecting \r\n after data block");
+      }
+    }
+ else {
+      this.request=null;
+      throw new StreamCorruptedException("Expecting \r\n after data block");
+    }
+  }
+  return null;
+}
