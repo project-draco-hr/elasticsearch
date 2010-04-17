@@ -1,33 +1,79 @@
 {
-  if (response.status().getStatus() >= 500) {
-    channel.write(ERROR.duplicate());
+  if (request.isBinary()) {
+    try {
+      ChannelBuffer writeBuffer=ChannelBuffers.dynamicBuffer(24 + request.getUriBytes().length + response.contentLength()+ 12);
+      writeBuffer.writeByte((byte)0x81);
+      if (request.method() == RestRequest.Method.GET) {
+        writeBuffer.writeByte((byte)0x00);
+      }
+ else       if (request.method() == RestRequest.Method.POST) {
+        writeBuffer.writeByte((byte)0x01);
+      }
+ else       if (request.method() == RestRequest.Method.DELETE) {
+        writeBuffer.writeByte((byte)0x04);
+      }
+      short keyLength=request.method() == RestRequest.Method.GET ? (short)request.getUriBytes().length : 0;
+      writeBuffer.writeShort(keyLength);
+      int extrasLength=request.method() == RestRequest.Method.GET ? 4 : 0;
+      writeBuffer.writeByte((byte)extrasLength);
+      writeBuffer.writeByte((byte)0);
+      if (response.status().getStatus() >= 500) {
+        writeBuffer.writeShort((short)0x0A);
+      }
+ else {
+        writeBuffer.writeShort((short)0x0000);
+      }
+      int dataLength=request.method() == RestRequest.Method.GET ? response.contentLength() : 0;
+      writeBuffer.writeInt(dataLength + keyLength + extrasLength);
+      writeBuffer.writeInt(request.getOpaque());
+      writeBuffer.writeLong(0);
+      if (extrasLength > 0) {
+        writeBuffer.writeShort((short)0);
+        writeBuffer.writeShort((short)0);
+      }
+      if (keyLength > 0) {
+        writeBuffer.writeBytes(request.getUriBytes());
+      }
+      if (dataLength > 0) {
+        writeBuffer.writeBytes(response.content(),0,response.contentLength());
+      }
+      channel.write(writeBuffer);
+    }
+ catch (    Exception e) {
+      throw new MemcachedTransportException("Failed to write response",e);
+    }
   }
  else {
-    if (request.method() == RestRequest.Method.POST) {
-      channel.write(STORED.duplicate());
-    }
- else     if (request.method() == RestRequest.Method.DELETE) {
-      channel.write(DELETED.duplicate());
+    if (response.status().getStatus() >= 500) {
+      channel.write(ERROR.duplicate());
     }
  else {
-      try {
-        ChannelBuffer writeBuffer=ChannelBuffers.dynamicBuffer(response.contentLength() + 512);
-        writeBuffer.writeBytes(VALUE.duplicate());
-        writeBuffer.writeBytes(Unicode.fromStringAsBytes(request.uri()));
-        writeBuffer.writeByte((byte)' ');
-        writeBuffer.writeByte((byte)'0');
-        writeBuffer.writeByte((byte)' ');
-        writeBuffer.writeBytes(Bytes.itoa(response.contentLength()));
-        writeBuffer.writeByte((byte)'\r');
-        writeBuffer.writeByte((byte)'\n');
-        writeBuffer.writeBytes(response.content(),0,response.contentLength());
-        writeBuffer.writeByte((byte)'\r');
-        writeBuffer.writeByte((byte)'\n');
-        writeBuffer.writeBytes(END.duplicate());
-        channel.write(writeBuffer);
+      if (request.method() == RestRequest.Method.POST) {
+        channel.write(STORED.duplicate());
       }
- catch (      Exception e) {
-        throw new MemcachedTransportException("Failed to write 'get' response",e);
+ else       if (request.method() == RestRequest.Method.DELETE) {
+        channel.write(DELETED.duplicate());
+      }
+ else {
+        try {
+          ChannelBuffer writeBuffer=ChannelBuffers.dynamicBuffer(response.contentLength() + 512);
+          writeBuffer.writeBytes(VALUE.duplicate());
+          writeBuffer.writeBytes(Unicode.fromStringAsBytes(request.uri()));
+          writeBuffer.writeByte((byte)' ');
+          writeBuffer.writeByte((byte)'0');
+          writeBuffer.writeByte((byte)' ');
+          writeBuffer.writeBytes(Bytes.itoa(response.contentLength()));
+          writeBuffer.writeByte((byte)'\r');
+          writeBuffer.writeByte((byte)'\n');
+          writeBuffer.writeBytes(response.content(),0,response.contentLength());
+          writeBuffer.writeByte((byte)'\r');
+          writeBuffer.writeByte((byte)'\n');
+          writeBuffer.writeBytes(END.duplicate());
+          channel.write(writeBuffer);
+        }
+ catch (        Exception e) {
+          throw new MemcachedTransportException("Failed to write 'get' response",e);
+        }
       }
     }
   }
