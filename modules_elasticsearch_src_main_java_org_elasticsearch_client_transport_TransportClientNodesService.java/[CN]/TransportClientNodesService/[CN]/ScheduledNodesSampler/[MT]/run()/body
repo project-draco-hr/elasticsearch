@@ -1,16 +1,13 @@
 {
-  ImmutableList<TransportAddress> transportAddresses=TransportClientNodesService.this.transportAddresses;
-  final CountDownLatch latch=new CountDownLatch(transportAddresses.size());
+  ImmutableList<DiscoveryNode> listedNodes=TransportClientNodesService.this.listedNodes;
+  final CountDownLatch latch=new CountDownLatch(listedNodes.size());
   final CopyOnWriteArrayList<NodesInfoResponse> nodesInfoResponses=new CopyOnWriteArrayList<NodesInfoResponse>();
-  final CopyOnWriteArrayList<DiscoveryNode> tempNodes=new CopyOnWriteArrayList<DiscoveryNode>();
-  for (  final TransportAddress transportAddress : transportAddresses) {
+  for (  final DiscoveryNode listedNode : listedNodes) {
     threadPool.execute(new Runnable(){
       @Override public void run(){
-        DiscoveryNode tempNode=new DiscoveryNode("#temp#-" + tempNodeIdGenerator.incrementAndGet(),transportAddress);
-        tempNodes.add(tempNode);
         try {
-          transportService.nodesAdded(ImmutableList.of(tempNode));
-          transportService.sendRequest(tempNode,TransportActions.Admin.Cluster.Node.INFO,Requests.nodesInfo("_local"),new BaseTransportResponseHandler<NodesInfoResponse>(){
+          transportService.connectToNode(listedNode);
+          transportService.sendRequest(listedNode,TransportActions.Admin.Cluster.Node.INFO,Requests.nodesInfo("_local"),new BaseTransportResponseHandler<NodesInfoResponse>(){
             @Override public NodesInfoResponse newInstance(){
               return new NodesInfoResponse();
             }
@@ -19,14 +16,14 @@
               latch.countDown();
             }
             @Override public void handleException(            RemoteTransportException exp){
-              logger.debug("Failed to get node info from " + transportAddress + ", removed from nodes list",exp);
+              logger.debug("Failed to get node info from " + listedNode + ", removed from nodes list",exp);
               latch.countDown();
             }
           }
 );
         }
  catch (        Exception e) {
-          logger.debug("Failed to get node info from " + transportAddress + ", removed from nodes list",e);
+          logger.debug("Failed to get node info from " + listedNode + ", removed from nodes list",e);
           latch.countDown();
         }
       }
@@ -57,6 +54,13 @@
   if (discoveredNodes != null) {
     newNodes.addAll(discoveredNodes.nodes().values());
   }
+  for (  DiscoveryNode node : newNodes) {
+    try {
+      transportService.connectToNode(node);
+    }
+ catch (    Exception e) {
+      logger.debug("Failed to connect to discovered node [" + node + "]",e);
+    }
+  }
   nodes=new ImmutableList.Builder<DiscoveryNode>().addAll(newNodes).build();
-  transportService.nodesRemoved(tempNodes);
 }
