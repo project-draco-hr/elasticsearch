@@ -1,0 +1,77 @@
+{
+  while (running) {
+    try {
+      int id;
+      DiscoveryNode requestingNodeX;
+      ClusterName clusterName;
+synchronized (receiveMutex) {
+        try {
+          multicastSocket.receive(datagramPacketReceive);
+        }
+ catch (        SocketTimeoutException ignore) {
+          continue;
+        }
+catch (        Exception e) {
+          if (running) {
+            logger.warn("Failed to receive packet",e);
+          }
+          continue;
+        }
+        try {
+          StreamInput input=HandlesStreamInput.Cached.cached(new BytesStreamInput(datagramPacketReceive.getData(),datagramPacketReceive.getOffset(),datagramPacketReceive.getLength()));
+          id=input.readInt();
+          clusterName=ClusterName.readClusterName(input);
+          requestingNodeX=readNode(input);
+        }
+ catch (        Exception e) {
+          logger.warn("Failed to read requesting node from {}",e,datagramPacketReceive.getSocketAddress());
+          continue;
+        }
+      }
+      DiscoveryNodes discoveryNodes=nodesProvider.nodes();
+      final DiscoveryNode requestingNode=requestingNodeX;
+      if (requestingNode.id().equals(discoveryNodes.localNodeId())) {
+        continue;
+      }
+      if (!clusterName.equals(MulticastZenPing.this.clusterName)) {
+        continue;
+      }
+      final WrappedPingResponse wrappedPingResponse=new WrappedPingResponse();
+      wrappedPingResponse.id=id;
+      wrappedPingResponse.pingResponse=new PingResponse(discoveryNodes.localNode(),discoveryNodes.masterNode());
+      if (logger.isTraceEnabled()) {
+        logger.trace("[{}] Received ping_request from [{}], sending {}",id,requestingNode,wrappedPingResponse.pingResponse);
+      }
+      if (!transportService.nodeConnected(requestingNode)) {
+        threadPool.execute(new Runnable(){
+          @Override public void run(){
+            try {
+              transportService.connectToNode(requestingNode);
+            }
+ catch (            Exception e) {
+              logger.warn("Failed to connect to requesting node {}",e,requestingNode);
+            }
+            transportService.sendRequest(requestingNode,PingResponseRequestHandler.ACTION,wrappedPingResponse,new VoidTransportResponseHandler(false){
+              @Override public void handleException(              RemoteTransportException exp){
+                logger.warn("Failed to receive confirmation on sent ping response to [{}]",exp,requestingNode);
+              }
+            }
+);
+          }
+        }
+);
+      }
+ else {
+        transportService.sendRequest(requestingNode,PingResponseRequestHandler.ACTION,wrappedPingResponse,new VoidTransportResponseHandler(false){
+          @Override public void handleException(          RemoteTransportException exp){
+            logger.warn("Failed to receive confirmation on sent ping response to [{}]",exp,requestingNode);
+          }
+        }
+);
+      }
+    }
+ catch (    Exception e) {
+      logger.warn("Unexpected exception in multicast receiver",e);
+    }
+  }
+}

@@ -1,0 +1,25 @@
+{
+  final long requestId=newRequestId();
+  try {
+    Timeout timeoutX=null;
+    if (timeout != null) {
+      timeoutX=timerService.newTimeout(new TimeoutTimerTask(requestId),timeout);
+    }
+    clientHandlers.put(requestId,new RequestHolder<T>(handler,node,action,timeoutX));
+    transport.sendRequest(node,requestId,action,message,handler);
+  }
+ catch (  final Exception e) {
+    clientHandlers.remove(requestId);
+    if (throwConnectException) {
+      if (e instanceof ConnectTransportException) {
+        throw (ConnectTransportException)e;
+      }
+    }
+    threadPool.execute(new Runnable(){
+      @Override public void run(){
+        handler.handleException(new SendRequestTransportException(node,action,e));
+      }
+    }
+);
+  }
+}

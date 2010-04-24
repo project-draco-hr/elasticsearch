@@ -1,0 +1,32 @@
+{
+  if (masterNode != null) {
+    final DiscoveryNode sentToNode=masterNode;
+    transportService.sendRequest(masterNode,MasterPingRequestHandler.ACTION,new MasterPingRequest(nodesProvider.nodes().localNode()),pingRetryTimeout,new BaseTransportResponseHandler<MasterPingResponseResponse>(){
+      @Override public MasterPingResponseResponse newInstance(){
+        return new MasterPingResponseResponse();
+      }
+      @Override public void handleResponse(      MasterPingResponseResponse response){
+        if (sentToNode.equals(MasterFaultDetection.this.masterNode())) {
+          if (!response.connectedToMaster) {
+            logger.trace("Master [{}] does not have us registered with it...",masterNode);
+            notifyDisconnectedFromMaster();
+          }
+ else {
+            threadPool.schedule(SendPingRequest.this,pingInterval);
+          }
+        }
+      }
+      @Override public void handleException(      RemoteTransportException exp){
+        if (sentToNode.equals(MasterFaultDetection.this.masterNode())) {
+          int retryCount=++MasterFaultDetection.this.retryCount;
+          logger.trace("Master [{}] failed to ping, retry [{}] out of [{}]",exp,masterNode,retryCount,pingRetryCount);
+          if (retryCount >= pingRetryCount) {
+            logger.trace("Master [{}] failed on ping",masterNode);
+            notifyMasterFailure(sentToNode);
+          }
+        }
+      }
+    }
+);
+  }
+}

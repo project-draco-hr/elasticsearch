@@ -1,0 +1,34 @@
+{
+  if (master) {
+    return;
+  }
+  logger.info("Master [{}] left, reason [{}]",masterNode,reason);
+  List<DiscoveryNode> nodes=newArrayList(latestDiscoNodes.nodes().values());
+  nodes.remove(masterNode);
+  DiscoveryNode electedMaster=electMaster.electMaster(nodes);
+  if (localNode.equals(electedMaster)) {
+    this.master=true;
+    masterFD.stop();
+    nodesFD.start();
+    clusterService.submitStateUpdateTask("zen-disco-elected_as_master(old master [" + masterNode + "])",new ProcessedClusterStateUpdateTask(){
+      @Override public ClusterState execute(      ClusterState currentState){
+        DiscoveryNodes.Builder builder=new DiscoveryNodes.Builder().putAll(currentState.nodes()).remove(masterNode.id()).masterNodeId(localNode.id());
+        latestDiscoNodes=builder.build();
+        return newClusterStateBuilder().state(currentState).nodes(latestDiscoNodes).build();
+      }
+      @Override public void clusterStateProcessed(      ClusterState clusterState){
+        sendInitialStateEventIfNeeded();
+      }
+    }
+);
+  }
+ else {
+    nodesFD.stop();
+    if (electedMaster != null) {
+      masterFD.restart(electedMaster);
+    }
+ else {
+      masterFD.stop();
+    }
+  }
+}

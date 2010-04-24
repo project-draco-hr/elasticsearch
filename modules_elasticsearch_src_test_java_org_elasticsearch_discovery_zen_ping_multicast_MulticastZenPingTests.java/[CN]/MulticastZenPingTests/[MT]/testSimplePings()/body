@@ -1,0 +1,37 @@
+{
+  ThreadPool threadPool=new CachedThreadPool();
+  TimerService timerService=new TimerService(threadPool);
+  ClusterName clusterName=new ClusterName("test");
+  final TransportService transportServiceA=new TransportService(new LocalTransport(threadPool),threadPool,timerService).start();
+  final DiscoveryNode nodeA=new DiscoveryNode("A",transportServiceA.boundAddress().publishAddress());
+  final TransportService transportServiceB=new TransportService(new LocalTransport(threadPool),threadPool,timerService).start();
+  final DiscoveryNode nodeB=new DiscoveryNode("B",transportServiceA.boundAddress().publishAddress());
+  MulticastZenPing zenPingA=(MulticastZenPing)new MulticastZenPing(threadPool,transportServiceA,clusterName);
+  zenPingA.setNodesProvider(new DiscoveryNodesProvider(){
+    @Override public DiscoveryNodes nodes(){
+      return DiscoveryNodes.newNodesBuilder().put(nodeA).localNodeId("A").build();
+    }
+  }
+);
+  zenPingA.start();
+  MulticastZenPing zenPingB=(MulticastZenPing)new MulticastZenPing(threadPool,transportServiceB,clusterName);
+  zenPingB.setNodesProvider(new DiscoveryNodesProvider(){
+    @Override public DiscoveryNodes nodes(){
+      return DiscoveryNodes.newNodesBuilder().put(nodeB).localNodeId("B").build();
+    }
+  }
+);
+  zenPingB.start();
+  try {
+    ZenPing.PingResponse[] pingResponses=zenPingA.pingAndWait(TimeValue.timeValueSeconds(1));
+    assertThat(pingResponses.length,equalTo(1));
+    assertThat(pingResponses[0].target().id(),equalTo("B"));
+  }
+  finally {
+    zenPingA.close();
+    zenPingB.close();
+    transportServiceA.close();
+    transportServiceB.close();
+    threadPool.shutdown();
+  }
+}

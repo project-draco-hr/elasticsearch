@@ -1,0 +1,35 @@
+{
+  if (!running) {
+    return;
+  }
+  transportService.sendRequest(node,PingRequestHandler.ACTION,new PingRequest(),pingRetryTimeout,new BaseTransportResponseHandler<PingResponse>(){
+    @Override public PingResponse newInstance(){
+      return new PingResponse();
+    }
+    @Override public void handleResponse(    PingResponse response){
+      if (running) {
+        NodeFD nodeFD=nodesFD.get(node);
+        if (nodeFD != null) {
+          nodeFD.retryCount=0;
+          threadPool.schedule(SendPingRequest.this,pingInterval);
+        }
+      }
+    }
+    @Override public void handleException(    RemoteTransportException exp){
+      if (running) {
+        NodeFD nodeFD=nodesFD.get(node);
+        if (nodeFD != null) {
+          int retryCount=++nodeFD.retryCount;
+          logger.trace("Node [{}] failed to ping, retry [{}] out of [{}]",exp,node,retryCount,pingRetryCount);
+          if (retryCount >= pingRetryCount) {
+            logger.trace("Node [{}] failed on ping",node);
+            if (nodesFD.remove(node) != null) {
+              notifyNodeFailure(node);
+            }
+          }
+        }
+      }
+    }
+  }
+);
+}
