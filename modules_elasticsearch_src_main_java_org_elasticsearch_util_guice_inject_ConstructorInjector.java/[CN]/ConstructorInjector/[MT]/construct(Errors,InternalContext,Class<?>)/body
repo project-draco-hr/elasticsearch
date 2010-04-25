@@ -1,0 +1,32 @@
+{
+  ConstructionContext<T> constructionContext=context.getConstructionContext(this);
+  if (constructionContext.isConstructing()) {
+    return constructionContext.createProxy(errors,expectedType);
+  }
+  T t=constructionContext.getCurrentReference();
+  if (t != null) {
+    return t;
+  }
+  try {
+    constructionContext.startConstruction();
+    try {
+      Object[] parameters=SingleParameterInjector.getAll(errors,context,parameterInjectors);
+      t=constructionProxy.newInstance(parameters);
+      constructionContext.setProxyDelegates(t);
+    }
+  finally {
+      constructionContext.finishConstruction();
+    }
+    constructionContext.setCurrentReference(t);
+    membersInjector.injectMembers(t,errors,context);
+    membersInjector.notifyListeners(t,errors);
+    return t;
+  }
+ catch (  InvocationTargetException userException) {
+    Throwable cause=userException.getCause() != null ? userException.getCause() : userException;
+    throw errors.withSource(constructionProxy.getInjectionPoint()).errorInjectingConstructor(cause).toException();
+  }
+ finally {
+    constructionContext.removeCurrentReference();
+  }
+}

@@ -1,0 +1,87 @@
+{
+  return new AbstractModule(){
+    @Override public void configure(){
+      final List<Element> elements=Elements.getElements(baseModules);
+      final List<Element> overrideElements=Elements.getElements(overrides);
+      final Set<Key> overriddenKeys=Sets.newHashSet();
+      final Set<Class<? extends Annotation>> overridesScopeAnnotations=Sets.newHashSet();
+      new ModuleWriter(binder()){
+        @Override public <T>Void visit(        Binding<T> binding){
+          overriddenKeys.add(binding.getKey());
+          return super.visit(binding);
+        }
+        @Override public Void visit(        ScopeBinding scopeBinding){
+          overridesScopeAnnotations.add(scopeBinding.getAnnotationType());
+          return super.visit(scopeBinding);
+        }
+        @Override public Void visit(        PrivateElements privateElements){
+          overriddenKeys.addAll(privateElements.getExposedKeys());
+          return super.visit(privateElements);
+        }
+      }
+.writeAll(overrideElements);
+      final Map<Scope,Object> scopeInstancesInUse=Maps.newHashMap();
+      final List<ScopeBinding> scopeBindings=Lists.newArrayList();
+      new ModuleWriter(binder()){
+        @Override public <T>Void visit(        Binding<T> binding){
+          if (!overriddenKeys.remove(binding.getKey())) {
+            super.visit(binding);
+            Scope scope=getScopeInstanceOrNull(binding);
+            if (scope != null) {
+              scopeInstancesInUse.put(scope,binding.getSource());
+            }
+          }
+          return null;
+        }
+        @Override public Void visit(        PrivateElements privateElements){
+          PrivateBinder privateBinder=binder.withSource(privateElements.getSource()).newPrivateBinder();
+          Set<Key<?>> skippedExposes=Sets.newHashSet();
+          for (          Key<?> key : privateElements.getExposedKeys()) {
+            if (overriddenKeys.remove(key)) {
+              skippedExposes.add(key);
+            }
+ else {
+              privateBinder.withSource(privateElements.getExposedSource(key)).expose(key);
+            }
+          }
+          for (          Element element : privateElements.getElements()) {
+            if (element instanceof Binding && skippedExposes.contains(((Binding)element).getKey())) {
+              continue;
+            }
+            element.applyTo(privateBinder);
+          }
+          return null;
+        }
+        @Override public Void visit(        ScopeBinding scopeBinding){
+          scopeBindings.add(scopeBinding);
+          return null;
+        }
+      }
+.writeAll(elements);
+      new ModuleWriter(binder()){
+        @Override public Void visit(        ScopeBinding scopeBinding){
+          if (!overridesScopeAnnotations.remove(scopeBinding.getAnnotationType())) {
+            super.visit(scopeBinding);
+          }
+ else {
+            Object source=scopeInstancesInUse.get(scopeBinding.getScope());
+            if (source != null) {
+              binder().withSource(source).addError("The scope for @%s is bound directly and cannot be overridden.",scopeBinding.getAnnotationType().getSimpleName());
+            }
+          }
+          return null;
+        }
+      }
+.writeAll(scopeBindings);
+    }
+    private Scope getScopeInstanceOrNull(    Binding<?> binding){
+      return binding.acceptScopingVisitor(new DefaultBindingScopingVisitor<Scope>(){
+        public Scope visitScope(        Scope scope){
+          return scope;
+        }
+      }
+);
+    }
+  }
+;
+}
