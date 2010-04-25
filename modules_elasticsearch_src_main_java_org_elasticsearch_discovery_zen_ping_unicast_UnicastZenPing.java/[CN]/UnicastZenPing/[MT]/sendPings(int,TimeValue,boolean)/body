@@ -1,0 +1,80 @@
+{
+  UnicastPingRequest pingRequest=new UnicastPingRequest();
+  pingRequest.id=id;
+  pingRequest.timeout=timeout;
+  DiscoveryNodes discoNodes=nodesProvider.nodes();
+  pingRequest.pingResponse=new PingResponse(discoNodes.localNode(),discoNodes.masterNode(),clusterName);
+  List<DiscoveryNode> nodesToPing=newArrayList(nodes);
+  nodesToPing.addAll(buildDynamicNodes());
+  final CountDownLatch latch=new CountDownLatch(nodesToPing.size());
+  for (  final DiscoveryNode node : nodesToPing) {
+    boolean disconnectX;
+    DiscoveryNode nodeToSendX=discoNodes.findByAddress(node.address());
+    if (nodeToSendX != null) {
+      disconnectX=false;
+    }
+ else {
+      nodeToSendX=node;
+      disconnectX=true;
+    }
+    final DiscoveryNode nodeToSend=nodeToSendX;
+    try {
+      transportService.connectToNode(nodeToSend);
+    }
+ catch (    ConnectTransportException e) {
+      latch.countDown();
+      continue;
+    }
+    final boolean disconnect=disconnectX;
+    transportService.sendRequest(nodeToSend,UnicastPingRequestHandler.ACTION,pingRequest,TimeValue.timeValueMillis((long)(timeout.millis() * 1.25)),new BaseTransportResponseHandler<UnicastPingResponse>(){
+      @Override public UnicastPingResponse newInstance(){
+        return new UnicastPingResponse();
+      }
+      @Override public void handleResponse(      UnicastPingResponse response){
+        try {
+          DiscoveryNodes discoveryNodes=nodesProvider.nodes();
+          for (          PingResponse pingResponse : response.pingResponses) {
+            if (disconnect) {
+              transportService.disconnectFromNode(nodeToSend);
+            }
+            if (pingResponse.target().id().equals(discoveryNodes.localNodeId())) {
+              continue;
+            }
+            if (!pingResponse.clusterName().equals(clusterName)) {
+              return;
+            }
+            ConcurrentMap<DiscoveryNode,PingResponse> responses=receivedResponses.get(response.id);
+            if (responses == null) {
+              logger.warn("Received ping response with no matching id [{}]",response.id);
+            }
+ else {
+              responses.put(pingResponse.target(),pingResponse);
+            }
+          }
+        }
+  finally {
+          latch.countDown();
+        }
+      }
+      @Override public void handleException(      RemoteTransportException exp){
+        latch.countDown();
+        if (exp instanceof ConnectTransportException) {
+        }
+ else {
+          if (disconnect) {
+            transportService.disconnectFromNode(nodeToSend);
+          }
+          logger.warn("Failed to send ping to [{}]",exp,node);
+        }
+      }
+    }
+);
+  }
+  if (wait) {
+    try {
+      latch.await(timeout.millis() * 5,TimeUnit.MILLISECONDS);
+    }
+ catch (    InterruptedException e) {
+    }
+  }
+}
