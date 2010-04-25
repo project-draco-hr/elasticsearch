@@ -1,46 +1,27 @@
 {
-  localNode=new DiscoveryNode(settings.get("name"),settings.getAsBoolean("node.data",!settings.getAsBoolean("node.client",false)),UUID.randomUUID().toString(),transportService.boundAddress().publishAddress());
+  Map<String,String> nodeAttributes=buildCommonNodesAttributes(settings);
+  Boolean zenMaster=componentSettings.getAsBoolean("master",null);
+  if (zenMaster != null) {
+    if (zenMaster.equals(Boolean.FALSE)) {
+      nodeAttributes.put("zen.master","false");
+    }
+  }
+ else   if (nodeAttributes.containsKey("client")) {
+    if (nodeAttributes.get("client").equals("true")) {
+      nodeAttributes.put("zen.master","false");
+    }
+  }
+  localNode=new DiscoveryNode(settings.get("name"),UUID.randomUUID().toString(),transportService.boundAddress().publishAddress(),nodeAttributes);
   pingService.start();
-  boolean retry=true;
-  while (retry) {
-    retry=false;
-    DiscoveryNode masterNode=broadBingTillMasterResolved();
-    if (localNode.equals(masterNode)) {
-      this.firstMaster=true;
-      this.master=true;
-      nodesFD.start();
-      clusterService.submitStateUpdateTask("zen-disco-initial_connect(master)",new ProcessedClusterStateUpdateTask(){
-        @Override public ClusterState execute(        ClusterState currentState){
-          DiscoveryNodes.Builder builder=new DiscoveryNodes.Builder().localNodeId(localNode.id()).masterNodeId(localNode.id()).put(localNode);
-          latestDiscoNodes=builder.build();
-          return newClusterStateBuilder().state(currentState).nodes(builder).build();
-        }
-        @Override public void clusterStateProcessed(        ClusterState clusterState){
-          sendInitialStateEventIfNeeded();
-        }
+  if (nodeAttributes.containsKey("zen.master") && nodeAttributes.get("zen.master").equals("false")) {
+    threadPool.execute(new Runnable(){
+      @Override public void run(){
+        initialJoin();
       }
+    }
 );
-    }
+  }
  else {
-      this.firstMaster=false;
-      this.master=false;
-      try {
-        transportService.connectToNode(masterNode);
-      }
- catch (      Exception e) {
-        logger.warn("Failed to connect to master [{}], retrying...",e,masterNode);
-        retry=true;
-        continue;
-      }
-      try {
-        membership.sendJoinRequestBlocking(masterNode,localNode,initialPingTimeout);
-      }
- catch (      Exception e) {
-        logger.warn("Failed to send join request to master [{}], retrying...",e,masterNode);
-        retry=true;
-        continue;
-      }
-      masterFD.start(masterNode);
-    }
+    initialJoin();
   }
 }

@@ -1,0 +1,49 @@
+{
+  boolean retry=true;
+  while (retry) {
+    retry=false;
+    DiscoveryNode masterNode=broadPingTillMasterResolved();
+    if (localNode.equals(masterNode)) {
+      this.firstMaster=true;
+      this.master=true;
+      nodesFD.start();
+      clusterService.submitStateUpdateTask("zen-disco-initial_connect(master)",new ProcessedClusterStateUpdateTask(){
+        @Override public ClusterState execute(        ClusterState currentState){
+          DiscoveryNodes.Builder builder=new DiscoveryNodes.Builder().localNodeId(localNode.id()).masterNodeId(localNode.id()).put(localNode);
+          latestDiscoNodes=builder.build();
+          return newClusterStateBuilder().state(currentState).nodes(builder).build();
+        }
+        @Override public void clusterStateProcessed(        ClusterState clusterState){
+          sendInitialStateEventIfNeeded();
+        }
+      }
+);
+    }
+ else {
+      this.firstMaster=false;
+      this.master=false;
+      try {
+        transportService.connectToNode(masterNode);
+      }
+ catch (      Exception e) {
+        logger.warn("Failed to connect to master [{}], retrying...",e,masterNode);
+        retry=true;
+        continue;
+      }
+      try {
+        membership.sendJoinRequestBlocking(masterNode,localNode,initialPingTimeout);
+      }
+ catch (      Exception e) {
+        logger.warn("Failed to send join request to master [{}], retrying...",e,masterNode);
+        retry=true;
+        continue;
+      }
+      masterFD.start(masterNode);
+    }
+    if (retry) {
+      if (!lifecycle.started()) {
+        return;
+      }
+    }
+  }
+}
