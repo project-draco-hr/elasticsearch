@@ -1,0 +1,53 @@
+{
+  byte[] content=null;
+  String contentType=null;
+  String name=null;
+  XContentParser parser=context.parser();
+  XContentParser.Token token=parser.currentToken();
+  if (token == XContentParser.Token.VALUE_STRING) {
+    content=parser.binaryValue();
+  }
+ else {
+    String currentFieldName=null;
+    while ((token=parser.nextToken()) != XContentParser.Token.END_OBJECT) {
+      if (token == XContentParser.Token.FIELD_NAME) {
+        currentFieldName=parser.currentName();
+      }
+ else       if (token == XContentParser.Token.VALUE_STRING) {
+        if ("content".equals(currentFieldName)) {
+          content=parser.binaryValue();
+        }
+ else         if ("_content_type".equals(currentFieldName)) {
+          contentType=parser.text();
+        }
+ else         if ("_name".equals(currentFieldName)) {
+          name=parser.text();
+        }
+      }
+    }
+  }
+  Metadata metadata=new Metadata();
+  if (contentType != null) {
+    metadata.add(Metadata.CONTENT_TYPE,contentType);
+  }
+  if (name != null) {
+    metadata.add(Metadata.RESOURCE_NAME_KEY,name);
+  }
+  String parsedContent;
+  try {
+    parsedContent=tika().parseToString(new FastByteArrayInputStream(content),metadata);
+  }
+ catch (  TikaException e) {
+    throw new MapperParsingException("Failed to extract text for [" + name + "]",e);
+  }
+  context.externalValue(parsedContent);
+  contentMapper.parse(context);
+  context.externalValue(metadata.get(Metadata.DATE));
+  dateMapper.parse(context);
+  context.externalValue(metadata.get(Metadata.TITLE));
+  titleMapper.parse(context);
+  context.externalValue(metadata.get(Metadata.AUTHOR));
+  authorMapper.parse(context);
+  context.externalValue(metadata.get(Metadata.KEYWORDS));
+  keywordsMapper.parse(context);
+}

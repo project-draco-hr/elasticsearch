@@ -1,0 +1,62 @@
+{
+  XContentMapper mapper=mappers.get(currentFieldName);
+  if (mapper != null) {
+    mapper.parse(context);
+    return;
+  }
+  if (!dynamic) {
+    return;
+  }
+synchronized (mutex) {
+    mapper=mappers.get(currentFieldName);
+    if (mapper != null) {
+      mapper.parse(context);
+      return;
+    }
+    BuilderContext builderContext=new BuilderContext(context.path());
+    if (token == XContentParser.Token.VALUE_STRING) {
+      String text=context.parser().text();
+      boolean isDate=false;
+      if (text.contains(":") || text.contains("-")) {
+        for (        FormatDateTimeFormatter dateTimeFormatter : dateTimeFormatters) {
+          try {
+            dateTimeFormatter.parser().parseMillis(text);
+            mapper=dateField(currentFieldName).dateTimeFormatter(dateTimeFormatter).build(builderContext);
+            isDate=true;
+            break;
+          }
+ catch (          Exception e) {
+          }
+        }
+      }
+      if (!isDate) {
+        mapper=stringField(currentFieldName).build(builderContext);
+      }
+    }
+ else     if (token == XContentParser.Token.VALUE_NUMBER) {
+      XContentParser.NumberType numberType=context.parser().numberType();
+      if (numberType == XContentParser.NumberType.INT) {
+        mapper=integerField(currentFieldName).build(builderContext);
+      }
+ else       if (numberType == XContentParser.NumberType.LONG) {
+        mapper=longField(currentFieldName).build(builderContext);
+      }
+ else       if (numberType == XContentParser.NumberType.FLOAT) {
+        mapper=floatField(currentFieldName).build(builderContext);
+      }
+ else       if (numberType == XContentParser.NumberType.DOUBLE) {
+        mapper=doubleField(currentFieldName).build(builderContext);
+      }
+    }
+ else     if (token == XContentParser.Token.VALUE_BOOLEAN) {
+      mapper=booleanField(currentFieldName).build(builderContext);
+    }
+ else {
+      throw new ElasticSearchIllegalStateException("Can't handle serializing a dynamic type with content token [" + token + "] and field name ["+ currentFieldName+ "]");
+    }
+    putMapper(mapper);
+    context.docMapper().addFieldMapper((FieldMapper)mapper);
+    mapper.parse(context);
+    context.addedMapper();
+  }
+}
