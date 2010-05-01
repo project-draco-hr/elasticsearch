@@ -1,0 +1,42 @@
+{
+  if (disabled) {
+    throw new ElasticSearchIllegalStateException("Shutdown is disabled");
+  }
+  logger.info("Shutting down in [{}]",request.delay);
+  Thread t=new Thread(new Runnable(){
+    @Override public void run(){
+      try {
+        Thread.sleep(request.delay.millis());
+      }
+ catch (      InterruptedException e) {
+      }
+      boolean shutdownWithWrapper=false;
+      if (System.getProperty("elasticsearch-service") != null) {
+        try {
+          Class wrapperManager=settings.getClassLoader().loadClass("org.tanukisoftware.wrapper.WrapperManager");
+          logger.info("Initiating requested shutdown (using service)");
+          wrapperManager.getMethod("stopAndReturn",int.class).invoke(null,0);
+          shutdownWithWrapper=true;
+        }
+ catch (        Throwable e) {
+          e.printStackTrace();
+        }
+      }
+      if (!shutdownWithWrapper) {
+        logger.info("Initiating requested shutdown");
+        try {
+          node.close();
+        }
+ catch (        Exception e) {
+          logger.warn("Failed to shutdown",e);
+        }
+ finally {
+          System.exit(0);
+        }
+      }
+    }
+  }
+);
+  t.start();
+  return new NodesShutdownResponse.NodeShutdownResponse(clusterService.state().nodes().localNode());
+}
