@@ -1,0 +1,33 @@
+{
+  URLConnection connection=aSource.openConnection();
+  if (hasTimestamp) {
+    connection.setIfModifiedSince(timestamp);
+  }
+  if (connection instanceof HttpURLConnection) {
+    ((HttpURLConnection)connection).setInstanceFollowRedirects(false);
+    ((HttpURLConnection)connection).setUseCaches(true);
+  }
+  connection.connect();
+  if (connection instanceof HttpURLConnection) {
+    HttpURLConnection httpConnection=(HttpURLConnection)connection;
+    int responseCode=httpConnection.getResponseCode();
+    if (responseCode == HttpURLConnection.HTTP_MOVED_PERM || responseCode == HttpURLConnection.HTTP_MOVED_TEMP || responseCode == HttpURLConnection.HTTP_SEE_OTHER) {
+      String newLocation=httpConnection.getHeaderField("Location");
+      String message=aSource + (responseCode == HttpURLConnection.HTTP_MOVED_PERM ? " permanently" : "") + " moved to "+ newLocation;
+      URL newURL=new URL(newLocation);
+      if (!redirectionAllowed(aSource,newURL)) {
+        return null;
+      }
+      return openConnection(newURL);
+    }
+    long lastModified=httpConnection.getLastModified();
+    if (responseCode == HttpURLConnection.HTTP_NOT_MODIFIED || (lastModified != 0 && hasTimestamp && timestamp >= lastModified)) {
+      return null;
+    }
+    if (responseCode == HttpURLConnection.HTTP_UNAUTHORIZED) {
+      String message="HTTP Authorization failure";
+      throw new IOException(message);
+    }
+  }
+  return connection;
+}
