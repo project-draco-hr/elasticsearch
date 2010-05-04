@@ -1,0 +1,42 @@
+{
+  final Map<String,StorageMetadata> allMetaDatas=listAllMetadatas(shardTranslogContainer);
+  long latestTranslogId=-1;
+  for (  String name : allMetaDatas.keySet()) {
+    long translogId=Long.parseLong(name.substring(0,name.indexOf('.')));
+    if (translogId > latestTranslogId) {
+      latestTranslogId=translogId;
+    }
+  }
+  if (latestTranslogId == -1) {
+    indexShard.start();
+    return new RecoveryStatus.Translog(-1,0,new SizeValue(0,SizeUnit.BYTES));
+  }
+  try {
+    ArrayList<Translog.Operation> operations=Lists.newArrayList();
+    long size=0;
+    int index=1;
+    while (true) {
+      String translogPartName=String.valueOf(latestTranslogId) + "." + index;
+      if (!allMetaDatas.containsKey(translogPartName)) {
+        break;
+      }
+      Blob blob=blobStoreContext.getBlobStore().getBlob(shardTranslogContainer,translogPartName);
+      if (blob == null) {
+        break;
+      }
+      size+=blob.getContentLength();
+      InputStreamStreamInput streamInput=new InputStreamStreamInput(blob.getContent());
+      int numberOfOperations=streamInput.readInt();
+      for (int i=0; i < numberOfOperations; i++) {
+        operations.add(readTranslogOperation(streamInput));
+      }
+      index++;
+    }
+    currentTranslogPartToWrite=index;
+    indexShard.performRecovery(operations);
+    return new RecoveryStatus.Translog(latestTranslogId,operations.size(),new SizeValue(size,SizeUnit.BYTES));
+  }
+ catch (  Exception e) {
+    throw new IndexShardGatewayRecoveryException(shardId(),"Failed to perform recovery of translog",e);
+  }
+}

@@ -1,14 +1,25 @@
 {
   super(settings);
-  this.clusterName=clusterName;
   this.blobStoreContext=blobStoreService.context();
+  this.chunkSize=componentSettings.getAsSize("chunk_size",null);
+  String location=componentSettings.get("location");
+  if (location == null) {
+    this.location=null;
+  }
+ else {
+    this.location=blobStoreContext.getBlobStore().getAssignableLocations().get(location);
+    if (this.location == null) {
+      throw new ElasticSearchIllegalArgumentException("Not a valid location [" + location + "], available locations "+ blobStoreContext.getBlobStore().getAssignableLocations().keySet());
+    }
+  }
   String container=componentSettings.get("container");
   if (container == null) {
     throw new ElasticSearchIllegalArgumentException("Cloud gateway requires 'container' setting");
   }
-  this.location=componentSettings.get("location");
-  this.container=container + "." + clusterName.value();
-  blobStoreContext.getBlobStore().createContainerInLocation(location,container);
+  this.container=container + JCloudsUtils.BLOB_CONTAINER_SEP + clusterName.value();
+  this.metadataContainer=this.container + JCloudsUtils.BLOB_CONTAINER_SEP + "metadata";
+  logger.debug("Using location [{}], container [{}], metadata_container [{}]",this.location,this.container,metadataContainer);
+  blobStoreContext.getBlobStore().createContainerInLocation(this.location,metadataContainer);
   this.currentIndex=findLatestIndex();
   logger.debug("Latest metadata found at index [" + currentIndex + "]");
 }

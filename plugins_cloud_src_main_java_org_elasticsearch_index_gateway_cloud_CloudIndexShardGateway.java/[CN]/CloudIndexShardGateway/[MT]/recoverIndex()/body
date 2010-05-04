@@ -1,0 +1,49 @@
+{
+  final Map<String,StorageMetadata> allMetaDatas=listAllMetadatas(shardIndexContainer);
+  final Map<String,StorageMetadata> filesMetaDatas=Maps.newHashMap();
+  for (  Map.Entry<String,StorageMetadata> entry : allMetaDatas.entrySet()) {
+    if (entry.getKey().contains(".part")) {
+      continue;
+    }
+    filesMetaDatas.put(entry.getKey(),entry.getValue());
+  }
+  final CountDownLatch latch=new CountDownLatch(filesMetaDatas.size());
+  final AtomicReference<Exception> lastException=new AtomicReference<Exception>();
+  for (  final Map.Entry<String,StorageMetadata> entry : filesMetaDatas.entrySet()) {
+    threadPool.execute(new Runnable(){
+      @Override public void run(){
+        try {
+          copyToDirectory(entry.getValue(),allMetaDatas);
+        }
+ catch (        Exception e) {
+          logger.debug("Failed to read [" + entry.getKey() + "] into ["+ store+ "]",e);
+          lastException.set(e);
+        }
+ finally {
+          latch.countDown();
+        }
+      }
+    }
+);
+  }
+  try {
+    latch.await();
+  }
+ catch (  InterruptedException e) {
+    lastException.set(e);
+  }
+  long totalSize=0;
+  for (  Map.Entry<String,StorageMetadata> entry : allMetaDatas.entrySet()) {
+    totalSize+=entry.getValue().getSize();
+  }
+  long version=-1;
+  try {
+    if (IndexReader.indexExists(store.directory())) {
+      version=IndexReader.getCurrentVersion(store.directory());
+    }
+  }
+ catch (  IOException e) {
+    throw new IndexShardGatewayRecoveryException(shardId(),"Failed to fetch index version after copying it over",e);
+  }
+  return new RecoveryStatus.Index(version,filesMetaDatas.size(),new SizeValue(totalSize,SizeUnit.BYTES));
+}
