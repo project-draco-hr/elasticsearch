@@ -1,0 +1,47 @@
+{
+  String[] nodesIds=RestActions.splitNodes(request.param("nodeId"));
+  NodesStatsRequest nodesStatsRequest=new NodesStatsRequest(nodesIds);
+  nodesStatsRequest.listenerThreaded(false);
+  client.admin().cluster().nodesStats(nodesStatsRequest,new ActionListener<NodesStatsResponse>(){
+    @Override public void onResponse(    NodesStatsResponse result){
+      try {
+        XContentBuilder builder=RestXContentBuilder.restContentBuilder(request);
+        builder.startObject();
+        builder.field("cluster_name",result.clusterName().value());
+        builder.startObject("nodes");
+        for (        NodeStats nodeStats : result) {
+          builder.startObject(nodeStats.node().id());
+          builder.field("name",nodeStats.node().name());
+          if (nodeStats.os() != null) {
+            nodeStats.os().toXContent(builder,request);
+          }
+          if (nodeStats.process() != null) {
+            nodeStats.process().toXContent(builder,request);
+          }
+          if (nodeStats.jvm() != null) {
+            nodeStats.jvm().toXContent(builder,request);
+          }
+          if (nodeStats.network() != null) {
+            nodeStats.network().toXContent(builder,request);
+          }
+          builder.endObject();
+        }
+        builder.endObject();
+        builder.endObject();
+        channel.sendResponse(new XContentRestResponse(request,RestResponse.Status.OK,builder));
+      }
+ catch (      Exception e) {
+        onFailure(e);
+      }
+    }
+    @Override public void onFailure(    Throwable e){
+      try {
+        channel.sendResponse(new XContentThrowableRestResponse(request,e));
+      }
+ catch (      IOException e1) {
+        logger.error("Failed to send failure response",e1);
+      }
+    }
+  }
+);
+}
