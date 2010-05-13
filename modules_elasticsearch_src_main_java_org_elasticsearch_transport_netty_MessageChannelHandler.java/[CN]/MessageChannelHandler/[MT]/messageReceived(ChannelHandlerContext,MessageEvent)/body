@@ -1,25 +1,33 @@
 {
   ChannelBuffer buffer=(ChannelBuffer)event.getMessage();
+  int size=buffer.getInt(buffer.readerIndex() - 4);
+  int markedReaderIndex=buffer.readerIndex();
+  int expectedIndexReader=markedReaderIndex + size;
   StreamInput streamIn=new ChannelBufferStreamInput(buffer);
   streamIn=HandlesStreamInput.Cached.cached(streamIn);
   long requestId=buffer.readLong();
   byte status=buffer.readByte();
   boolean isRequest=isRequest(status);
+  TransportResponseHandler handler=null;
   if (isRequest) {
-    handleRequest(buffer,event,streamIn,requestId);
+    handleRequest(event,streamIn,requestId);
   }
  else {
-    final TransportResponseHandler handler=transportServiceAdapter.remove(requestId);
+    handler=transportServiceAdapter.remove(requestId);
     if (handler != null) {
       if (isError(status)) {
-        handlerResponseError(buffer,streamIn,handler);
+        handlerResponseError(streamIn,handler);
       }
  else {
-        handleResponse(buffer,streamIn,handler);
+        handleResponse(streamIn,handler);
       }
     }
  else {
-      buffer.skipBytes(buffer.readableBytes());
+      buffer.readerIndex(markedReaderIndex + size);
     }
+  }
+  if (buffer.readerIndex() < expectedIndexReader) {
+    logger.warn("Message not fully read for [{}] and handler {}, resetting",requestId,handler);
+    buffer.readerIndex(expectedIndexReader);
   }
 }
