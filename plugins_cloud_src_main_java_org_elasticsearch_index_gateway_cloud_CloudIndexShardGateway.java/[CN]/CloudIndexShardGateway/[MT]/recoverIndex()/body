@@ -9,10 +9,16 @@
   }
   final CountDownLatch latch=new CountDownLatch(filesMetaDatas.size());
   final AtomicReference<Exception> lastException=new AtomicReference<Exception>();
+  final AtomicLong throttlingWaitTime=new AtomicLong();
   for (  final Map.Entry<String,StorageMetadata> entry : filesMetaDatas.entrySet()) {
     threadPool.execute(new Runnable(){
       @Override public void run(){
         try {
+          long throttlingStartTime=System.currentTimeMillis();
+          while (!recoveryThrottler.tryStream(shardId,entry.getKey())) {
+            Thread.sleep(recoveryThrottler.throttleInterval().millis());
+          }
+          throttlingWaitTime.addAndGet(System.currentTimeMillis() - throttlingStartTime);
           copyToDirectory(entry.getValue(),allMetaDatas);
         }
  catch (        Exception e) {
@@ -20,6 +26,7 @@
           lastException.set(e);
         }
  finally {
+          recoveryThrottler.streamDone(shardId,entry.getKey());
           latch.countDown();
         }
       }
@@ -45,5 +52,5 @@
  catch (  IOException e) {
     throw new IndexShardGatewayRecoveryException(shardId(),"Failed to fetch index version after copying it over",e);
   }
-  return new RecoveryStatus.Index(version,filesMetaDatas.size(),new SizeValue(totalSize,SizeUnit.BYTES));
+  return new RecoveryStatus.Index(version,filesMetaDatas.size(),new SizeValue(totalSize,SizeUnit.BYTES),TimeValue.timeValueMillis(throttlingWaitTime.get()));
 }

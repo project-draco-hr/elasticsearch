@@ -17,25 +17,55 @@ catch (    IndexShardRelocatedException e) {
 catch (    IndexShardClosedException e) {
       throw new IgnoreRecoveryException("Can't recover a closed shard.",e);
     }
+    StopWatch throttlingWaitTime=new StopWatch().start();
+    while (!recoveryThrottler.tryRecovery(shardId,"peer recovery target")) {
+      try {
+        Thread.sleep(recoveryThrottler.throttleInterval().millis());
+      }
+ catch (      InterruptedException e) {
+        if (indexShard.ignoreRecoveryAttempt()) {
+          throw new IgnoreRecoveryException("Interrupted while waiting for recovery, but we should ignore ...");
+        }
+        throw new RecoveryFailedException(shardId,node,targetNode,e);
+      }
+    }
+    throttlingWaitTime.stop();
     logger.debug("Starting recovery from {}",targetNode);
-    StopWatch stopWatch=new StopWatch().start();
     try {
       if (closed) {
         throw new IgnoreRecoveryException("Recovery closed");
       }
-      RecoveryStatus recoveryStatus=transportService.submitRequest(targetNode,startTransportAction,new StartRecoveryRequest(node,markAsRelocated),new FutureTransportResponseHandler<RecoveryStatus>(){
-        @Override public RecoveryStatus newInstance(){
-          return new RecoveryStatus();
+      StopWatch stopWatch=null;
+      RecoveryStatus recoveryStatus=null;
+      boolean retry=true;
+      while (retry) {
+        stopWatch=new StopWatch().start();
+        recoveryStatus=transportService.submitRequest(targetNode,startTransportAction,new StartRecoveryRequest(node,markAsRelocated),new FutureTransportResponseHandler<RecoveryStatus>(){
+          @Override public RecoveryStatus newInstance(){
+            return new RecoveryStatus();
+          }
+        }
+).txGet();
+        retry=recoveryStatus.retry;
+        if (retry) {
+          try {
+            Thread.sleep(recoveryThrottler.throttleInterval().millis());
+          }
+ catch (          InterruptedException e) {
+            if (indexShard.ignoreRecoveryAttempt()) {
+              throw new IgnoreRecoveryException("Interrupted while waiting for remote recovery, but we should ignore ...");
+            }
+            throw new RecoveryFailedException(shardId,node,targetNode,e);
+          }
         }
       }
-).txGet();
       stopWatch.stop();
       if (logger.isDebugEnabled()) {
         StringBuilder sb=new StringBuilder();
-        sb.append("Recovery completed from ").append(targetNode).append(", took[").append(stopWatch.totalTime()).append("]\n");
-        sb.append("   Phase1: recovered [").append(recoveryStatus.phase1FileNames.size()).append("]").append(" files with total size of [").append(new SizeValue(recoveryStatus.phase1TotalSize)).append("]").append(", took [").append(new TimeValue(recoveryStatus.phase1Time,MILLISECONDS)).append("]").append("\n");
-        sb.append("   Phase2: recovered [").append(recoveryStatus.phase2Operations).append("]").append(" transaction log operations").append(", took [").append(new TimeValue(recoveryStatus.phase2Time,MILLISECONDS)).append("]").append("\n");
-        sb.append("   Phase3: recovered [").append(recoveryStatus.phase3Operations).append("]").append(" transaction log operations").append(", took [").append(new TimeValue(recoveryStatus.phase3Time,MILLISECONDS)).append("]");
+        sb.append("Recovery completed from ").append(targetNode).append(", took[").append(stopWatch.totalTime()).append("], throttling_wait [").append(throttlingWaitTime.totalTime()).append("]\n");
+        sb.append("   Phase1: recovered [").append(recoveryStatus.phase1FileNames.size()).append("]").append(" files with total size of [").append(new SizeValue(recoveryStatus.phase1TotalSize)).append("]").append(", took [").append(timeValueMillis(recoveryStatus.phase1Time)).append("], throttling_wait [").append(timeValueMillis(recoveryStatus.phase1ThrottlingWaitTime)).append(']').append("\n");
+        sb.append("   Phase2: recovered [").append(recoveryStatus.phase2Operations).append("]").append(" transaction log operations").append(", took [").append(timeValueMillis(recoveryStatus.phase2Time)).append("]").append("\n");
+        sb.append("   Phase3: recovered [").append(recoveryStatus.phase3Operations).append("]").append(" transaction log operations").append(", took [").append(timeValueMillis(recoveryStatus.phase3Time)).append("]");
         logger.debug(sb.toString());
       }
     }
@@ -63,6 +93,9 @@ catch (    Exception e) {
         throw new IgnoreRecoveryException("Recovery closed",e);
       }
       throw new RecoveryFailedException(shardId,node,targetNode,e);
+    }
+ finally {
+      recoveryThrottler.recoveryDone(shardId,"peer recovery target");
     }
   }
   finally {
