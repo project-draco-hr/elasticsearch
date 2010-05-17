@@ -1,0 +1,30 @@
+{
+  settings=settingsBuilder().put(SETTING_NUMBER_OF_SHARDS,5).put(SETTING_NUMBER_OF_REPLICAS,1).put(settings).build();
+  nodes=new Node[numberOfNodes];
+  clients=new Client[numberOfNodes];
+  for (int i=0; i < numberOfNodes; i++) {
+    nodes[i]=nodeBuilder().settings(settingsBuilder().put(settings).put("name","node" + i)).node();
+    clients[i]=nodes[i].client();
+  }
+  for (int i=0; i < searcherThreads.length; i++) {
+    searcherThreads[i]=new Searcher(i);
+  }
+  for (int i=0; i < indexThreads.length; i++) {
+    indexThreads[i]=new Indexer(i);
+  }
+  latch=new CountDownLatch(1);
+  barrier1=new CyclicBarrier(2);
+  barrier2=new CyclicBarrier(2);
+  StopWatch stopWatch=new StopWatch().start();
+  Indexer warmup=new Indexer(-1).max(10000);
+  warmup.start();
+  barrier1.await();
+  barrier2.await();
+  latch.await();
+  stopWatch.stop();
+  System.out.println("Done Warmup, took [" + stopWatch.totalTime() + "]");
+  latch=new CountDownLatch(searcherThreads.length + indexThreads.length);
+  barrier1=new CyclicBarrier(searcherThreads.length + indexThreads.length + 1);
+  barrier2=new CyclicBarrier(searcherThreads.length + indexThreads.length + 1);
+  return this;
+}
