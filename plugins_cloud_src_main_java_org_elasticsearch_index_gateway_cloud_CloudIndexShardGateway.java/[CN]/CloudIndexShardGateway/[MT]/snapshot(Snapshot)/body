@@ -11,9 +11,8 @@
     long time=System.currentTimeMillis();
     indexDirty=true;
     allIndicesMetadata=listAllMetadatas(container,shardIndexDirectory);
-    final Map<String,StorageMetadata> allIndicesMetadataF=allIndicesMetadata;
     final CountDownLatch latch=new CountDownLatch(snapshotIndexCommit.getFiles().length);
-    final AtomicReference<Exception> lastException=new AtomicReference<Exception>();
+    final CopyOnWriteArrayList<Throwable> failures=new CopyOnWriteArrayList<Throwable>();
     for (    final String fileName : snapshotIndexCommit.getFiles()) {
       if (fileName.equals(snapshotIndexCommit.getSegmentsFileName())) {
         latch.countDown();
@@ -22,8 +21,21 @@
       IndexInput indexInput=null;
       try {
         indexInput=snapshotIndexCommit.getDirectory().openInput(fileName);
-        StorageMetadata metadata=allIndicesMetadata.get(fileName);
-        if (metadata != null && (metadata.getSize() == indexInput.length())) {
+        long totalLength=0;
+        int counter=0;
+        while (true) {
+          String blobName=shardIndexDirectory + "/" + fileName;
+          if (counter > 0) {
+            blobName=blobName + ".part" + counter;
+          }
+          StorageMetadata metadata=allIndicesMetadata.get(blobName);
+          if (metadata == null) {
+            break;
+          }
+          totalLength+=metadata.getSize();
+          counter++;
+        }
+        if (totalLength == indexInput.length()) {
           latch.countDown();
           continue;
         }
@@ -47,29 +59,22 @@
  catch (      IOException e) {
       }
       deleteFile(shardIndexDirectory + "/" + fileName,allIndicesMetadata);
-      threadPool.execute(new Runnable(){
-        @Override public void run(){
-          try {
-            copyFromDirectory(snapshotIndexCommit.getDirectory(),fileName,allIndicesMetadataF);
-          }
- catch (          Exception e) {
-            lastException.set(e);
-          }
- finally {
-            latch.countDown();
-          }
-        }
+      try {
+        copyFromDirectory(snapshotIndexCommit.getDirectory(),fileName,latch,failures);
       }
-);
+ catch (      Exception e) {
+        failures.add(e);
+        latch.countDown();
+      }
     }
     try {
       latch.await();
     }
  catch (    InterruptedException e) {
-      lastException.set(e);
+      failures.add(e);
     }
-    if (lastException.get() != null) {
-      throw new IndexShardGatewaySnapshotFailedException(shardId(),"Failed to perform snapshot (index files)",lastException.get());
+    if (!failures.isEmpty()) {
+      throw new IndexShardGatewaySnapshotFailedException(shardId(),"Failed to perform snapshot (index files)",failures.get(failures.size() - 1));
     }
     indexTime=System.currentTimeMillis() - time;
   }

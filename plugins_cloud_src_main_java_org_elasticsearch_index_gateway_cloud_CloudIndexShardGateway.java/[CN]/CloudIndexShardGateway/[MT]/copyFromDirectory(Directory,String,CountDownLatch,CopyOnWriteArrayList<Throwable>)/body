@@ -1,0 +1,60 @@
+{
+  long totalLength=dir.fileLength(fileName);
+  long numberOfChunks=totalLength / chunkSize.bytes();
+  if (totalLength % chunkSize.bytes() > 0) {
+    numberOfChunks++;
+  }
+  final AtomicLong counter=new AtomicLong(numberOfChunks);
+  for (long i=0; i < numberOfChunks; i++) {
+    final long chunkNumber=i;
+    IndexInput indexInput=null;
+    try {
+      indexInput=dir.openInput(fileName);
+      indexInput.seek(chunkNumber * chunkSize.bytes());
+      InputStreamIndexInput is=new ThreadSafeInputStreamIndexInput(indexInput,chunkSize.bytes());
+      String blobName=shardIndexDirectory + "/" + fileName;
+      if (chunkNumber > 0) {
+        blobName+=".part" + chunkNumber;
+      }
+      Blob blob=blobStoreContext.getBlobStore().newBlob(blobName);
+      blob.setPayload(is);
+      blob.setContentLength(is.actualSizeToRead());
+      final IndexInput fIndexInput=indexInput;
+      final ListenableFuture<String> future=blobStoreContext.getAsyncBlobStore().putBlob(container,blob);
+      future.addListener(new Runnable(){
+        @Override public void run(){
+          try {
+            fIndexInput.close();
+          }
+ catch (          IOException e) {
+          }
+          if (!future.isCancelled()) {
+            try {
+              future.get();
+            }
+ catch (            ExecutionException e) {
+              failures.add(e.getCause());
+            }
+catch (            Exception e) {
+              failures.add(e);
+            }
+          }
+          if (counter.decrementAndGet() == 0) {
+            latch.countDown();
+          }
+        }
+      }
+,threadPool);
+    }
+ catch (    Exception e) {
+      if (indexInput != null) {
+        try {
+          indexInput.close();
+        }
+ catch (        IOException e1) {
+        }
+      }
+      failures.add(e);
+    }
+  }
+}
