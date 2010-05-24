@@ -1,0 +1,117 @@
+{
+  String host=url.getHost();
+  if (request.getVirtualHost() != null) {
+    host=request.getVirtualHost();
+  }
+  HttpRequest nettyRequest;
+  String queryString=url.getQueryString();
+  if (queryString != null) {
+    nettyRequest=new DefaultHttpRequest(HttpVersion.HTTP_1_1,m,url.getUri());
+  }
+ else {
+    nettyRequest=new DefaultHttpRequest(HttpVersion.HTTP_1_1,m,url.getPath());
+  }
+  nettyRequest.setHeader(HttpHeaders.Names.HOST,host + ":" + url.getPort());
+  Headers h=request.getHeaders();
+  if (h != null) {
+    Iterator<Pair<String,String>> i=h.iterator();
+    Pair<String,String> p;
+    while (i.hasNext()) {
+      p=i.next();
+      if ("host".equalsIgnoreCase(p.getFirst())) {
+        continue;
+      }
+      String key=p.getFirst() == null ? "" : p.getFirst();
+      String value=p.getSecond() == null ? "" : p.getSecond();
+      nettyRequest.setHeader(key,value);
+    }
+  }
+  String ka=config.getKeepAlive() ? "keep-alive" : "close";
+  nettyRequest.setHeader(HttpHeaders.Names.CONNECTION,ka);
+  if (config.getProxyServer() != null) {
+    nettyRequest.setHeader("Proxy-Connection",ka);
+  }
+  if (config.getUserAgent() != null) {
+    nettyRequest.setHeader("User-Agent",config.getUserAgent());
+  }
+  if (request.getCookies() != null && !request.getCookies().isEmpty()) {
+    CookieEncoder httpCookieEncoder=new CookieEncoder(false);
+    Iterator<Cookie> ic=request.getCookies().iterator();
+    Cookie c;
+    org.jboss.netty.handler.codec.http.Cookie cookie;
+    while (ic.hasNext()) {
+      c=ic.next();
+      cookie=new DefaultCookie(c.getName(),c.getValue());
+      cookie.setPath(c.getPath());
+      cookie.setMaxAge(c.getMaxAge());
+      cookie.setDomain(c.getDomain());
+      httpCookieEncoder.addCookie(cookie);
+    }
+    nettyRequest.setHeader(HttpHeaders.Names.COOKIE,httpCookieEncoder.encode());
+  }
+  if (config.isCompressionEnabled()) {
+    nettyRequest.setHeader(HttpHeaders.Names.ACCEPT_ENCODING,HttpHeaders.Values.GZIP);
+  }
+switch (request.getType()) {
+case POST:
+case PUT:
+    nettyRequest.setHeader(HttpHeaders.Names.CONTENT_LENGTH,"0");
+  if (request.getByteData() != null) {
+    nettyRequest.setHeader(HttpHeaders.Names.CONTENT_LENGTH,String.valueOf(request.getByteData().length));
+    nettyRequest.setContent(ChannelBuffers.copiedBuffer(request.getByteData()));
+  }
+ else   if (request.getStringData() != null) {
+    nettyRequest.setHeader(HttpHeaders.Names.CONTENT_LENGTH,String.valueOf(request.getStringData().length()));
+    nettyRequest.setContent(ChannelBuffers.copiedBuffer(request.getStringData(),"UTF-8"));
+  }
+ else   if (request.getStreamData() != null) {
+    nettyRequest.setHeader(HttpHeaders.Names.CONTENT_LENGTH,String.valueOf(request.getStreamData().available()));
+    byte[] b=new byte[(int)request.getStreamData().available()];
+    request.getStreamData().read(b);
+    nettyRequest.setContent(ChannelBuffers.copiedBuffer(b));
+  }
+ else   if (request.getParams() != null) {
+    StringBuilder sb=new StringBuilder();
+    for (    final Entry<String,String> param : request.getParams().entries()) {
+      sb.append(param.getKey());
+      sb.append("=");
+      sb.append(param.getValue());
+      sb.append("&");
+    }
+    sb.deleteCharAt(sb.length() - 1);
+    nettyRequest.setHeader(HttpHeaders.Names.CONTENT_LENGTH,String.valueOf(sb.length()));
+    nettyRequest.setContent(ChannelBuffers.copiedBuffer(sb.toString().getBytes()));
+    if (request.getHeaders().getHeaderValues(Headers.CONTENT_TYPE).isEmpty() && request.getHeaders().getHeaderValue(Headers.CONTENT_TYPE) == null) {
+      nettyRequest.setHeader(HttpHeaders.Names.CONTENT_TYPE,"application/x-www-form-urlencoded");
+    }
+  }
+ else   if (request.getParts() != null) {
+    int lenght=computeAndSetContentLength(request,nettyRequest);
+    if (lenght == -1) {
+      lenght=MAX_BUFFERRED_BYTES;
+    }
+    MultipartRequestEntity mre=createMultipartRequestEntity(request.getParts(),request.getParams());
+    nettyRequest.setHeader(HttpHeaders.Names.CONTENT_TYPE,mre.getContentType());
+    nettyRequest.setHeader(HttpHeaders.Names.CONTENT_LENGTH,String.valueOf(mre.getContentLength()));
+    ChannelBuffer b=ChannelBuffers.dynamicBuffer((int)lenght);
+    mre.writeRequest(new ChannelBufferOutputStream(b));
+    nettyRequest.setContent(b);
+  }
+ else   if (request.getEntityWriter() != null) {
+    int lenght=computeAndSetContentLength(request,nettyRequest);
+    if (lenght == -1) {
+      lenght=MAX_BUFFERRED_BYTES;
+    }
+    ChannelBuffer b=ChannelBuffers.dynamicBuffer((int)lenght);
+    request.getEntityWriter().writeEntity(new ChannelBufferOutputStream(b));
+    nettyRequest.setHeader(HttpHeaders.Names.CONTENT_LENGTH,b.writerIndex());
+    nettyRequest.setContent(b);
+  }
+break;
+}
+if (nettyRequest.getHeader(HttpHeaders.Names.CONTENT_TYPE) == null) {
+nettyRequest.setHeader(HttpHeaders.Names.CONTENT_TYPE,"txt/html; charset=utf-8");
+}
+if (log.isDebugEnabled()) log.debug("Constructed request: " + nettyRequest);
+return nettyRequest;
+}

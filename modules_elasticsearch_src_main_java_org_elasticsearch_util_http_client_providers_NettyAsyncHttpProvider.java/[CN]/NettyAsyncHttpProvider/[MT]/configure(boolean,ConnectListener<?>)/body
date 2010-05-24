@@ -1,0 +1,34 @@
+{
+  bootstrap.setPipelineFactory(new ChannelPipelineFactory(){
+    public ChannelPipeline getPipeline() throws Exception {
+      ChannelPipeline pipeline=pipeline();
+      if (useSSL) {
+        try {
+          SSLEngine sslEngine=config.getSSLEngine();
+          if (sslEngine == null) {
+            sslEngine=SslUtils.getSSLEngine();
+          }
+          pipeline.addLast("ssl",new SslHandler(sslEngine));
+        }
+ catch (        Throwable ex) {
+          cl.future().abort(ex);
+        }
+      }
+      pipeline.addLast("codec",new HttpClientCodec());
+      if (config.isCompressionEnabled()) {
+        pipeline.addLast("inflater",new HttpContentDecompressor());
+      }
+      IdleStateHandler h=new IdleStateHandler(timer,0,0,config.getIdleConnectionTimeoutInMs(),TimeUnit.MILLISECONDS){
+        @SuppressWarnings("unused") public void channelIdle(        ChannelHandlerContext ctx,        IdleStateEvent e) throws MalformedURLException {
+          e.getChannel().close();
+          removeFromCache(ctx,e);
+        }
+      }
+;
+      pipeline.addLast("timeout",h);
+      pipeline.addLast("httpProcessor",NettyAsyncHttpProvider.this);
+      return pipeline;
+    }
+  }
+);
+}

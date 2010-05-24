@@ -1,0 +1,39 @@
+{
+  if (isClose.get()) {
+    throw new IOException("Closed");
+  }
+  if (connectionsPool.size() >= config.getMaxTotalConnections()) {
+    throw new IOException("Too many connections");
+  }
+  Url url=createUrl(request.getUrl());
+  if (log.isDebugEnabled())   log.debug("Lookup cache: " + url.toString());
+  Channel channel=lookupInCache(url);
+  if (channel != null && channel.isOpen()) {
+    HttpRequest nettyRequest=buildRequest(config,request,url);
+    if (f == null) {
+      f=new NettyResponseFuture<T>(url,request,asyncHandler,nettyRequest,config.getRequestTimeoutInMs());
+    }
+    executeRequest(channel,asyncHandler,config,f,nettyRequest);
+    return f;
+  }
+  ConnectListener<T> c=new ConnectListener.Builder<T>(config,request,asyncHandler,f).build();
+  configure(url.getProtocol().compareTo(Protocol.HTTPS) == 0,c);
+  ChannelFuture channelFuture=null;
+  try {
+    if (config.getProxyServer() == null) {
+      channelFuture=bootstrap.connect(new InetSocketAddress(url.getHost(),url.getPort()));
+    }
+ else {
+      channelFuture=bootstrap.connect(new InetSocketAddress(config.getProxyServer().getHost(),config.getProxyServer().getPort()));
+    }
+    bootstrap.setOption("connectTimeout",(int)config.getConnectionTimeoutInMs());
+  }
+ catch (  Throwable t) {
+    log.error(t.getMessage(),t);
+    c.future().abort(t.getCause());
+    return c.future();
+  }
+  channelFuture.addListener(c);
+  openChannels.add(channelFuture.getChannel());
+  return c.future();
+}

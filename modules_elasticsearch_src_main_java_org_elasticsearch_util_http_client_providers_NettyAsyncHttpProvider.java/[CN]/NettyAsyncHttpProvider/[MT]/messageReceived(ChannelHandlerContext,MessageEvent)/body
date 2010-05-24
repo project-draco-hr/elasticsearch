@@ -1,0 +1,85 @@
+{
+  if (ctx.getAttachment() instanceof DiscardEvent) {
+    ctx.getChannel().setReadable(false);
+    return;
+  }
+  NettyResponseFuture<?> future=(NettyResponseFuture<?>)ctx.getAttachment();
+  HttpRequest nettyRequest=future.getNettyRequest();
+  AsyncHandler<?> handler=future.getAsyncHandler();
+  try {
+    if (e.getMessage() instanceof HttpResponse) {
+      HttpResponse response=(HttpResponse)e.getMessage();
+      future.setHttpResponse(response);
+      String ka=response.getHeader("Connection");
+      future.setKeepAlive(ka == null || ka.toLowerCase().equals("keep-alive"));
+      if (config.isRedirectEnabled() && (response.getStatus().getCode() == 302 || response.getStatus().getCode() == 301)) {
+        if (future.incrementAndGetCurrentRedirectCount() < config.getMaxRedirects()) {
+          String location=response.getHeader(HttpHeaders.Names.LOCATION);
+          if (location.startsWith("/")) {
+            location=future.getUrl().getBaseUrl() + location;
+          }
+          Url url=createUrl(location);
+          RequestBuilder builder=new RequestBuilder(future.getRequest());
+          future.setUrl(url);
+          ctx.setAttachment(new DiscardEvent());
+          try {
+            ctx.getChannel().setReadable(false);
+          }
+ catch (          Exception ex) {
+            if (log.isTraceEnabled()) {
+              log.trace(ex.getMessage(),ex);
+            }
+          }
+          execute(builder.setUrl(url.toString()).build(),future);
+          return;
+        }
+ else {
+          throw new MaxRedirectException("Maximum redirect reached: " + config.getMaxRedirects());
+        }
+      }
+      if (log.isDebugEnabled()) {
+        log.debug("Status: " + response.getStatus());
+        log.debug("Version: " + response.getProtocolVersion());
+        log.debug("\"");
+        if (!response.getHeaderNames().isEmpty()) {
+          for (          String name : response.getHeaderNames()) {
+            log.debug("Header: " + name + " = "+ response.getHeaders(name));
+          }
+          log.debug("\"");
+        }
+      }
+      if (updateStatusAndInterrupt(handler,new ResponseStatus(future.getUrl(),response,this))) {
+        finishUpdate(future,ctx);
+        return;
+      }
+ else       if (updateHeadersAndInterrupt(handler,new ResponseHeaders(future.getUrl(),response,this))) {
+        finishUpdate(future,ctx);
+        return;
+      }
+ else       if (!response.isChunked()) {
+        updateBodyAndInterrupt(handler,new ResponseBodyPart(future.getUrl(),response,this));
+        finishUpdate(future,ctx);
+        return;
+      }
+      if (response.getStatus().getCode() != 200 || nettyRequest.getMethod().equals(HttpMethod.HEAD)) {
+        markAsDoneAndCacheConnection(future,ctx.getChannel());
+      }
+    }
+ else     if (e.getMessage() instanceof HttpChunk) {
+      HttpChunk chunk=(HttpChunk)e.getMessage();
+      if (handler != null) {
+        if (updateBodyAndInterrupt(handler,new ResponseBodyPart(future.getUrl(),null,this,chunk)) || chunk.isLast()) {
+          if (chunk instanceof HttpChunkTrailer) {
+            updateHeadersAndInterrupt(handler,new ResponseHeaders(future.getUrl(),future.getHttpResponse(),this,(HttpChunkTrailer)chunk));
+          }
+          finishUpdate(future,ctx);
+        }
+      }
+    }
+  }
+ catch (  Exception t) {
+    future.abort(t);
+    finishUpdate(future,ctx);
+    throw t;
+  }
+}
