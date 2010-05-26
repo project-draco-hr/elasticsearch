@@ -1,11 +1,19 @@
 {
   super(shardId,indexSettings);
   this.syncToDisk=componentSettings.getAsBoolean("sync_to_disk",false);
-  this.fsDirectory=new CustomMMapDirectory(createStoreFilePath(environment.workWithClusterFile(),localNodeId,shardId,MAIN_INDEX_SUFFIX),syncToDisk);
+  String fsLock=componentSettings.get("use_fs_lock","none");
+  LockFactory lockFactory=new NoLockFactory();
+  if (fsLock.equals("native")) {
+    lockFactory=new NativeFSLockFactory();
+  }
+ else   if (fsLock.equals("simple")) {
+    lockFactory=new SimpleFSLockFactory();
+  }
+  this.fsDirectory=new CustomMMapDirectory(createStoreFilePath(environment.workWithClusterFile(),localNodeId,shardId,MAIN_INDEX_SUFFIX),lockFactory,syncToDisk);
   SwitchDirectory switchDirectory=buildSwitchDirectoryIfNeeded(fsDirectory);
   if (switchDirectory != null) {
     suggestUseCompoundFile=false;
-    logger.debug("Using [mmap_fs] Store with path [{}], cache [true] with extensions [{}]",new Object[]{fsDirectory.getFile(),switchDirectory.primaryExtensions()});
+    logger.debug("Using [mmap_fs] Store with path [{}], cache [true] with extensions [{}]",fsDirectory.getFile(),switchDirectory.primaryExtensions());
     directory=switchDirectory;
   }
  else {
