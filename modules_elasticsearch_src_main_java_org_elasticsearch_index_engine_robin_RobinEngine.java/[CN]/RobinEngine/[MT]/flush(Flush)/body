@@ -7,12 +7,31 @@
     if (disableFlushCounter > 0) {
       throw new FlushNotAllowedEngineException(shardId,"Recovery is in progress, flush is not allowed");
     }
-    try {
-      indexWriter.commit();
-      translog.newTranslog();
+    if (flush.full()) {
+      dirty=false;
+      refreshMutex.set(true);
+      try {
+        indexWriter.close();
+        indexWriter=createWriter();
+        AcquirableResource<ReaderSearcherHolder> current=nrtResource;
+        nrtResource=buildNrtResource(indexWriter);
+        current.markForClose();
+      }
+ catch (      IOException e) {
+        throw new FlushFailedEngineException(shardId,e);
+      }
+ finally {
+        refreshMutex.set(false);
+      }
     }
- catch (    IOException e) {
-      throw new FlushFailedEngineException(shardId,e);
+ else {
+      try {
+        indexWriter.commit();
+        translog.newTranslog();
+      }
+ catch (      IOException e) {
+        throw new FlushFailedEngineException(shardId,e);
+      }
     }
   }
   finally {

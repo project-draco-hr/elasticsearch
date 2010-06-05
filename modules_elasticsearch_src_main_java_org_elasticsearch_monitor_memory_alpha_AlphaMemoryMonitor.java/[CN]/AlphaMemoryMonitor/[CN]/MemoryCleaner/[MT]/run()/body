@@ -1,50 +1,74 @@
 {
-  indicesMemoryCleaner.cacheClearUnreferenced();
-  IndicesMemoryCleaner.TranslogCleanResult translogCleanResult=indicesMemoryCleaner.cleanTranslog(translogNumberOfOperationsThreshold);
-  if (translogCleanResult.cleanedShards() > 0) {
-    long totalClean=totalCleans.incrementAndGet();
-    logger.debug("[" + totalClean + "] [Translog] "+ translogCleanResult);
-  }
-  long upperMemory=maxMemory.bytes();
-  long totalMemory=totalMemory();
-  long usedMemory=totalMemory - freeMemory();
-  long upperThresholdMemory=(long)(upperMemory * upperMemoryThreshold);
-  if (usedMemory - upperThresholdMemory <= 0) {
-    clearCacheCounter=0;
-    performedClean=false;
-    cleanCounter=0;
-    return;
-  }
-  if (performedClean) {
-    if (++cleanCounter < cleanThreshold) {
+  try {
+    indicesMemoryCleaner.cacheClearUnreferenced();
+    IndicesMemoryCleaner.TranslogCleanResult translogCleanResult=indicesMemoryCleaner.cleanTranslog(translogNumberOfOperationsThreshold);
+    if (translogCleanResult.cleanedShards() > 0) {
+      long totalClean=totalCleans.incrementAndGet();
+      logger.debug("[" + totalClean + "] [Translog] "+ translogCleanResult);
+    }
+    long upperMemory=maxMemory.bytes();
+    long totalMemory=totalMemory();
+    long usedMemory=totalMemory - freeMemory();
+    long upperThresholdMemory=(long)(upperMemory * upperMemoryThreshold);
+    if (usedMemory - upperThresholdMemory <= 0) {
+      fullCounter=0;
+      performedClean=false;
+      cleanCounter=0;
       return;
     }
+    if (performedClean) {
+      if (++cleanCounter < cleanThreshold) {
+        return;
+      }
+    }
+    long lowerThresholdMemory=(long)(upperMemory * lowerMemoryThreshold);
+    long memoryToClean=usedMemory - lowerThresholdMemory;
+    if (fullCounter++ >= fullThreshold) {
+      long total=totalFull.incrementAndGet();
+      if (logger.isInfoEnabled()) {
+        StringBuilder sb=new StringBuilder();
+        sb.append('[').append(total).append("] ");
+        sb.append("[Full    ] Ran after [").append(fullThreshold).append("] consecutive clean swipes");
+        sb.append(", memory_to_clean [").append(new SizeValue(memoryToClean)).append(']');
+        sb.append(", lower_memory_threshold [").append(new SizeValue(lowerThresholdMemory)).append(']');
+        sb.append(", upper_memory_threshold [").append(new SizeValue(upperThresholdMemory)).append(']');
+        sb.append(", used_memory [").append(new SizeValue(usedMemory)).append(']');
+        sb.append(", total_memory[").append(new SizeValue(totalMemory)).append(']');
+        sb.append(", max_memory[").append(maxMemory).append(']');
+        logger.info(sb.toString());
+      }
+      indicesMemoryCleaner.cacheClear();
+      indicesMemoryCleaner.forceCleanMemory(true);
+      ThreadLocals.clearReferencesThreadLocals();
+      fullCounter=0;
+    }
+ else {
+      long totalClean=totalCleans.incrementAndGet();
+      if (logger.isDebugEnabled()) {
+        StringBuilder sb=new StringBuilder();
+        sb.append('[').append(totalClean).append("] ");
+        sb.append("[Cleaning] memory_to_clean [").append(new SizeValue(memoryToClean)).append(']');
+        sb.append(", lower_memory_threshold [").append(new SizeValue(lowerThresholdMemory)).append(']');
+        sb.append(", upper_memory_threshold [").append(new SizeValue(upperThresholdMemory)).append(']');
+        sb.append(", used_memory [").append(new SizeValue(usedMemory)).append(']');
+        sb.append(", total_memory[").append(new SizeValue(totalMemory)).append(']');
+        sb.append(", max_memory[").append(maxMemory).append(']');
+        logger.debug(sb.toString());
+      }
+      IndicesMemoryCleaner.MemoryCleanResult memoryCleanResult=indicesMemoryCleaner.cleanMemory(memoryToClean,minimumFlushableSizeToClean);
+      boolean forceClean=false;
+      if (memoryCleanResult.cleaned().bytes() < memoryToClean) {
+        forceClean=true;
+        indicesMemoryCleaner.forceCleanMemory(false);
+      }
+      if (logger.isDebugEnabled()) {
+        logger.debug("[" + totalClean + "] [Cleaned ] force_clean ["+ forceClean+ "], "+ memoryCleanResult);
+      }
+    }
+    performedClean=true;
+    cleanCounter=0;
   }
-  long totalClean=totalCleans.incrementAndGet();
-  long lowerThresholdMemory=(long)(upperMemory * lowerMemoryThreshold);
-  long memoryToClean=usedMemory - lowerThresholdMemory;
-  if (logger.isDebugEnabled()) {
-    StringBuilder sb=new StringBuilder();
-    sb.append('[').append(totalClean).append("] ");
-    sb.append("[Cleaning] memory_to_clean [").append(new SizeValue(memoryToClean)).append(']');
-    sb.append(", lower_memory_threshold [").append(new SizeValue(lowerThresholdMemory)).append(']');
-    sb.append(", upper_memory_threshold [").append(new SizeValue(upperThresholdMemory)).append(']');
-    sb.append(", used_memory [").append(new SizeValue(usedMemory)).append(']');
-    sb.append(", total_memory[").append(new SizeValue(totalMemory)).append(']');
-    sb.append(", max_memory[").append(maxMemory).append(']');
-    logger.debug(sb.toString());
+ catch (  Exception e) {
+    logger.info("Failed to run memory monitor",e);
   }
-  IndicesMemoryCleaner.MemoryCleanResult memoryCleanResult=indicesMemoryCleaner.cleanMemory(memoryToClean,minimumFlushableSizeToClean);
-  if (logger.isDebugEnabled()) {
-    logger.debug("[" + totalClean + "] [Cleaned ] "+ memoryCleanResult);
-  }
-  if (++clearCacheCounter >= clearCacheThreshold) {
-    long totalClear=totalClearCache.incrementAndGet();
-    logger.debug("[" + totalClear + "] [Cache   ] cleared after ["+ (cleanCounter / cleanThreshold)+ "] memory clean swipes");
-    indicesMemoryCleaner.cacheClear();
-    ThreadLocals.clearReferencesThreadLocals();
-    clearCacheCounter=0;
-  }
-  performedClean=true;
-  cleanCounter=0;
 }

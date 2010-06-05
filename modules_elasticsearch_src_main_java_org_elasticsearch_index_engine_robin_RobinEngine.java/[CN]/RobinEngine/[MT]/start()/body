@@ -5,30 +5,14 @@
   if (logger.isDebugEnabled()) {
     logger.debug("Starting engine with ram_buffer_size[" + ramBufferSize + "], refresh_interval["+ refreshInterval+ "]");
   }
-  IndexWriter indexWriter=null;
   try {
-    if (IndexWriter.isLocked(store.directory())) {
-      logger.trace("Shard is locked, releasing lock");
-      store.directory().clearLock(IndexWriter.WRITE_LOCK_NAME);
-    }
-    boolean create=!IndexReader.indexExists(store.directory());
-    indexWriter=new IndexWriter(store.directory(),analysisService.defaultIndexAnalyzer(),create,deletionPolicy,IndexWriter.MaxFieldLength.UNLIMITED);
-    indexWriter.setMergeScheduler(mergeScheduler.newMergeScheduler());
-    indexWriter.setMergePolicy(mergePolicyProvider.newMergePolicy(indexWriter));
-    indexWriter.setSimilarity(similarityService.defaultIndexSimilarity());
-    indexWriter.setRAMBufferSizeMB(ramBufferSize.mbFrac());
-    indexWriter.setTermIndexInterval(termIndexInterval);
+    this.indexWriter=createWriter();
   }
  catch (  IOException e) {
-    safeClose(indexWriter);
     throw new EngineCreationFailureException(shardId,"Failed to create engine",e);
   }
-  this.indexWriter=indexWriter;
   try {
-    IndexReader indexReader=indexWriter.getReader();
-    IndexSearcher indexSearcher=new IndexSearcher(indexReader);
-    indexSearcher.setSimilarity(similarityService.defaultSearchSimilarity());
-    this.nrtResource=newAcquirableResource(new ReaderSearcherHolder(indexSearcher));
+    this.nrtResource=buildNrtResource(indexWriter);
   }
  catch (  IOException e) {
     try {
