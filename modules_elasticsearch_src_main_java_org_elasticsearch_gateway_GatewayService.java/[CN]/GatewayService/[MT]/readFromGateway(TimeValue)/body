@@ -14,29 +14,21 @@
   }
   final MetaData fMetaData=metaData;
   final CountDownLatch latch=new CountDownLatch(fMetaData.indices().size());
-  clusterService.submitStateUpdateTask("gateway (recovered meta-data)",new ClusterStateUpdateTask(){
-    @Override public ClusterState execute(    ClusterState currentState){
-      MetaData.Builder metaDataBuilder=newMetaDataBuilder().metaData(currentState.metaData()).maxNumberOfShardsPerNode(fMetaData.maxNumberOfShardsPerNode());
-      for (      final IndexMetaData indexMetaData : fMetaData) {
-        threadPool.execute(new Runnable(){
-          @Override public void run(){
-            try {
-              metaDataService.createIndex("gateway",indexMetaData.index(),indexMetaData.settings(),indexMetaData.mappings(),timeValueMillis(initialStateTimeout.millis() - 1000));
-            }
- catch (            Exception e) {
-              logger.error("Failed to create index [" + indexMetaData.index() + "]",e);
-            }
- finally {
-              latch.countDown();
-            }
-          }
-        }
-);
+  if (delayIndexCreation != null) {
+    logger.debug("Delaying initial state index creation for [{}]",delayIndexCreation);
+    threadPool.schedule(new Runnable(){
+      @Override public void run(){
+        updateClusterStateFromGateway(fMetaData,latch);
       }
-      return newClusterStateBuilder().state(currentState).metaData(metaDataBuilder).build();
     }
+,delayIndexCreation);
   }
-);
+ else {
+    updateClusterStateFromGateway(fMetaData,latch);
+  }
+  if (delayIndexCreation != null) {
+    return null;
+  }
   if (waitTimeout != null) {
     try {
       return latch.await(waitTimeout.millis(),TimeUnit.MILLISECONDS);
@@ -44,5 +36,5 @@
  catch (    InterruptedException e) {
     }
   }
-  return false;
+  return null;
 }
