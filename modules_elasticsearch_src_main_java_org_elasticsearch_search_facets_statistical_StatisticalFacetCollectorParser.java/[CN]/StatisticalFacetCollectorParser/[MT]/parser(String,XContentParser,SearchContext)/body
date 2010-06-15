@@ -1,16 +1,35 @@
 {
   String field=null;
-  String fieldName=null;
+  String currentFieldName=null;
+  String script=null;
+  Map<String,Object> params=cachedParams.get().get();
+  params.clear();
   XContentParser.Token token;
   while ((token=parser.nextToken()) != XContentParser.Token.END_OBJECT) {
     if (token == XContentParser.Token.FIELD_NAME) {
-      fieldName=parser.currentName();
+      currentFieldName=parser.currentName();
+    }
+ else     if (token == XContentParser.Token.START_OBJECT) {
+      if ("params".equals(currentFieldName)) {
+        params=parser.map();
+      }
     }
  else     if (token.isValue()) {
-      if ("field".equals(fieldName)) {
+      if ("field".equals(currentFieldName)) {
         field=parser.text();
+      }
+ else       if ("script".equals(currentFieldName)) {
+        script=parser.text();
       }
     }
   }
-  return new StatisticalFacetCollector(facetName,field,context.fieldDataCache(),context.mapperService());
+  if (script == null && field == null) {
+    throw new FacetPhaseExecutionException(facetName,"statistical facet requires either [script] or [field] to be set");
+  }
+  if (field != null) {
+    return new StatisticalFacetCollector(facetName,field,context.fieldDataCache(),context.mapperService());
+  }
+ else {
+    return new ScriptStatisticalFacetCollector(facetName,script,params,context.scriptService(),context.fieldDataCache(),context.mapperService());
+  }
 }
