@@ -1,0 +1,49 @@
+{
+  int totalShards=0;
+  long estimatedFlushableSize=0;
+  ArrayList<Tuple<ByteSizeValue,IndexShard>> shards=new ArrayList<Tuple<ByteSizeValue,IndexShard>>();
+  for (  IndexService indexService : indicesService) {
+    for (    IndexShard indexShard : indexService) {
+      if (indexShard.state() != IndexShardState.STARTED) {
+        continue;
+      }
+      totalShards++;
+      ByteSizeValue estimatedSize=indexShard.estimateFlushableMemorySize();
+      estimatedFlushableSize+=estimatedSize.bytes();
+      if (estimatedSize != null) {
+        shards.add(new Tuple<ByteSizeValue,IndexShard>(estimatedSize,indexShard));
+      }
+    }
+  }
+  Collections.sort(shards,new Comparator<Tuple<ByteSizeValue,IndexShard>>(){
+    @Override public int compare(    Tuple<ByteSizeValue,IndexShard> o1,    Tuple<ByteSizeValue,IndexShard> o2){
+      return (int)(o1.v1().bytes() - o2.v1().bytes());
+    }
+  }
+);
+  int cleanedShards=0;
+  long cleaned=0;
+  Set<ShardId> shardsCleaned=newHashSet();
+  for (  Tuple<ByteSizeValue,IndexShard> tuple : shards) {
+    if (tuple.v1().bytes() < minimumFlushableSizeToClean.bytes()) {
+      break;
+    }
+    try {
+      tuple.v2().flush(new Engine.Flush());
+    }
+ catch (    FlushNotAllowedEngineException e) {
+    }
+catch (    IllegalIndexShardStateException e) {
+    }
+catch (    Exception e) {
+      logger.warn(tuple.v2().shardId() + ": Failed to flush in order to clean memory",e);
+    }
+    shardsCleaned.add(tuple.v2().shardId());
+    cleanedShards++;
+    cleaned+=tuple.v1().bytes();
+    if (cleaned > memoryToClean) {
+      break;
+    }
+  }
+  return new MemoryCleanResult(totalShards,cleanedShards,new ByteSizeValue(estimatedFlushableSize),new ByteSizeValue(cleaned),shardsCleaned);
+}
