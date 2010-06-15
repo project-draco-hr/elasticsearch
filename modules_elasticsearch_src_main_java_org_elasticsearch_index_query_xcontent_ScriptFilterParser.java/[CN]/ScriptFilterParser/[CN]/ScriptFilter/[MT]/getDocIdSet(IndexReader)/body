@@ -1,0 +1,56 @@
+{
+  final ScriptFieldsFunction function=new ScriptFieldsFunction(script,scriptService,mapperService,fieldDataCache);
+  function.setNextReader(reader);
+  final int maxDoc=reader.maxDoc();
+  return new DocSet(){
+    @Override public boolean isCacheable(){
+      return false;
+    }
+    @Override public boolean get(    int doc) throws IOException {
+      Object val=function.execute(doc,params);
+      if (val == null) {
+        return false;
+      }
+      if (val instanceof Boolean) {
+        return (Boolean)val;
+      }
+      if (val instanceof Number) {
+        return ((Number)val).longValue() != 0;
+      }
+      throw new IOException("Can't handle type [" + val + "] in script filter");
+    }
+    @Override public DocIdSetIterator iterator() throws IOException {
+      return new DocIdSetIterator(){
+        private int doc=-1;
+        @Override public int docID(){
+          return doc;
+        }
+        @Override public int nextDoc() throws IOException {
+          do {
+            doc++;
+            if (doc >= maxDoc) {
+              return doc=NO_MORE_DOCS;
+            }
+          }
+ while (!get(doc));
+          return doc;
+        }
+        @Override public int advance(        int target) throws IOException {
+          if (target >= maxDoc) {
+            return doc=NO_MORE_DOCS;
+          }
+          doc=target;
+          while (!get(doc)) {
+            doc++;
+            if (doc >= maxDoc) {
+              return doc=NO_MORE_DOCS;
+            }
+          }
+          return doc;
+        }
+      }
+;
+    }
+  }
+;
+}
