@@ -12,8 +12,19 @@
   ChannelBuffer buffer=ChannelBuffers.wrappedBuffer(data);
   int size=buffer.writerIndex() - 4;
   if (size == 0) {
-    handler.handleException(new RemoteTransportException("",new FailedCommunicationException("Trying to send a stream with 0 size")));
+    throw new ElasticSearchIllegalStateException("Trying to send a stream with 0 size");
   }
   buffer.setInt(0,size);
   ChannelFuture channelFuture=targetChannel.write(buffer);
+  channelFuture.addListener(new ChannelFutureListener(){
+    @Override public void operationComplete(    ChannelFuture future) throws Exception {
+      if (!future.isSuccess()) {
+        TransportResponseHandler handler=transportServiceAdapter.remove(requestId);
+        if (handler != null) {
+          handler.handleException(new RemoteTransportException("Failed write request",new SendRequestTransportException(node,action,future.getCause())));
+        }
+      }
+    }
+  }
+);
 }
