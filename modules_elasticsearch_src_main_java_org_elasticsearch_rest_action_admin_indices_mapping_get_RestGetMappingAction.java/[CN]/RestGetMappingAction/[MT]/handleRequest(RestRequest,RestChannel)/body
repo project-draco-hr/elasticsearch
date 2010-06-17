@@ -1,0 +1,44 @@
+{
+  final String[] indices=splitIndices(request.param("index"));
+  final Set<String> types=ImmutableSet.copyOf(splitTypes(request.param("type")));
+  ClusterStateRequest clusterStateRequest=Requests.clusterState().filterRoutingTable(true).filterNodes(true).filteredIndices(indices);
+  client.admin().cluster().state(clusterStateRequest,new ActionListener<ClusterStateResponse>(){
+    @Override public void onResponse(    ClusterStateResponse response){
+      try {
+        MetaData metaData=response.state().metaData();
+        XContentBuilder builder=RestXContentBuilder.restContentBuilder(request);
+        builder.startObject();
+        for (        IndexMetaData indexMetaData : metaData) {
+          builder.startObject(indexMetaData.index());
+          for (          Map.Entry<String,String> entry : indexMetaData.mappings().entrySet()) {
+            if (!types.isEmpty() && !types.contains(entry.getKey())) {
+              continue;
+            }
+            XContentParser parser=XContentFactory.xContent(entry.getValue()).createParser(entry.getValue());
+            Map<String,Object> mapping=parser.map();
+            if (mapping.size() == 1 && mapping.containsKey(entry.getKey())) {
+              mapping=(Map<String,Object>)mapping.get(entry.getKey());
+            }
+            builder.field(entry.getKey());
+            builder.map(mapping);
+          }
+          builder.endObject();
+        }
+        builder.endObject();
+        channel.sendResponse(new XContentRestResponse(request,OK,builder));
+      }
+ catch (      Exception e) {
+        onFailure(e);
+      }
+    }
+    @Override public void onFailure(    Throwable e){
+      try {
+        channel.sendResponse(new XContentThrowableRestResponse(request,e));
+      }
+ catch (      IOException e1) {
+        logger.error("Failed to send failure response",e1);
+      }
+    }
+  }
+);
+}
