@@ -6,51 +6,29 @@
     if (node == null) {
       throw new ConnectTransportException(node,"Can't connect to a null node");
     }
-    NodeConnections nodeConnections=connectedNodes.get(node.id());
-    if (nodeConnections != null) {
+    Channel channel=connectedNodes.get(node);
+    if (channel != null) {
       return;
     }
 synchronized (this) {
-      nodeConnections=connectedNodes.get(node.id());
-      if (nodeConnections != null) {
+      channel=connectedNodes.get(node);
+      if (channel != null) {
         return;
       }
-      List<ChannelFuture> connectFutures=newArrayList();
-      for (int connectionIndex=0; connectionIndex < connectionsPerNode; connectionIndex++) {
-        InetSocketAddress address=((InetSocketTransportAddress)node.address()).address();
-        connectFutures.add(clientBootstrap.connect(address));
+      InetSocketAddress address=((InetSocketTransportAddress)node.address()).address();
+      ChannelFuture connectFuture=clientBootstrap.connect(address);
+      connectFuture.awaitUninterruptibly((long)(connectTimeout.millis() * 1.25));
+      if (!connectFuture.isSuccess()) {
+        throw new ConnectTransportException(node,"connect_timeout[" + connectTimeout + "]",connectFuture.getCause());
       }
-      List<Channel> channels=newArrayList();
-      Throwable lastConnectException=null;
-      for (      ChannelFuture connectFuture : connectFutures) {
-        if (!lifecycle.started()) {
-          for (          Channel channel : channels) {
-            channel.close().awaitUninterruptibly();
-          }
-          throw new ConnectTransportException(node,"Can't connect when the transport is stopped");
-        }
-        connectFuture.awaitUninterruptibly((long)(connectTimeout.millis() * 1.25));
-        if (!connectFuture.isSuccess()) {
-          lastConnectException=connectFuture.getCause();
-        }
- else {
-          Channel channel=connectFuture.getChannel();
-          channel.getCloseFuture().addListener(new ChannelCloseListener(node.id()));
-          channels.add(channel);
-        }
-      }
-      if (channels.isEmpty()) {
-        if (lastConnectException != null) {
-          throw new ConnectTransportException(node,"connect_timeout[" + connectTimeout + "]",lastConnectException);
-        }
-        throw new ConnectTransportException(node,"connect_timeout[" + connectTimeout + "], reason unknown");
-      }
+      channel=connectFuture.getChannel();
+      channel.getCloseFuture().addListener(new ChannelCloseListener(node));
+      connectedNodes.put(node,channel);
       if (logger.isDebugEnabled()) {
-        logger.debug("Connected to node[{}], number_of_connections[{}]",node,channels.size());
+        logger.debug("Connected to node [{}]",node);
       }
-      connectedNodes.put(node.id(),new NodeConnections(node,channels.toArray(new Channel[channels.size()])));
-      transportServiceAdapter.raiseNodeConnected(node);
     }
+    transportServiceAdapter.raiseNodeConnected(node);
   }
  catch (  Exception e) {
     throw new ConnectTransportException(node,"General node connection failure",e);
