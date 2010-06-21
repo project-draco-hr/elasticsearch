@@ -1,0 +1,59 @@
+{
+  long chunkBytes=Long.MAX_VALUE;
+  if (chunkSize != null) {
+    chunkBytes=chunkSize.bytes();
+  }
+  long totalLength=dir.fileLength(fileName);
+  long numberOfChunks=totalLength / chunkBytes;
+  if (totalLength % chunkBytes > 0) {
+    numberOfChunks++;
+  }
+  if (numberOfChunks == 0) {
+    numberOfChunks++;
+  }
+  final AtomicLong counter=new AtomicLong(numberOfChunks);
+  for (long i=0; i < numberOfChunks; i++) {
+    final long chunkNumber=i;
+    IndexInput indexInput=null;
+    try {
+      indexInput=dir.openInput(fileName);
+      indexInput.seek(chunkNumber * chunkBytes);
+      InputStreamIndexInput is=new ThreadSafeInputStreamIndexInput(indexInput,chunkBytes);
+      String blobName=fileName;
+      if (chunkNumber > 0) {
+        blobName+=".part" + chunkNumber;
+      }
+      final IndexInput fIndexInput=indexInput;
+      indexContainer.writeBlob(blobName,is,is.actualSizeToRead(),new ImmutableBlobContainer.WriterListener(){
+        @Override public void onCompleted(){
+          try {
+            fIndexInput.close();
+          }
+ catch (          IOException e) {
+          }
+          if (counter.decrementAndGet() == 0) {
+            latch.countDown();
+          }
+        }
+        @Override public void onFailure(        Throwable t){
+          failures.add(t);
+          if (counter.decrementAndGet() == 0) {
+            latch.countDown();
+          }
+        }
+      }
+);
+    }
+ catch (    Exception e) {
+      if (indexInput != null) {
+        try {
+          indexInput.close();
+        }
+ catch (        IOException e1) {
+        }
+      }
+      failures.add(e);
+      latch.countDown();
+    }
+  }
+}

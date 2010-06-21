@@ -1,0 +1,41 @@
+{
+  final IndexOutput indexOutput;
+  try {
+    indexOutput=store.directory().createOutput(fileToRecover);
+  }
+ catch (  IOException e) {
+    recoveryThrottler.streamDone(shardId,fileToRecover);
+    failures.add(e);
+    latch.countDown();
+    return;
+  }
+  final AtomicInteger partIndex=new AtomicInteger();
+  indexContainer.readBlob(fileToRecover,new BlobContainer.ReadBlobListener(){
+    @Override public synchronized void onPartial(    byte[] data,    int offset,    int size) throws IOException {
+      indexOutput.writeBytes(data,offset,size);
+    }
+    @Override public synchronized void onCompleted(){
+      int part=partIndex.incrementAndGet();
+      String partName=fileToRecover + ".part" + part;
+      if (blobs.containsKey(partName)) {
+        indexContainer.readBlob(partName,this);
+      }
+ else {
+        try {
+          indexOutput.close();
+        }
+ catch (        IOException e) {
+          onFailure(e);
+        }
+      }
+      recoveryThrottler.streamDone(shardId,fileToRecover);
+      latch.countDown();
+    }
+    @Override public void onFailure(    Throwable t){
+      recoveryThrottler.streamDone(shardId,fileToRecover);
+      failures.add(t);
+      latch.countDown();
+    }
+  }
+);
+}

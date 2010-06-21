@@ -1,0 +1,71 @@
+{
+  final ImmutableMap<String,BlobMetaData> blobs;
+  try {
+    blobs=indexContainer.listBlobs();
+  }
+ catch (  IOException e) {
+    throw new IndexShardGatewayRecoveryException(shardId,"Failed to list content of gateway",e);
+  }
+  TObjectLongHashMap<String> combinedBlobs=buildCombinedPartsBlobs(blobs);
+  List<String> filesToRecover=new ArrayList<String>();
+  for (TObjectLongIterator<String> it=combinedBlobs.iterator(); it.hasNext(); ) {
+    it.advance();
+    try {
+      if (store.directory().fileExists(it.key()) && store.directory().fileLength(it.key()) == it.value()) {
+        if (logger.isTraceEnabled()) {
+          logger.trace("not recovering [{}], exists in local store and has same size [{}]",it.key(),new ByteSizeValue(it.value()));
+        }
+      }
+ else {
+        filesToRecover.add(it.key());
+      }
+    }
+ catch (    Exception e) {
+      filesToRecover.add(it.key());
+      logger.debug("failed to check local store for existence of [{}]",it.key());
+    }
+  }
+  long totalSize=0;
+  final AtomicLong throttlingWaitTime=new AtomicLong();
+  final CountDownLatch latch=new CountDownLatch(filesToRecover.size());
+  final CopyOnWriteArrayList<Throwable> failures=new CopyOnWriteArrayList<Throwable>();
+  for (  final String fileToRecover : filesToRecover) {
+    totalSize+=combinedBlobs.get(fileToRecover);
+    if (recoveryThrottler.tryStream(shardId,fileToRecover)) {
+      recoverFile(fileToRecover,blobs,latch,failures);
+    }
+ else {
+      threadPool.schedule(new Runnable(){
+        @Override public void run(){
+          throttlingWaitTime.addAndGet(recoveryThrottler.throttleInterval().millis());
+          if (recoveryThrottler.tryStream(shardId,fileToRecover)) {
+            recoverFile(fileToRecover,blobs,latch,failures);
+          }
+ else {
+            threadPool.schedule(this,recoveryThrottler.throttleInterval());
+          }
+        }
+      }
+,recoveryThrottler.throttleInterval());
+    }
+  }
+  try {
+    latch.await();
+  }
+ catch (  InterruptedException e) {
+    throw new IndexShardGatewayRecoveryException(shardId,"Interrupted while recovering index",e);
+  }
+  if (!failures.isEmpty()) {
+    throw new IndexShardGatewayRecoveryException(shardId,"Failed to recovery index",failures.get(0));
+  }
+  long version=-1;
+  try {
+    if (IndexReader.indexExists(store.directory())) {
+      version=IndexReader.getCurrentVersion(store.directory());
+    }
+  }
+ catch (  IOException e) {
+    throw new IndexShardGatewayRecoveryException(shardId(),"Failed to fetch index version after copying it over",e);
+  }
+  return new RecoveryStatus.Index(version,filesToRecover.size(),new ByteSizeValue(totalSize,ByteSizeUnit.BYTES),TimeValue.timeValueMillis(throttlingWaitTime.get()));
+}

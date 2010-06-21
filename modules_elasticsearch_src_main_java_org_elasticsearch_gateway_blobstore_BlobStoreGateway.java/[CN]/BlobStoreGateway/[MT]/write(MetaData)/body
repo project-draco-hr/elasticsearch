@@ -1,0 +1,32 @@
+{
+  final String newMetaData="metadata-" + (currentIndex + 1);
+  BinaryXContentBuilder builder;
+  try {
+    builder=XContentFactory.contentBinaryBuilder(XContentType.JSON);
+    builder.prettyPrint();
+    builder.startObject();
+    MetaData.Builder.toXContent(metaData,builder,ToXContent.EMPTY_PARAMS);
+    builder.endObject();
+  }
+ catch (  IOException e) {
+    throw new GatewayException("Failed to serialize metadata into gateway",e);
+  }
+  try {
+    metaDataBlobContainer.writeBlob(newMetaData,new ByteArrayInputStream(builder.unsafeBytes(),0,builder.unsafeBytesLength()),builder.unsafeBytesLength());
+  }
+ catch (  IOException e) {
+    throw new GatewayException("Failed to write metadata [" + newMetaData + "]",e);
+  }
+  currentIndex++;
+  try {
+    metaDataBlobContainer.deleteBlobsByFilter(new BlobContainer.BlobNameFilter(){
+      @Override public boolean accept(      String blobName){
+        return blobName.startsWith("metadata-") && !newMetaData.equals(blobName);
+      }
+    }
+);
+  }
+ catch (  IOException e) {
+    logger.debug("Failed to delete old metadata, will do it next time",e);
+  }
+}

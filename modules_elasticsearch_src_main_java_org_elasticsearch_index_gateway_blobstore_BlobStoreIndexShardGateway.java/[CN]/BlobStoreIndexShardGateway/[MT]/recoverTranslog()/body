@@ -1,0 +1,48 @@
+{
+  final ImmutableMap<String,BlobMetaData> blobs;
+  try {
+    blobs=translogContainer.listBlobsByPrefix("translog-");
+  }
+ catch (  IOException e) {
+    throw new IndexShardGatewayRecoveryException(shardId,"Failed to list content of gateway",e);
+  }
+  List<Long> translogIds=Lists.newArrayList();
+  for (  BlobMetaData blob : blobs.values()) {
+    long translogId=Long.parseLong(blob.name().substring(blob.name().indexOf('-') + 1));
+    translogIds.add(translogId);
+  }
+  if (translogIds.isEmpty()) {
+    indexShard.start();
+    return new RecoveryStatus.Translog(-1,0,new ByteSizeValue(0,ByteSizeUnit.BYTES));
+  }
+  Collections.sort(translogIds,new Comparator<Long>(){
+    @Override public int compare(    Long o1,    Long o2){
+      return (int)(o2 - o1);
+    }
+  }
+);
+  Exception lastException=null;
+  for (  Long translogId : translogIds) {
+    try {
+      ArrayList<Translog.Operation> operations=Lists.newArrayList();
+      byte[] translogData=translogContainer.readBlobFully("translog-" + translogId);
+      BytesStreamInput si=new BytesStreamInput(translogData);
+      while (true) {
+        int numberOfOperations=si.readInt();
+        for (int i=0; i < numberOfOperations; i++) {
+          operations.add(readTranslogOperation(si));
+        }
+        if (si.position() == translogData.length) {
+          break;
+        }
+      }
+      indexShard.performRecovery(operations);
+      return new RecoveryStatus.Translog(indexShard.translog().currentId(),operations.size(),new ByteSizeValue(translogData.length,ByteSizeUnit.BYTES));
+    }
+ catch (    Exception e) {
+      lastException=e;
+      logger.debug("Failed to read translog, will try the next one",e);
+    }
+  }
+  throw new IndexShardGatewayRecoveryException(shardId,"Failed to recovery translog",lastException);
+}
