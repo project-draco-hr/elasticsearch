@@ -7,16 +7,24 @@
     throw new IndexShardGatewayRecoveryException(shardId,"Failed to list content of gateway",e);
   }
   TObjectLongHashMap<String> combinedBlobs=buildCombinedPartsBlobs(blobs);
+  int numberOfFiles=0;
+  long totalSize=0;
+  int numberOfExistingFiles=0;
+  long existingTotalSize=0;
   List<String> filesToRecover=new ArrayList<String>();
   for (TObjectLongIterator<String> it=combinedBlobs.iterator(); it.hasNext(); ) {
     it.advance();
     try {
       if (store.directory().fileExists(it.key()) && store.directory().fileLength(it.key()) == it.value()) {
+        numberOfExistingFiles++;
+        existingTotalSize+=it.value();
         if (logger.isTraceEnabled()) {
           logger.trace("not recovering [{}], exists in local store and has same size [{}]",it.key(),new ByteSizeValue(it.value()));
         }
       }
  else {
+        numberOfFiles++;
+        totalSize+=it.value();
         filesToRecover.add(it.key());
       }
     }
@@ -25,12 +33,10 @@
       logger.debug("failed to check local store for existence of [{}]",it.key());
     }
   }
-  long totalSize=0;
   final AtomicLong throttlingWaitTime=new AtomicLong();
   final CountDownLatch latch=new CountDownLatch(filesToRecover.size());
   final CopyOnWriteArrayList<Throwable> failures=new CopyOnWriteArrayList<Throwable>();
   for (  final String fileToRecover : filesToRecover) {
-    totalSize+=combinedBlobs.get(fileToRecover);
     if (recoveryThrottler.tryStream(shardId,fileToRecover)) {
       recoverFile(fileToRecover,blobs,latch,failures);
     }
@@ -80,5 +86,5 @@
   }
  catch (  IOException e) {
   }
-  return new RecoveryStatus.Index(version,filesToRecover.size(),new ByteSizeValue(totalSize,ByteSizeUnit.BYTES),TimeValue.timeValueMillis(throttlingWaitTime.get()));
+  return new RecoveryStatus.Index(version,numberOfFiles,new ByteSizeValue(totalSize),numberOfExistingFiles,new ByteSizeValue(existingTotalSize),TimeValue.timeValueMillis(throttlingWaitTime.get()));
 }
