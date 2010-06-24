@@ -6,28 +6,42 @@
     return;
   }
   try {
-    logger.trace("Starting recovery to {}, markAsRelocated {}",startRecoveryRequest.node,startRecoveryRequest.markAsRelocated);
+    logger.trace("starting recovery to {}, mark_as_relocated {}",startRecoveryRequest.node,startRecoveryRequest.markAsRelocated);
     final DiscoveryNode node=startRecoveryRequest.node;
     cleanOpenIndex();
     final RecoveryStatus recoveryStatus=new RecoveryStatus();
     indexShard.recover(new Engine.RecoveryHandler(){
       @Override public void phase1(      SnapshotIndexCommit snapshot) throws ElasticSearchException {
         long totalSize=0;
+        long existingTotalSize=0;
         try {
           StopWatch stopWatch=new StopWatch().start();
           for (          String name : snapshot.getFiles()) {
             IndexInput indexInput=store.directory().openInput(name);
-            recoveryStatus.phase1FileNames.add(name);
-            recoveryStatus.phase1FileSizes.add(indexInput.length());
-            totalSize+=indexInput.length();
-            indexInput.close();
+            long length=indexInput.length();
+            try {
+              if (startRecoveryRequest.existingFiles.containsKey(name) && startRecoveryRequest.existingFiles.get(name) == length) {
+                recoveryStatus.phase1ExistingFileNames.add(name);
+                recoveryStatus.phase1ExistingFileSizes.add(length);
+                existingTotalSize+=length;
+              }
+ else {
+                recoveryStatus.phase1FileNames.add(name);
+                recoveryStatus.phase1FileSizes.add(length);
+                totalSize+=length;
+              }
+            }
+  finally {
+              indexInput.close();
+            }
           }
           recoveryStatus.phase1TotalSize=totalSize;
+          recoveryStatus.phase1ExistingTotalSize=existingTotalSize;
           final AtomicLong throttlingWaitTime=new AtomicLong();
-          logger.trace("Recovery [phase1] to {}: recovering [{}] files with total size of [{}]",node,snapshot.getFiles().length,new ByteSizeValue(totalSize));
-          final CountDownLatch latch=new CountDownLatch(snapshot.getFiles().length);
+          logger.trace("recovery [phase1] to {}: recovering [{}] files with total size of [{}]",node,recoveryStatus.phase1FileNames.size(),new ByteSizeValue(totalSize));
+          final CountDownLatch latch=new CountDownLatch(recoveryStatus.phase1FileNames.size());
           final AtomicReference<Exception> lastException=new AtomicReference<Exception>();
-          for (          final String name : snapshot.getFiles()) {
+          for (          final String name : recoveryStatus.phase1FileNames) {
             sendFileChunksRecoveryFutures.add(threadPool.submit(new Runnable(){
               @Override public void run(){
                 IndexInput indexInput=null;
@@ -73,15 +87,18 @@
           if (lastException.get() != null) {
             throw lastException.get();
           }
+          CleanFilesRequest cleanFilesRequest=new CleanFilesRequest();
+          cleanFilesRequest.snapshotFiles.addAll(Arrays.asList(snapshot.getFiles()));
+          transportService.submitRequest(node,cleanFilesTransportAction,cleanFilesRequest,VoidTransportResponseHandler.INSTANCE).txGet();
           stopWatch.stop();
-          logger.trace("Recovery [phase1] to {}: took [{}], throttling_wait [{}]",node,stopWatch.totalTime(),timeValueMillis(throttlingWaitTime.get()));
+          logger.trace("recovery [phase1] to {}: took [{}], throttling_wait [{}]",node,stopWatch.totalTime(),timeValueMillis(throttlingWaitTime.get()));
           recoveryStatus.phase1Time=stopWatch.totalTime().millis();
         }
  catch (        ElasticSearchInterruptedException e) {
           throw new IgnoreRecoveryException("Interrupted while recovering files");
         }
 catch (        Throwable e) {
-          throw new RecoverFilesRecoveryException(shardId,snapshot.getFiles().length,new ByteSizeValue(totalSize),e);
+          throw new RecoverFilesRecoveryException(shardId,recoveryStatus.phase1FileNames.size(),new ByteSizeValue(totalSize),e);
         }
  finally {
           sendFileChunksRecoveryFutures.clear();
@@ -93,11 +110,12 @@ catch (        Throwable e) {
           if (closed) {
             throw new IndexShardClosedException(shardId);
           }
-          logger.trace("Recovery [phase2] to {}: sending [{}] transaction log operations",node,snapshot.size());
+          logger.trace("recovery [phase2] to {}: sending [{}] transaction log operations",node,snapshot.size());
           StopWatch stopWatch=new StopWatch().start();
-          sendSnapshot(snapshot,false);
+          transportService.submitRequest(node,prepareForTranslogOperationsTransportAction,VoidStreamable.INSTANCE,VoidTransportResponseHandler.INSTANCE).txGet();
+          sendSnapshot(snapshot);
           stopWatch.stop();
-          logger.trace("Recovery [phase2] to {}: took [{}]",node,stopWatch.totalTime());
+          logger.trace("recovery [phase2] to {}: took [{}]",node,stopWatch.totalTime());
           recoveryStatus.phase2Time=stopWatch.totalTime().millis();
           recoveryStatus.phase2Operations=snapshot.size();
         }
@@ -114,9 +132,10 @@ catch (        Throwable e) {
           if (closed) {
             throw new IndexShardClosedException(shardId);
           }
-          logger.trace("Recovery [phase3] to {}: sending [{}] transaction log operations",node,snapshot.size());
+          logger.trace("recovery [phase3] to {}: sending [{}] transaction log operations",node,snapshot.size());
           StopWatch stopWatch=new StopWatch().start();
-          sendSnapshot(snapshot,true);
+          sendSnapshot(snapshot);
+          transportService.submitRequest(node,finalizeRecoveryTransportAction,VoidStreamable.INSTANCE,VoidTransportResponseHandler.INSTANCE).txGet();
           if (startRecoveryRequest.markAsRelocated) {
             try {
               indexShard.relocated();
@@ -125,7 +144,7 @@ catch (        Throwable e) {
             }
           }
           stopWatch.stop();
-          logger.trace("Recovery [phase3] to {}: took [{}]",node,stopWatch.totalTime());
+          logger.trace("recovery [phase3] to {}: took [{}]",node,stopWatch.totalTime());
           recoveryStatus.phase3Time=stopWatch.totalTime().millis();
           recoveryStatus.phase3Operations=snapshot.size();
         }
@@ -136,15 +155,12 @@ catch (        Throwable e) {
           sendSnapshotRecoveryThread=null;
         }
       }
-      private void sendSnapshot(      Translog.Snapshot snapshot,      boolean phase3) throws ElasticSearchException {
-        MemorySnapshot memorySnapshot;
-        if (snapshot instanceof MemorySnapshot) {
-          memorySnapshot=(MemorySnapshot)snapshot;
+      private void sendSnapshot(      Translog.Snapshot snapshot) throws ElasticSearchException {
+        TranslogOperationsRequest request=new TranslogOperationsRequest();
+        for (        Translog.Operation operation : snapshot) {
+          request.operations.add(operation);
         }
- else {
-          memorySnapshot=new MemorySnapshot(snapshot);
-        }
-        transportService.submitRequest(node,snapshotTransportAction,new SnapshotWrapper(memorySnapshot,phase3),VoidTransportResponseHandler.INSTANCE).txGet();
+        transportService.submitRequest(node,translogOperationsTransportAction,request,VoidTransportResponseHandler.INSTANCE).txGet();
       }
     }
 );
