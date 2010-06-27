@@ -1,0 +1,31 @@
+{
+  if (!event.routingTableChanged()) {
+    return;
+  }
+  RoutingTable routingTable=event.state().routingTable();
+  for (  IndexRoutingTable indexRoutingTable : routingTable) {
+    IndexService indexService=indicesService.indexService(indexRoutingTable.index());
+    if (indexService == null) {
+      continue;
+    }
+    if (!indexService.store().persistent()) {
+      continue;
+    }
+    for (    IndexShardRoutingTable indexShardRoutingTable : indexRoutingTable) {
+      if (indexService.hasShard(indexShardRoutingTable.shardId().id())) {
+        continue;
+      }
+      if (indexShardRoutingTable.countWithState(ShardRoutingState.STARTED) == indexShardRoutingTable.size()) {
+        if (logger.isDebugEnabled()) {
+          logger.debug("[{}][{}] deleting unallocated shard",indexShardRoutingTable.shardId().index().name(),indexShardRoutingTable.shardId().id());
+        }
+        try {
+          indexService.store().deleteUnallocated(indexShardRoutingTable.shardId());
+        }
+ catch (        Exception e) {
+          logger.debug("[{}][{}] failed to delete unallocated shard, ignoring",e,indexShardRoutingTable.shardId().index().name(),indexShardRoutingTable.shardId().id());
+        }
+      }
+    }
+  }
+}
