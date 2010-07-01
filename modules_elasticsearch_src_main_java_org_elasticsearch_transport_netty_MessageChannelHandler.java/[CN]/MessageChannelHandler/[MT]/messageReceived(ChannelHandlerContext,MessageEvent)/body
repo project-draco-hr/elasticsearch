@@ -9,12 +9,15 @@
   long requestId=buffer.readLong();
   byte status=buffer.readByte();
   boolean isRequest=isRequest(status);
-  TransportResponseHandler handler=null;
   if (isRequest) {
-    handleRequest(event,streamIn,requestId);
+    TransportRequestHandler handler=handleRequest(event,streamIn,requestId);
+    if (buffer.readerIndex() < expectedIndexReader) {
+      logger.warn("Message not fully read (request) for [{}] and handler {}, resetting",requestId,handler);
+      buffer.readerIndex(expectedIndexReader);
+    }
   }
  else {
-    handler=transportServiceAdapter.remove(requestId);
+    TransportResponseHandler handler=transportServiceAdapter.remove(requestId);
     if (handler != null) {
       if (isError(status)) {
         handlerResponseError(streamIn,handler);
@@ -26,9 +29,9 @@
  else {
       buffer.readerIndex(markedReaderIndex + size);
     }
-  }
-  if (buffer.readerIndex() < expectedIndexReader) {
-    logger.warn("Message not fully read for [{}] and handler {}, resetting",requestId,handler);
-    buffer.readerIndex(expectedIndexReader);
+    if (buffer.readerIndex() < expectedIndexReader) {
+      logger.warn("Message not fully read (response) for [{}] and handler {}, resetting",requestId,handler);
+      buffer.readerIndex(expectedIndexReader);
+    }
   }
 }
