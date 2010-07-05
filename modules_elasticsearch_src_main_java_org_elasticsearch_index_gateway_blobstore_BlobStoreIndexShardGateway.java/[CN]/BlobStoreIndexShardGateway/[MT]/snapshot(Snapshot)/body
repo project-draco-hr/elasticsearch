@@ -86,21 +86,25 @@
     final AtomicReference<Throwable> failure=new AtomicReference<Throwable>();
     translogBlob.append(new AppendableBlobContainer.AppendBlobListener(){
       @Override public void withStream(      StreamOutput os) throws IOException {
-        int deltaNumberOfOperations;
-        Iterable<Translog.Operation> operationsIt;
-        if (snapshot.newTranslogCreated()) {
-          deltaNumberOfOperations=translogSnapshot.size();
-          operationsIt=translogSnapshot;
+        if (!snapshot.newTranslogCreated()) {
+          translogSnapshot.seekForward(snapshot.lastTranslogPosition());
         }
- else {
-          deltaNumberOfOperations=translogSnapshot.size() - snapshot.lastTranslogSize();
-          operationsIt=translogSnapshot.skipTo(snapshot.lastTranslogSize());
+        FastByteArrayOutputStream bos=cachedBos.get();
+        if (bos == null) {
+          bos=new FastByteArrayOutputStream();
+          cachedBos=new SoftReference<FastByteArrayOutputStream>(bos);
         }
-        os.writeInt(deltaNumberOfOperations);
-        for (        Translog.Operation operation : operationsIt) {
-          writeTranslogOperation(os,operation);
+        int totalNumberOfOperations=0;
+        OutputStreamStreamOutput bosOs=new OutputStreamStreamOutput(bos);
+        while (translogSnapshot.hasNext()) {
+          bos.reset();
+          TranslogStreams.writeTranslogOperation(bosOs,translogSnapshot.next());
+          bosOs.flush();
+          os.writeVInt(bos.size());
+          os.writeBytes(bos.unsafeByteArray(),bos.size());
+          totalNumberOfOperations++;
         }
-        translogNumberOfOperations.set(deltaNumberOfOperations);
+        translogNumberOfOperations.set(totalNumberOfOperations);
       }
       @Override public void onCompleted(){
         latch.countDown();

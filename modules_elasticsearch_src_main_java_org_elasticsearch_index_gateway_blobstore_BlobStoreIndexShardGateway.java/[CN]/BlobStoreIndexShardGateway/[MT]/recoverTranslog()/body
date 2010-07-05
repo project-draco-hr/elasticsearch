@@ -4,49 +4,92 @@
     translogId=IndexReader.getCurrentVersion(store.directory());
   }
  catch (  FileNotFoundException e) {
-    return new RecoveryStatus.Translog(-1,0,new ByteSizeValue(0));
+    indexShard.start();
+    return new RecoveryStatus.Translog(-1,0,0,new ByteSizeValue(0));
   }
 catch (  IOException e) {
     throw new IndexShardGatewayRecoveryException(shardId,"Failed to recovery translog, can't read current index version",e);
   }
   if (!translogContainer.blobExists("translog-" + translogId)) {
-    return new RecoveryStatus.Translog(-1,0,new ByteSizeValue(0));
+    indexShard.start();
+    return new RecoveryStatus.Translog(-1,0,0,new ByteSizeValue(0));
   }
   try {
     indexShard.performRecoveryPrepareForTranslog();
-    int totalOperations=0;
-    byte[] translogData=translogContainer.readBlobFully("translog-" + translogId);
-    BytesStreamInput si=new BytesStreamInput(translogData);
-    while (true) {
-      try {
-        int numberOfOperations=si.readInt();
-        ArrayList<Translog.Operation> operations=Lists.newArrayList();
-        for (int i=0; i < numberOfOperations; i++) {
-          operations.add(readTranslogOperation(si));
-          totalOperations++;
+    final AtomicReference<Throwable> failure=new AtomicReference<Throwable>();
+    final CountDownLatch latch=new CountDownLatch(1);
+    final AtomicInteger totalOperations=new AtomicInteger();
+    final AtomicLong totalSize=new AtomicLong();
+    translogContainer.readBlob("translog-" + translogId,new BlobContainer.ReadBlobListener(){
+      FastByteArrayOutputStream bos=new FastByteArrayOutputStream();
+      boolean ignore=false;
+      @Override public synchronized void onPartial(      byte[] data,      int offset,      int size) throws IOException {
+        if (ignore) {
+          return;
         }
-        indexShard.performRecoveryOperations(operations);
-        if (si.position() == translogData.length) {
-          break;
+        bos.write(data,offset,size);
+        BytesStreamInput si=new BytesStreamInput(bos.unsafeByteArray(),0,bos.size());
+        int position;
+        while (true) {
+          try {
+            position=si.position();
+            int opSize=si.readVInt();
+            int curPos=si.position();
+            if ((si.position() + opSize) > bos.size()) {
+              break;
+            }
+            Translog.Operation operation=TranslogStreams.readTranslogOperation(si);
+            if ((si.position() - curPos) != opSize) {
+              logger.warn("mismatch in size, expected [{}], got [{}]",opSize,si.position() - curPos);
+            }
+            totalOperations.incrementAndGet();
+            indexShard.performRecoveryOperation(operation);
+            if (si.position() >= bos.size()) {
+              position=si.position();
+              break;
+            }
+          }
+ catch (          Exception e) {
+            logger.warn("failed to retrieve translog after [{}] operations, ignoring the rest, considered corrupted",e,totalOperations.get());
+            ignore=true;
+            latch.countDown();
+            return;
+          }
         }
+        totalSize.addAndGet(position);
+        FastByteArrayOutputStream newBos=new FastByteArrayOutputStream();
+        int leftOver=bos.size() - position;
+        if (leftOver > 0) {
+          newBos.write(bos.unsafeByteArray(),position,leftOver);
+        }
+        bos=newBos;
       }
- catch (      IOException e) {
-        if (si.position() >= translogData.length) {
-        }
- else {
-          throw e;
-        }
+      @Override public synchronized void onCompleted(){
+        latch.countDown();
       }
+      @Override public synchronized void onFailure(      Throwable t){
+        failure.set(t);
+        latch.countDown();
+      }
+    }
+);
+    latch.await();
+    if (failure.get() != null) {
+      throw failure.get();
     }
     indexShard.performRecoveryFinalization();
     long lastTranslogId=indexShard.translog().currentId();
+    Translog.Snapshot translogSnapshot=indexShard.translog().snapshot();
+    long lastTranslogLength=translogSnapshot.length();
+    translogSnapshot.release();
     if (!translogContainer.canAppendToExistingBlob()) {
       indexShard.flush(new Engine.Flush());
       lastTranslogId=-1;
+      lastTranslogLength=0;
     }
-    return new RecoveryStatus.Translog(lastTranslogId,totalOperations,new ByteSizeValue(translogData.length,ByteSizeUnit.BYTES));
+    return new RecoveryStatus.Translog(lastTranslogId,lastTranslogLength,totalOperations.get(),new ByteSizeValue(totalSize.get(),ByteSizeUnit.BYTES));
   }
- catch (  Exception e) {
-    throw new IndexShardGatewayRecoveryException(shardId,"Failed to recovery translog, can't read current index version",e);
+ catch (  Throwable e) {
+    throw new IndexShardGatewayRecoveryException(shardId,"Failed to recovery translog",e);
   }
 }

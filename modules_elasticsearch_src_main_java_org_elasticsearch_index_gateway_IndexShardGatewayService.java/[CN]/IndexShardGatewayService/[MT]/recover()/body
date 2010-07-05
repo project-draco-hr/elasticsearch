@@ -28,7 +28,7 @@
     IndexShardGateway.RecoveryStatus recoveryStatus=shardGateway.recover();
     lastIndexVersion=recoveryStatus.index().version();
     lastTranslogId=recoveryStatus.translog().translogId();
-    lastTranslogSize=recoveryStatus.translog().numberOfOperations();
+    lastTranslogLength=recoveryStatus.translog().translogLength();
     if (indexShard.state() != IndexShardState.STARTED) {
       indexShard.start();
     }
@@ -44,7 +44,19 @@
     indexShard.refresh(new Engine.Refresh(false));
     scheduleSnapshotIfNeeded();
   }
-  finally {
+ catch (  IndexShardGatewayRecoveryException e) {
+    if ((e.getCause() instanceof IndexShardClosedException) || (e.getCause() instanceof IndexShardNotStartedException)) {
+      throw new IgnoreGatewayRecoveryException(shardId,"shard closed");
+    }
+    throw e;
+  }
+catch (  IndexShardClosedException e) {
+    throw new IgnoreGatewayRecoveryException(shardId,"shard closed");
+  }
+catch (  IndexShardNotStartedException e) {
+    throw new IgnoreGatewayRecoveryException(shardId,"shard closed");
+  }
+ finally {
     recoveryThrottler.recoveryDone(shardId,"gateway");
   }
 }
