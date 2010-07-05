@@ -4,7 +4,7 @@
   final SnapshotIndexCommit snapshotIndexCommit=snapshot.indexCommit();
   final Translog.Snapshot translogSnapshot=snapshot.translogSnapshot();
   ImmutableMap<String,BlobMetaData> indicesBlobs=null;
-  TObjectLongHashMap<String> combinedIndicesBlobs=null;
+  ImmutableMap<String,BlobMetaData> virtualIndicesBlobs=null;
   int indexNumberOfFiles=0;
   long indexTotalFilesSize=0;
   long indexTime=0;
@@ -17,29 +17,30 @@
  catch (    IOException e) {
       throw new IndexShardGatewaySnapshotFailedException(shardId,"Failed to list indices files from gateway",e);
     }
-    combinedIndicesBlobs=buildCombinedPartsBlobs(indicesBlobs);
+    virtualIndicesBlobs=buildVirtualBlobs(indexContainer,indicesBlobs,cachedMd5);
     final CountDownLatch latch=new CountDownLatch(snapshotIndexCommit.getFiles().length);
     final CopyOnWriteArrayList<Throwable> failures=new CopyOnWriteArrayList<Throwable>();
     for (    final String fileName : snapshotIndexCommit.getFiles()) {
+      StoreFileMetaData snapshotFileMetaData;
+      try {
+        snapshotFileMetaData=store.metaDataWithMd5(fileName);
+      }
+ catch (      IOException e) {
+        throw new IndexShardGatewaySnapshotFailedException(shardId,"Failed to get store file metadata",e);
+      }
       if (fileName.equals(snapshotIndexCommit.getSegmentsFileName())) {
         latch.countDown();
         continue;
       }
-      long fileSize;
-      try {
-        fileSize=snapshotIndexCommit.getDirectory().fileLength(fileName);
-      }
- catch (      IOException e) {
-        throw new IndexShardGatewaySnapshotFailedException(shardId,"Failed to get length on local store",e);
-      }
-      if (combinedIndicesBlobs.contains(fileName) && combinedIndicesBlobs.get(fileName) == fileSize) {
+      if (virtualIndicesBlobs.containsKey(fileName) && virtualIndicesBlobs.get(fileName).md5().equals(snapshotFileMetaData.md5())) {
         latch.countDown();
         continue;
       }
       indexNumberOfFiles++;
-      indexTotalFilesSize+=fileSize;
-      if (combinedIndicesBlobs.contains(fileName)) {
+      indexTotalFilesSize+=snapshotFileMetaData.sizeInBytes();
+      if (virtualIndicesBlobs.containsKey(fileName)) {
         try {
+          cachedMd5.remove(fileName);
           indexContainer.deleteBlobsByPrefix(fileName);
         }
  catch (        IOException e) {
@@ -47,7 +48,7 @@
         }
       }
       try {
-        snapshotFile(snapshotIndexCommit.getDirectory(),fileName,latch,failures);
+        snapshotFile(snapshotIndexCommit.getDirectory(),snapshotFileMetaData,latch,failures);
       }
  catch (      IOException e) {
         failures.add(e);
@@ -125,25 +126,25 @@
     try {
       indexNumberOfFiles++;
       if (indicesBlobs.containsKey(snapshotIndexCommit.getSegmentsFileName())) {
+        cachedMd5.remove(snapshotIndexCommit.getSegmentsFileName());
         indexContainer.deleteBlob(snapshotIndexCommit.getSegmentsFileName());
       }
-      indexTotalFilesSize+=snapshotIndexCommit.getDirectory().fileLength(snapshotIndexCommit.getSegmentsFileName());
+      StoreFileMetaData snapshotFileMetaData=store.metaDataWithMd5(snapshotIndexCommit.getSegmentsFileName());
+      indexTotalFilesSize+=snapshotFileMetaData.sizeInBytes();
       long time=System.currentTimeMillis();
-      IndexInput indexInput=snapshotIndexCommit.getDirectory().openInput(snapshotIndexCommit.getSegmentsFileName());
-      try {
-        InputStreamIndexInput is=new InputStreamIndexInput(indexInput,Long.MAX_VALUE);
-        indexContainer.writeBlob(snapshotIndexCommit.getSegmentsFileName(),is,is.actualSizeToRead());
-      }
-  finally {
-        try {
-          indexInput.close();
-        }
- catch (        Exception e) {
-        }
+      CountDownLatch latch=new CountDownLatch(1);
+      CopyOnWriteArrayList<Throwable> failures=new CopyOnWriteArrayList<Throwable>();
+      snapshotFile(snapshotIndexCommit.getDirectory(),snapshotFileMetaData,latch,failures);
+      latch.await();
+      if (!failures.isEmpty()) {
+        throw new IndexShardGatewaySnapshotFailedException(shardId(),"Failed to perform snapshot (segment index file)",failures.get(failures.size() - 1));
       }
       indexTime+=(System.currentTimeMillis() - time);
     }
  catch (    Exception e) {
+      if (e instanceof IndexShardGatewaySnapshotFailedException) {
+        throw (IndexShardGatewaySnapshotFailedException)e;
+      }
       throw new IndexShardGatewaySnapshotFailedException(shardId(),"Failed to finalize index snapshot into [" + snapshotIndexCommit.getSegmentsFileName() + "]",e);
     }
   }
@@ -155,18 +156,18 @@
     }
   }
   if (indexDirty) {
-    for (TObjectLongIterator<String> it=combinedIndicesBlobs.iterator(); it.hasNext(); ) {
-      it.advance();
+    for (    BlobMetaData md : virtualIndicesBlobs.values()) {
       boolean found=false;
       for (      final String fileName : snapshotIndexCommit.getFiles()) {
-        if (it.key().equals(fileName)) {
+        if (md.name().equals(fileName)) {
           found=true;
           break;
         }
       }
       if (!found) {
         try {
-          indexContainer.deleteBlobsByPrefix(it.key());
+          cachedMd5.remove(md.name());
+          indexContainer.deleteBlobsByPrefix(md.name());
         }
  catch (        IOException e) {
           logger.debug("failed to delete unused index files, will retry later...",e);

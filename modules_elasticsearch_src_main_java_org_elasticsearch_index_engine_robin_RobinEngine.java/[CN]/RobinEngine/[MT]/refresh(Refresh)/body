@@ -1,28 +1,36 @@
 {
-  if (refreshMutex.compareAndSet(false,true)) {
-    IndexWriter currentWriter=indexWriter;
-    try {
-      if (dirty) {
-        dirty=false;
-        AcquirableResource<ReaderSearcherHolder> current=nrtResource;
-        IndexReader newReader=current.resource().reader().reopen(true);
-        if (newReader != current.resource().reader()) {
-          IndexSearcher indexSearcher=new IndexSearcher(newReader);
-          indexSearcher.setSimilarity(similarityService.defaultSearchSimilarity());
-          nrtResource=newAcquirableResource(new ReaderSearcherHolder(indexSearcher));
-          current.markForClose();
+  rwl.readLock().lock();
+  try {
+    if (refreshMutex.compareAndSet(false,true)) {
+      IndexWriter currentWriter=indexWriter;
+      try {
+        if (dirty) {
+          dirty=false;
+          AcquirableResource<ReaderSearcherHolder> current=nrtResource;
+          IndexReader newReader=current.resource().reader().reopen(true);
+          if (newReader != current.resource().reader()) {
+            IndexSearcher indexSearcher=new IndexSearcher(newReader);
+            indexSearcher.setSimilarity(similarityService.defaultSearchSimilarity());
+            nrtResource=newAcquirableResource(new ReaderSearcherHolder(indexSearcher));
+            current.markForClose();
+          }
         }
       }
-    }
- catch (    Exception e) {
-      if (currentWriter != indexWriter) {
+ catch (      AlreadyClosedException e) {
       }
+catch (      Exception e) {
+        if (currentWriter != indexWriter) {
+        }
  else {
-        throw new RefreshFailedEngineException(shardId,e);
+          throw new RefreshFailedEngineException(shardId,e);
+        }
+      }
+ finally {
+        refreshMutex.set(false);
       }
     }
- finally {
-      refreshMutex.set(false);
-    }
+  }
+  finally {
+    rwl.readLock().unlock();
   }
 }

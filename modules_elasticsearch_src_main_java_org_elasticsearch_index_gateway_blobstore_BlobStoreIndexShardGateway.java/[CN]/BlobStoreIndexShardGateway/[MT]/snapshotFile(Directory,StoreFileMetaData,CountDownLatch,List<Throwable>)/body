@@ -1,0 +1,75 @@
+{
+  long chunkBytes=Long.MAX_VALUE;
+  if (chunkSize != null) {
+    chunkBytes=chunkSize.bytes();
+  }
+  long totalLength=fileMetaData.sizeInBytes();
+  long numberOfChunks=totalLength / chunkBytes;
+  if (totalLength % chunkBytes > 0) {
+    numberOfChunks++;
+  }
+  if (numberOfChunks == 0) {
+    numberOfChunks++;
+  }
+  final long fNumberOfChunks=numberOfChunks;
+  final AtomicLong counter=new AtomicLong(numberOfChunks);
+  for (long i=0; i < fNumberOfChunks; i++) {
+    final long chunkNumber=i;
+    IndexInput indexInput=null;
+    try {
+      indexInput=dir.openInput(fileMetaData.name());
+      indexInput.seek(chunkNumber * chunkBytes);
+      InputStreamIndexInput is=new ThreadSafeInputStreamIndexInput(indexInput,chunkBytes);
+      String blobName=fileMetaData.name();
+      if (fNumberOfChunks > 1) {
+        blobName+=".part" + chunkNumber;
+      }
+      final IndexInput fIndexInput=indexInput;
+      indexContainer.writeBlob(blobName,is,is.actualSizeToRead(),new ImmutableBlobContainer.WriterListener(){
+        @Override public void onCompleted(){
+          try {
+            fIndexInput.close();
+          }
+ catch (          IOException e) {
+          }
+          if (counter.decrementAndGet() == 0) {
+            byte[] md5=Digest.md5HexToByteArray(fileMetaData.md5());
+            indexContainer.writeBlob(fileMetaData.name() + ".md5",new FastByteArrayInputStream(md5),md5.length,new ImmutableBlobContainer.WriterListener(){
+              @Override public void onCompleted(){
+                latch.countDown();
+              }
+              @Override public void onFailure(              Throwable t){
+                failures.add(t);
+                latch.countDown();
+              }
+            }
+);
+          }
+        }
+        @Override public void onFailure(        Throwable t){
+          try {
+            fIndexInput.close();
+          }
+ catch (          IOException e) {
+          }
+          failures.add(t);
+          if (counter.decrementAndGet() == 0) {
+            latch.countDown();
+          }
+        }
+      }
+);
+    }
+ catch (    Exception e) {
+      if (indexInput != null) {
+        try {
+          indexInput.close();
+        }
+ catch (        IOException e1) {
+        }
+      }
+      failures.add(e);
+      latch.countDown();
+    }
+  }
+}

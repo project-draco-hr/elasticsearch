@@ -3,26 +3,27 @@
     @Override public ClusterState execute(    ClusterState currentState){
       MetaData.Builder metaDataBuilder=newMetaDataBuilder().metaData(currentState.metaData()).maxNumberOfShardsPerNode(fMetaData.maxNumberOfShardsPerNode());
       metaDataBuilder.markAsRecoveredFromGateway();
-      ClusterBlocks.Builder blocks=ClusterBlocks.builder().blocks(currentState.blocks()).removeGlobalBlock(NOT_RECOVERED_FROM_GATEWAY_BLOCK);
-      return newClusterStateBuilder().state(currentState).metaData(metaDataBuilder).blocks(blocks).build();
+      return newClusterStateBuilder().state(currentState).metaData(metaDataBuilder).build();
     }
     @Override public void clusterStateProcessed(    ClusterState clusterState){
       for (      final IndexMetaData indexMetaData : fMetaData) {
-        threadPool.execute(new Runnable(){
-          @Override public void run(){
-            try {
-              metaDataService.createIndex("gateway",indexMetaData.index(),indexMetaData.settings(),indexMetaData.mappings(),timeValueMillis(initialStateTimeout.millis() - 1000));
-            }
- catch (            Exception e) {
-              logger.error("failed to create index [" + indexMetaData.index() + "]",e);
-            }
- finally {
-              latch.countDown();
-            }
-          }
+        try {
+          metaDataService.createIndex("gateway",indexMetaData.index(),indexMetaData.settings(),indexMetaData.mappings(),timeValueMillis(10));
         }
-);
+ catch (        Exception e) {
+          logger.error("failed to create index [" + indexMetaData.index() + "]",e);
+        }
+ finally {
+          latch.countDown();
+        }
       }
+      clusterService.submitStateUpdateTask("gateway (remove block)",new ClusterStateUpdateTask(){
+        @Override public ClusterState execute(        ClusterState currentState){
+          ClusterBlocks.Builder blocks=ClusterBlocks.builder().blocks(currentState.blocks()).removeGlobalBlock(NOT_RECOVERED_FROM_GATEWAY_BLOCK);
+          return newClusterStateBuilder().state(currentState).blocks(blocks).build();
+        }
+      }
+);
     }
   }
 );

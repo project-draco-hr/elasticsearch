@@ -1,5 +1,9 @@
 {
   ClusterState clusterState=clusterService.state();
+  if (!indicesService.hasIndex(request.index()) || !clusterState.routingTable().hasIndex(request.index())) {
+    retryPrimary(fromClusterEvent,null);
+    return false;
+  }
   nodes=clusterState.nodes();
   try {
     shards=shards(clusterState,request);
@@ -11,8 +15,8 @@
   boolean foundPrimary=false;
   for (  final ShardRouting shard : shards) {
     if (shard.primary()) {
-      if (!shard.active() || !nodes.nodeExists(shard.currentNodeId())) {
-        retryPrimary(fromClusterEvent,shard);
+      if (!shard.active() || !nodes.nodeExists(shard.currentNodeId()) || !indicesService.hasIndex(request.index())) {
+        retryPrimary(fromClusterEvent,shard.shardId());
         return false;
       }
       if (!primaryOperationStarted.compareAndSet(false,true)) {
