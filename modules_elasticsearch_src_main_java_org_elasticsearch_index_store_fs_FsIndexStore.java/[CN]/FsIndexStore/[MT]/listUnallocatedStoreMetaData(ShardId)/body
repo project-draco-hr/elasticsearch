@@ -3,15 +3,23 @@
   if (!shardIndexLocation.exists()) {
     return new StoreFilesMetaData(false,shardId,ImmutableMap.<String,StoreFileMetaData>of());
   }
+  ConcurrentMap<String,String> shardIdCachedMd5s=cachedUnallocatedMd5s.get(shardId);
+  if (shardIdCachedMd5s == null) {
+    shardIdCachedMd5s=ConcurrentCollections.newConcurrentMap();
+    cachedUnallocatedMd5s.put(shardId,shardIdCachedMd5s);
+  }
   Map<String,StoreFileMetaData> files=Maps.newHashMap();
   for (  File file : shardIndexLocation.listFiles()) {
     FileInputStream is=new FileInputStream(file);
-    String md5;
-    try {
-      md5=Digest.md5Hex(is);
-    }
+    String md5=shardIdCachedMd5s.get(file.getName());
+    if (md5 == null) {
+      try {
+        md5=Digest.md5Hex(is);
+      }
   finally {
-      is.close();
+        is.close();
+      }
+      shardIdCachedMd5s.put(file.getName(),md5);
     }
     files.put(file.getName(),new StoreFileMetaData(file.getName(),file.length(),file.lastModified(),md5));
   }
