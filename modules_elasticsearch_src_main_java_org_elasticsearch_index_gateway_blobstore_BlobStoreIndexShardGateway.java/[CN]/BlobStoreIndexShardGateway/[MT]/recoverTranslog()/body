@@ -5,14 +5,14 @@
   }
  catch (  FileNotFoundException e) {
     indexShard.start();
-    return new RecoveryStatus.Translog(-1,0,0,new ByteSizeValue(0));
+    return new RecoveryStatus.Translog(0);
   }
 catch (  IOException e) {
     throw new IndexShardGatewayRecoveryException(shardId,"Failed to recovery translog, can't read current index version",e);
   }
   if (!translogContainer.blobExists("translog-" + translogId)) {
     indexShard.start();
-    return new RecoveryStatus.Translog(-1,0,0,new ByteSizeValue(0));
+    return new RecoveryStatus.Translog(0);
   }
   try {
     indexShard.performRecoveryPrepareForTranslog();
@@ -78,16 +78,8 @@ catch (  IOException e) {
       throw failure.get();
     }
     indexShard.performRecoveryFinalization();
-    long lastTranslogId=indexShard.translog().currentId();
-    Translog.Snapshot translogSnapshot=indexShard.translog().snapshot();
-    long lastTranslogLength=translogSnapshot.length();
-    translogSnapshot.release();
-    if (!translogContainer.canAppendToExistingBlob()) {
-      indexShard.flush(new Engine.Flush());
-      lastTranslogId=-1;
-      lastTranslogLength=0;
-    }
-    return new RecoveryStatus.Translog(lastTranslogId,lastTranslogLength,totalOperations.get(),new ByteSizeValue(totalSize.get(),ByteSizeUnit.BYTES));
+    indexShard.flush(new Engine.Flush());
+    return new RecoveryStatus.Translog(totalOperations.get());
   }
  catch (  Throwable e) {
     throw new IndexShardGatewayRecoveryException(shardId,"Failed to recovery translog",e);
