@@ -14,18 +14,40 @@
   Map<Integer,IndexShard> tmpShardsMap=newHashMap(shards);
   IndexShard indexShard=tmpShardsMap.remove(shardId);
   shards=ImmutableMap.copyOf(tmpShardsMap);
-  indicesLifecycle.beforeIndexShardClosed(indexShard,delete);
+  ShardId sId=new ShardId(index,shardId);
+  indicesLifecycle.beforeIndexShardClosed(sId,indexShard,delete);
   for (  Class<? extends CloseableIndexComponent> closeable : pluginsService.shardServices()) {
-    shardInjector.getInstance(closeable).close(delete);
+    try {
+      shardInjector.getInstance(closeable).close(delete);
+    }
+ catch (    Exception e) {
+      logger.debug("failed to clean plugin shard service [{}]",e,closeable);
+    }
   }
-  shardInjector.getInstance(IndexShardManagement.class).close();
+  if (indexShard != null) {
+    shardInjector.getInstance(IndexShardManagement.class).close();
+  }
   RecoveryAction recoveryAction=shardInjector.getInstance(RecoveryAction.class);
   if (recoveryAction != null)   recoveryAction.close();
-  indexShard.close();
-  shardInjector.getInstance(Engine.class).close();
-  shardInjector.getInstance(IndexShardGatewayService.class).close(deleteGateway);
-  shardInjector.getInstance(Translog.class).close();
-  indicesLifecycle.afterIndexShardClosed(indexShard.shardId(),delete);
+  if (indexShard != null) {
+    indexShard.close();
+  }
+  try {
+    shardInjector.getInstance(Engine.class).close();
+  }
+ catch (  Exception e) {
+  }
+  try {
+    shardInjector.getInstance(IndexShardGatewayService.class).close(deleteGateway);
+  }
+ catch (  Exception e) {
+  }
+  try {
+    shardInjector.getInstance(Translog.class).close();
+  }
+ catch (  Exception e) {
+  }
+  indicesLifecycle.afterIndexShardClosed(sId,delete);
   Store store=shardInjector.getInstance(Store.class);
   if (delete || indexGateway.type().equals(NoneGateway.TYPE) || !indexStore.persistent()) {
     try {
