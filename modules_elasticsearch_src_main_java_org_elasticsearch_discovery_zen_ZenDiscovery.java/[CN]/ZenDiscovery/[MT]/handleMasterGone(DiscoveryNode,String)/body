@@ -5,33 +5,47 @@
   if (master) {
     return;
   }
-  logger.info("master [{}] left, reason [{}]",masterNode,reason);
-  List<DiscoveryNode> nodes=newArrayList(latestDiscoNodes.nodes().values());
-  nodes.remove(masterNode);
-  DiscoveryNode electedMaster=electMaster.electMaster(nodes);
-  if (localNode.equals(electedMaster)) {
-    this.master=true;
-    masterFD.stop("got elected as new master since master left (reason = " + reason + ")");
-    nodesFD.start();
-    clusterService.submitStateUpdateTask("zen-disco-elected_as_master(old master [" + masterNode + "])",new ProcessedClusterStateUpdateTask(){
-      @Override public ClusterState execute(      ClusterState currentState){
-        DiscoveryNodes.Builder builder=new DiscoveryNodes.Builder().putAll(currentState.nodes()).remove(masterNode.id()).masterNodeId(localNode.id());
+  logger.info("master_left [{}], reason [{}]",masterNode,reason);
+  clusterService.submitStateUpdateTask("zen-disco-master_failed (" + masterNode + ")",new ProcessedClusterStateUpdateTask(){
+    @Override public ClusterState execute(    ClusterState currentState){
+      if (!masterNode.id().equals(currentState.nodes().masterNodeId())) {
+        return currentState;
+      }
+      List<DiscoveryNode> nodes=newArrayList(currentState.nodes().nodes().values());
+      nodes.remove(masterNode);
+      final DiscoveryNode electedMaster=electMaster.electMaster(nodes);
+      if (localNode.equals(electedMaster)) {
+        master=true;
+        masterFD.stop("got elected as new master since master left (reason = " + reason + ")");
+        nodesFD.start();
+        DiscoveryNodes.Builder builder=DiscoveryNodes.newNodesBuilder().putAll(currentState.nodes()).remove(masterNode.id()).masterNodeId(localNode.id());
         latestDiscoNodes=builder.build();
         return newClusterStateBuilder().state(currentState).nodes(latestDiscoNodes).build();
       }
-      @Override public void clusterStateProcessed(      ClusterState clusterState){
-        sendInitialStateEventIfNeeded();
+ else {
+        nodesFD.stop();
+        DiscoveryNodes.Builder builder=DiscoveryNodes.newNodesBuilder().putAll(currentState.nodes()).remove(masterNode.id());
+        if (electedMaster != null) {
+          builder.masterNodeId(electedMaster.id());
+          masterFD.restart(electedMaster,"possible elected master since master left (reason = " + reason + ")");
+        }
+ else {
+          builder.masterNodeId(null);
+          masterFD.stop("no master elected since master left (reason = " + reason + ")");
+          threadPool.execute(new Runnable(){
+            @Override public void run(){
+              joinCluster();
+            }
+          }
+);
+        }
+        latestDiscoNodes=builder.build();
+        return newClusterStateBuilder().state(currentState).nodes(latestDiscoNodes).build();
       }
     }
+    @Override public void clusterStateProcessed(    ClusterState clusterState){
+      sendInitialStateEventIfNeeded();
+    }
+  }
 );
-  }
- else {
-    nodesFD.stop();
-    if (electedMaster != null) {
-      masterFD.restart(electedMaster,"possible elected master since master left (reason = " + reason + ")");
-    }
- else {
-      masterFD.stop("no master elected since master left (reason = " + reason + ")");
-    }
-  }
 }
