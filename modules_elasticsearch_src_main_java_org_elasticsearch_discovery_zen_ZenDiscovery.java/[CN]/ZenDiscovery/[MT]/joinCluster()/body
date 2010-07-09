@@ -13,11 +13,12 @@
     if (localNode.equals(masterNode)) {
       this.master=true;
       nodesFD.start();
-      clusterService.submitStateUpdateTask("zen-disco-initial_connect(master)",new ProcessedClusterStateUpdateTask(){
+      clusterService.submitStateUpdateTask("zen-disco-join (elected_as_master)",new ProcessedClusterStateUpdateTask(){
         @Override public ClusterState execute(        ClusterState currentState){
           DiscoveryNodes.Builder builder=new DiscoveryNodes.Builder().localNodeId(localNode.id()).masterNodeId(localNode.id()).put(localNode);
           latestDiscoNodes=builder.build();
-          return newClusterStateBuilder().state(currentState).nodes(builder).build();
+          ClusterBlocks clusterBlocks=ClusterBlocks.builder().blocks(currentState.blocks()).removeGlobalBlock(NO_MASTER_BLOCK).build();
+          return newClusterStateBuilder().state(currentState).nodes(builder).blocks(clusterBlocks).build();
         }
         @Override public void clusterStateProcessed(        ClusterState clusterState){
           sendInitialStateEventIfNeeded();
@@ -52,6 +53,16 @@
         continue;
       }
       masterFD.start(masterNode,"initial_join");
+      clusterService.submitStateUpdateTask("zen-disco-join (detected master)",new ProcessedClusterStateUpdateTask(){
+        @Override public ClusterState execute(        ClusterState currentState){
+          ClusterBlocks clusterBlocks=ClusterBlocks.builder().blocks(currentState.blocks()).removeGlobalBlock(NO_MASTER_BLOCK).build();
+          return newClusterStateBuilder().state(currentState).blocks(clusterBlocks).build();
+        }
+        @Override public void clusterStateProcessed(        ClusterState clusterState){
+          sendInitialStateEventIfNeeded();
+        }
+      }
+);
     }
   }
 }
