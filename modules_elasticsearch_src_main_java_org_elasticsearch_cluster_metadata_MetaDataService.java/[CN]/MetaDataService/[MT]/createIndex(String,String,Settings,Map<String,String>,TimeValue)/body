@@ -1,50 +1,4 @@
 {
-  ClusterState clusterState=clusterService.state();
-  if (clusterState.routingTable().hasIndex(index)) {
-    throw new IndexAlreadyExistsException(new Index(index));
-  }
-  if (clusterState.metaData().hasIndex(index)) {
-    throw new IndexAlreadyExistsException(new Index(index));
-  }
-  if (index.contains(" ")) {
-    throw new InvalidIndexNameException(new Index(index),index,"must not contain whitespace");
-  }
-  if (index.contains(",")) {
-    throw new InvalidIndexNameException(new Index(index),index,"must not contain ',");
-  }
-  if (index.contains("#")) {
-    throw new InvalidIndexNameException(new Index(index),index,"must not contain '#");
-  }
-  if (index.charAt(0) == '_') {
-    throw new InvalidIndexNameException(new Index(index),index,"must not start with '_'");
-  }
-  if (!index.toLowerCase().equals(index)) {
-    throw new InvalidIndexNameException(new Index(index),index,"must be lowercase");
-  }
-  if (!Strings.validFileName(index)) {
-    throw new InvalidIndexNameException(new Index(index),index,"must not contain the following characters " + Strings.INVALID_FILENAME_CHARS);
-  }
-  if (clusterState.metaData().aliases().contains(index)) {
-    throw new InvalidIndexNameException(new Index(index),index,"an alias with the same name already exists");
-  }
-  if (mappings == null) {
-    mappings=Maps.newHashMap();
-  }
- else {
-    mappings=Maps.newHashMap(mappings);
-  }
-  File mappingsDir=new File(environment.configFile(),"mappings");
-  if (mappingsDir.exists() && mappingsDir.isDirectory()) {
-    File defaultMappingsDir=new File(mappingsDir,"_default");
-    if (mappingsDir.exists() && mappingsDir.isDirectory()) {
-      addMappings(mappings,defaultMappingsDir);
-    }
-    File indexMappingsDir=new File(mappingsDir,index);
-    if (mappingsDir.exists() && mappingsDir.isDirectory()) {
-      addMappings(mappings,indexMappingsDir);
-    }
-  }
-  final Map<String,String> fMappings=mappings;
   final CountDownLatch latch=new CountDownLatch(clusterService.state().nodes().size());
   NodeIndexCreatedAction.Listener nodeCreatedListener=new NodeIndexCreatedAction.Listener(){
     @Override public void onNodeIndexCreated(    String mIndex,    String nodeId){
@@ -54,27 +8,75 @@
     }
   }
 ;
-  nodeIndexCreatedAction.add(nodeCreatedListener);
-  clusterService.submitStateUpdateTask("create-index [" + index + "], cause ["+ cause+ "]",new ClusterStateUpdateTask(){
-    @Override public ClusterState execute(    ClusterState currentState){
-      ImmutableSettings.Builder indexSettingsBuilder=settingsBuilder().put(indexSettings);
-      if (indexSettings.get(SETTING_NUMBER_OF_SHARDS) == null) {
-        indexSettingsBuilder.put(SETTING_NUMBER_OF_SHARDS,settings.getAsInt(SETTING_NUMBER_OF_SHARDS,5));
-      }
-      if (indexSettings.get(SETTING_NUMBER_OF_REPLICAS) == null) {
-        indexSettingsBuilder.put(SETTING_NUMBER_OF_REPLICAS,settings.getAsInt(SETTING_NUMBER_OF_REPLICAS,1));
-      }
-      Settings actualIndexSettings=indexSettingsBuilder.build();
-      IndexMetaData.Builder indexMetaData=newIndexMetaDataBuilder(index).settings(actualIndexSettings);
-      for (      Map.Entry<String,String> entry : fMappings.entrySet()) {
-        indexMetaData.putMapping(entry.getKey(),entry.getValue());
-      }
-      MetaData newMetaData=newMetaDataBuilder().metaData(currentState.metaData()).put(indexMetaData).build();
-      logger.info("[{}] creating index, cause [{}], shards [{}]/[{}], mappings {}",index,cause,indexMetaData.numberOfShards(),indexMetaData.numberOfReplicas(),fMappings.keySet());
-      return newClusterStateBuilder().state(currentState).metaData(newMetaData).build();
+synchronized (mutex) {
+    ClusterState clusterState=clusterService.state();
+    if (clusterState.routingTable().hasIndex(index)) {
+      throw new IndexAlreadyExistsException(new Index(index));
     }
-  }
+    if (clusterState.metaData().hasIndex(index)) {
+      throw new IndexAlreadyExistsException(new Index(index));
+    }
+    if (index.contains(" ")) {
+      throw new InvalidIndexNameException(new Index(index),index,"must not contain whitespace");
+    }
+    if (index.contains(",")) {
+      throw new InvalidIndexNameException(new Index(index),index,"must not contain ',");
+    }
+    if (index.contains("#")) {
+      throw new InvalidIndexNameException(new Index(index),index,"must not contain '#");
+    }
+    if (index.charAt(0) == '_') {
+      throw new InvalidIndexNameException(new Index(index),index,"must not start with '_'");
+    }
+    if (!index.toLowerCase().equals(index)) {
+      throw new InvalidIndexNameException(new Index(index),index,"must be lowercase");
+    }
+    if (!Strings.validFileName(index)) {
+      throw new InvalidIndexNameException(new Index(index),index,"must not contain the following characters " + Strings.INVALID_FILENAME_CHARS);
+    }
+    if (clusterState.metaData().aliases().contains(index)) {
+      throw new InvalidIndexNameException(new Index(index),index,"an alias with the same name already exists");
+    }
+    if (mappings == null) {
+      mappings=Maps.newHashMap();
+    }
+ else {
+      mappings=Maps.newHashMap(mappings);
+    }
+    File mappingsDir=new File(environment.configFile(),"mappings");
+    if (mappingsDir.exists() && mappingsDir.isDirectory()) {
+      File defaultMappingsDir=new File(mappingsDir,"_default");
+      if (mappingsDir.exists() && mappingsDir.isDirectory()) {
+        addMappings(mappings,defaultMappingsDir);
+      }
+      File indexMappingsDir=new File(mappingsDir,index);
+      if (mappingsDir.exists() && mappingsDir.isDirectory()) {
+        addMappings(mappings,indexMappingsDir);
+      }
+    }
+    final Map<String,String> fMappings=mappings;
+    nodeIndexCreatedAction.add(nodeCreatedListener);
+    clusterService.submitStateUpdateTask("create-index [" + index + "], cause ["+ cause+ "]",new ClusterStateUpdateTask(){
+      @Override public ClusterState execute(      ClusterState currentState){
+        ImmutableSettings.Builder indexSettingsBuilder=settingsBuilder().put(indexSettings);
+        if (indexSettings.get(SETTING_NUMBER_OF_SHARDS) == null) {
+          indexSettingsBuilder.put(SETTING_NUMBER_OF_SHARDS,settings.getAsInt(SETTING_NUMBER_OF_SHARDS,5));
+        }
+        if (indexSettings.get(SETTING_NUMBER_OF_REPLICAS) == null) {
+          indexSettingsBuilder.put(SETTING_NUMBER_OF_REPLICAS,settings.getAsInt(SETTING_NUMBER_OF_REPLICAS,1));
+        }
+        Settings actualIndexSettings=indexSettingsBuilder.build();
+        IndexMetaData.Builder indexMetaData=newIndexMetaDataBuilder(index).settings(actualIndexSettings);
+        for (        Map.Entry<String,String> entry : fMappings.entrySet()) {
+          indexMetaData.putMapping(entry.getKey(),entry.getValue());
+        }
+        MetaData newMetaData=newMetaDataBuilder().metaData(currentState.metaData()).put(indexMetaData).build();
+        logger.info("[{}] creating index, cause [{}], shards [{}]/[{}], mappings {}",index,cause,indexMetaData.numberOfShards(),indexMetaData.numberOfReplicas(),fMappings.keySet());
+        return newClusterStateBuilder().state(currentState).metaData(newMetaData).build();
+      }
+    }
 );
+  }
   boolean acknowledged;
   try {
     acknowledged=latch.await(timeout.millis(),TimeUnit.MILLISECONDS);
