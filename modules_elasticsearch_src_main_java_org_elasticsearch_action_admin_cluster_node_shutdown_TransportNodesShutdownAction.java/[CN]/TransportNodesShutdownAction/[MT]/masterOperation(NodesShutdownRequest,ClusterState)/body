@@ -1,0 +1,108 @@
+{
+  if (disabled) {
+    throw new ElasticSearchIllegalStateException("Shutdown is disabled");
+  }
+  Set<DiscoveryNode> nodes=Sets.newHashSet();
+  if (Actions.isAllNodes(request.nodesIds)) {
+    logger.info("[cluster_shutdown]: requested, shutting down in [{}]",request.delay);
+    nodes.addAll(state.nodes().nodes().values());
+    Thread t=new Thread(new Runnable(){
+      @Override public void run(){
+        try {
+          Thread.sleep(request.delay.millis());
+        }
+ catch (        InterruptedException e) {
+        }
+        logger.trace("[cluster_shutdown]: stopping the cluster service so no re-routing will occur");
+        clusterService.stop();
+        final CountDownLatch latch=new CountDownLatch(state.nodes().size());
+        for (        final DiscoveryNode node : state.nodes()) {
+          if (node.id().equals(state.nodes().masterNodeId())) {
+            latch.countDown();
+          }
+ else {
+            logger.trace("[cluster_shutdown]: sending shutdown request to [{}]",node);
+            transportService.sendRequest(node,NodeShutdownRequestHandler.ACTION,VoidStreamable.INSTANCE,new VoidTransportResponseHandler(){
+              @Override public void handleResponse(              VoidStreamable response){
+                logger.trace("[cluster_shutdown]: received shutdown response from [{}]",node);
+                latch.countDown();
+              }
+              @Override public void handleException(              RemoteTransportException exp){
+                logger.warn("[cluster_shutdown]: received failed shutdown response from [{}]",exp,node);
+                latch.countDown();
+              }
+            }
+);
+          }
+        }
+        try {
+          latch.await();
+        }
+ catch (        InterruptedException e) {
+        }
+        logger.info("[cluster_shutdown]: done shutting done all nodes except master, proceeding to master");
+        logger.trace("[cluster_shutdown]: shutting down the master [{}]",state.nodes().masterNode());
+        transportService.sendRequest(state.nodes().masterNode(),NodeShutdownRequestHandler.ACTION,VoidStreamable.INSTANCE,new VoidTransportResponseHandler(){
+          @Override public void handleResponse(          VoidStreamable response){
+            logger.trace("[cluster_shutdown]: received shutdown response from master");
+          }
+          @Override public void handleException(          RemoteTransportException exp){
+            logger.warn("[cluster_shutdown]: received failed shutdown response master",exp);
+          }
+        }
+);
+      }
+    }
+);
+    t.start();
+  }
+ else {
+    final String[] nodesIds=Actions.buildNodesIds(state.nodes(),request.nodesIds);
+    logger.info("[partial_cluster_shutdown]: requested, shutting down [{}] in [{}]",nodesIds,request.delay);
+    for (    String nodeId : nodesIds) {
+      final DiscoveryNode node=state.nodes().get(nodeId);
+      if (node != null) {
+        nodes.add(node);
+      }
+    }
+    Thread t=new Thread(new Runnable(){
+      @Override public void run(){
+        try {
+          Thread.sleep(request.delay.millis());
+        }
+ catch (        InterruptedException e) {
+        }
+        final CountDownLatch latch=new CountDownLatch(nodesIds.length);
+        for (        String nodeId : nodesIds) {
+          final DiscoveryNode node=state.nodes().get(nodeId);
+          if (node == null) {
+            logger.warn("[partial_cluster_shutdown]: no node to shutdown for node_id [{}]",nodeId);
+            latch.countDown();
+            continue;
+          }
+          logger.trace("[partial_cluster_shutdown]: sending shutdown request to [{}]",node);
+          transportService.sendRequest(node,NodeShutdownRequestHandler.ACTION,VoidStreamable.INSTANCE,new VoidTransportResponseHandler(){
+            @Override public void handleResponse(            VoidStreamable response){
+              logger.trace("[partial_cluster_shutdown]: received shutdown response from [{}]",node);
+              latch.countDown();
+            }
+            @Override public void handleException(            RemoteTransportException exp){
+              logger.warn("[partial_cluster_shutdown]: received failed shutdown response from [{}]",exp,node);
+              latch.countDown();
+            }
+          }
+);
+        }
+        try {
+          latch.await();
+        }
+ catch (        InterruptedException e) {
+        }
+        logger.info("[partial_cluster_shutdown]: done shutting down [{}]",nodesIds);
+      }
+    }
+);
+    t.start();
+  }
+  return new NodesShutdownResponse(clusterName,nodes.toArray(new DiscoveryNode[nodes.size()]));
+}
