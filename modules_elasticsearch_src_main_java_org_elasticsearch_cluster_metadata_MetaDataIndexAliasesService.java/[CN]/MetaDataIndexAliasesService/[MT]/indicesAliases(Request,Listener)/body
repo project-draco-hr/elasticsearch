@@ -1,0 +1,33 @@
+{
+  clusterService.submitStateUpdateTask("index-aliases",new ProcessedClusterStateUpdateTask(){
+    @Override public ClusterState execute(    ClusterState currentState){
+      for (      AliasAction aliasAction : request.actions) {
+        if (!currentState.metaData().hasIndex(aliasAction.index())) {
+          listener.onFailure(new IndexMissingException(new Index(aliasAction.index())));
+          return currentState;
+        }
+      }
+      MetaData.Builder builder=newMetaDataBuilder().metaData(currentState.metaData());
+      for (      AliasAction aliasAction : request.actions) {
+        IndexMetaData indexMetaData=builder.get(aliasAction.index());
+        if (indexMetaData == null) {
+          throw new IndexMissingException(new Index(aliasAction.index()));
+        }
+        Set<String> indexAliases=newHashSet(indexMetaData.settings().getAsArray("index.aliases"));
+        if (aliasAction.actionType() == AliasAction.Type.ADD) {
+          indexAliases.add(aliasAction.alias());
+        }
+ else         if (aliasAction.actionType() == AliasAction.Type.REMOVE) {
+          indexAliases.remove(aliasAction.alias());
+        }
+        Settings settings=settingsBuilder().put(indexMetaData.settings()).putArray("index.aliases",indexAliases.toArray(new String[indexAliases.size()])).build();
+        builder.put(newIndexMetaDataBuilder(indexMetaData).settings(settings));
+      }
+      return newClusterStateBuilder().state(currentState).metaData(builder).build();
+    }
+    @Override public void clusterStateProcessed(    ClusterState clusterState){
+      listener.onResponse(new Response());
+    }
+  }
+);
+}

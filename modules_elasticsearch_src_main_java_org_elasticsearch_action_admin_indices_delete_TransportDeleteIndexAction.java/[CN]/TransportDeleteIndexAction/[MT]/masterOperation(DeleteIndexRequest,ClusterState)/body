@@ -1,4 +1,31 @@
 {
-  MetaDataService.DeleteIndexResult deleteIndexResult=metaDataService.deleteIndex(request.index(),request.timeout());
-  return new DeleteIndexResponse(deleteIndexResult.acknowledged());
+  final AtomicReference<DeleteIndexResponse> responseRef=new AtomicReference<DeleteIndexResponse>();
+  final AtomicReference<Throwable> failureRef=new AtomicReference<Throwable>();
+  final CountDownLatch latch=new CountDownLatch(1);
+  deleteIndexService.deleteIndex(new MetaDataDeleteIndexService.Request(request.index()).timeout(request.timeout()),new MetaDataDeleteIndexService.Listener(){
+    @Override public void onResponse(    MetaDataDeleteIndexService.Response response){
+      responseRef.set(new DeleteIndexResponse(response.acknowledged()));
+      latch.countDown();
+    }
+    @Override public void onFailure(    Throwable t){
+      failureRef.set(t);
+      latch.countDown();
+    }
+  }
+);
+  try {
+    latch.await();
+  }
+ catch (  InterruptedException e) {
+    failureRef.set(e);
+  }
+  if (failureRef.get() != null) {
+    if (failureRef.get() instanceof ElasticSearchException) {
+      throw (ElasticSearchException)failureRef.get();
+    }
+ else {
+      throw new ElasticSearchException(failureRef.get().getMessage(),failureRef.get());
+    }
+  }
+  return responseRef.get();
 }

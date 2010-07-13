@@ -1,0 +1,23 @@
+{
+  if (notified.compareAndSet(false,true)) {
+    if (timeout != null) {
+      timeout.cancel();
+    }
+    clusterService.submitStateUpdateTask("reroute after index [" + request.index + "] creation",new ProcessedClusterStateUpdateTask(){
+      @Override public ClusterState execute(      ClusterState currentState){
+        RoutingTable.Builder routingTableBuilder=new RoutingTable.Builder();
+        for (        IndexRoutingTable indexRoutingTable : currentState.routingTable().indicesRouting().values()) {
+          routingTableBuilder.add(indexRoutingTable);
+        }
+        IndexRoutingTable.Builder indexRoutingBuilder=new IndexRoutingTable.Builder(request.index).initializeEmpty(currentState.metaData().index(request.index));
+        routingTableBuilder.add(indexRoutingBuilder);
+        RoutingTable newRoutingTable=shardsRoutingStrategy.reroute(newClusterStateBuilder().state(currentState).routingTable(routingTableBuilder).build());
+        return newClusterStateBuilder().state(currentState).routingTable(newRoutingTable).build();
+      }
+      @Override public void clusterStateProcessed(      ClusterState clusterState){
+        listener.onResponse(response);
+      }
+    }
+);
+  }
+}

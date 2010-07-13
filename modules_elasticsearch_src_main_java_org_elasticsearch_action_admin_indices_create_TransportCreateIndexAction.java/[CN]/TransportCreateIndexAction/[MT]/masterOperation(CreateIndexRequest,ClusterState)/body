@@ -3,6 +3,33 @@
   if (cause.length() == 0) {
     cause="api";
   }
-  MetaDataService.CreateIndexResult createIndexResult=metaDataService.createIndex(cause,request.index(),request.settings(),request.mappings(),request.timeout());
-  return new CreateIndexResponse(createIndexResult.acknowledged());
+  final AtomicReference<CreateIndexResponse> responseRef=new AtomicReference<CreateIndexResponse>();
+  final AtomicReference<Throwable> failureRef=new AtomicReference<Throwable>();
+  final CountDownLatch latch=new CountDownLatch(1);
+  createIndexService.createIndex(new MetaDataCreateIndexService.Request(cause,request.index()).settings(request.settings()).mappings(request.mappings()).timeout(request.timeout()),new MetaDataCreateIndexService.Listener(){
+    @Override public void onResponse(    MetaDataCreateIndexService.Response response){
+      responseRef.set(new CreateIndexResponse(response.acknowledged()));
+      latch.countDown();
+    }
+    @Override public void onFailure(    Throwable t){
+      failureRef.set(t);
+      latch.countDown();
+    }
+  }
+);
+  try {
+    latch.await();
+  }
+ catch (  InterruptedException e) {
+    failureRef.set(e);
+  }
+  if (failureRef.get() != null) {
+    if (failureRef.get() instanceof ElasticSearchException) {
+      throw (ElasticSearchException)failureRef.get();
+    }
+ else {
+      throw new ElasticSearchException(failureRef.get().getMessage(),failureRef.get());
+    }
+  }
+  return responseRef.get();
 }

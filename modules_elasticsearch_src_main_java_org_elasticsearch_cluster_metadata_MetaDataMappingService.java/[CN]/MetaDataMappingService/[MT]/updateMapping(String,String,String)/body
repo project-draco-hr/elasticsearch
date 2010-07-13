@@ -1,0 +1,27 @@
+{
+  clusterService.submitStateUpdateTask("update-mapping [" + index + "]["+ type+ "]",new ClusterStateUpdateTask(){
+    @Override public ClusterState execute(    ClusterState currentState){
+      MapperService mapperService=indicesService.indexServiceSafe(index).mapperService();
+      DocumentMapper existingMapper=mapperService.documentMapper(type);
+      DocumentMapper updatedMapper=mapperService.parse(type,mappingSource);
+      if (existingMapper == null) {
+        existingMapper=updatedMapper;
+      }
+ else {
+        existingMapper.merge(updatedMapper,mergeFlags().simulate(false));
+      }
+      final String updatedMappingSource=existingMapper.buildSource();
+      if (logger.isDebugEnabled()) {
+        logger.debug("[{}] update mapping [{}] (dynamic) with source [{}]",index,type,updatedMappingSource);
+      }
+ else       if (logger.isInfoEnabled()) {
+        logger.info("[{}] update mapping [{}] (dynamic)",index,type);
+      }
+      MetaData.Builder builder=newMetaDataBuilder().metaData(currentState.metaData());
+      IndexMetaData indexMetaData=currentState.metaData().index(index);
+      builder.put(newIndexMetaDataBuilder(indexMetaData).putMapping(type,updatedMappingSource));
+      return newClusterStateBuilder().state(currentState).metaData(builder).build();
+    }
+  }
+);
+}

@@ -1,0 +1,105 @@
+{
+  clusterService.submitStateUpdateTask("put-mapping [" + request.mappingType + "]",new ClusterStateUpdateTask(){
+    @Override public ClusterState execute(    ClusterState currentState){
+      final PutMappingListener listener=new PutMappingListener(request,userListener);
+      try {
+        if (request.indices.length == 0) {
+          throw new IndexMissingException(new Index("_all"));
+        }
+        for (        String index : request.indices) {
+          if (!currentState.metaData().hasIndex(index)) {
+            listener.onFailure(new IndexMissingException(new Index(index)));
+          }
+        }
+        Map<String,DocumentMapper> newMappers=newHashMap();
+        Map<String,DocumentMapper> existingMappers=newHashMap();
+        for (        String index : request.indices) {
+          IndexService indexService=indicesService.indexService(index);
+          if (indexService != null) {
+            DocumentMapper newMapper=indexService.mapperService().parse(request.mappingType,request.mappingSource);
+            newMappers.put(index,newMapper);
+            DocumentMapper existingMapper=indexService.mapperService().documentMapper(request.mappingType);
+            if (existingMapper != null) {
+              DocumentMapper.MergeResult mergeResult=existingMapper.merge(newMapper,mergeFlags().simulate(true));
+              if (!request.ignoreConflicts && mergeResult.hasConflicts()) {
+                throw new MergeMappingException(mergeResult.conflicts());
+              }
+              existingMappers.put(index,existingMapper);
+            }
+          }
+ else {
+            throw new IndexMissingException(new Index(index));
+          }
+        }
+        String mappingType=request.mappingType;
+        if (mappingType == null) {
+          mappingType=newMappers.values().iterator().next().type();
+        }
+ else         if (!mappingType.equals(newMappers.values().iterator().next().type())) {
+          throw new InvalidTypeNameException("Type name provided does not match type name within mapping definition");
+        }
+        if (mappingType.charAt(0) == '_') {
+          throw new InvalidTypeNameException("Document mapping type name can't start with '_'");
+        }
+        final Map<String,Tuple<String,String>> mappings=newHashMap();
+        for (        Map.Entry<String,DocumentMapper> entry : newMappers.entrySet()) {
+          Tuple<String,String> mapping;
+          String index=entry.getKey();
+          DocumentMapper newMapper=entry.getValue();
+          if (existingMappers.containsKey(entry.getKey())) {
+            DocumentMapper existingMapper=existingMappers.get(entry.getKey());
+            existingMapper.merge(newMapper,mergeFlags().simulate(false));
+            mapping=new Tuple<String,String>(existingMapper.type(),existingMapper.buildSource());
+          }
+ else {
+            mapping=new Tuple<String,String>(newMapper.type(),newMapper.buildSource());
+          }
+          mappings.put(index,mapping);
+          if (logger.isDebugEnabled()) {
+            logger.debug("[{}] put_mapping [{}] with source [{}]",index,mapping.v1(),mapping.v2());
+          }
+ else           if (logger.isInfoEnabled()) {
+            logger.info("[{}] put_mapping [{}]",index,mapping.v1());
+          }
+        }
+        MetaData.Builder builder=newMetaDataBuilder().metaData(currentState.metaData());
+        for (        String indexName : request.indices) {
+          IndexMetaData indexMetaData=currentState.metaData().index(indexName);
+          if (indexMetaData == null) {
+            throw new IndexMissingException(new Index(indexName));
+          }
+          Tuple<String,String> mapping=mappings.get(indexName);
+          builder.put(newIndexMetaDataBuilder(indexMetaData).putMapping(mapping.v1(),mapping.v2()));
+        }
+        final AtomicInteger counter=new AtomicInteger(clusterService.state().nodes().size() * request.indices.length);
+        final Set<String> indicesSet=newHashSet(request.indices);
+        final NodeMappingCreatedAction.Listener nodeMappingListener=new NodeMappingCreatedAction.Listener(){
+          @Override public void onNodeMappingCreated(          NodeMappingCreatedAction.NodeMappingCreatedResponse response){
+            if (indicesSet.contains(response.index()) && response.type().equals(request.mappingType)) {
+              if (counter.decrementAndGet() == 0) {
+                listener.onResponse(new Response(true));
+                nodeMappingCreatedAction.remove(this);
+              }
+            }
+          }
+        }
+;
+        nodeMappingCreatedAction.add(nodeMappingListener);
+        Timeout timeoutTask=timerService.newTimeout(new TimerTask(){
+          @Override public void run(          Timeout timeout) throws Exception {
+            listener.onResponse(new Response(false));
+            nodeMappingCreatedAction.remove(nodeMappingListener);
+          }
+        }
+,request.timeout,TimerService.ExecutionType.THREADED);
+        listener.timeout=timeoutTask;
+        return newClusterStateBuilder().state(currentState).metaData(builder).build();
+      }
+ catch (      Exception e) {
+        listener.onFailure(e);
+        return currentState;
+      }
+    }
+  }
+);
+}
