@@ -36,8 +36,9 @@
         retry=true;
         continue;
       }
+      ClusterState clusterState;
       try {
-        membership.sendJoinRequestBlocking(masterNode,localNode,initialPingTimeout);
+        clusterState=membership.sendJoinRequestBlocking(masterNode,localNode,initialPingTimeout);
       }
  catch (      Exception e) {
         if (e instanceof ElasticSearchException) {
@@ -53,10 +54,12 @@
         continue;
       }
       masterFD.start(masterNode,"initial_join");
+      final MetaData metaData=clusterState.metaData();
       clusterService.submitStateUpdateTask("zen-disco-join (detected master)",new ProcessedClusterStateUpdateTask(){
         @Override public ClusterState execute(        ClusterState currentState){
           ClusterBlocks clusterBlocks=ClusterBlocks.builder().blocks(currentState.blocks()).removeGlobalBlock(NO_MASTER_BLOCK).build();
-          return newClusterStateBuilder().state(currentState).blocks(clusterBlocks).build();
+          DiscoveryNodes.Builder nodesBuilder=DiscoveryNodes.newNodesBuilder().putAll(currentState.nodes()).put(localNode).localNodeId(localNode.id());
+          return newClusterStateBuilder().state(currentState).nodes(nodesBuilder).blocks(clusterBlocks).metaData(metaData).build();
         }
         @Override public void clusterStateProcessed(        ClusterState clusterState){
         }
