@@ -1,19 +1,23 @@
 {
-  Map<Integer,Injector> tmpShardInjectors=newHashMap(shardsInjectors);
-  Injector shardInjector=tmpShardInjectors.remove(shardId);
-  if (shardInjector == null) {
-    if (!delete) {
-      return;
+  Injector shardInjector;
+  IndexShard indexShard;
+synchronized (this) {
+    Map<Integer,Injector> tmpShardInjectors=newHashMap(shardsInjectors);
+    shardInjector=tmpShardInjectors.remove(shardId);
+    if (shardInjector == null) {
+      if (!delete) {
+        return;
+      }
+      throw new IndexShardMissingException(new ShardId(index,shardId));
     }
-    throw new IndexShardMissingException(new ShardId(index,shardId));
+    shardsInjectors=ImmutableMap.copyOf(tmpShardInjectors);
+    if (delete) {
+      logger.debug("deleting shard_id [{}]",shardId);
+    }
+    Map<Integer,IndexShard> tmpShardsMap=newHashMap(shards);
+    indexShard=tmpShardsMap.remove(shardId);
+    shards=ImmutableMap.copyOf(tmpShardsMap);
   }
-  shardsInjectors=ImmutableMap.copyOf(tmpShardInjectors);
-  if (delete) {
-    logger.debug("deleting shard_id [{}]",shardId);
-  }
-  Map<Integer,IndexShard> tmpShardsMap=newHashMap(shards);
-  IndexShard indexShard=tmpShardsMap.remove(shardId);
-  shards=ImmutableMap.copyOf(tmpShardsMap);
   ShardId sId=new ShardId(index,shardId);
   indicesLifecycle.beforeIndexShardClosed(sId,indexShard,delete);
   for (  Class<? extends CloseableIndexComponent> closeable : pluginsService.shardServices()) {

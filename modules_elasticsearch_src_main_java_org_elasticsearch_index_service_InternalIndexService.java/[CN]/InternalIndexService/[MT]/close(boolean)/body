@@ -1,12 +1,28 @@
 {
   try {
-    for (    int shardId : shardIds()) {
-      try {
-        deleteShard(shardId,delete,delete);
+    Set<Integer> shardIds=shardIds();
+    final CountDownLatch latch=new CountDownLatch(shardIds.size());
+    for (    final int shardId : shardIds) {
+      threadPool.cached().execute(new Runnable(){
+        @Override public void run(){
+          try {
+            deleteShard(shardId,delete,delete);
+          }
+ catch (          Exception e) {
+            logger.warn("failed to close shard, delete [{}]",e,delete);
+          }
+ finally {
+            latch.countDown();
+          }
+        }
       }
- catch (      Exception e) {
-        logger.warn("failed to close shard, delete [{}]",e,delete);
-      }
+);
+    }
+    try {
+      latch.await();
+    }
+ catch (    InterruptedException e) {
+      throw new ElasticSearchInterruptedException("interrupted closing index [ " + index().name() + "]",e);
     }
   }
   finally {
