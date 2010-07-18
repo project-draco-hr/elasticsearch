@@ -1,33 +1,39 @@
 {
-  if (indexWriter != null) {
-    throw new EngineAlreadyStartedException(shardId);
-  }
-  if (logger.isDebugEnabled()) {
-    logger.debug("Starting engine with ram_buffer_size[" + indexingBufferSize + "], refresh_interval["+ refreshInterval+ "]");
-  }
+  rwl.writeLock().lock();
   try {
-    this.indexWriter=createWriter();
-  }
- catch (  IOException e) {
-    throw new EngineCreationFailureException(shardId,"Failed to create engine",e);
-  }
-  try {
-    translog.newTranslog(IndexReader.getCurrentVersion(store.directory()));
-    this.nrtResource=buildNrtResource(indexWriter);
-  }
- catch (  IOException e) {
+    if (indexWriter != null) {
+      throw new EngineAlreadyStartedException(shardId);
+    }
+    if (logger.isDebugEnabled()) {
+      logger.debug("Starting engine with ram_buffer_size[" + indexingBufferSize + "], refresh_interval["+ refreshInterval+ "]");
+    }
     try {
-      indexWriter.rollback();
+      this.indexWriter=createWriter();
     }
- catch (    IOException e1) {
+ catch (    IOException e) {
+      throw new EngineCreationFailureException(shardId,"Failed to create engine",e);
     }
- finally {
+    try {
+      translog.newTranslog(IndexReader.getCurrentVersion(store.directory()));
+      this.nrtResource=buildNrtResource(indexWriter);
+    }
+ catch (    IOException e) {
       try {
-        indexWriter.close();
+        indexWriter.rollback();
       }
  catch (      IOException e1) {
       }
+ finally {
+        try {
+          indexWriter.close();
+        }
+ catch (        IOException e1) {
+        }
+      }
+      throw new EngineCreationFailureException(shardId,"Failed to open reader on writer",e);
     }
-    throw new EngineCreationFailureException(shardId,"Failed to open reader on writer",e);
+  }
+  finally {
+    rwl.writeLock().unlock();
   }
 }

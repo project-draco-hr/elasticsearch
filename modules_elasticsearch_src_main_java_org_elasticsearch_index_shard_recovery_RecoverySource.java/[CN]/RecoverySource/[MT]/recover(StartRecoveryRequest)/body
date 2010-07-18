@@ -1,0 +1,175 @@
+{
+  if (!recoveryThrottler.tryRecovery(request.shardId(),"peer recovery source")) {
+    RecoveryResponse retry=new RecoveryResponse();
+    retry.retry=true;
+    return retry;
+  }
+  final InternalIndexShard shard=(InternalIndexShard)indicesService.indexServiceSafe(request.shardId().index().name()).shardSafe(request.shardId().id());
+  try {
+    logger.trace("starting recovery to {}, mark_as_relocated {}",request.targetNode(),request.markAsRelocated());
+    final RecoveryResponse response=new RecoveryResponse();
+    shard.recover(new Engine.RecoveryHandler(){
+      @Override public void phase1(      final SnapshotIndexCommit snapshot) throws ElasticSearchException {
+        long totalSize=0;
+        long existingTotalSize=0;
+        try {
+          StopWatch stopWatch=new StopWatch().start();
+          for (          String name : snapshot.getFiles()) {
+            StoreFileMetaData md=shard.store().metaDataWithMd5(name);
+            boolean useExisting=false;
+            if (request.existingFiles.containsKey(name)) {
+              if (md.md5().equals(request.existingFiles.get(name).md5())) {
+                response.phase1ExistingFileNames.add(name);
+                response.phase1ExistingFileSizes.add(md.sizeInBytes());
+                existingTotalSize+=md.sizeInBytes();
+                useExisting=true;
+                if (logger.isTraceEnabled()) {
+                  logger.trace("[{}][{}] recovery [phase1] to {}: not recovering [{}], exists in local store and has md5 [{}]",request.shardId().index().name(),request.shardId().id(),request.targetNode(),name,md.md5());
+                }
+              }
+            }
+            if (!useExisting) {
+              if (request.existingFiles.containsKey(name)) {
+                logger.trace("[{}][{}] recovery [phase1] to {}: recovering [{}], exists in local store, but has different md5: remote [{}], local [{}]",request.shardId().index().name(),request.shardId().id(),request.targetNode(),name,request.existingFiles.get(name).md5(),md.md5());
+              }
+ else {
+                logger.trace("[{}][{}] recovery [phase1] to {}: recovering [{}], does not exists in remote",request.shardId().index().name(),request.shardId().id(),request.targetNode(),name);
+              }
+              response.phase1FileNames.add(name);
+              response.phase1FileSizes.add(md.sizeInBytes());
+              totalSize+=md.sizeInBytes();
+            }
+          }
+          response.phase1TotalSize=totalSize;
+          response.phase1ExistingTotalSize=existingTotalSize;
+          final AtomicLong throttlingWaitTime=new AtomicLong();
+          logger.trace("[{}][{}] recovery [phase1] to {}: recovering_files [{}] with total_size [{}], reusing_files [{}] with total_size [{}]",request.shardId().index().name(),request.shardId().id(),request.targetNode(),response.phase1FileNames.size(),new ByteSizeValue(totalSize),response.phase1ExistingFileNames.size(),new ByteSizeValue(existingTotalSize));
+          final CountDownLatch latch=new CountDownLatch(response.phase1FileNames.size());
+          final AtomicReference<Exception> lastException=new AtomicReference<Exception>();
+          for (          final String name : response.phase1FileNames) {
+            threadPool.execute(new Runnable(){
+              @Override public void run(){
+                IndexInput indexInput=null;
+                try {
+                  long throttlingStartTime=System.currentTimeMillis();
+                  while (!recoveryThrottler.tryStream(request.shardId(),name)) {
+                    if (shard.state() == IndexShardState.CLOSED) {
+                      throw new IndexShardClosedException(shard.shardId());
+                    }
+                    Thread.sleep(recoveryThrottler.throttleInterval().millis());
+                  }
+                  throttlingWaitTime.addAndGet(System.currentTimeMillis() - throttlingStartTime);
+                  final int BUFFER_SIZE=(int)fileChunkSize.bytes();
+                  byte[] buf=new byte[BUFFER_SIZE];
+                  indexInput=snapshot.getDirectory().openInput(name);
+                  long len=indexInput.length();
+                  long readCount=0;
+                  while (readCount < len) {
+                    if (shard.state() == IndexShardState.CLOSED) {
+                      throw new IndexShardClosedException(shard.shardId());
+                    }
+                    int toRead=readCount + BUFFER_SIZE > len ? (int)(len - readCount) : BUFFER_SIZE;
+                    long position=indexInput.getFilePointer();
+                    indexInput.readBytes(buf,0,toRead,false);
+                    transportService.submitRequest(request.targetNode(),RecoveryTarget.Actions.FILE_CHUNK,new RecoveryFileChunkRequest(request.shardId(),name,position,len,buf,toRead),VoidTransportResponseHandler.INSTANCE).txGet();
+                    readCount+=toRead;
+                  }
+                  indexInput.close();
+                }
+ catch (                Exception e) {
+                  lastException.set(e);
+                }
+ finally {
+                  recoveryThrottler.streamDone(request.shardId(),name);
+                  if (indexInput != null) {
+                    try {
+                      indexInput.close();
+                    }
+ catch (                    IOException e) {
+                    }
+                  }
+                  latch.countDown();
+                }
+              }
+            }
+);
+          }
+          latch.await();
+          if (lastException.get() != null) {
+            throw lastException.get();
+          }
+          Set<String> snapshotFiles=Sets.newHashSet(snapshot.getFiles());
+          transportService.submitRequest(request.targetNode(),RecoveryTarget.Actions.CLEAN_FILES,new RecoveryCleanFilesRequest(shard.shardId(),snapshotFiles),VoidTransportResponseHandler.INSTANCE).txGet();
+          stopWatch.stop();
+          logger.trace("[{}][{}] recovery [phase1] to {}: took [{}], throttling_wait [{}]",request.shardId().index().name(),request.shardId().id(),request.targetNode(),stopWatch.totalTime(),timeValueMillis(throttlingWaitTime.get()));
+          response.phase1Time=stopWatch.totalTime().millis();
+        }
+ catch (        Throwable e) {
+          throw new RecoverFilesRecoveryException(request.shardId(),response.phase1FileNames.size(),new ByteSizeValue(totalSize),e);
+        }
+      }
+      @Override public void phase2(      Translog.Snapshot snapshot) throws ElasticSearchException {
+        if (shard.state() == IndexShardState.CLOSED) {
+          throw new IndexShardClosedException(request.shardId());
+        }
+        logger.trace("[{}][{}] recovery [phase2] to {}: sending transaction log operations",request.shardId().index().name(),request.shardId().id(),request.targetNode());
+        StopWatch stopWatch=new StopWatch().start();
+        transportService.submitRequest(request.targetNode(),RecoveryTarget.Actions.PREPARE_TRANSLOG,new RecoveryPrepareForTranslogOperationsRequest(request.shardId()),VoidTransportResponseHandler.INSTANCE).txGet();
+        int totalOperations=sendSnapshot(snapshot);
+        stopWatch.stop();
+        logger.trace("[{}][{}] recovery [phase2] to {}: took [{}]",request.shardId().index().name(),request.shardId().id(),request.targetNode(),stopWatch.totalTime());
+        response.phase2Time=stopWatch.totalTime().millis();
+        response.phase2Operations=totalOperations;
+      }
+      @Override public void phase3(      Translog.Snapshot snapshot) throws ElasticSearchException {
+        if (shard.state() == IndexShardState.CLOSED) {
+          throw new IndexShardClosedException(request.shardId());
+        }
+        logger.trace("[{}][{}] recovery [phase3] to {}: sending transaction log operations",request.shardId().index().name(),request.shardId().id(),request.targetNode());
+        StopWatch stopWatch=new StopWatch().start();
+        int totalOperations=sendSnapshot(snapshot);
+        transportService.submitRequest(request.targetNode(),RecoveryTarget.Actions.FINALIZE,new RecoveryFinalizeRecoveryRequest(request.shardId()),VoidTransportResponseHandler.INSTANCE).txGet();
+        if (request.markAsRelocated()) {
+          try {
+            shard.relocated();
+          }
+ catch (          IllegalIndexShardStateException e) {
+          }
+        }
+        stopWatch.stop();
+        logger.trace("[{}][{}] recovery [phase3] to {}: took [{}]",request.shardId().index().name(),request.shardId().id(),request.targetNode(),stopWatch.totalTime());
+        response.phase3Time=stopWatch.totalTime().millis();
+        response.phase3Operations=totalOperations;
+      }
+      private int sendSnapshot(      Translog.Snapshot snapshot) throws ElasticSearchException {
+        int translogBatchSize=10;
+        int counter=0;
+        int totalOperations=0;
+        List<Translog.Operation> operations=Lists.newArrayList();
+        while (snapshot.hasNext()) {
+          if (shard.state() == IndexShardState.CLOSED) {
+            throw new IndexShardClosedException(request.shardId());
+          }
+          operations.add(snapshot.next());
+          totalOperations++;
+          if (++counter == translogBatchSize) {
+            RecoveryTranslogOperationsRequest translogOperationsRequest=new RecoveryTranslogOperationsRequest(request.shardId(),operations);
+            transportService.submitRequest(request.targetNode(),RecoveryTarget.Actions.TRANSLOG_OPS,translogOperationsRequest,VoidTransportResponseHandler.INSTANCE).txGet();
+            counter=0;
+            operations=Lists.newArrayList();
+          }
+        }
+        if (!operations.isEmpty()) {
+          RecoveryTranslogOperationsRequest translogOperationsRequest=new RecoveryTranslogOperationsRequest(request.shardId(),operations);
+          transportService.submitRequest(request.targetNode(),RecoveryTarget.Actions.TRANSLOG_OPS,translogOperationsRequest,VoidTransportResponseHandler.INSTANCE).txGet();
+        }
+        return totalOperations;
+      }
+    }
+);
+    return response;
+  }
+  finally {
+    recoveryThrottler.recoveryDone(request.shardId(),"peer recovery source");
+  }
+}

@@ -1,0 +1,41 @@
+{
+  InternalIndexShard shard=(InternalIndexShard)indicesService.indexServiceSafe(request.shardId().index().name()).shardSafe(request.shardId().id());
+  OnGoingRecovery onGoingRecovery=onGoingRecoveries.get(shard.shardId());
+  if (onGoingRecovery == null) {
+    throw new IndexShardClosedException(shard.shardId());
+  }
+  IndexOutput indexOutput;
+  if (request.position() == 0) {
+    indexOutput=onGoingRecovery.openIndexOutputs.remove(request.name());
+    if (indexOutput != null) {
+      try {
+        indexOutput.close();
+      }
+ catch (      IOException e) {
+      }
+    }
+    indexOutput=shard.store().directory().createOutput(request.name());
+    onGoingRecovery.openIndexOutputs.put(request.name(),indexOutput);
+  }
+ else {
+    indexOutput=onGoingRecovery.openIndexOutputs.get(request.name());
+  }
+synchronized (indexOutput) {
+    try {
+      indexOutput.writeBytes(request.content(),request.contentLength());
+      if (indexOutput.getFilePointer() == request.length()) {
+        indexOutput.close();
+        onGoingRecovery.openIndexOutputs.remove(request.name());
+      }
+    }
+ catch (    IOException e) {
+      onGoingRecovery.openIndexOutputs.remove(request.name());
+      try {
+        indexOutput.close();
+      }
+ catch (      IOException e1) {
+      }
+    }
+  }
+  channel.sendResponse(VoidStreamable.INSTANCE);
+}

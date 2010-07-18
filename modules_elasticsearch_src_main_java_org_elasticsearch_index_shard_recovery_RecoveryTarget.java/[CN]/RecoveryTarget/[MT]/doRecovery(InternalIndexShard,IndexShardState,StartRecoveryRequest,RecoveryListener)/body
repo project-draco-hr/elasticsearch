@@ -1,0 +1,67 @@
+{
+  if (!recoveryThrottler.tryRecovery(shard.shardId(),"peer recovery target")) {
+    if (shard.state() == IndexShardState.CLOSED) {
+      listener.onIgnoreRecovery("shard closed, stop recovery");
+      return;
+    }
+    shard.restoreRecoveryState(preRecoveryState);
+    listener.onRetryRecovery(recoveryThrottler.throttleInterval());
+    return;
+  }
+  try {
+    logger.trace("[{}][{}] starting recovery from {}",request.shardId().index().name(),request.shardId().id(),request.sourceNode());
+    onGoingRecoveries.put(request.shardId(),new OnGoingRecovery());
+    StopWatch stopWatch=new StopWatch().start();
+    RecoveryResponse recoveryStatus=transportService.submitRequest(request.sourceNode(),RecoverySource.Actions.START_RECOVERY,request,new FutureTransportResponseHandler<RecoveryResponse>(){
+      @Override public RecoveryResponse newInstance(){
+        return new RecoveryResponse();
+      }
+    }
+).txGet();
+    if (recoveryStatus.retry) {
+      if (shard.state() == IndexShardState.CLOSED) {
+        listener.onIgnoreRecovery("shard closed, stop recovery");
+        return;
+      }
+      logger.trace("[{}][{}] retrying recovery in [{}], source shard is busy",request.shardId().index().name(),request.shardId().id(),recoveryThrottler.throttleInterval());
+      removeAndCleanOnGoingRecovery(request.shardId());
+      shard.restoreRecoveryState(preRecoveryState);
+      listener.onRetryRecovery(recoveryThrottler.throttleInterval());
+      return;
+    }
+    stopWatch.stop();
+    if (logger.isDebugEnabled()) {
+      StringBuilder sb=new StringBuilder();
+      sb.append('[').append(request.shardId().index().name()).append(']').append('[').append(request.shardId().id()).append("] ");
+      sb.append("recovery completed from ").append(request.sourceNode()).append(", took[").append(stopWatch.totalTime()).append("]\n");
+      sb.append("   phase1: recovered_files [").append(recoveryStatus.phase1FileNames.size()).append("]").append(" with total_size of [").append(new ByteSizeValue(recoveryStatus.phase1TotalSize)).append("]").append(", took [").append(timeValueMillis(recoveryStatus.phase1Time)).append("], throttling_wait [").append(timeValueMillis(recoveryStatus.phase1ThrottlingWaitTime)).append(']').append("\n");
+      sb.append("         : reusing_files   [").append(recoveryStatus.phase1ExistingFileNames.size()).append("] with total_size of [").append(new ByteSizeValue(recoveryStatus.phase1ExistingTotalSize)).append("]\n");
+      sb.append("   phase2: recovered [").append(recoveryStatus.phase2Operations).append("]").append(" transaction log operations").append(", took [").append(timeValueMillis(recoveryStatus.phase2Time)).append("]").append("\n");
+      sb.append("   phase3: recovered [").append(recoveryStatus.phase3Operations).append("]").append(" transaction log operations").append(", took [").append(timeValueMillis(recoveryStatus.phase3Time)).append("]");
+      logger.debug(sb.toString());
+    }
+    removeAndCleanOnGoingRecovery(request.shardId());
+    listener.onRecoveryDone();
+  }
+ catch (  Exception e) {
+    removeAndCleanOnGoingRecovery(request.shardId());
+    if (shard.state() == IndexShardState.CLOSED) {
+      listener.onIgnoreRecovery("shard closed, stop recovery");
+      return;
+    }
+    logger.trace("[{}][{}] recovery from [{}] failed",e,request.shardId().index().name(),request.shardId().id(),request.sourceNode());
+    Throwable cause=ExceptionsHelper.unwrapCause(e);
+    if (cause instanceof RecoveryEngineException) {
+      cause=cause.getCause();
+    }
+    if (cause instanceof IndexShardNotStartedException || cause instanceof IndexMissingException || cause instanceof IndexShardMissingException) {
+      shard.restoreRecoveryState(preRecoveryState);
+      listener.onRetryRecovery(recoveryThrottler.throttleInterval());
+      return;
+    }
+    listener.onRecoveryFailure(new RecoveryFailedException(request,e),true);
+  }
+ finally {
+    recoveryThrottler.recoveryDone(shard.shardId(),"peer recovery target");
+  }
+}
