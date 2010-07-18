@@ -1,7 +1,7 @@
 {
   if (!recoveryThrottler.tryRecovery(shard.shardId(),"peer recovery target")) {
     if (shard.state() == IndexShardState.CLOSED) {
-      listener.onIgnoreRecovery("shard closed, stop recovery");
+      listener.onIgnoreRecovery(false,"shard closed, stop recovery");
       return;
     }
     shard.restoreRecoveryState(preRecoveryState);
@@ -20,7 +20,7 @@
 ).txGet();
     if (recoveryStatus.retry) {
       if (shard.state() == IndexShardState.CLOSED) {
-        listener.onIgnoreRecovery("shard closed, stop recovery");
+        listener.onIgnoreRecovery(false,"shard closed, stop recovery");
         return;
       }
       logger.trace("[{}][{}] retrying recovery in [{}], source shard is busy",request.shardId().index().name(),request.shardId().id(),recoveryThrottler.throttleInterval());
@@ -46,7 +46,7 @@
  catch (  Exception e) {
     removeAndCleanOnGoingRecovery(request.shardId());
     if (shard.state() == IndexShardState.CLOSED) {
-      listener.onIgnoreRecovery("shard closed, stop recovery");
+      listener.onIgnoreRecovery(false,"shard closed, stop recovery");
       return;
     }
     logger.trace("[{}][{}] recovery from [{}] failed",e,request.shardId().index().name(),request.shardId().id(),request.sourceNode());
@@ -54,9 +54,25 @@
     if (cause instanceof RecoveryEngineException) {
       cause=cause.getCause();
     }
+    cause=ExceptionsHelper.unwrapCause(cause);
+    if (cause instanceof RecoveryEngineException) {
+      cause=cause.getCause();
+    }
     if (cause instanceof IndexShardNotStartedException || cause instanceof IndexMissingException || cause instanceof IndexShardMissingException) {
-      shard.restoreRecoveryState(preRecoveryState);
+      try {
+        shard.restoreRecoveryState(preRecoveryState);
+      }
+ catch (      IndexShardNotRecoveringException e1) {
+      }
       listener.onRetryRecovery(recoveryThrottler.throttleInterval());
+      return;
+    }
+    if (cause instanceof ConnectTransportException) {
+      listener.onIgnoreRecovery(true,"source node disconnected");
+      return;
+    }
+    if (cause instanceof IndexShardClosedException) {
+      listener.onIgnoreRecovery(true,"source node disconnected");
       return;
     }
     listener.onRecoveryFailure(new RecoveryFailedException(request,e),true);
