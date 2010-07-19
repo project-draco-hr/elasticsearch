@@ -1,5 +1,6 @@
 {
   startNode("node1");
+  startNode("node2");
   client("node1").admin().indices().prepareCreate("test").execute().actionGet();
   final AtomicLong idGenerator=new AtomicLong();
   final AtomicBoolean stop=new AtomicBoolean(false);
@@ -8,11 +9,15 @@
   for (int i=0; i < writers.length; i++) {
     writers[i]=new Thread(){
       @Override public void run(){
-        while (!stop.get()) {
-          long id=idGenerator.incrementAndGet();
-          client("node1").prepareIndex("test","type1",Long.toString(id)).setSource(MapBuilder.<String,Object>newMapBuilder().put("test","value" + id).map()).execute().actionGet();
+        try {
+          while (!stop.get()) {
+            long id=idGenerator.incrementAndGet();
+            client("node2").prepareIndex("test","type1",Long.toString(id)).setSource(MapBuilder.<String,Object>newMapBuilder().put("test","value" + id).map()).execute().actionGet();
+          }
         }
-        stopLatch.countDown();
+  finally {
+          stopLatch.countDown();
+        }
       }
     }
 ;
@@ -27,16 +32,23 @@
     Thread.sleep(100);
     client("node1").admin().indices().prepareRefresh().execute().actionGet();
   }
-  startNode("server2");
+  startNode("node3");
+  startNode("node4");
   assertThat(client("node1").admin().cluster().prepareHealth().setTimeout("1m").setWaitForGreenStatus().execute().actionGet().status(),equalTo(ClusterHealthStatus.GREEN));
-  while (client("node1").prepareCount().setQuery(matchAllQuery()).execute().actionGet().count() < 100000) {
+  while (client("node1").prepareCount().setQuery(matchAllQuery()).execute().actionGet().count() < 80000) {
     Thread.sleep(100);
     client("node1").admin().indices().prepareRefresh().execute().actionGet();
   }
+  closeNode("node1");
+  assertThat(client("node2").admin().cluster().prepareHealth().setTimeout("1m").setWaitForGreenStatus().execute().actionGet().status(),equalTo(ClusterHealthStatus.GREEN));
+  closeNode("node3");
+  assertThat(client("node2").admin().cluster().prepareHealth().setTimeout("1m").setWaitForGreenStatus().execute().actionGet().status(),equalTo(ClusterHealthStatus.GREEN));
+  closeNode("node4");
+  assertThat(client("node2").admin().cluster().prepareHealth().setTimeout("1m").setWaitForYellowStatus().execute().actionGet().status(),equalTo(ClusterHealthStatus.YELLOW));
   stop.set(true);
   stopLatch.await();
-  client("node1").admin().indices().prepareRefresh().execute().actionGet();
+  client("node2").admin().indices().prepareRefresh().execute().actionGet();
   for (int i=0; i < 10; i++) {
-    assertThat(client("node1").prepareCount().setQuery(matchAllQuery()).execute().actionGet().count(),equalTo(idGenerator.get()));
+    assertThat(client("node2").prepareCount().setQuery(matchAllQuery()).execute().actionGet().count(),equalTo(idGenerator.get()));
   }
 }
