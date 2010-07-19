@@ -1,0 +1,35 @@
+{
+  startNode("node1");
+  client("node1").admin().indices().prepareCreate("test").execute().actionGet();
+  for (int i=0; i < 1000; i++) {
+    client("node1").prepareIndex("test","type1",Long.toString(i)).setSource(MapBuilder.<String,Object>newMapBuilder().put("test","value" + i).map()).execute().actionGet();
+  }
+  client("node1").admin().indices().prepareFlush().execute().actionGet();
+  for (int i=1000; i < 2000; i++) {
+    client("node1").prepareIndex("test","type1",Long.toString(i)).setSource(MapBuilder.<String,Object>newMapBuilder().put("test","value" + i).map()).execute().actionGet();
+  }
+  startNode("node2");
+  startNode("node3");
+  assertThat(client("node1").admin().cluster().prepareHealth().setTimeout("1m").setWaitForGreenStatus().execute().actionGet().status(),equalTo(ClusterHealthStatus.GREEN));
+  startNode("node4");
+  startNode("node5");
+  assertThat(client("node1").admin().cluster().prepareHealth().setTimeout("1m").setWaitForGreenStatus().execute().actionGet().status(),equalTo(ClusterHealthStatus.GREEN));
+  client("node1").admin().indices().prepareRefresh().execute().actionGet();
+  for (int i=0; i < 10; i++) {
+    assertThat(client("node1").prepareCount().setQuery(matchAllQuery()).execute().actionGet().count(),equalTo(2000l));
+  }
+  closeNode("node1");
+  closeNode("node2");
+  assertThat(client("node5").admin().cluster().prepareHealth().setTimeout("1m").setWaitForGreenStatus().execute().actionGet().status(),equalTo(ClusterHealthStatus.GREEN));
+  client("node5").admin().indices().prepareRefresh().execute().actionGet();
+  for (int i=0; i < 10; i++) {
+    assertThat(client("node5").prepareCount().setQuery(matchAllQuery()).execute().actionGet().count(),equalTo(2000l));
+  }
+  closeNode("node3");
+  closeNode("node4");
+  assertThat(client("node5").admin().cluster().prepareHealth().setTimeout("1m").setWaitForYellowStatus().execute().actionGet().status(),equalTo(ClusterHealthStatus.YELLOW));
+  client("node5").admin().indices().prepareRefresh().execute().actionGet();
+  for (int i=0; i < 10; i++) {
+    assertThat(client("node5").prepareCount().setQuery(matchAllQuery()).execute().actionGet().count(),equalTo(2000l));
+  }
+}
