@@ -1,5 +1,5 @@
 {
-  if (ignoreBackups() || shards.size() == 1) {
+  if (ignoreReplicas() || shards.size() == 1) {
     if (alreadyThreaded || !request.listenerThreaded()) {
       listener.onResponse(response);
     }
@@ -13,7 +13,7 @@
     }
     return;
   }
-  int backupCounter=0;
+  int replicaCounter=0;
   if (replicationType == ReplicationType.ASYNC) {
     if (alreadyThreaded || !request.listenerThreaded()) {
       listener.onResponse(response);
@@ -26,21 +26,31 @@
       }
 );
     }
-    backupCounter=-100;
+    replicaCounter=-100;
   }
   for (  final ShardRouting shard : shards.reset()) {
     if (shard.primary()) {
-      continue;
+      if (shard.relocating()) {
+        replicaCounter++;
+      }
     }
-    backupCounter++;
-    if (shard.relocating()) {
-      backupCounter++;
+ else {
+      replicaCounter++;
+      if (shard.relocating()) {
+        replicaCounter++;
+      }
     }
   }
-  AtomicInteger counter=new AtomicInteger(backupCounter);
+  AtomicInteger counter=new AtomicInteger(replicaCounter);
   for (  final ShardRouting shard : shards.reset()) {
+    boolean doOnlyOnRelocating=false;
     if (shard.primary()) {
-      continue;
+      if (shard.relocating()) {
+        doOnlyOnRelocating=true;
+      }
+ else {
+        continue;
+      }
     }
     if (shard.unassigned() || !nodes.nodeExists(shard.currentNodeId())) {
       if (counter.decrementAndGet() == 0) {
@@ -59,9 +69,11 @@
       }
       continue;
     }
-    performOnBackup(response,counter,shard,shard.currentNodeId());
+    if (!doOnlyOnRelocating) {
+      performOnReplica(response,counter,shard,shard.currentNodeId());
+    }
     if (shard.relocating()) {
-      performOnBackup(response,counter,shard,shard.relocatingNodeId());
+      performOnReplica(response,counter,shard,shard.relocatingNodeId());
     }
   }
 }
