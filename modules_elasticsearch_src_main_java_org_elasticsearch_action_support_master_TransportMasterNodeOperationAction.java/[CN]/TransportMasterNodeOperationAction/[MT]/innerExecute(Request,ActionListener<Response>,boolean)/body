@@ -1,0 +1,70 @@
+{
+  final ClusterState clusterState=clusterService.state();
+  DiscoveryNodes nodes=clusterState.nodes();
+  if (nodes.localNodeMaster()) {
+    threadPool.execute(new Runnable(){
+      @Override public void run(){
+        try {
+          checkBlock(request,clusterState);
+          Response response=masterOperation(request,clusterState);
+          listener.onResponse(response);
+        }
+ catch (        Exception e) {
+          listener.onFailure(e);
+        }
+      }
+    }
+);
+  }
+ else {
+    if (nodes.masterNode() == null) {
+      throw new ElasticSearchIllegalStateException("No master node discovered or set");
+    }
+    processBeforeDelegationToMaster(request,clusterState);
+    transportService.sendRequest(nodes.masterNode(),transportAction(),request,new BaseTransportResponseHandler<Response>(){
+      @Override public Response newInstance(){
+        return newResponse();
+      }
+      @Override public void handleResponse(      Response response){
+        listener.onResponse(response);
+      }
+      @Override public void handleException(      final RemoteTransportException exp){
+        if (retrying) {
+          listener.onFailure(exp);
+        }
+ else {
+          if (exp.unwrapCause() instanceof ConnectTransportException) {
+            clusterService.add(TimeValue.timeValueSeconds(30),new TimeoutClusterStateListener(){
+              @Override public void postAdded(){
+                ClusterState clusterStateV2=clusterService.state();
+                if (!clusterState.nodes().masterNodeId().equals(clusterStateV2.nodes().masterNodeId())) {
+                  clusterService.remove(this);
+                  innerExecute(request,listener,true);
+                }
+              }
+              @Override public void onClose(){
+                clusterService.remove(this);
+                listener.onFailure(new ElasticSearchIllegalStateException("node is shutting down"));
+              }
+              @Override public void onTimeout(              TimeValue timeout){
+                clusterService.remove(this);
+                listener.onFailure(exp);
+              }
+              @Override public void clusterChanged(              ClusterChangedEvent event){
+                if (event.nodesDelta().masterNodeChanged()) {
+                  clusterService.remove(this);
+                  innerExecute(request,listener,true);
+                }
+              }
+            }
+);
+          }
+ else {
+            listener.onFailure(exp);
+          }
+        }
+      }
+    }
+);
+  }
+}
