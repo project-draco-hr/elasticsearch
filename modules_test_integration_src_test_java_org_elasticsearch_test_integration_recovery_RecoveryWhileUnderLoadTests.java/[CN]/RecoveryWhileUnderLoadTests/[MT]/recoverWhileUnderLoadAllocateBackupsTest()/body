@@ -1,41 +1,64 @@
 {
+  logger.info("--> starting [node1] ...");
   startNode("node1");
+  logger.info("--> creating test index ...");
   client("node1").admin().indices().prepareCreate("test").execute().actionGet();
   final AtomicLong idGenerator=new AtomicLong();
   final AtomicBoolean stop=new AtomicBoolean(false);
   Thread[] writers=new Thread[5];
   final CountDownLatch stopLatch=new CountDownLatch(writers.length);
+  logger.info("--> starting {} indexing threads",writers.length);
   for (int i=0; i < writers.length; i++) {
+    final int indexerId=i;
     writers[i]=new Thread(){
       @Override public void run(){
-        while (!stop.get()) {
-          long id=idGenerator.incrementAndGet();
-          client("node1").prepareIndex("test","type1",Long.toString(id)).setSource(MapBuilder.<String,Object>newMapBuilder().put("test","value" + id).map()).execute().actionGet();
+        try {
+          logger.info("**** starting indexing thread {}",indexerId);
+          while (!stop.get()) {
+            long id=idGenerator.incrementAndGet();
+            client("node1").prepareIndex("test","type1",Long.toString(id)).setSource(MapBuilder.<String,Object>newMapBuilder().put("test","value" + id).map()).execute().actionGet();
+          }
+          logger.info("**** done indexing thread {}",indexerId);
         }
-        stopLatch.countDown();
+  finally {
+          stopLatch.countDown();
+        }
       }
     }
 ;
     writers[i].start();
   }
+  logger.info("--> waiting for 20000 docs to be indexed ...");
   while (client("node1").prepareCount().setQuery(matchAllQuery()).execute().actionGet().count() < 20000) {
     Thread.sleep(100);
     client("node1").admin().indices().prepareRefresh().execute().actionGet();
   }
+  logger.info("--> 20000 docs indexed");
+  logger.info("--> flushing the index ....");
   client("node1").admin().indices().prepareFlush().execute().actionGet();
+  logger.info("--> waiting for 40000 docs to be indexed ...");
   while (client("node1").prepareCount().setQuery(matchAllQuery()).execute().actionGet().count() < 40000) {
     Thread.sleep(100);
     client("node1").admin().indices().prepareRefresh().execute().actionGet();
   }
-  startNode("server2");
+  logger.info("--> 40000 docs indexed");
+  logger.info("--> starting [node2] ...");
+  startNode("node2");
+  logger.info("--> waiting for GREEN health status ...");
   assertThat(client("node1").admin().cluster().prepareHealth().setTimeout("1m").setWaitForGreenStatus().execute().actionGet().status(),equalTo(ClusterHealthStatus.GREEN));
+  logger.info("--> waiting for 100000 docs to be indexed ...");
   while (client("node1").prepareCount().setQuery(matchAllQuery()).execute().actionGet().count() < 100000) {
     Thread.sleep(100);
     client("node1").admin().indices().prepareRefresh().execute().actionGet();
   }
+  logger.info("--> 100000 docs indexed");
+  logger.info("--> marking and waiting for indexing threads to stop ...");
   stop.set(true);
   stopLatch.await();
+  logger.info("--> indexing threads stopped");
+  logger.info("--> refreshing the index");
   client("node1").admin().indices().prepareRefresh().execute().actionGet();
+  logger.info("--> verifying indexed content");
   for (int i=0; i < 10; i++) {
     assertThat(client("node1").prepareCount().setQuery(matchAllQuery()).execute().actionGet().count(),equalTo(idGenerator.get()));
   }
