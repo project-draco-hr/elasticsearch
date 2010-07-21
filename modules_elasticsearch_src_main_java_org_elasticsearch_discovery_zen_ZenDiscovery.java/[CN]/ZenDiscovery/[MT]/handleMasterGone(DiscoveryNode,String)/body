@@ -12,6 +12,8 @@
         return currentState;
       }
       ClusterBlocks clusterBlocks=currentState.blocks();
+      MetaData metaData=currentState.metaData();
+      RoutingTable routingTable=currentState.routingTable();
       List<DiscoveryNode> nodes=newArrayList(currentState.nodes().nodes().values());
       nodes.remove(masterNode);
       final DiscoveryNode electedMaster=electMaster.electMaster(nodes);
@@ -34,6 +36,10 @@
           logger.warn("master_left and no other node elected to become master, current nodes: {}",nodes);
           builder.masterNodeId(null);
           clusterBlocks=ClusterBlocks.builder().blocks(clusterBlocks).addGlobalBlock(NO_MASTER_BLOCK).build();
+          if (currentState.nodes().localNode().dataNode()) {
+            metaData=MetaData.newMetaDataBuilder().build();
+            routingTable=RoutingTable.newRoutingTableBuilder().build();
+          }
           masterFD.stop("no master elected since master left (reason = " + reason + ")");
           threadPool.cached().execute(new Runnable(){
             @Override public void run(){
@@ -43,7 +49,7 @@
 );
         }
         latestDiscoNodes=builder.build();
-        return newClusterStateBuilder().state(currentState).blocks(clusterBlocks).nodes(latestDiscoNodes).build();
+        return newClusterStateBuilder().state(currentState).blocks(clusterBlocks).nodes(latestDiscoNodes).metaData(metaData).routingTable(routingTable).build();
       }
     }
     @Override public void clusterStateProcessed(    ClusterState clusterState){
