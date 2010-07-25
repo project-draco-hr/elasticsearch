@@ -3,46 +3,34 @@
   this.documentParser=new XContentDocumentMapperParser(analysisService);
   this.searchAnalyzer=new SmartIndexNameSearchAnalyzer(analysisService.defaultSearchAnalyzer());
   this.dynamic=componentSettings.getAsBoolean("dynamic",true);
-  String dynamicMappingLocation=componentSettings.get("dynamic_mapping_location");
-  URL dynamicMappingUrl;
-  if (dynamicMappingLocation == null) {
+  String defaultMappingLocation=componentSettings.get("default_mapping_location");
+  URL defaultMappingUrl;
+  if (defaultMappingLocation == null) {
     try {
-      dynamicMappingUrl=environment.resolveConfig("dynamic-mapping.json");
+      defaultMappingUrl=environment.resolveConfig("default-mapping.json");
     }
  catch (    FailedToResolveConfigException e) {
-      dynamicMappingUrl=indexSettings.getClassLoader().getResource("org/elasticsearch/index/mapper/xcontent/dynamic-mapping.json");
+      defaultMappingUrl=indexSettings.getClassLoader().getResource("org/elasticsearch/index/mapper/xcontent/default-mapping.json");
     }
   }
  else {
     try {
-      dynamicMappingUrl=environment.resolveConfig(dynamicMappingLocation);
+      defaultMappingUrl=environment.resolveConfig(defaultMappingLocation);
     }
  catch (    FailedToResolveConfigException e) {
       try {
-        dynamicMappingUrl=new File(dynamicMappingLocation).toURI().toURL();
+        defaultMappingUrl=new File(defaultMappingLocation).toURI().toURL();
       }
  catch (      MalformedURLException e1) {
-        throw new FailedToResolveConfigException("Failed to resolve dynamic mapping location [" + dynamicMappingLocation + "]");
+        throw new FailedToResolveConfigException("Failed to resolve dynamic mapping location [" + defaultMappingLocation + "]");
       }
     }
   }
-  this.dynamicMappingUrl=dynamicMappingUrl;
-  if (dynamicMappingLocation == null) {
-    this.dynamicMappingLocation=dynamicMappingUrl.toExternalForm();
+  try {
+    defaultMappingSource=Streams.copyToString(new InputStreamReader(defaultMappingUrl.openStream(),"UTF-8"));
   }
- else {
-    this.dynamicMappingLocation=dynamicMappingLocation;
+ catch (  IOException e) {
+    throw new MapperException("Failed to load default mapping source from [" + defaultMappingLocation + "]",e);
   }
-  if (dynamic) {
-    try {
-      dynamicMappingSource=Streams.copyToString(new InputStreamReader(dynamicMappingUrl.openStream(),"UTF-8"));
-    }
- catch (    IOException e) {
-      throw new MapperException("Failed to load default mapping source from [" + dynamicMappingLocation + "]",e);
-    }
-  }
- else {
-    dynamicMappingSource=null;
-  }
-  logger.debug("using dynamic[{}] with location[{}] and source[{}]",dynamic,dynamicMappingLocation,dynamicMappingSource);
+  logger.debug("using dynamic[{}], default mapping: location[{}] and source[{}]",dynamic,defaultMappingLocation,defaultMappingSource);
 }
