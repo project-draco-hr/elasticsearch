@@ -14,22 +14,29 @@
  else     if (token == XContentParser.Token.START_ARRAY) {
       if ("ranges".equals(fieldName) || "entries".equals(fieldName)) {
         while ((token=parser.nextToken()) != XContentParser.Token.END_ARRAY) {
-          double from=Double.NEGATIVE_INFINITY;
-          double to=Double.POSITIVE_INFINITY;
+          RangeFacet.Entry entry=new RangeFacet.Entry();
           while ((token=parser.nextToken()) != XContentParser.Token.END_OBJECT) {
             if (token == XContentParser.Token.FIELD_NAME) {
               fieldName=parser.currentName();
             }
- else             if (token.isValue()) {
+ else             if (token == XContentParser.Token.VALUE_STRING) {
               if ("from".equals(fieldName)) {
-                from=parser.doubleValue();
+                entry.fromAsString=parser.text();
               }
  else               if ("to".equals(fieldName)) {
-                to=parser.doubleValue();
+                entry.toAsString=parser.text();
+              }
+            }
+ else             if (token.isValue()) {
+              if ("from".equals(fieldName)) {
+                entry.from=parser.doubleValue();
+              }
+ else               if ("to".equals(fieldName)) {
+                entry.to=parser.doubleValue();
               }
             }
           }
-          entries.add(new RangeFacet.Entry(from,to,0,0));
+          entries.add(entry);
         }
       }
     }
@@ -60,6 +67,20 @@
     throw new FacetPhaseExecutionException(facetName,"no ranges defined for range facet");
   }
   RangeFacet.Entry[] rangeEntries=entries.toArray(new RangeFacet.Entry[entries.size()]);
+  if (keyField != null) {
+    FieldMapper mapper=context.mapperService().smartNameFieldMapper(keyField);
+    if (mapper == null) {
+      throw new FacetPhaseExecutionException(facetName,"No mapping found for key_field [" + keyField + "]");
+    }
+    for (    RangeFacet.Entry entry : rangeEntries) {
+      if (entry.fromAsString != null) {
+        entry.from=((Number)mapper.valueFromString(entry.fromAsString)).doubleValue();
+      }
+      if (entry.toAsString != null) {
+        entry.to=((Number)mapper.valueFromString(entry.toAsString)).doubleValue();
+      }
+    }
+  }
   if (keyScript != null && valueScript != null) {
     return new ScriptRangeFacetCollector(facetName,keyScript,valueScript,params,rangeEntries,context.scriptService(),context.fieldDataCache(),context.mapperService());
   }
