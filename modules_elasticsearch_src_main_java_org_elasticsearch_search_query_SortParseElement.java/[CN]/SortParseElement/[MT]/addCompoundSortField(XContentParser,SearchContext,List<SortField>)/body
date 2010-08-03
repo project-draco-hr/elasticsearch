@@ -5,6 +5,9 @@
       String fieldName=parser.currentName();
       boolean reverse=false;
       String innerJsonName=null;
+      String script=null;
+      String type=null;
+      Map<String,Object> params=null;
       token=parser.nextToken();
       if (token == XContentParser.Token.VALUE_STRING) {
         String direction=parser.text();
@@ -24,10 +27,49 @@
             if ("reverse".equals(innerJsonName)) {
               reverse=parser.booleanValue();
             }
+ else             if ("order".equals(innerJsonName)) {
+              if ("asc".equals(parser.text())) {
+                reverse=SCORE_FIELD_NAME.equals(fieldName);
+              }
+ else               if ("desc".equals(parser.text())) {
+                reverse=!SCORE_FIELD_NAME.equals(fieldName);
+              }
+            }
+ else             if ("script".equals(innerJsonName)) {
+              script=parser.text();
+            }
+ else             if ("type".equals(innerJsonName)) {
+              type=parser.text();
+            }
+ else             if ("params".equals(innerJsonName)) {
+              params=parser.map();
+            }
           }
         }
       }
-      addSortField(context,sortFields,fieldName,reverse);
+      if (SCRIPT_FIELD_NAME.equals(fieldName)) {
+        if (script == null) {
+          throw new SearchParseException(context,"_script sorting requires setting the script to sort by");
+        }
+        if (type == null) {
+          throw new SearchParseException(context,"_script sorting requires setting the type of the script");
+        }
+        FieldsFunction fieldsFunction=new ScriptFieldsFunction(script,context.scriptService(),context.mapperService(),context.fieldDataCache());
+        FieldComparatorSource fieldComparatorSource;
+        if ("string".equals(type)) {
+          fieldComparatorSource=StringFieldsFunctionDataComparator.comparatorSource(fieldsFunction,params);
+        }
+ else         if ("number".equals(type)) {
+          fieldComparatorSource=DoubleFieldsFunctionDataComparator.comparatorSource(fieldsFunction,params);
+        }
+ else {
+          throw new SearchParseException(context,"custom script sort type [" + type + "] not supported");
+        }
+        sortFields.add(new SortField(fieldName,fieldComparatorSource,reverse));
+      }
+ else {
+        addSortField(context,sortFields,fieldName,reverse);
+      }
     }
   }
 }
