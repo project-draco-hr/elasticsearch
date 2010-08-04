@@ -60,33 +60,54 @@
           indexSettingsBuilder.put(SETTING_NUMBER_OF_REPLICAS,settings.getAsInt(SETTING_NUMBER_OF_REPLICAS,1));
         }
         Settings actualIndexSettings=indexSettingsBuilder.build();
+        indicesService.createIndex(request.index,actualIndexSettings,clusterService.state().nodes().localNode().id());
+        IndexService indexService=indicesService.indexServiceSafe(request.index);
+        MapperService mapperService=indexService.mapperService();
+        for (        Map.Entry<String,String> entry : mappings.entrySet()) {
+          try {
+            mapperService.add(entry.getKey(),entry.getValue());
+          }
+ catch (          Exception e) {
+            indicesService.deleteIndex(request.index);
+            throw new MapperParsingException("mapping [" + entry.getKey() + "]",e);
+          }
+        }
+        mappings.clear();
+        for (        DocumentMapper mapper : mapperService) {
+          mappings.put(mapper.type(),mapper.mappingSource());
+        }
         IndexMetaData.Builder indexMetaData=newIndexMetaDataBuilder(request.index).settings(actualIndexSettings);
         for (        Map.Entry<String,String> entry : mappings.entrySet()) {
           indexMetaData.putMapping(entry.getKey(),entry.getValue());
         }
         MetaData newMetaData=newMetaDataBuilder().metaData(currentState.metaData()).put(indexMetaData).build();
         logger.info("[{}] creating index, cause [{}], shards [{}]/[{}], mappings {}",request.index,request.cause,indexMetaData.numberOfShards(),indexMetaData.numberOfReplicas(),mappings.keySet());
-        final AtomicInteger counter=new AtomicInteger(currentState.nodes().size());
-        final NodeIndexCreatedAction.Listener nodeIndexCreateListener=new NodeIndexCreatedAction.Listener(){
-          @Override public void onNodeIndexCreated(          String index,          String nodeId){
-            if (index.equals(request.index)) {
-              if (counter.decrementAndGet() == 0) {
-                listener.onResponse(new Response(true));
-                nodeIndexCreatedAction.remove(this);
+        final AtomicInteger counter=new AtomicInteger(currentState.nodes().size() - 1);
+        if (counter.get() == 0) {
+          listener.onResponse(new Response(true));
+        }
+ else {
+          final NodeIndexCreatedAction.Listener nodeIndexCreateListener=new NodeIndexCreatedAction.Listener(){
+            @Override public void onNodeIndexCreated(            String index,            String nodeId){
+              if (index.equals(request.index)) {
+                if (counter.decrementAndGet() == 0) {
+                  listener.onResponse(new Response(true));
+                  nodeIndexCreatedAction.remove(this);
+                }
               }
             }
           }
-        }
 ;
-        nodeIndexCreatedAction.add(nodeIndexCreateListener);
-        Timeout timeoutTask=timerService.newTimeout(new TimerTask(){
-          @Override public void run(          Timeout timeout) throws Exception {
-            listener.onResponse(new Response(false));
-            nodeIndexCreatedAction.remove(nodeIndexCreateListener);
+          nodeIndexCreatedAction.add(nodeIndexCreateListener);
+          Timeout timeoutTask=timerService.newTimeout(new TimerTask(){
+            @Override public void run(            Timeout timeout) throws Exception {
+              listener.onResponse(new Response(false));
+              nodeIndexCreatedAction.remove(nodeIndexCreateListener);
+            }
           }
-        }
 ,request.timeout,TimerService.ExecutionType.THREADED);
-        listener.timeout=timeoutTask;
+          listener.timeout=timeoutTask;
+        }
         return newClusterStateBuilder().state(currentState).metaData(newMetaData).build();
       }
  catch (      Exception e) {
