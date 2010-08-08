@@ -1,0 +1,44 @@
+{
+  UpdateSettingsRequest updateSettingsRequest=updateSettingsRequest(splitIndices(request.param("index")));
+  ImmutableSettings.Builder updateSettings=ImmutableSettings.settingsBuilder();
+  String bodySettings=request.contentAsString();
+  if (Strings.hasText(bodySettings)) {
+    try {
+      updateSettings.put(ImmutableSettings.settingsBuilder().loadFromSource(bodySettings).build());
+    }
+ catch (    Exception e) {
+      try {
+        channel.sendResponse(new XContentThrowableRestResponse(request,BAD_REQUEST,new SettingsException("Failed to parse index settings",e)));
+      }
+ catch (      IOException e1) {
+        logger.warn("Failed to send response",e1);
+        return;
+      }
+    }
+  }
+  for (  Map.Entry<String,String> entry : request.params().entrySet()) {
+    updateSettings.put(entry.getKey(),entry.getValue());
+  }
+  updateSettingsRequest.settings(updateSettings);
+  client.admin().indices().updateSettings(updateSettingsRequest,new ActionListener<UpdateSettingsResponse>(){
+    @Override public void onResponse(    UpdateSettingsResponse updateSettingsResponse){
+      try {
+        XContentBuilder builder=RestXContentBuilder.restContentBuilder(request);
+        builder.startObject().field("ok",true).endObject();
+        channel.sendResponse(new XContentRestResponse(request,OK,builder));
+      }
+ catch (      Exception e) {
+        onFailure(e);
+      }
+    }
+    @Override public void onFailure(    Throwable e){
+      try {
+        channel.sendResponse(new XContentThrowableRestResponse(request,e));
+      }
+ catch (      IOException e1) {
+        logger.error("Failed to send failure response",e1);
+      }
+    }
+  }
+);
+}

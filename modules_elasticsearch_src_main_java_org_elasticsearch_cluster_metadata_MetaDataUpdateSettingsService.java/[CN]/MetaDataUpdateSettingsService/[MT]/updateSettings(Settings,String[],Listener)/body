@@ -1,0 +1,30 @@
+{
+  clusterService.submitStateUpdateTask("update-settings",new ClusterStateUpdateTask(){
+    @Override public ClusterState execute(    ClusterState currentState){
+      try {
+        boolean changed=false;
+        String[] actualIndices=currentState.metaData().concreteIndices(indices);
+        RoutingTable.Builder routingTableBuilder=newRoutingTableBuilder().routingTable(currentState.routingTable());
+        MetaData.Builder metaDataBuilder=MetaData.newMetaDataBuilder().metaData(currentState.metaData());
+        int updatedNumberOfReplicas=settings.getAsInt(IndexMetaData.SETTING_NUMBER_OF_REPLICAS,-1);
+        if (updatedNumberOfReplicas != -1) {
+          routingTableBuilder.updateNumberOfReplicas(updatedNumberOfReplicas,actualIndices);
+          metaDataBuilder.updateNumberOfReplicas(updatedNumberOfReplicas,actualIndices);
+          changed=true;
+        }
+        if (!changed) {
+          listener.onFailure(new ElasticSearchIllegalArgumentException("No settings applied"));
+          return currentState;
+        }
+        logger.info("Updating number_of_replicas to [{}] for indices {}",updatedNumberOfReplicas,actualIndices);
+        listener.onSuccess();
+        return ClusterState.builder().state(currentState).metaData(metaDataBuilder).routingTable(routingTableBuilder).build();
+      }
+ catch (      Exception e) {
+        listener.onFailure(e);
+        return currentState;
+      }
+    }
+  }
+);
+}

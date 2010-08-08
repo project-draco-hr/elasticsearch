@@ -1,0 +1,59 @@
+{
+  logger.info("Running Cluster Health");
+  ClusterHealthResponse clusterHealth=client1.admin().cluster().prepareHealth().setWaitForGreenStatus().execute().actionGet();
+  logger.info("Done Cluster Health, status " + clusterHealth.status());
+  assertThat(clusterHealth.timedOut(),equalTo(false));
+  assertThat(clusterHealth.status(),equalTo(ClusterHealthStatus.GREEN));
+  assertThat(clusterHealth.indices().get("test").activePrimaryShards(),equalTo(5));
+  assertThat(clusterHealth.indices().get("test").numberOfReplicas(),equalTo(1));
+  assertThat(clusterHealth.indices().get("test").activeShards(),equalTo(10));
+  for (int i=0; i < 10; i++) {
+    client1.prepareIndex("test","type1",Integer.toString(i)).setSource(jsonBuilder().startObject().field("value","test" + i).endObject()).execute().actionGet();
+  }
+  client1.admin().indices().prepareRefresh().execute().actionGet();
+  for (int i=0; i < 10; i++) {
+    CountResponse countResponse=client1.prepareCount().setQuery(matchAllQuery()).execute().actionGet();
+    assertThat(countResponse.count(),equalTo(10l));
+  }
+  logger.info("Increasing the number of replicas from 1 to 2");
+  client1.admin().indices().prepareUpdateSettings("test").setSettings(settingsBuilder().put("index.number_of_replicas",2)).execute().actionGet();
+  Thread.sleep(200);
+  logger.info("Running Cluster Health");
+  clusterHealth=client1.admin().cluster().prepareHealth().setWaitForYellowStatus().execute().actionGet();
+  logger.info("Done Cluster Health, status " + clusterHealth.status());
+  assertThat(clusterHealth.timedOut(),equalTo(false));
+  assertThat(clusterHealth.status(),equalTo(ClusterHealthStatus.YELLOW));
+  assertThat(clusterHealth.indices().get("test").activePrimaryShards(),equalTo(5));
+  assertThat(clusterHealth.indices().get("test").numberOfReplicas(),equalTo(2));
+  assertThat(clusterHealth.indices().get("test").activeShards(),equalTo(10));
+  logger.info("starting another node to new replicas will be allocated to it");
+  startNode("node3");
+  Thread.sleep(100);
+  logger.info("Running Cluster Health");
+  clusterHealth=client1.admin().cluster().prepareHealth().setWaitForGreenStatus().setWaitForNodes("3").execute().actionGet();
+  logger.info("Done Cluster Health, status " + clusterHealth.status());
+  assertThat(clusterHealth.timedOut(),equalTo(false));
+  assertThat(clusterHealth.status(),equalTo(ClusterHealthStatus.GREEN));
+  assertThat(clusterHealth.indices().get("test").activePrimaryShards(),equalTo(5));
+  assertThat(clusterHealth.indices().get("test").numberOfReplicas(),equalTo(2));
+  assertThat(clusterHealth.indices().get("test").activeShards(),equalTo(15));
+  for (int i=0; i < 10; i++) {
+    CountResponse countResponse=client1.prepareCount().setQuery(matchAllQuery()).execute().actionGet();
+    assertThat(countResponse.count(),equalTo(10l));
+  }
+  logger.info("Decreasing number of replicas from 2 to 0");
+  client1.admin().indices().prepareUpdateSettings("test").setSettings(settingsBuilder().put("index.number_of_replicas",0)).execute().actionGet();
+  Thread.sleep(200);
+  logger.info("Running Cluster Health");
+  clusterHealth=client1.admin().cluster().prepareHealth().setWaitForGreenStatus().setWaitForNodes("3").execute().actionGet();
+  logger.info("Done Cluster Health, status " + clusterHealth.status());
+  assertThat(clusterHealth.timedOut(),equalTo(false));
+  assertThat(clusterHealth.status(),equalTo(ClusterHealthStatus.GREEN));
+  assertThat(clusterHealth.indices().get("test").activePrimaryShards(),equalTo(5));
+  assertThat(clusterHealth.indices().get("test").numberOfReplicas(),equalTo(0));
+  assertThat(clusterHealth.indices().get("test").activeShards(),equalTo(5));
+  for (int i=0; i < 10; i++) {
+    CountResponse countResponse=client1.prepareCount().setQuery(matchAllQuery()).execute().actionGet();
+    assertThat(countResponse.count(),equalTo(10l));
+  }
+}
