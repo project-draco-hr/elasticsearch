@@ -1,0 +1,74 @@
+{
+  String fieldName=null;
+  double lat=Double.NaN;
+  double lon=Double.NaN;
+  DistanceUnit unit=DistanceUnit.KILOMETERS;
+  GeoDistance geoDistance=GeoDistance.ARC;
+  boolean reverse=false;
+  XContentParser.Token token;
+  String currentName=parser.currentName();
+  while ((token=parser.nextToken()) != XContentParser.Token.END_OBJECT) {
+    if (token == XContentParser.Token.FIELD_NAME) {
+      currentName=parser.currentName();
+    }
+ else     if (token == XContentParser.Token.START_ARRAY) {
+      token=parser.nextToken();
+      lat=parser.doubleValue();
+      token=parser.nextToken();
+      lon=parser.doubleValue();
+      while ((token=parser.nextToken()) != XContentParser.Token.END_ARRAY) {
+      }
+      fieldName=currentName;
+    }
+ else     if (token == XContentParser.Token.START_OBJECT) {
+      fieldName=currentName;
+      while ((token=parser.nextToken()) != XContentParser.Token.END_OBJECT) {
+        if (token == XContentParser.Token.FIELD_NAME) {
+          currentName=parser.currentName();
+        }
+ else         if (token.isValue()) {
+          if (currentName.equals(XContentGeoPointFieldMapper.Names.LAT)) {
+            lat=parser.doubleValue();
+          }
+ else           if (currentName.equals(XContentGeoPointFieldMapper.Names.LON)) {
+            lon=parser.doubleValue();
+          }
+ else           if (currentName.equals(XContentGeoPointFieldMapper.Names.GEOHASH)) {
+            double[] values=GeoHashUtils.decode(parser.text());
+            lat=values[0];
+            lon=values[1];
+          }
+        }
+      }
+    }
+ else     if (token.isValue()) {
+      if ("reverse".equals(currentName)) {
+        reverse=parser.booleanValue();
+      }
+ else       if ("order".equals(currentName)) {
+        reverse="desc".equals(parser.text());
+      }
+ else       if (currentName.equals("unit")) {
+        unit=DistanceUnit.fromString(parser.text());
+      }
+ else       if (currentName.equals("distance_type") || currentName.equals("distanceType")) {
+        geoDistance=GeoDistance.fromString(parser.text());
+      }
+ else {
+        String value=parser.text();
+        int comma=value.indexOf(',');
+        if (comma != -1) {
+          lat=Double.parseDouble(value.substring(0,comma).trim());
+          lon=Double.parseDouble(value.substring(comma + 1).trim());
+        }
+ else {
+          double[] values=GeoHashUtils.decode(value);
+          lat=values[0];
+          lon=values[1];
+        }
+        fieldName=currentName;
+      }
+    }
+  }
+  sortFields.add(new SortField(fieldName,GeoDistanceDataComparator.comparatorSource(fieldName,lat,lon,unit,geoDistance,context.fieldDataCache(),context.mapperService()),reverse));
+}
