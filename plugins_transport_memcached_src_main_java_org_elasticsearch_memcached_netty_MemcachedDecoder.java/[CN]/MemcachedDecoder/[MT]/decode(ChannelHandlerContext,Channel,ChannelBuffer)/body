@@ -21,32 +21,56 @@
         return null;
       }
       buffer.skipBytes(extraLength);
-      if (keyLength != 0) {
+      if (opcode == 0x00) {
         byte[] key=new byte[keyLength];
         buffer.readBytes(key);
         String uri=Unicode.fromBytes(key);
-        if (opcode == 0x00) {
-          request=new MemcachedRestRequest(RestRequest.Method.GET,uri,key,-1,true);
-          request.setOpaque(opaque);
-          return request;
-        }
- else         if (opcode == 0x04) {
-          request=new MemcachedRestRequest(RestRequest.Method.DELETE,uri,key,-1,true);
-          request.setOpaque(opaque);
-          return request;
-        }
- else         if (opcode == 0x01) {
-          int size=totalBodyLength - keyLength - extraLength;
-          request=new MemcachedRestRequest(RestRequest.Method.POST,uri,key,size,true);
-          request.setOpaque(opaque);
-          byte[] data=new byte[size];
-          buffer.readBytes(data,0,size);
-          request.setData(data);
-          return request;
-        }
+        request=new MemcachedRestRequest(RestRequest.Method.GET,uri,key,-1,true);
+        request.setOpaque(opaque);
+        return request;
+      }
+ else       if (opcode == 0x04) {
+        byte[] key=new byte[keyLength];
+        buffer.readBytes(key);
+        String uri=Unicode.fromBytes(key);
+        request=new MemcachedRestRequest(RestRequest.Method.DELETE,uri,key,-1,true);
+        request.setOpaque(opaque);
+        return request;
+      }
+ else       if (opcode == 0x01) {
+        byte[] key=new byte[keyLength];
+        buffer.readBytes(key);
+        String uri=Unicode.fromBytes(key);
+        int size=totalBodyLength - keyLength - extraLength;
+        request=new MemcachedRestRequest(RestRequest.Method.POST,uri,key,size,true);
+        request.setOpaque(opaque);
+        byte[] data=new byte[size];
+        buffer.readBytes(data,0,size);
+        request.setData(data);
+        request.setQuiet(opcode == 0x11);
+        return request;
+      }
+ else       if (opcode == 0x0A || opcode == 0x10) {
+        ChannelBuffer writeBuffer=ChannelBuffers.dynamicBuffer(24);
+        writeBuffer.writeByte(0x81);
+        writeBuffer.writeByte(opcode);
+        writeBuffer.writeShort(0);
+        writeBuffer.writeByte(0);
+        writeBuffer.writeByte(0);
+        writeBuffer.writeShort(0x0000);
+        writeBuffer.writeInt(0);
+        writeBuffer.writeInt(opaque);
+        writeBuffer.writeLong(0);
+        channel.write(writeBuffer);
+        return MemcachedDispatcher.IGNORE_REQUEST;
       }
  else       if (opcode == 0x07) {
         channel.disconnect();
+      }
+ else {
+        logger.error("Unsupported opcode [0x{}], ignoring and closing connection",Integer.toHexString(opcode));
+        channel.disconnect();
+        return null;
       }
     }
  else {
@@ -96,6 +120,11 @@
       }
  else       if ("quit".equals(cmd)) {
         channel.disconnect();
+      }
+ else {
+        logger.error("Unsupported command [{}], ignoring and closing connection",cmd);
+        channel.disconnect();
+        return null;
       }
     }
   }
