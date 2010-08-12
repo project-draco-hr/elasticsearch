@@ -4,18 +4,22 @@
     return;
   }
   final InternalIndexShard shard=(InternalIndexShard)indicesService.indexServiceSafe(request.shardId().index().name()).shardSafe(request.shardId().id());
-  IndexShardState preRecoveryState;
-  try {
-    preRecoveryState=shard.recovering();
+  if (!fromRetry) {
+    try {
+      shard.recovering();
+    }
+ catch (    IllegalIndexShardStateException e) {
+      listener.onIgnoreRecovery(false,"already in recovering process, " + e.getMessage());
+      return;
+    }
   }
- catch (  IllegalIndexShardStateException e) {
-    listener.onIgnoreRecovery(false,"already in recovering process, " + e.getMessage());
+  if (shard.state() == IndexShardState.CLOSED) {
+    listener.onIgnoreRecovery(false,"shard closed, stop recovery");
     return;
   }
-  final IndexShardState fPreRecoveryState=preRecoveryState;
   threadPool.cached().execute(new Runnable(){
     @Override public void run(){
-      doRecovery(shard,fPreRecoveryState,request,listener);
+      doRecovery(shard,request,listener);
     }
   }
 );
