@@ -1,15 +1,25 @@
 {
   if (shard.state() == IndexShardState.CLOSED) {
+    removeAndCleanOnGoingRecovery(request.shardId());
     listener.onIgnoreRecovery(false,"shard closed, stop recovery");
     return;
   }
+  OnGoingRecovery recovery;
+  if (fromRetry) {
+    recovery=onGoingRecoveries.get(request.shardId());
+  }
+ else {
+    recovery=new OnGoingRecovery();
+    onGoingRecoveries.put(request.shardId(),recovery);
+  }
   if (!recoveryThrottler.tryRecovery(shard.shardId(),"peer recovery target")) {
+    recovery.stage=OnGoingRecovery.Stage.RETRY;
+    recovery.retryTimeInMillis=System.currentTimeMillis() - recovery.startTimeImMillis;
     listener.onRetryRecovery(recoveryThrottler.throttleInterval());
     return;
   }
   try {
     logger.trace("[{}][{}] starting recovery from {}",request.shardId().index().name(),request.shardId().id(),request.sourceNode());
-    onGoingRecoveries.put(request.shardId(),new OnGoingRecovery());
     StopWatch stopWatch=new StopWatch().start();
     RecoveryResponse recoveryStatus=transportService.submitRequest(request.sourceNode(),RecoverySource.Actions.START_RECOVERY,request,new FutureTransportResponseHandler<RecoveryResponse>(){
       @Override public RecoveryResponse newInstance(){
@@ -23,7 +33,8 @@
         return;
       }
       logger.trace("[{}][{}] retrying recovery in [{}], source shard is busy",request.shardId().index().name(),request.shardId().id(),recoveryThrottler.throttleInterval());
-      removeAndCleanOnGoingRecovery(request.shardId());
+      recovery.stage=OnGoingRecovery.Stage.RETRY;
+      recovery.retryTimeInMillis=System.currentTimeMillis() - recovery.startTimeImMillis;
       listener.onRetryRecovery(recoveryThrottler.throttleInterval());
       return;
     }
@@ -42,12 +53,11 @@
     listener.onRecoveryDone();
   }
  catch (  Exception e) {
-    removeAndCleanOnGoingRecovery(request.shardId());
     if (shard.state() == IndexShardState.CLOSED) {
+      removeAndCleanOnGoingRecovery(request.shardId());
       listener.onIgnoreRecovery(false,"shard closed, stop recovery");
       return;
     }
-    logger.trace("[{}][{}] recovery from [{}] failed",e,request.shardId().index().name(),request.shardId().id(),request.sourceNode());
     Throwable cause=ExceptionsHelper.unwrapCause(e);
     if (cause instanceof RecoveryEngineException) {
       cause=cause.getCause();
@@ -57,9 +67,13 @@
       cause=cause.getCause();
     }
     if (cause instanceof IndexShardNotStartedException || cause instanceof IndexMissingException || cause instanceof IndexShardMissingException) {
+      recovery.stage=OnGoingRecovery.Stage.RETRY;
+      recovery.retryTimeInMillis=System.currentTimeMillis() - recovery.startTimeImMillis;
       listener.onRetryRecovery(recoveryThrottler.throttleInterval());
       return;
     }
+    removeAndCleanOnGoingRecovery(request.shardId());
+    logger.trace("[{}][{}] recovery from [{}] failed",e,request.shardId().index().name(),request.shardId().id(),request.sourceNode());
     if (cause instanceof ConnectTransportException) {
       listener.onIgnoreRecovery(true,"source node disconnected");
       return;
