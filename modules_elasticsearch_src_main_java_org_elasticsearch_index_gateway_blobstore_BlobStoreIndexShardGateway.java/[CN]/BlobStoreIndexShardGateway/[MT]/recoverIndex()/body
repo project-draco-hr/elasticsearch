@@ -1,5 +1,4 @@
 {
-  StopWatch timer=new StopWatch().start();
   final ImmutableMap<String,BlobMetaData> indicesBlobs;
   try {
     indicesBlobs=indexContainer.listBlobs();
@@ -42,10 +41,10 @@
       logger.debug("failed to check local store for existence of [{}]",e,virtualMd.name());
     }
   }
+  recoveryStatus.index().files(numberOfFiles,totalSize,numberOfExistingFiles,existingTotalSize);
   if (logger.isTraceEnabled()) {
     logger.trace("recovering_files [{}] with total_size [{}], reusing_files [{}] with total_size [{}]",numberOfFiles,new ByteSizeValue(totalSize),numberOfExistingFiles,new ByteSizeValue(existingTotalSize));
   }
-  final AtomicLong throttlingWaitTime=new AtomicLong();
   final CountDownLatch latch=new CountDownLatch(filesToRecover.size());
   final CopyOnWriteArrayList<Throwable> failures=new CopyOnWriteArrayList<Throwable>();
   for (  final BlobMetaData fileToRecover : filesToRecover) {
@@ -55,7 +54,7 @@
  else {
       threadPool.schedule(new Runnable(){
         @Override public void run(){
-          throttlingWaitTime.addAndGet(recoveryThrottler.throttleInterval().millis());
+          recoveryStatus.index().addThrottlingTime(recoveryThrottler.throttleInterval().millis());
           if (recoveryThrottler.tryStream(shardId,fileToRecover.name())) {
             recoverFile(fileToRecover,indicesBlobs,latch,failures);
           }
@@ -85,6 +84,7 @@
  catch (  IOException e) {
     throw new IndexShardGatewayRecoveryException(shardId(),"Failed to fetch index version after copying it over",e);
   }
+  recoveryStatus.index().updateVersion(version);
   try {
     for (    String storeFile : store.directory().listAll()) {
       if (!virtualIndicesBlobs.containsKey(storeFile)) {
@@ -98,5 +98,4 @@
   }
  catch (  IOException e) {
   }
-  return new RecoveryStatus.Index(version,numberOfFiles,new ByteSizeValue(totalSize),numberOfExistingFiles,new ByteSizeValue(existingTotalSize),TimeValue.timeValueMillis(throttlingWaitTime.get()),timer.stop().totalTime());
 }

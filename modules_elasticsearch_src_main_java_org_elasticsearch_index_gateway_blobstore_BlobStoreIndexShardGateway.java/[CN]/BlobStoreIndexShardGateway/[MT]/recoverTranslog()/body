@@ -5,22 +5,20 @@
   }
  catch (  FileNotFoundException e) {
     indexShard.start();
-    return RecoveryStatus.Translog.EMPTY;
+    return;
   }
 catch (  IOException e) {
     throw new IndexShardGatewayRecoveryException(shardId,"Failed to recovery translog, can't read current index version",e);
   }
   if (!translogContainer.blobExists("translog-" + translogId)) {
     indexShard.start();
-    return RecoveryStatus.Translog.EMPTY;
+    return;
   }
   StopWatch timer=new StopWatch().start();
   try {
     indexShard.performRecoveryPrepareForTranslog();
     final AtomicReference<Throwable> failure=new AtomicReference<Throwable>();
     final CountDownLatch latch=new CountDownLatch(1);
-    final AtomicInteger totalOperations=new AtomicInteger();
-    final AtomicLong totalSize=new AtomicLong();
     translogContainer.readBlob("translog-" + translogId,new BlobContainer.ReadBlobListener(){
       FastByteArrayOutputStream bos=new FastByteArrayOutputStream();
       boolean ignore=false;
@@ -43,7 +41,7 @@ catch (  IOException e) {
             if ((si.position() - curPos) != opSize) {
               logger.warn("mismatch in size, expected [{}], got [{}]",opSize,si.position() - curPos);
             }
-            totalOperations.incrementAndGet();
+            recoveryStatus.translog().addTranslogOperations(1);
             indexShard.performRecoveryOperation(operation);
             if (si.position() >= bos.size()) {
               position=si.position();
@@ -51,13 +49,12 @@ catch (  IOException e) {
             }
           }
  catch (          Exception e) {
-            logger.warn("failed to retrieve translog after [{}] operations, ignoring the rest, considered corrupted",e,totalOperations.get());
+            logger.warn("failed to retrieve translog after [{}] operations, ignoring the rest, considered corrupted",e,recoveryStatus.translog().currentTranslogOperations());
             ignore=true;
             latch.countDown();
             return;
           }
         }
-        totalSize.addAndGet(position);
         FastByteArrayOutputStream newBos=new FastByteArrayOutputStream();
         int leftOver=bos.size() - position;
         if (leftOver > 0) {
@@ -79,7 +76,6 @@ catch (  IOException e) {
       throw failure.get();
     }
     indexShard.performRecoveryFinalization(true);
-    return new RecoveryStatus.Translog(totalOperations.get(),timer.stop().totalTime());
   }
  catch (  Throwable e) {
     throw new IndexShardGatewayRecoveryException(shardId,"Failed to recovery translog",e);
