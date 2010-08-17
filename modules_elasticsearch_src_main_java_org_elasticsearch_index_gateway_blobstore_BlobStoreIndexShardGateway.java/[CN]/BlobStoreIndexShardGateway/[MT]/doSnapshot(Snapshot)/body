@@ -1,0 +1,188 @@
+{
+  currentSnapshotStatus.index().startTime(System.currentTimeMillis());
+  currentSnapshotStatus.updateStage(SnapshotStatus.Stage.INDEX);
+  boolean indexDirty=false;
+  final SnapshotIndexCommit snapshotIndexCommit=snapshot.indexCommit();
+  final Translog.Snapshot translogSnapshot=snapshot.translogSnapshot();
+  ImmutableMap<String,BlobMetaData> indicesBlobs=null;
+  ImmutableMap<String,BlobMetaData> virtualIndicesBlobs=null;
+  int indexNumberOfFiles=0;
+  long indexTotalFilesSize=0;
+  long indexTime=0;
+  if (snapshot.indexChanged()) {
+    long time=System.currentTimeMillis();
+    indexDirty=true;
+    try {
+      indicesBlobs=indexContainer.listBlobs();
+    }
+ catch (    IOException e) {
+      throw new IndexShardGatewaySnapshotFailedException(shardId,"Failed to list indices files from gateway",e);
+    }
+    virtualIndicesBlobs=buildVirtualBlobs(indexContainer,indicesBlobs,cachedMd5);
+    final CountDownLatch latch=new CountDownLatch(snapshotIndexCommit.getFiles().length);
+    final CopyOnWriteArrayList<Throwable> failures=new CopyOnWriteArrayList<Throwable>();
+    for (    final String fileName : snapshotIndexCommit.getFiles()) {
+      StoreFileMetaData snapshotFileMetaData;
+      try {
+        snapshotFileMetaData=store.metaDataWithMd5(fileName);
+      }
+ catch (      IOException e) {
+        throw new IndexShardGatewaySnapshotFailedException(shardId,"Failed to get store file metadata",e);
+      }
+      if (fileName.equals(snapshotIndexCommit.getSegmentsFileName())) {
+        latch.countDown();
+        continue;
+      }
+      if (virtualIndicesBlobs.containsKey(fileName) && virtualIndicesBlobs.get(fileName).md5().equals(snapshotFileMetaData.md5())) {
+        latch.countDown();
+        continue;
+      }
+      indexNumberOfFiles++;
+      indexTotalFilesSize+=snapshotFileMetaData.sizeInBytes();
+      if (virtualIndicesBlobs.containsKey(fileName)) {
+        try {
+          cachedMd5.remove(fileName);
+          indexContainer.deleteBlobsByPrefix(fileName);
+        }
+ catch (        IOException e) {
+          logger.debug("failed to delete [" + fileName + "] before snapshotting, ignoring...");
+        }
+      }
+      try {
+        snapshotFile(snapshotIndexCommit.getDirectory(),snapshotFileMetaData,latch,failures);
+      }
+ catch (      IOException e) {
+        failures.add(e);
+        latch.countDown();
+      }
+    }
+    currentSnapshotStatus.index().files(indexNumberOfFiles,indexTotalFilesSize);
+    try {
+      latch.await();
+    }
+ catch (    InterruptedException e) {
+      failures.add(e);
+    }
+    if (!failures.isEmpty()) {
+      throw new IndexShardGatewaySnapshotFailedException(shardId(),"Failed to perform snapshot (index files)",failures.get(failures.size() - 1));
+    }
+    indexTime=System.currentTimeMillis() - time;
+  }
+  currentSnapshotStatus.index().took(System.currentTimeMillis() - currentSnapshotStatus.index().startTime());
+  currentSnapshotStatus.updateStage(SnapshotStatus.Stage.TRANSLOG);
+  currentSnapshotStatus.translog().startTime(System.currentTimeMillis());
+  if (snapshot.newTranslogCreated() || snapshot.sameTranslogNewOperations()) {
+    if (snapshot.newTranslogCreated() && translogBlob != null) {
+      translogBlob.close();
+      translogBlob=null;
+    }
+    if (translogBlob == null) {
+      try {
+        translogBlob=translogContainer.appendBlob("translog-" + translogSnapshot.translogId());
+      }
+ catch (      IOException e) {
+        throw new IndexShardGatewaySnapshotFailedException(shardId,"Failed to create translog",e);
+      }
+    }
+    final CountDownLatch latch=new CountDownLatch(1);
+    final AtomicReference<Throwable> failure=new AtomicReference<Throwable>();
+    translogBlob.append(new AppendableBlobContainer.AppendBlobListener(){
+      @Override public void withStream(      StreamOutput os) throws IOException {
+        if (!snapshot.newTranslogCreated()) {
+          translogSnapshot.seekForward(snapshot.lastTranslogPosition());
+        }
+        FastByteArrayOutputStream bos=cachedBos.get();
+        if (bos == null) {
+          bos=new FastByteArrayOutputStream();
+          cachedBos=new SoftReference<FastByteArrayOutputStream>(bos);
+        }
+        OutputStreamStreamOutput bosOs=new OutputStreamStreamOutput(bos);
+        while (translogSnapshot.hasNext()) {
+          bos.reset();
+          TranslogStreams.writeTranslogOperation(bosOs,translogSnapshot.next());
+          bosOs.flush();
+          os.writeVInt(bos.size());
+          os.writeBytes(bos.unsafeByteArray(),bos.size());
+          currentSnapshotStatus.translog().addTranslogOperations(1);
+        }
+      }
+      @Override public void onCompleted(){
+        latch.countDown();
+      }
+      @Override public void onFailure(      Throwable t){
+        failure.set(t);
+        latch.countDown();
+      }
+    }
+);
+    try {
+      latch.await();
+    }
+ catch (    InterruptedException e) {
+      failure.set(e);
+    }
+    if (failure.get() != null) {
+      throw new IndexShardGatewaySnapshotFailedException(shardId,"Failed to snapshot translog",failure.get());
+    }
+  }
+  currentSnapshotStatus.translog().took(System.currentTimeMillis() - currentSnapshotStatus.translog().startTime());
+  if (indexDirty) {
+    try {
+      indexNumberOfFiles++;
+      if (indicesBlobs.containsKey(snapshotIndexCommit.getSegmentsFileName())) {
+        cachedMd5.remove(snapshotIndexCommit.getSegmentsFileName());
+        indexContainer.deleteBlob(snapshotIndexCommit.getSegmentsFileName());
+      }
+      StoreFileMetaData snapshotFileMetaData=store.metaDataWithMd5(snapshotIndexCommit.getSegmentsFileName());
+      indexTotalFilesSize+=snapshotFileMetaData.sizeInBytes();
+      long time=System.currentTimeMillis();
+      CountDownLatch latch=new CountDownLatch(1);
+      CopyOnWriteArrayList<Throwable> failures=new CopyOnWriteArrayList<Throwable>();
+      snapshotFile(snapshotIndexCommit.getDirectory(),snapshotFileMetaData,latch,failures);
+      latch.await();
+      if (!failures.isEmpty()) {
+        throw new IndexShardGatewaySnapshotFailedException(shardId(),"Failed to perform snapshot (segment index file)",failures.get(failures.size() - 1));
+      }
+      indexTime+=(System.currentTimeMillis() - time);
+    }
+ catch (    Exception e) {
+      if (e instanceof IndexShardGatewaySnapshotFailedException) {
+        throw (IndexShardGatewaySnapshotFailedException)e;
+      }
+      throw new IndexShardGatewaySnapshotFailedException(shardId(),"Failed to finalize index snapshot into [" + snapshotIndexCommit.getSegmentsFileName() + "]",e);
+    }
+  }
+  currentSnapshotStatus.updateStage(SnapshotStatus.Stage.FINALIZE);
+  if (snapshot.newTranslogCreated()) {
+    try {
+      translogContainer.deleteBlobsByFilter(new BlobContainer.BlobNameFilter(){
+        @Override public boolean accept(        String blobName){
+          return !blobName.equals("translog-" + translogSnapshot.translogId());
+        }
+      }
+);
+    }
+ catch (    Exception e) {
+    }
+  }
+  if (indexDirty) {
+    for (    BlobMetaData md : virtualIndicesBlobs.values()) {
+      boolean found=false;
+      for (      final String fileName : snapshotIndexCommit.getFiles()) {
+        if (md.name().equals(fileName)) {
+          found=true;
+          break;
+        }
+      }
+      if (!found) {
+        try {
+          cachedMd5.remove(md.name());
+          indexContainer.deleteBlobsByPrefix(md.name());
+        }
+ catch (        IOException e) {
+          logger.debug("failed to delete unused index files, will retry later...",e);
+        }
+      }
+    }
+  }
+}
