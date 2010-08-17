@@ -7,18 +7,49 @@
   }
  catch (  IOException e) {
   }
-  shardStatus.estimatedFlushableMemorySize=indexShard.estimateFlushableMemorySize();
-  shardStatus.translogId=indexShard.translog().currentId();
-  shardStatus.translogOperations=indexShard.translog().size();
-  Engine.Searcher searcher=indexShard.searcher();
-  try {
-    shardStatus.docs=new ShardStatus.Docs();
-    shardStatus.docs.numDocs=searcher.reader().numDocs();
-    shardStatus.docs.maxDoc=searcher.reader().maxDoc();
-    shardStatus.docs.deletedDocs=searcher.reader().numDeletedDocs();
-  }
+  if (indexShard.state() == IndexShardState.STARTED) {
+    shardStatus.translogId=indexShard.translog().currentId();
+    shardStatus.translogOperations=indexShard.translog().size();
+    Engine.Searcher searcher=indexShard.searcher();
+    try {
+      shardStatus.docs=new ShardStatus.Docs();
+      shardStatus.docs.numDocs=searcher.reader().numDocs();
+      shardStatus.docs.maxDoc=searcher.reader().maxDoc();
+      shardStatus.docs.deletedDocs=searcher.reader().numDeletedDocs();
+    }
   finally {
-    searcher.release();
+      searcher.release();
+    }
   }
-  return shardStatus;
+  PeerRecoveryStatus peerRecoveryStatus=indexShard.peerRecoveryStatus();
+  if (peerRecoveryStatus == null) {
+    peerRecoveryStatus=peerRecoveryTarget.peerRecoveryStatus(indexShard.shardId());
+  }
+  if (peerRecoveryStatus != null) {
+    ShardStatus.PeerRecoveryStatus.Stage stage;
+switch (peerRecoveryStatus.stage()) {
+case INIT:
+      stage=ShardStatus.PeerRecoveryStatus.Stage.INIT;
+    break;
+case FILES:
+  stage=ShardStatus.PeerRecoveryStatus.Stage.FILES;
+break;
+case TRANSLOG:
+stage=ShardStatus.PeerRecoveryStatus.Stage.TRANSLOG;
+break;
+case RETRY:
+stage=ShardStatus.PeerRecoveryStatus.Stage.RETRY;
+break;
+case FINALIZE:
+stage=ShardStatus.PeerRecoveryStatus.Stage.FINALIZE;
+break;
+case DONE:
+stage=ShardStatus.PeerRecoveryStatus.Stage.DONE;
+break;
+default :
+stage=ShardStatus.PeerRecoveryStatus.Stage.INIT;
+}
+shardStatus.peerRecoveryStatus=new ShardStatus.PeerRecoveryStatus(stage,peerRecoveryStatus.startTime(),peerRecoveryStatus.took(),peerRecoveryStatus.retryTime(),peerRecoveryStatus.phase1TotalSize(),peerRecoveryStatus.phase1ExistingTotalSize(),peerRecoveryStatus.currentFilesSize(),peerRecoveryStatus.currentTranslogOperations());
+}
+return shardStatus;
 }
