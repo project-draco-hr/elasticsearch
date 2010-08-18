@@ -14,7 +14,6 @@ catch (  IOException e) {
     indexShard.start();
     return;
   }
-  StopWatch timer=new StopWatch().start();
   try {
     indexShard.performRecoveryPrepareForTranslog();
     final AtomicReference<Throwable> failure=new AtomicReference<Throwable>();
@@ -27,12 +26,18 @@ catch (  IOException e) {
           return;
         }
         bos.write(data,offset,size);
+        if (bos.size() < 4) {
+          return;
+        }
         BytesStreamInput si=new BytesStreamInput(bos.unsafeByteArray(),0,bos.size());
         int position;
         while (true) {
           try {
             position=si.position();
-            int opSize=si.readVInt();
+            if (position + 4 > bos.size()) {
+              break;
+            }
+            int opSize=si.readInt();
             int curPos=si.position();
             if ((si.position() + opSize) > bos.size()) {
               break;

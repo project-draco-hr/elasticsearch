@@ -1,21 +1,19 @@
 {
+  try {
+    BytesStreamOutput out=CachedStreamOutput.cachedBytes();
+    out.writeInt(0);
+    TranslogStreams.writeTranslogOperation(out,operation);
+    out.flush();
+    int size=out.size();
+    out.seek(0);
+    out.writeInt(size - 4);
 synchronized (mutex) {
-    FastByteArrayOutputStream bos=cachedBos.get();
-    if (bos == null) {
-      bos=new FastByteArrayOutputStream();
-      cachedBos=new SoftReference<FastByteArrayOutputStream>(bos);
-    }
-    try {
-      bos.reset();
-      OutputStreamStreamOutput bosOs=new OutputStreamStreamOutput(bos);
-      TranslogStreams.writeTranslogOperation(bosOs,operation);
-      bosOs.flush();
-      raf.raf().writeInt(bos.size());
-      raf.raf().write(bos.unsafeByteArray(),0,bos.size());
+      raf.raf().write(out.unsafeByteArray(),0,size);
+      lastPosition+=size;
       operationCounter.incrementAndGet();
     }
- catch (    Exception e) {
-      throw new TranslogException(shardId,"Failed to write operation [" + operation + "]",e);
-    }
+  }
+ catch (  Exception e) {
+    throw new TranslogException(shardId,"Failed to write operation [" + operation + "]",e);
   }
 }

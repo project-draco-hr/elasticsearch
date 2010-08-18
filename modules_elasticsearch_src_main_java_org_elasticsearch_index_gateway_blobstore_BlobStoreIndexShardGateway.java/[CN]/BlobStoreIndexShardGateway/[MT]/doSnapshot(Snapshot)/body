@@ -91,18 +91,16 @@
         if (!snapshot.newTranslogCreated()) {
           translogSnapshot.seekForward(snapshot.lastTranslogPosition());
         }
-        FastByteArrayOutputStream bos=cachedBos.get();
-        if (bos == null) {
-          bos=new FastByteArrayOutputStream();
-          cachedBos=new SoftReference<FastByteArrayOutputStream>(bos);
-        }
-        OutputStreamStreamOutput bosOs=new OutputStreamStreamOutput(bos);
+        BytesStreamOutput bout=CachedStreamOutput.cachedBytes();
         while (translogSnapshot.hasNext()) {
-          bos.reset();
-          TranslogStreams.writeTranslogOperation(bosOs,translogSnapshot.next());
-          bosOs.flush();
-          os.writeVInt(bos.size());
-          os.writeBytes(bos.unsafeByteArray(),bos.size());
+          bout.reset();
+          bout.writeInt(0);
+          TranslogStreams.writeTranslogOperation(bout,translogSnapshot.next());
+          bout.flush();
+          int size=bout.size();
+          bout.seek(0);
+          bout.writeInt(size - 4);
+          os.writeBytes(bout.unsafeByteArray(),size);
           currentSnapshotStatus.translog().addTranslogOperations(1);
         }
       }
