@@ -14,6 +14,36 @@
     return;
   }
   int replicaCounter=0;
+  for (  final ShardRouting shard : shards.reset()) {
+    if (shard.unassigned()) {
+      continue;
+    }
+    if (shard.primary()) {
+      if (shard.relocating()) {
+        replicaCounter++;
+      }
+    }
+ else {
+      replicaCounter++;
+      if (shard.relocating()) {
+        replicaCounter++;
+      }
+    }
+  }
+  if (replicaCounter == 0) {
+    if (alreadyThreaded || !request.listenerThreaded()) {
+      listener.onResponse(response);
+    }
+ else {
+      threadPool.execute(new Runnable(){
+        @Override public void run(){
+          listener.onResponse(response);
+        }
+      }
+);
+    }
+    return;
+  }
   if (replicationType == ReplicationType.ASYNC) {
     if (alreadyThreaded || !request.listenerThreaded()) {
       listener.onResponse(response);
@@ -28,21 +58,11 @@
     }
     replicaCounter=-100;
   }
-  for (  final ShardRouting shard : shards.reset()) {
-    if (shard.primary()) {
-      if (shard.relocating()) {
-        replicaCounter++;
-      }
-    }
- else {
-      replicaCounter++;
-      if (shard.relocating()) {
-        replicaCounter++;
-      }
-    }
-  }
   AtomicInteger counter=new AtomicInteger(replicaCounter);
   for (  final ShardRouting shard : shards.reset()) {
+    if (shard.unassigned()) {
+      continue;
+    }
     boolean doOnlyOnRelocating=false;
     if (shard.primary()) {
       if (shard.relocating()) {
@@ -52,28 +72,11 @@
         continue;
       }
     }
-    if (shard.unassigned() || !nodes.nodeExists(shard.currentNodeId())) {
-      if (counter.decrementAndGet() == 0) {
-        if (alreadyThreaded || !request.listenerThreaded()) {
-          listener.onResponse(response);
-        }
- else {
-          threadPool.execute(new Runnable(){
-            @Override public void run(){
-              listener.onResponse(response);
-            }
-          }
-);
-        }
-        break;
-      }
-      continue;
-    }
     if (!doOnlyOnRelocating) {
-      performOnReplica(response,counter,shard,shard.currentNodeId());
+      performOnReplica(response,alreadyThreaded,counter,shard,shard.currentNodeId());
     }
     if (shard.relocating()) {
-      performOnReplica(response,counter,shard,shard.relocatingNodeId());
+      performOnReplica(response,alreadyThreaded,counter,shard,shard.relocatingNodeId());
     }
   }
 }
