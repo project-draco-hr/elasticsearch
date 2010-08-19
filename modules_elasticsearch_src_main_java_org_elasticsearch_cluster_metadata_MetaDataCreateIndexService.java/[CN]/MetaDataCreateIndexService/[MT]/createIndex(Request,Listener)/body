@@ -78,22 +78,23 @@
         for (        DocumentMapper mapper : mapperService) {
           mappings.put(mapper.type(),mapper.mappingSource());
         }
-        IndexMetaData.Builder indexMetaData=newIndexMetaDataBuilder(request.index).settings(actualIndexSettings);
+        final IndexMetaData.Builder indexMetaDataBuilder=newIndexMetaDataBuilder(request.index).settings(actualIndexSettings);
         for (        Map.Entry<String,CompressedString> entry : mappings.entrySet()) {
-          indexMetaData.putMapping(entry.getKey(),entry.getValue());
+          indexMetaDataBuilder.putMapping(entry.getKey(),entry.getValue());
         }
+        final IndexMetaData indexMetaData=indexMetaDataBuilder.build();
         MetaData newMetaData=newMetaDataBuilder().metaData(currentState.metaData()).put(indexMetaData).build();
         logger.info("[{}] creating index, cause [{}], shards [{}]/[{}], mappings {}",request.index,request.cause,indexMetaData.numberOfShards(),indexMetaData.numberOfReplicas(),mappings.keySet());
         final AtomicInteger counter=new AtomicInteger(currentState.nodes().size() - 1);
         if (counter.get() == 0) {
-          listener.onResponse(new Response(true));
+          listener.onResponse(new Response(true,indexMetaData));
         }
  else {
           final NodeIndexCreatedAction.Listener nodeIndexCreateListener=new NodeIndexCreatedAction.Listener(){
             @Override public void onNodeIndexCreated(            String index,            String nodeId){
               if (index.equals(request.index)) {
                 if (counter.decrementAndGet() == 0) {
-                  listener.onResponse(new Response(true));
+                  listener.onResponse(new Response(true,indexMetaData));
                   nodeIndexCreatedAction.remove(this);
                 }
               }
@@ -103,7 +104,7 @@
           nodeIndexCreatedAction.add(nodeIndexCreateListener);
           Timeout timeoutTask=timerService.newTimeout(new TimerTask(){
             @Override public void run(            Timeout timeout) throws Exception {
-              listener.onResponse(new Response(false));
+              listener.onResponse(new Response(false,indexMetaData));
               nodeIndexCreatedAction.remove(nodeIndexCreateListener);
             }
           }
