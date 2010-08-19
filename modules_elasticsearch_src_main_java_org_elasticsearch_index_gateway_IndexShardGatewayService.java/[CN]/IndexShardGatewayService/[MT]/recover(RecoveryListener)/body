@@ -17,6 +17,10 @@
       recoveryStatus.updateStage(RecoveryStatus.Stage.INIT);
       indexShard.recovering();
       while (!recoveryThrottler.tryRecovery(shardId,"gateway")) {
+        if (indexShard.ignoreRecoveryAttempt()) {
+          listener.onIgnoreRecovery("ignoring recovery while waiting on retry");
+          return;
+        }
         recoveryStatus.updateStage(RecoveryStatus.Stage.RETRY);
         try {
           Thread.sleep(recoveryThrottler.throttleInterval().millis());
@@ -25,9 +29,11 @@
  catch (        InterruptedException e) {
           if (indexShard.ignoreRecoveryAttempt()) {
             listener.onIgnoreRecovery("Interrupted while waiting for recovery, but we should ignore ...");
-            return;
           }
-          listener.onRecoveryFailed(new IndexShardGatewayRecoveryException(shardId,"Interrupted while waiting to recovery",e));
+ else {
+            listener.onRecoveryFailed(new IndexShardGatewayRecoveryException(shardId,"Interrupted while waiting to recovery",e));
+          }
+          return;
         }
       }
       try {
