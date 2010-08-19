@@ -39,7 +39,7 @@
           listener.onFailure(new InvalidIndexNameException(new Index(request.index),request.index,"an alias with the same name already exists"));
           return currentState;
         }
-        Map<String,String> mappings=Maps.newHashMap();
+        Map<String,CompressedString> mappings=Maps.newHashMap();
         File mappingsDir=new File(environment.configFile(),"mappings");
         if (mappingsDir.exists() && mappingsDir.isDirectory()) {
           File defaultMappingsDir=new File(mappingsDir,"_default");
@@ -51,7 +51,9 @@
             addMappings(mappings,indexMappingsDir);
           }
         }
-        mappings.putAll(request.mappings);
+        for (        Map.Entry<String,String> entry : request.mappings.entrySet()) {
+          mappings.put(entry.getKey(),new CompressedString(entry.getValue()));
+        }
         ImmutableSettings.Builder indexSettingsBuilder=settingsBuilder().put(request.settings);
         if (request.settings.get(SETTING_NUMBER_OF_SHARDS) == null) {
           indexSettingsBuilder.put(SETTING_NUMBER_OF_SHARDS,settings.getAsInt(SETTING_NUMBER_OF_SHARDS,5));
@@ -63,9 +65,9 @@
         indicesService.createIndex(request.index,actualIndexSettings,clusterService.state().nodes().localNode().id());
         IndexService indexService=indicesService.indexServiceSafe(request.index);
         MapperService mapperService=indexService.mapperService();
-        for (        Map.Entry<String,String> entry : mappings.entrySet()) {
+        for (        Map.Entry<String,CompressedString> entry : mappings.entrySet()) {
           try {
-            mapperService.add(entry.getKey(),entry.getValue());
+            mapperService.add(entry.getKey(),entry.getValue().string());
           }
  catch (          Exception e) {
             indicesService.deleteIndex(request.index);
@@ -77,7 +79,7 @@
           mappings.put(mapper.type(),mapper.mappingSource());
         }
         IndexMetaData.Builder indexMetaData=newIndexMetaDataBuilder(request.index).settings(actualIndexSettings);
-        for (        Map.Entry<String,String> entry : mappings.entrySet()) {
+        for (        Map.Entry<String,CompressedString> entry : mappings.entrySet()) {
           indexMetaData.putMapping(entry.getKey(),entry.getValue());
         }
         MetaData newMetaData=newMetaDataBuilder().metaData(currentState.metaData()).put(indexMetaData).build();
