@@ -18,27 +18,6 @@
     @Override public void run(){
       recoveryStatus=new RecoveryStatus();
       recoveryStatus.updateStage(RecoveryStatus.Stage.INIT);
-      while (!recoveryThrottler.tryGatewayRecovery(shardId,"gateway")) {
-        if (indexShard.state() == IndexShardState.CLOSED) {
-          listener.onIgnoreRecovery("ignoring recovery while waiting on retry, closed");
-          return;
-        }
-        recoveryStatus.updateStage(RecoveryStatus.Stage.THROTTLE);
-        try {
-          Thread.sleep(recoveryThrottler.throttleInterval().millis());
-          recoveryStatus.retryTime(System.currentTimeMillis() - recoveryStatus.startTime());
-        }
- catch (        InterruptedException e) {
-          recoveryStatus=null;
-          if (indexShard.state() == IndexShardState.CLOSED) {
-            listener.onIgnoreRecovery("Interrupted while waiting for recovery, but we should ignore since closed");
-          }
- else {
-            listener.onRecoveryFailed(new IndexShardGatewayRecoveryException(shardId,"Interrupted while waiting to recovery",e));
-          }
-          return;
-        }
-      }
       try {
         logger.debug("starting recovery from {} ...",shardGateway);
         shardGateway.recover(recoveryStatus);
@@ -54,8 +33,8 @@
         recoveryStatus.updateStage(RecoveryStatus.Stage.DONE);
         if (logger.isDebugEnabled()) {
           StringBuilder sb=new StringBuilder();
-          sb.append("recovery completed from ").append(shardGateway).append(", took [").append(timeValueMillis(recoveryStatus.time())).append("], retry_time [").append(TimeValue.timeValueMillis(recoveryStatus.retryTime())).append("]\n");
-          sb.append("    index    : recovered_files [").append(recoveryStatus.index().numberOfFiles()).append("] with total_size [").append(new ByteSizeValue(recoveryStatus.index().totalSize())).append("], took [").append(TimeValue.timeValueMillis(recoveryStatus.index().time())).append("], throttling_wait [").append(TimeValue.timeValueMillis(recoveryStatus.index().retryTime())).append("]\n");
+          sb.append("recovery completed from ").append(shardGateway).append(", took [").append(timeValueMillis(recoveryStatus.time())).append("]\n");
+          sb.append("    index    : recovered_files [").append(recoveryStatus.index().numberOfFiles()).append("] with total_size [").append(new ByteSizeValue(recoveryStatus.index().totalSize())).append("], took [").append(TimeValue.timeValueMillis(recoveryStatus.index().time())).append("]\n");
           sb.append("             : reusing_files   [").append(recoveryStatus.index().numberOfExistingFiles()).append("] with total_size [").append(new ByteSizeValue(recoveryStatus.index().existingTotalSize())).append("]\n");
           sb.append("    translog : number_of_operations [").append(recoveryStatus.translog().currentTranslogOperations()).append("], took [").append(TimeValue.timeValueMillis(recoveryStatus.translog().time())).append("]");
           logger.debug(sb.toString());
@@ -82,9 +61,6 @@ catch (      IndexShardNotStartedException e) {
       }
 catch (      Exception e) {
         listener.onRecoveryFailed(new IndexShardGatewayRecoveryException(shardId,"failed recovery",e));
-      }
- finally {
-        recoveryThrottler.recoveryGatewayDone(shardId,"gateway");
       }
     }
   }
