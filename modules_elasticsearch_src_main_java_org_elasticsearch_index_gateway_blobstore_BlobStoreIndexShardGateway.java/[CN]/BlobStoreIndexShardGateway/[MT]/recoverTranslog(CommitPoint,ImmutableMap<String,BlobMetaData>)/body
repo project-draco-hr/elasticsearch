@@ -1,0 +1,82 @@
+{
+  if (commitPoint.translogFiles().isEmpty()) {
+    indexShard.start();
+    return;
+  }
+  try {
+    indexShard.performRecoveryPrepareForTranslog();
+    final AtomicReference<Throwable> failure=new AtomicReference<Throwable>();
+    final CountDownLatch latch=new CountDownLatch(1);
+    final Iterator<CommitPoint.FileInfo> transIt=commitPoint.translogFiles().iterator();
+    blobContainer.readBlob(transIt.next().name(),new BlobContainer.ReadBlobListener(){
+      FastByteArrayOutputStream bos=new FastByteArrayOutputStream();
+      boolean ignore=false;
+      @Override public void onPartial(      byte[] data,      int offset,      int size) throws IOException {
+        if (ignore) {
+          return;
+        }
+        bos.write(data,offset,size);
+        if (bos.size() < 4) {
+          return;
+        }
+        BytesStreamInput si=new BytesStreamInput(bos.unsafeByteArray(),0,bos.size());
+        int position;
+        while (true) {
+          try {
+            position=si.position();
+            if (position + 4 > bos.size()) {
+              break;
+            }
+            int opSize=si.readInt();
+            int curPos=si.position();
+            if ((si.position() + opSize) > bos.size()) {
+              break;
+            }
+            Translog.Operation operation=TranslogStreams.readTranslogOperation(si);
+            if ((si.position() - curPos) != opSize) {
+              logger.warn("mismatch in size, expected [{}], got [{}]",opSize,si.position() - curPos);
+            }
+            recoveryStatus.translog().addTranslogOperations(1);
+            indexShard.performRecoveryOperation(operation);
+            if (si.position() >= bos.size()) {
+              position=si.position();
+              break;
+            }
+          }
+ catch (          Exception e) {
+            logger.warn("failed to retrieve translog after [{}] operations, ignoring the rest, considered corrupted",e,recoveryStatus.translog().currentTranslogOperations());
+            ignore=true;
+            latch.countDown();
+            return;
+          }
+        }
+        FastByteArrayOutputStream newBos=new FastByteArrayOutputStream();
+        int leftOver=bos.size() - position;
+        if (leftOver > 0) {
+          newBos.write(bos.unsafeByteArray(),position,leftOver);
+        }
+        bos=newBos;
+      }
+      @Override public synchronized void onCompleted(){
+        if (!transIt.hasNext()) {
+          latch.countDown();
+          return;
+        }
+        blobContainer.readBlob(transIt.next().name(),this);
+      }
+      @Override public void onFailure(      Throwable t){
+        failure.set(t);
+        latch.countDown();
+      }
+    }
+);
+    latch.await();
+    if (failure.get() != null) {
+      throw failure.get();
+    }
+    indexShard.performRecoveryFinalization(true);
+  }
+ catch (  Throwable e) {
+    throw new IndexShardGatewayRecoveryException(shardId,"Failed to recover translog",e);
+  }
+}

@@ -1,11 +1,39 @@
 {
   this.recoveryStatus=recoveryStatus;
-  recoveryStatus.index().startTime(System.currentTimeMillis());
-  recoveryStatus.updateStage(RecoveryStatus.Stage.INDEX);
-  recoverIndex();
-  recoveryStatus.index().time(System.currentTimeMillis() - recoveryStatus.index().startTime());
-  recoveryStatus.translog().startTime(System.currentTimeMillis());
-  recoveryStatus.updateStage(RecoveryStatus.Stage.TRANSLOG);
-  recoverTranslog();
-  recoveryStatus.translog().time(System.currentTimeMillis() - recoveryStatus.index().startTime());
+  final ImmutableMap<String,BlobMetaData> blobs;
+  try {
+    blobs=blobContainer.listBlobs();
+  }
+ catch (  IOException e) {
+    throw new IndexShardGatewayRecoveryException(shardId,"Failed to list content of gateway",e);
+  }
+  CommitPoints commitPoints=buildCommitPoints(blobs);
+  if (commitPoints.commits().isEmpty()) {
+    recoveryStatus.index().startTime(System.currentTimeMillis());
+    recoveryStatus.index().time(System.currentTimeMillis() - recoveryStatus.index().startTime());
+    recoveryStatus.translog().startTime(System.currentTimeMillis());
+    recoveryStatus.translog().time(System.currentTimeMillis() - recoveryStatus.index().startTime());
+    return;
+  }
+  for (  CommitPoint commitPoint : commitPoints) {
+    if (!commitPointExistsInBlobs(commitPoint,blobs)) {
+      logger.warn("listed commit_point [{}]/[{}], but not all files exists, ignoring",commitPoint.name(),commitPoint.version());
+      continue;
+    }
+    try {
+      recoveryStatus.index().startTime(System.currentTimeMillis());
+      recoveryStatus.updateStage(RecoveryStatus.Stage.INDEX);
+      recoverIndex(commitPoint,blobs);
+      recoveryStatus.index().time(System.currentTimeMillis() - recoveryStatus.index().startTime());
+      recoveryStatus.translog().startTime(System.currentTimeMillis());
+      recoveryStatus.updateStage(RecoveryStatus.Stage.TRANSLOG);
+      recoverTranslog(commitPoint,blobs);
+      recoveryStatus.translog().time(System.currentTimeMillis() - recoveryStatus.index().startTime());
+      return;
+    }
+ catch (    Exception e) {
+      throw new IndexShardGatewayRecoveryException(shardId,"failed to recover commit_point [" + commitPoint.name() + "]/["+ commitPoint.version()+ "]",e);
+    }
+  }
+  throw new IndexShardGatewayRecoveryException(shardId,"No commit point data is available in gateway",null);
 }

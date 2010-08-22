@@ -1,0 +1,50 @@
+{
+  final IndexOutput indexOutput;
+  try {
+    indexOutput=store.directory().createOutput(fileInfo.physicalName());
+  }
+ catch (  IOException e) {
+    failures.add(e);
+    latch.countDown();
+    return;
+  }
+  String firstFileToRecover=fileInfo.name();
+  if (!blobs.containsKey(fileInfo.name())) {
+    firstFileToRecover=fileInfo.name() + ".part0";
+  }
+  if (!blobs.containsKey(firstFileToRecover)) {
+    logger.warn("no file [{}]/[{}] to recover, ignoring it",fileInfo.name(),fileInfo.physicalName());
+    latch.countDown();
+    return;
+  }
+  final AtomicInteger partIndex=new AtomicInteger();
+  blobContainer.readBlob(firstFileToRecover,new BlobContainer.ReadBlobListener(){
+    @Override public synchronized void onPartial(    byte[] data,    int offset,    int size) throws IOException {
+      recoveryStatus.index().addCurrentFilesSize(size);
+      indexOutput.writeBytes(data,offset,size);
+    }
+    @Override public synchronized void onCompleted(){
+      int part=partIndex.incrementAndGet();
+      String partName=fileInfo.name() + ".part" + part;
+      if (blobs.containsKey(partName)) {
+        blobContainer.readBlob(partName,this);
+        return;
+      }
+ else {
+        try {
+          indexOutput.close();
+        }
+ catch (        IOException e) {
+          onFailure(e);
+          return;
+        }
+      }
+      latch.countDown();
+    }
+    @Override public void onFailure(    Throwable t){
+      failures.add(t);
+      latch.countDown();
+    }
+  }
+);
+}

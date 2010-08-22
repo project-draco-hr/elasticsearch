@@ -1,0 +1,75 @@
+{
+  int numberOfFiles=0;
+  long totalSize=0;
+  int numberOfExistingFiles=0;
+  long existingTotalSize=0;
+  List<CommitPoint.FileInfo> filesToRecover=Lists.newArrayList();
+  for (  CommitPoint.FileInfo fileInfo : commitPoint.indexFiles()) {
+    StoreFileMetaData storeFile=store.metaData(fileInfo.physicalName());
+    if (storeFile != null && !storeFile.name().contains("segment") && storeFile.length() == fileInfo.length()) {
+      numberOfExistingFiles++;
+      existingTotalSize+=storeFile.length();
+      totalSize+=storeFile.length();
+      if (logger.isTraceEnabled()) {
+        logger.trace("not_recovering [{}], exists in local store and has same length [{}]",fileInfo.physicalName(),fileInfo.length());
+      }
+    }
+ else {
+      if (logger.isTraceEnabled()) {
+        if (storeFile == null) {
+          logger.trace("recovering [{}], does not exists in local store",fileInfo.physicalName());
+        }
+ else {
+          logger.trace("recovering [{}], exists in local store but has different length: gateway [{}], local [{}]",fileInfo.physicalName(),fileInfo.length(),storeFile.length());
+        }
+      }
+      numberOfFiles++;
+      totalSize+=fileInfo.length();
+      filesToRecover.add(fileInfo);
+    }
+  }
+  recoveryStatus.index().files(numberOfFiles,totalSize,numberOfExistingFiles,existingTotalSize);
+  if (filesToRecover.isEmpty()) {
+    logger.trace("no files to recover, all exists within the local store");
+  }
+  if (logger.isTraceEnabled()) {
+    logger.trace("recovering_files [{}] with total_size [{}], reusing_files [{}] with reused_size [{}]",numberOfFiles,new ByteSizeValue(totalSize),numberOfExistingFiles,new ByteSizeValue(existingTotalSize));
+  }
+  final CountDownLatch latch=new CountDownLatch(filesToRecover.size());
+  final CopyOnWriteArrayList<Throwable> failures=new CopyOnWriteArrayList<Throwable>();
+  for (  final CommitPoint.FileInfo fileToRecover : filesToRecover) {
+    recoverFile(fileToRecover,blobs,latch,failures);
+  }
+  try {
+    latch.await();
+  }
+ catch (  InterruptedException e) {
+    throw new IndexShardGatewayRecoveryException(shardId,"Interrupted while recovering index",e);
+  }
+  if (!failures.isEmpty()) {
+    throw new IndexShardGatewayRecoveryException(shardId,"Failed to recover index",failures.get(0));
+  }
+  long version=-1;
+  try {
+    if (IndexReader.indexExists(store.directory())) {
+      version=IndexReader.getCurrentVersion(store.directory());
+    }
+  }
+ catch (  IOException e) {
+    throw new IndexShardGatewayRecoveryException(shardId(),"Failed to fetch index version after copying it over",e);
+  }
+  recoveryStatus.index().updateVersion(version);
+  try {
+    for (    String storeFile : store.directory().listAll()) {
+      if (!commitPoint.containPhysicalIndexFile(storeFile)) {
+        try {
+          store.directory().deleteFile(storeFile);
+        }
+ catch (        IOException e) {
+        }
+      }
+    }
+  }
+ catch (  IOException e) {
+  }
+}

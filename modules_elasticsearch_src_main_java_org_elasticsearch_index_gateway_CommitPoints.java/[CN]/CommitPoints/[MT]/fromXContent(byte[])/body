@@ -1,0 +1,86 @@
+{
+  XContentParser parser=XContentFactory.xContent(XContentType.JSON).createParser(data);
+  try {
+    String currentFieldName=null;
+    XContentParser.Token token=parser.nextToken();
+    if (token == null) {
+      throw new IOException("No commit point data");
+    }
+    long version=-1;
+    String name=null;
+    CommitPoint.Type type=null;
+    List<CommitPoint.FileInfo> indexFiles=Lists.newArrayList();
+    List<CommitPoint.FileInfo> translogFiles=Lists.newArrayList();
+    while ((token=parser.nextToken()) != XContentParser.Token.END_OBJECT) {
+      if (token == XContentParser.Token.FIELD_NAME) {
+        currentFieldName=parser.currentName();
+      }
+ else       if (token == XContentParser.Token.START_OBJECT) {
+        List<CommitPoint.FileInfo> files=null;
+        if ("index_files".equals(currentFieldName) || "indexFiles".equals(currentFieldName)) {
+          files=indexFiles;
+        }
+ else         if ("translog_files".equals(currentFieldName) || "translogFiles".equals(currentFieldName)) {
+          files=translogFiles;
+        }
+ else {
+          throw new IOException("Can't handle object with name [" + currentFieldName + "]");
+        }
+        while ((token=parser.nextToken()) != XContentParser.Token.END_OBJECT) {
+          if (token == XContentParser.Token.FIELD_NAME) {
+            currentFieldName=parser.currentName();
+          }
+ else           if (token == XContentParser.Token.START_OBJECT) {
+            String fileName=currentFieldName;
+            String physicalName=null;
+            long size=-1;
+            while ((token=parser.nextToken()) != XContentParser.Token.END_OBJECT) {
+              if (token == XContentParser.Token.FIELD_NAME) {
+                currentFieldName=parser.currentName();
+              }
+ else               if (token.isValue()) {
+                if ("physical_name".equals(currentFieldName) || "physicalName".equals(currentFieldName)) {
+                  physicalName=parser.text();
+                }
+ else                 if ("length".equals(currentFieldName)) {
+                  size=parser.longValue();
+                }
+              }
+            }
+            if (physicalName == null) {
+              throw new IOException("Malformed commit, missing physical_name for [" + fileName + "]");
+            }
+            if (size == -1) {
+              throw new IOException("Malformed commit, missing size for [" + fileName + "]");
+            }
+            files.add(new CommitPoint.FileInfo(fileName,physicalName,size));
+          }
+        }
+      }
+ else       if (token.isValue()) {
+        if ("version".equals(currentFieldName)) {
+          version=parser.longValue();
+        }
+ else         if ("name".equals(currentFieldName)) {
+          name=parser.text();
+        }
+ else         if ("type".equals(currentFieldName)) {
+          type=CommitPoint.Type.valueOf(parser.text());
+        }
+      }
+    }
+    if (version == -1) {
+      throw new IOException("Malformed commit, missing version");
+    }
+    if (name == null) {
+      throw new IOException("Malformed commit, missing name");
+    }
+    if (type == null) {
+      throw new IOException("Malformed commit, missing type");
+    }
+    return new CommitPoint(version,name,type,indexFiles,translogFiles);
+  }
+  finally {
+    parser.close();
+  }
+}
