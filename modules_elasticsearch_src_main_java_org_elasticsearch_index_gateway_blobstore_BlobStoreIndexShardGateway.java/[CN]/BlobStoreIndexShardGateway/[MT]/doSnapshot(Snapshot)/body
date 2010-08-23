@@ -65,8 +65,13 @@
   currentSnapshotStatus.updateStage(SnapshotStatus.Stage.TRANSLOG);
   currentSnapshotStatus.translog().startTime(System.currentTimeMillis());
   List<CommitPoint.FileInfo> translogCommitPointFiles=Lists.newArrayList();
+  int expectedNumberOfOperations=0;
   boolean snapshotRequired=snapshot.newTranslogCreated();
-  if (!snapshot.newTranslogCreated()) {
+  if (snapshot.newTranslogCreated()) {
+    snapshotRequired=true;
+    expectedNumberOfOperations=translogSnapshot.totalOperations();
+  }
+ else {
     if (!commitPoints.commits().isEmpty()) {
       CommitPoint commitPoint=commitPoints.commits().get(0);
       boolean allTranslogFilesExists=true;
@@ -81,13 +86,16 @@
         if (snapshot.sameTranslogNewOperations()) {
           translogSnapshot.seekForward(snapshot.lastTranslogPosition());
           snapshotRequired=true;
+          expectedNumberOfOperations=translogSnapshot.totalOperations() - snapshot.lastTotalTranslogOperations();
         }
       }
  else {
+        expectedNumberOfOperations=translogSnapshot.totalOperations();
         snapshotRequired=true;
       }
     }
   }
+  currentSnapshotStatus.translog().expectedNumberOfOperations(expectedNumberOfOperations);
   if (snapshotRequired) {
     CommitPoint.FileInfo addedTranslogFileInfo=new CommitPoint.FileInfo(fileNameFromGeneration(++generation),"translog-" + translogSnapshot.translogId(),translogSnapshot.lengthInBytes());
     translogCommitPointFiles.add(addedTranslogFileInfo);
