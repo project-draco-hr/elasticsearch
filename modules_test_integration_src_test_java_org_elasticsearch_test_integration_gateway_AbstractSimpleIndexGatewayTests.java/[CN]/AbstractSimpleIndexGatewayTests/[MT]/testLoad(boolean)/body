@@ -25,4 +25,18 @@
   assertThat(clusterHealth.status(),equalTo(ClusterHealthStatus.YELLOW));
   logger.info("--> checking count");
   assertThat(client("server1").prepareCount().setQuery(matchAllQuery()).execute().actionGet().count(),equalTo(12345l));
+  logger.info("--> checking reuse / recovery status");
+  IndicesStatusResponse statusResponse=client("server1").admin().indices().prepareStatus().execute().actionGet();
+  for (  IndexShardStatus indexShardStatus : statusResponse.index("test")) {
+    for (    ShardStatus shardStatus : indexShardStatus) {
+      if (shardStatus.shardRouting().primary()) {
+        if (fullRecovery) {
+          assertThat(shardStatus.gatewayRecoveryStatus().reusedIndexSize().bytes(),equalTo(0l));
+        }
+ else {
+          assertThat(shardStatus.gatewayRecoveryStatus().reusedIndexSize().bytes(),greaterThan(shardStatus.gatewayRecoveryStatus().indexSize().bytes() - 4098));
+        }
+      }
+    }
+  }
 }
