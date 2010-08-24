@@ -3,6 +3,20 @@
   if (nodes.dataNodes().isEmpty()) {
     return changed;
   }
+  for (  ShardId shardId : cachedCommitPoints.keySet()) {
+    IndexRoutingTable indexRoutingTable=routingNodes.routingTable().index(shardId.index().name());
+    if (indexRoutingTable == null) {
+      cachedCommitPoints.remove(shardId);
+      continue;
+    }
+    ShardRouting primaryShardRouting=indexRoutingTable.shard(shardId.id()).primaryShard();
+    if (primaryShardRouting.active()) {
+      cachedCommitPoints.remove(shardId);
+    }
+  }
+  if (!routingNodes.hasUnassigned()) {
+    return changed;
+  }
   Iterator<MutableShardRouting> unassignedIterator=routingNodes.unassigned().iterator();
   while (unassignedIterator.hasNext()) {
     MutableShardRouting shard=unassignedIterator.next();
@@ -50,7 +64,22 @@
       if (shard.primary() && indexService.gateway() instanceof BlobStoreIndexGateway) {
         BlobStoreIndexGateway indexGateway=(BlobStoreIndexGateway)indexService.gateway();
         try {
-          CommitPoint commitPoint=indexGateway.findCommitPoint(shard.id());
+          CommitPoint commitPoint=cachedCommitPoints.get(shard.shardId());
+          if (commitPoint == null) {
+            commitPoint=indexGateway.findCommitPoint(shard.id());
+            if (commitPoint != null) {
+              cachedCommitPoints.put(shard.shardId(),commitPoint);
+            }
+ else {
+              cachedCommitPoints.put(shard.shardId(),CommitPoint.NULL);
+            }
+          }
+ else           if (commitPoint == CommitPoint.NULL) {
+            commitPoint=null;
+          }
+          if (commitPoint == null) {
+            break;
+          }
           if (logger.isTraceEnabled()) {
             StringBuilder sb=new StringBuilder(shard + ": checking for pre_allocation (gateway) on node " + discoNode+ "\n");
             sb.append("    gateway_files:\n");
