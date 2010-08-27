@@ -1,0 +1,31 @@
+{
+  final AtomicInteger indicesCounter=new AtomicInteger(fMetaData.indices().size());
+  clusterService.submitStateUpdateTask("gateway (recovered meta-data)",new ProcessedClusterStateUpdateTask(){
+    @Override public ClusterState execute(    ClusterState currentState){
+      MetaData.Builder metaDataBuilder=newMetaDataBuilder().metaData(currentState.metaData());
+      metaDataBuilder.markAsRecoveredFromGateway();
+      return newClusterStateBuilder().state(currentState).metaData(metaDataBuilder).build();
+    }
+    @Override public void clusterStateProcessed(    ClusterState clusterState){
+      for (      final IndexMetaData indexMetaData : fMetaData) {
+        try {
+          createIndexService.createIndex(new MetaDataCreateIndexService.Request("gateway",indexMetaData.index()).settings(indexMetaData.settings()).mappingsCompressed(indexMetaData.mappings()).timeout(timeValueSeconds(30)),new MetaDataCreateIndexService.Listener(){
+            @Override public void onResponse(            MetaDataCreateIndexService.Response response){
+              if (indicesCounter.decrementAndGet() == 0) {
+                listener.onSuccess();
+              }
+            }
+            @Override public void onFailure(            Throwable t){
+              logger.error("failed to create index [{}]",indexMetaData.index(),t);
+            }
+          }
+);
+        }
+ catch (        IOException e) {
+          logger.error("failed to create index [{}]",indexMetaData.index(),e);
+        }
+      }
+    }
+  }
+);
+}
