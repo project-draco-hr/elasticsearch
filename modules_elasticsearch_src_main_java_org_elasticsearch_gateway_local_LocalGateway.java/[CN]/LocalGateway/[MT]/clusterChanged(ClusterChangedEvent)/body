@@ -1,0 +1,72 @@
+{
+  if (!event.state().metaData().recoveredFromGateway()) {
+    return;
+  }
+  for (  Map.Entry<String,ImmutableSet<ClusterBlock>> entry : event.state().blocks().indices().entrySet()) {
+    final String index=entry.getKey();
+    ImmutableSet<ClusterBlock> indexBlocks=entry.getValue();
+    if (indexBlocks.contains(INDEX_NOT_RECOVERED_BLOCK)) {
+      IndexRoutingTable indexRoutingTable=event.state().routingTable().index(index);
+      if (indexRoutingTable != null && indexRoutingTable.allPrimaryShardsActive()) {
+        clusterService.submitStateUpdateTask("remove-index-block (all primary shards active for [" + index + "])",new ClusterStateUpdateTask(){
+          @Override public ClusterState execute(          ClusterState currentState){
+            ClusterBlocks.Builder blocks=ClusterBlocks.builder().blocks(currentState.blocks());
+            blocks.removeIndexBlock(index,INDEX_NOT_RECOVERED_BLOCK);
+            return ClusterState.builder().state(currentState).blocks(blocks).build();
+          }
+        }
+);
+      }
+    }
+  }
+  if (!event.routingTableChanged() && !event.metaDataChanged()) {
+    return;
+  }
+  LocalGatewayState.Builder builder=LocalGatewayState.builder();
+  if (currentState != null) {
+    builder.state(currentState);
+  }
+  builder.version(event.state().version());
+  builder.metaData(event.state().metaData());
+  for (  IndexRoutingTable indexRoutingTable : event.state().routingTable()) {
+    for (    IndexShardRoutingTable indexShardRoutingTable : indexRoutingTable) {
+      if (indexShardRoutingTable.primaryShard().active()) {
+        builder.remove(indexShardRoutingTable.shardId());
+      }
+    }
+  }
+  RoutingNode routingNode=event.state().readOnlyRoutingNodes().node(event.state().nodes().localNodeId());
+  if (routingNode != null) {
+    for (    MutableShardRouting shardRouting : routingNode) {
+      if (shardRouting.active()) {
+        builder.put(shardRouting.shardId(),event.state().version());
+      }
+    }
+  }
+  try {
+    LocalGatewayState stateToWrite=builder.build();
+    BinaryXContentBuilder xContentBuilder=XContentFactory.contentBinaryBuilder(XContentType.JSON);
+    xContentBuilder.prettyPrint();
+    xContentBuilder.startObject();
+    LocalGatewayState.Builder.toXContent(stateToWrite,xContentBuilder,ToXContent.EMPTY_PARAMS);
+    xContentBuilder.endObject();
+    File stateFile=new File(location,"state-" + event.state().version());
+    FileOutputStream fos=new FileOutputStream(stateFile);
+    fos.write(xContentBuilder.unsafeBytes(),0,xContentBuilder.unsafeBytesLength());
+    fos.close();
+    FileSystemUtils.syncFile(stateFile);
+    currentState=stateToWrite;
+  }
+ catch (  IOException e) {
+    logger.warn("failed to write updated state",e);
+  }
+  File[] files=location.listFiles(new FilenameFilter(){
+    @Override public boolean accept(    File dir,    String name){
+      return !name.equals("state-" + event.state().version());
+    }
+  }
+);
+  for (  File file : files) {
+    file.delete();
+  }
+}

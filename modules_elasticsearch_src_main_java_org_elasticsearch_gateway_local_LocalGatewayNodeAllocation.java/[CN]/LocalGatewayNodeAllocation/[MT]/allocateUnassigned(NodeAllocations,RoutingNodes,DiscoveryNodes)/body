@@ -1,0 +1,48 @@
+{
+  boolean changed=false;
+  for (  IndexRoutingTable indexRoutingTable : routingNodes.routingTable()) {
+    if (!routingNodes.blocks().hasIndexBlock(indexRoutingTable.index(),LocalGateway.INDEX_NOT_RECOVERED_BLOCK)) {
+      continue;
+    }
+    if (indexRoutingTable.allPrimaryShardsUnassigned()) {
+      Set<String> nodesIds=Sets.newHashSet();
+      nodesIds.addAll(nodes.dataNodes().keySet());
+      nodesIds.addAll(nodes.masterNodes().keySet());
+      TransportNodesListGatewayState.NodesLocalGatewayState nodesState=listGatewayState.list(nodesIds,null).actionGet();
+      Map<ShardId,Tuple<DiscoveryNode,Long>> shards=Maps.newHashMap();
+      for (      TransportNodesListGatewayState.NodeLocalGatewayState nodeState : nodesState) {
+        for (        Map.Entry<ShardId,Long> entry : nodeState.state().shards().entrySet()) {
+          if (entry.getKey().index().name().equals(indexRoutingTable.index())) {
+            Tuple<DiscoveryNode,Long> t=shards.get(entry.getKey());
+            if (t == null || entry.getValue() > t.v2().longValue()) {
+              t=new Tuple<DiscoveryNode,Long>(nodeState.node(),entry.getValue());
+              shards.put(entry.getKey(),t);
+            }
+          }
+        }
+      }
+      if (shards.size() < indexRoutingTable.shards().size()) {
+        for (Iterator<MutableShardRouting> it=routingNodes.unassigned().iterator(); it.hasNext(); ) {
+          MutableShardRouting shardRouting=it.next();
+          if (shardRouting.index().equals(indexRoutingTable.index())) {
+            it.remove();
+            routingNodes.ignoredUnassigned().add(shardRouting);
+          }
+        }
+      }
+ else {
+        changed=true;
+        for (Iterator<MutableShardRouting> it=routingNodes.unassigned().iterator(); it.hasNext(); ) {
+          MutableShardRouting shardRouting=it.next();
+          if (shardRouting.primary()) {
+            DiscoveryNode node=shards.get(shardRouting.shardId()).v1();
+            RoutingNode routingNode=routingNodes.node(node.id());
+            routingNode.add(shardRouting);
+            it.remove();
+          }
+        }
+      }
+    }
+  }
+  return changed;
+}
