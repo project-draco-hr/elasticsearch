@@ -1,0 +1,54 @@
+{
+  recoveryStatus().index().startTime(System.currentTimeMillis());
+  long version=-1;
+  try {
+    if (IndexReader.indexExists(indexShard.store().directory())) {
+      version=IndexReader.getCurrentVersion(indexShard.store().directory());
+    }
+  }
+ catch (  IOException e) {
+    throw new IndexShardGatewayRecoveryException(shardId(),"Failed to fetch index version after copying it over",e);
+  }
+  recoveryStatus.index().updateVersion(version);
+  recoveryStatus.index().time(System.currentTimeMillis() - recoveryStatus.index().startTime());
+  recoveryStatus.translog().startTime(System.currentTimeMillis());
+  if (version == -1) {
+    indexShard.start();
+    recoveryStatus.translog().time(System.currentTimeMillis() - recoveryStatus.index().startTime());
+    return;
+  }
+  FsTranslog translog=(FsTranslog)indexShard.translog();
+  File recoveringTranslogFile=new File(translog.location(),"translog-" + version + ".recovering");
+  if (!recoveringTranslogFile.exists()) {
+    File translogFile=new File(translog.location(),"translog-" + version);
+    if (translogFile.exists()) {
+      for (int i=0; i < 3; i++) {
+        if (translogFile.renameTo(recoveringTranslogFile)) {
+          break;
+        }
+      }
+    }
+  }
+  if (!recoveringTranslogFile.exists()) {
+    indexShard.start();
+    recoveryStatus.translog().time(System.currentTimeMillis() - recoveryStatus.index().startTime());
+    return;
+  }
+  indexShard.performRecoveryPrepareForTranslog();
+  try {
+    InputStreamStreamInput si=new InputStreamStreamInput(new FileInputStream(recoveringTranslogFile));
+    while (true) {
+      int opSize=si.readInt();
+      Translog.Operation operation=TranslogStreams.readTranslogOperation(si);
+      recoveryStatus.translog().addTranslogOperations(1);
+      indexShard.performRecoveryOperation(operation);
+    }
+  }
+ catch (  EOFException e) {
+  }
+catch (  IOException e) {
+  }
+  indexShard.performRecoveryFinalization(true);
+  recoveringTranslogFile.delete();
+  recoveryStatus.translog().time(System.currentTimeMillis() - recoveryStatus.index().startTime());
+}
