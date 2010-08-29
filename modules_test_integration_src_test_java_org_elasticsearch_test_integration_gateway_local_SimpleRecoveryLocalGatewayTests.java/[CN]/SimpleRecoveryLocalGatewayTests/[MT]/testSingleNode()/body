@@ -1,0 +1,19 @@
+{
+  buildNode("node1",settingsBuilder().put("gateway.type","local").build());
+  ((InternalNode)node("node1")).injector().getInstance(Gateway.class).reset();
+  closeAllNodes();
+  Node node1=startNode("node1",settingsBuilder().put("gateway.type","local").put("index.number_of_shards",1).build());
+  node1.client().prepareIndex("test","type1","1").setSource(jsonBuilder().startObject().field("field","value1").endObject()).execute().actionGet();
+  node1.client().admin().indices().prepareFlush().execute().actionGet();
+  node1.client().prepareIndex("test","type1","2").setSource(jsonBuilder().startObject().field("field","value2").endObject()).execute().actionGet();
+  node1.client().admin().indices().prepareRefresh().execute().actionGet();
+  assertThat(node1.client().prepareCount().setQuery(matchAllQuery()).execute().actionGet().count(),equalTo(2l));
+  closeNode("node1");
+  node1=startNode("node1",settingsBuilder().put("gateway.type","local").build());
+  logger.info("Running Cluster Health (wait for the shards to startup)");
+  ClusterHealthResponse clusterHealth=client("node1").admin().cluster().health(clusterHealthRequest().waitForYellowStatus().waitForActiveShards(1)).actionGet();
+  logger.info("Done Cluster Health, status " + clusterHealth.status());
+  assertThat(clusterHealth.timedOut(),equalTo(false));
+  assertThat(clusterHealth.status(),equalTo(ClusterHealthStatus.YELLOW));
+  assertThat(node1.client().prepareCount().setQuery(matchAllQuery()).execute().actionGet().count(),equalTo(2l));
+}
