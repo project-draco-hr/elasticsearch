@@ -7,7 +7,10 @@
     }
     short magic=buffer.readUnsignedByte();
     if (magic == 0x80) {
-      if (buffer.readableBytes() < 23)       return null;
+      if (buffer.readableBytes() < 23) {
+        buffer.resetReaderIndex();
+        return null;
+      }
       short opcode=buffer.readUnsignedByte();
       short keyLength=buffer.readShort();
       short extraLength=buffer.readUnsignedByte();
@@ -80,51 +83,61 @@
       int readableBytes=buffer.readableBytes();
       for (int i=0; i < readableBytes; i++) {
         byte next=buffer.readByte();
-        if (next == CR) {
-          next=buffer.readByte();
-          if (next == LF) {
-            done=true;
-            break;
-          }
+        if (!ending && next == CR) {
+          ending=true;
         }
- else         if (next == LF) {
+ else         if (ending && next == LF) {
+          ending=false;
           done=true;
           break;
+        }
+ else         if (ending) {
+          logger.error("Corrupt stream, expected LF, found [0x{}]",Integer.toHexString(next));
+          throw new StreamCorruptedException("Expecting LF after CR");
         }
  else {
           sb.append((char)next);
         }
       }
       if (!done) {
-        sb.setLength(0);
-        buffer.resetReaderIndex();
+        buffer.markReaderIndex();
         return null;
       }
       String[] args=lineSplit.split(sb);
       sb.setLength(0);
       String cmd=args[0];
-      String uri=args[1];
       if ("get".equals(cmd)) {
-        request=new MemcachedRestRequest(RestRequest.Method.GET,uri,null,-1,false);
+        request=new MemcachedRestRequest(RestRequest.Method.GET,args[1],null,-1,false);
         if (args.length > 3) {
           request.setData(Unicode.fromStringAsBytes(args[2]));
         }
         return request;
       }
  else       if ("delete".equals(cmd)) {
-        request=new MemcachedRestRequest(RestRequest.Method.DELETE,uri,null,-1,false);
+        request=new MemcachedRestRequest(RestRequest.Method.DELETE,args[1],null,-1,false);
         return request;
       }
  else       if ("set".equals(cmd)) {
-        this.request=new MemcachedRestRequest(RestRequest.Method.POST,uri,null,Integer.parseInt(args[4]),false);
+        this.request=new MemcachedRestRequest(RestRequest.Method.POST,args[1],null,Integer.parseInt(args[4]),false);
         buffer.markReaderIndex();
       }
+ else       if ("version".equals(cmd)) {
+        byte[] bytes=Version.full().getBytes();
+        ChannelBuffer writeBuffer=ChannelBuffers.dynamicBuffer(bytes.length);
+        writeBuffer.writeBytes(bytes);
+        channel.write(writeBuffer);
+        return MemcachedDispatcher.IGNORE_REQUEST;
+      }
  else       if ("quit".equals(cmd)) {
-        channel.disconnect();
+        if (channel.isConnected()) {
+          channel.disconnect();
+        }
       }
  else {
         logger.error("Unsupported command [{}], ignoring and closing connection",cmd);
-        channel.disconnect();
+        if (channel.isConnected()) {
+          channel.disconnect();
+        }
         return null;
       }
     }
