@@ -1,10 +1,14 @@
 {
   Set<String> nodesIds=Sets.newHashSet();
-  nodesIds.addAll(clusterService.state().nodes().dataNodes().keySet());
   nodesIds.addAll(clusterService.state().nodes().masterNodes().keySet());
-  TransportNodesListGatewayState.NodesLocalGatewayState nodesState=listGatewayState.list(nodesIds,null).actionGet();
-  TransportNodesListGatewayState.NodeLocalGatewayState electedState=null;
-  for (  TransportNodesListGatewayState.NodeLocalGatewayState nodeState : nodesState) {
+  TransportNodesListGatewayMetaState.NodesLocalGatewayMetaState nodesState=listGatewayMetaState.list(nodesIds,null).actionGet();
+  if (nodesState.failures().length > 0) {
+    for (    FailedNodeException failedNodeException : nodesState.failures()) {
+      logger.warn("failed to fetch state from node",failedNodeException);
+    }
+  }
+  TransportNodesListGatewayMetaState.NodeLocalGatewayMetaState electedState=null;
+  for (  TransportNodesListGatewayMetaState.NodeLocalGatewayMetaState nodeState : nodesState) {
     if (nodeState.state() == null) {
       continue;
     }
@@ -21,7 +25,7 @@
     return;
   }
   logger.debug("elected state from [{}]",electedState.node());
-  final LocalGatewayState state=electedState.state();
+  final LocalGatewayMetaState state=electedState.state();
   final AtomicInteger indicesCounter=new AtomicInteger(state.metaData().indices().size());
   clusterService.submitStateUpdateTask("local-gateway-elected-state",new ProcessedClusterStateUpdateTask(){
     @Override public ClusterState execute(    ClusterState currentState){
