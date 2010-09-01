@@ -1,8 +1,25 @@
 {
   JvmStats currentJvmStats=jvmStats();
-  long collectionTime=currentJvmStats.gc().collectionTime().millis() - lastJvmStats.gc().collectionTime().millis();
-  if (collectionTime > gcCollectionWarning.millis()) {
-    logger.warn("Long GC collection occurred, took [" + new TimeValue(collectionTime) + "], breached threshold ["+ gcCollectionWarning+ "]");
+  for (int i=0; i < currentJvmStats.gc().collectors().length; i++) {
+    GarbageCollector gc=currentJvmStats.gc().collectors()[i];
+    if (gc.lastGc() != null) {
+      GarbageCollector.LastGc lastGc=gc.lastGc();
+      if (lastGc.startTime == lastJvmStats.gc.collectors()[i].lastGc().startTime()) {
+        continue;
+      }
+      if (lastGc.duration().millis() > gcThreshold.millis()) {
+        logger.info("[gc][{}][{}] took [{}]/[{}], reclaimed [{}], leaving [{}] used, max [{}]",gc.name(),gc.getCollectionCount(),lastGc.duration(),gc.getCollectionTime(),lastGc.reclaimed(),lastGc.afterUsed(),lastGc.max());
+      }
+ else       if (logger.isDebugEnabled()) {
+        logger.debug("[gc][{}][{}] took [{}]/[{}], reclaimed [{}], leaving [{}] used, max [{}]",gc.name(),gc.getCollectionCount(),lastGc.duration(),gc.getCollectionTime(),lastGc.reclaimed(),lastGc.afterUsed(),lastGc.max());
+      }
+    }
+ else {
+      long collectionTime=gc.collectionTime().millis() - lastJvmStats.gc().collectors()[i].collectionTime().millis();
+      if (collectionTime > gcThreshold.millis()) {
+        logger.info("[gc][{}] collection occurred, took [{}]",gc.name(),new TimeValue(collectionTime));
+      }
+    }
   }
   lastJvmStats=currentJvmStats;
 }
