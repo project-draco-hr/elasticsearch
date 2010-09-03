@@ -1,0 +1,54 @@
+{
+  PortsRange portsRange=new PortsRange(port);
+  final AtomicReference<Exception> lastException=new AtomicReference<Exception>();
+  boolean success=portsRange.iterate(new PortsRange.PortCallback(){
+    @Override public boolean onPortNumber(    int portNumber){
+      ThriftServer.this.portNumber=portNumber;
+      try {
+        Rest.Processor processor=new Rest.Processor(client);
+        if ("threadpool_framed".equals(type) || "threadpool".equals("threadpool")) {
+          TTransportFactory transportFactory;
+          if ("threadpool_framed".equals(type)) {
+            transportFactory=new TFramedTransport.Factory();
+          }
+ else {
+            transportFactory=new TTransportFactory();
+          }
+          TServerTransport serverTransport=new TServerSocket(portNumber);
+          server=new TThreadPoolServer(processor,serverTransport,transportFactory,protocolFactory);
+        }
+ else         if ("nonblocking".equals(type) || "hsha".equals(type)) {
+          TNonblockingServerTransport serverTransport=new TNonblockingServerSocket(portNumber);
+          TFramedTransport.Factory transportFactory=new TFramedTransport.Factory();
+          if ("nonblocking".equals(type)) {
+            server=new TNonblockingServer(processor,serverTransport,transportFactory,protocolFactory);
+          }
+ else {
+            server=new THsHaServer(processor,serverTransport,transportFactory,protocolFactory);
+          }
+        }
+      }
+ catch (      Exception e) {
+        lastException.set(e);
+        return false;
+      }
+      return true;
+    }
+  }
+);
+  if (!success) {
+    throw new BindTransportException("Failed to bind to [" + port + "]",lastException.get());
+  }
+  logger.info("bound on port [{}]",portNumber);
+  try {
+    nodesInfoAction.putNodeAttribute("thrift_address",new InetSocketAddress(networkService.resolvePublishHostAddress(publishHost),portNumber).toString());
+  }
+ catch (  Exception e) {
+  }
+  daemonThreadFactory(settings,"thrift_server").newThread(new Runnable(){
+    @Override public void run(){
+      server.serve();
+    }
+  }
+).start();
+}
