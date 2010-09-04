@@ -2,32 +2,25 @@
   if (context.highlight() == null) {
     return;
   }
-  FragListBuilder fragListBuilder=new SimpleFragListBuilder();
-  FragmentsBuilder fragmentsBuilder;
-  if (context.highlight().scoreOrdered()) {
-    fragmentsBuilder=new ScoreOrderFragmentsBuilder(context.highlight().preTags(),context.highlight().postTags());
-  }
- else {
-    fragmentsBuilder=new SimpleFragmentsBuilder(context.highlight().preTags(),context.highlight().postTags());
-  }
-  FastVectorHighlighter highlighter=new FastVectorHighlighter(true,false,fragListBuilder,fragmentsBuilder);
-  CustomFieldQuery.reader.set(context.searcher().getIndexReader());
-  CustomFieldQuery.highlightFilters.set(context.highlight().highlightFilter());
-  FieldQuery fieldQuery=new CustomFieldQuery(context.query(),highlighter);
+  Map<Integer,FastVectorHighlighter> highlighterMap=newHashMap();
+  Map<Integer,FieldQuery> fieldQueryMap=newHashMap();
   for (  SearchHit hit : context.fetchResult().hits().hits()) {
     InternalSearchHit internalHit=(InternalSearchHit)hit;
     DocumentMapper documentMapper=context.mapperService().type(internalHit.type());
     int docId=internalHit.docId();
-    Map<String,HighlightField> highlightFields=new HashMap<String,HighlightField>();
+    Map<String,HighlightField> highlightFields=newHashMap();
     for (    SearchContextHighlight.ParsedHighlightField parsedHighlightField : context.highlight().fields()) {
-      String indexName=parsedHighlightField.field();
+      String fieldName=parsedHighlightField.field();
       FieldMapper mapper=documentMapper.mappers().smartNameFieldMapper(parsedHighlightField.field());
       if (mapper != null) {
-        indexName=mapper.names().indexName();
+        fieldName=mapper.names().indexName();
       }
+      Tuple<Integer,FastVectorHighlighter> highlighterTuple=getHighlighter(highlighterMap,parsedHighlightField.settings());
+      FastVectorHighlighter highlighter=highlighterTuple.v2();
+      FieldQuery fieldQuery=getFieldQuery(highlighterTuple.v1(),fieldQueryMap,highlighter,context.query(),context.searcher().getIndexReader(),parsedHighlightField.settings());
       String[] fragments;
       try {
-        fragments=highlighter.getBestFragments(fieldQuery,context.searcher().getIndexReader(),docId,indexName,parsedHighlightField.fragmentCharSize(),parsedHighlightField.numberOfFragments());
+        fragments=highlighter.getBestFragments(fieldQuery,context.searcher().getIndexReader(),docId,fieldName,parsedHighlightField.settings().fragmentCharSize(),parsedHighlightField.settings().numberOfFragments());
       }
  catch (      IOException e) {
         throw new FetchPhaseExecutionException(context,"Failed to highlight field [" + parsedHighlightField.field() + "]",e);
