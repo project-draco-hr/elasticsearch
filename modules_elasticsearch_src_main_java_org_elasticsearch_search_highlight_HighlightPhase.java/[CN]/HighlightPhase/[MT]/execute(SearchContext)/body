@@ -2,30 +2,27 @@
   if (context.highlight() == null) {
     return;
   }
-  Map<Integer,FastVectorHighlighter> highlighterMap=newHashMap();
-  Map<Integer,FieldQuery> fieldQueryMap=newHashMap();
   for (  SearchHit hit : context.fetchResult().hits().hits()) {
     InternalSearchHit internalHit=(InternalSearchHit)hit;
     DocumentMapper documentMapper=context.mapperService().type(internalHit.type());
     int docId=internalHit.docId();
     Map<String,HighlightField> highlightFields=newHashMap();
-    for (    SearchContextHighlight.ParsedHighlightField parsedHighlightField : context.highlight().fields()) {
-      String fieldName=parsedHighlightField.field();
-      FieldMapper mapper=documentMapper.mappers().smartNameFieldMapper(parsedHighlightField.field());
+    for (    SearchContextHighlight.Field field : context.highlight().fields()) {
+      String fieldName=field.field();
+      FieldMapper mapper=documentMapper.mappers().smartNameFieldMapper(field.field());
       if (mapper != null) {
         fieldName=mapper.names().indexName();
       }
-      Tuple<Integer,FastVectorHighlighter> highlighterTuple=getHighlighter(highlighterMap,parsedHighlightField.settings());
-      FastVectorHighlighter highlighter=highlighterTuple.v2();
-      FieldQuery fieldQuery=getFieldQuery(highlighterTuple.v1(),fieldQueryMap,highlighter,context.query(),context.searcher().getIndexReader(),parsedHighlightField.settings());
+      FastVectorHighlighter highlighter=buildHighlighter(field);
+      FieldQuery fieldQuery=buildFieldQuery(highlighter,context.query(),context.searcher().getIndexReader(),field);
       String[] fragments;
       try {
-        fragments=highlighter.getBestFragments(fieldQuery,context.searcher().getIndexReader(),docId,fieldName,parsedHighlightField.settings().fragmentCharSize(),parsedHighlightField.settings().numberOfFragments());
+        fragments=highlighter.getBestFragments(fieldQuery,context.searcher().getIndexReader(),docId,fieldName,field.fragmentCharSize(),field.numberOfFragments());
       }
  catch (      IOException e) {
-        throw new FetchPhaseExecutionException(context,"Failed to highlight field [" + parsedHighlightField.field() + "]",e);
+        throw new FetchPhaseExecutionException(context,"Failed to highlight field [" + field.field() + "]",e);
       }
-      HighlightField highlightField=new HighlightField(parsedHighlightField.field(),fragments);
+      HighlightField highlightField=new HighlightField(field.field(),fragments);
       highlightFields.put(highlightField.name(),highlightField);
     }
     internalHit.highlightFields(highlightFields);
