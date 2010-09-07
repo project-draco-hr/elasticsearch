@@ -2,65 +2,48 @@
   ContentPath.Type origPathType=context.path().pathType();
   context.path().pathType(pathType);
   context.path().add(name);
-  boolean added=false;
   XContentParser.Token token=context.parser().currentToken();
-  if (token == XContentParser.Token.VALUE_STRING) {
-    String value=context.parser().text();
-    int comma=value.indexOf(',');
-    if (comma != -1) {
-      double lat=Double.parseDouble(value.substring(0,comma).trim());
-      double lon=Double.parseDouble(value.substring(comma + 1).trim());
-      added=true;
-      parseLatLon(context,lat,lon);
+  if (token == XContentParser.Token.START_ARRAY) {
+    token=context.parser().nextToken();
+    if (token == XContentParser.Token.START_ARRAY) {
+      while (token != XContentParser.Token.END_ARRAY) {
+        token=context.parser().nextToken();
+        Double lat=context.parser().doubleValue();
+        token=context.parser().nextToken();
+        Double lon=context.parser().doubleValue();
+        while ((token=context.parser().nextToken()) != XContentParser.Token.END_ARRAY) {
+        }
+        parseLatLon(context,lat,lon);
+        token=context.parser().nextToken();
+      }
     }
  else {
-      added=true;
-      parseGeohash(context,value);
+      if (token == XContentParser.Token.VALUE_NUMBER) {
+        Double lat=context.parser().doubleValue();
+        token=context.parser().nextToken();
+        Double lon=context.parser().doubleValue();
+        while ((token=context.parser().nextToken()) != XContentParser.Token.END_ARRAY) {
+        }
+        parseLatLon(context,lat,lon);
+      }
+ else {
+        while (token != XContentParser.Token.END_ARRAY) {
+          if (token == XContentParser.Token.START_OBJECT) {
+            parseObjectLatLon(context);
+          }
+ else           if (token == XContentParser.Token.VALUE_STRING) {
+            parseStringLatLon(context);
+          }
+          token=context.parser().nextToken();
+        }
+      }
     }
   }
  else   if (token == XContentParser.Token.START_OBJECT) {
-    String currentName=context.parser().currentName();
-    Double lat=null;
-    Double lon=null;
-    String geohash=null;
-    while ((token=context.parser().nextToken()) != XContentParser.Token.END_OBJECT) {
-      if (token == XContentParser.Token.FIELD_NAME) {
-        currentName=context.parser().currentName();
-      }
- else       if (token.isValue()) {
-        if (currentName.equals(Names.LAT)) {
-          lat=context.parser().doubleValue();
-        }
- else         if (currentName.equals(Names.LON)) {
-          lon=context.parser().doubleValue();
-        }
- else         if (currentName.equals(Names.GEOHASH)) {
-          geohash=context.parser().text();
-        }
-      }
-    }
-    if (geohash != null) {
-      added=true;
-      parseGeohash(context,geohash);
-    }
- else     if (lat != null && lon != null) {
-      added=true;
-      parseLatLon(context,lat,lon);
-    }
+    parseObjectLatLon(context);
   }
- else   if (token == XContentParser.Token.START_ARRAY) {
-    token=context.parser().nextToken();
-    Double lat=context.parser().doubleValue();
-    token=context.parser().nextToken();
-    Double lon=context.parser().doubleValue();
-    token=context.parser().nextToken();
-    while ((token=context.parser().nextToken()) != XContentParser.Token.END_ARRAY) {
-    }
-    added=true;
-    parseLatLon(context,lat,lon);
-  }
-  if (!added) {
-    throw new MapperParsingException("failed to find location values for [" + name + "]");
+ else   if (token == XContentParser.Token.VALUE_STRING) {
+    parseStringLatLon(context);
   }
   context.path().remove();
   context.path().pathType(origPathType);
