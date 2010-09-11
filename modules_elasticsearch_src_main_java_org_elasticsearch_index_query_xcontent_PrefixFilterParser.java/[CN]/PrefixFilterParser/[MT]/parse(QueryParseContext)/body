@@ -1,2 +1,38 @@
 {
+  XContentParser parser=parseContext.parser();
+  String fieldName=null;
+  String value=null;
+  String filterName=null;
+  String currentFieldName=null;
+  XContentParser.Token token;
+  while ((token=parser.nextToken()) != XContentParser.Token.END_OBJECT) {
+    if (token == XContentParser.Token.FIELD_NAME) {
+      currentFieldName=parser.currentName();
+    }
+ else     if (token.isValue()) {
+      if ("_name".equals(currentFieldName)) {
+        filterName=parser.text();
+      }
+ else {
+        fieldName=currentFieldName;
+        value=parser.text();
+      }
+    }
+  }
+  if (value == null) {
+    throw new QueryParsingException(index,"No value specified for prefix filter");
+  }
+  MapperService.SmartNameFieldMappers smartNameFieldMappers=parseContext.smartFieldMappers(fieldName);
+  if (smartNameFieldMappers != null) {
+    if (smartNameFieldMappers.hasMapper()) {
+      fieldName=smartNameFieldMappers.mapper().names().indexName();
+      value=smartNameFieldMappers.mapper().indexedValue(value);
+    }
+  }
+  Filter filter=new PrefixFilter(new Term(fieldName,value));
+  filter=wrapSmartNameFilter(filter,smartNameFieldMappers,parseContext);
+  if (filterName != null) {
+    parseContext.addNamedFilter(filterName,filter);
+  }
+  return filter;
 }
