@@ -1,0 +1,79 @@
+{
+  IndexShard indexShard=indexShard(shardRequest);
+  final BulkShardRequest request=shardRequest.request;
+  BulkItemResponse[] responses=new BulkItemResponse[request.items().length];
+  Engine.Operation[] ops=new Engine.Operation[request.items().length];
+  for (int i=0; i < ops.length; i++) {
+    BulkItemRequest item=request.items()[i];
+    if (item.request() instanceof IndexRequest) {
+      IndexRequest indexRequest=(IndexRequest)item.request();
+      try {
+        if (indexRequest.opType() == IndexRequest.OpType.INDEX) {
+          ops[i]=indexShard.prepareIndex(indexRequest.type(),indexRequest.id(),indexRequest.source());
+        }
+ else {
+          ops[i]=indexShard.prepareCreate(indexRequest.type(),indexRequest.id(),indexRequest.source());
+        }
+      }
+ catch (      Exception e) {
+        responses[i]=new BulkItemResponse(item.id(),indexRequest.opType().toString().toLowerCase(),new BulkItemResponse.Failure(indexRequest.index(),indexRequest.type(),indexRequest.id(),ExceptionsHelper.detailedMessage(e)));
+      }
+    }
+ else     if (item.request() instanceof DeleteRequest) {
+      DeleteRequest deleteRequest=(DeleteRequest)item.request();
+      try {
+        ops[i]=indexShard.prepareDelete(deleteRequest.type(),deleteRequest.id());
+      }
+ catch (      Exception e) {
+        responses[i]=new BulkItemResponse(item.id(),"delete",new BulkItemResponse.Failure(deleteRequest.index(),deleteRequest.type(),deleteRequest.id(),ExceptionsHelper.detailedMessage(e)));
+      }
+    }
+  }
+  EngineException[] failures=indexShard.bulk(new Engine.Bulk(ops));
+  Set<String> processedTypes=Sets.newHashSet();
+  for (int i=0; i < ops.length; i++) {
+    if (ops[i] == null) {
+      continue;
+    }
+    BulkItemRequest item=request.items()[i];
+    if (item.request() instanceof IndexRequest) {
+      IndexRequest indexRequest=(IndexRequest)item.request();
+      if (indexRequest.opType() == IndexRequest.OpType.INDEX) {
+        Engine.Index engineIndex=(Engine.Index)ops[i];
+        if (!processedTypes.contains(engineIndex.type())) {
+          processedTypes.add(engineIndex.type());
+          ParsedDocument doc=engineIndex.parsedDoc();
+          if (doc.mappersAdded()) {
+            updateMappingOnMaster(indexRequest);
+          }
+        }
+      }
+ else {
+        Engine.Create engineCreate=(Engine.Create)ops[i];
+        if (!processedTypes.contains(engineCreate.type())) {
+          processedTypes.add(engineCreate.type());
+          ParsedDocument doc=engineCreate.parsedDoc();
+          if (doc.mappersAdded()) {
+            updateMappingOnMaster(indexRequest);
+          }
+        }
+      }
+      if (failures != null && failures[i] != null) {
+        responses[i]=new BulkItemResponse(item.id(),indexRequest.opType().toString().toLowerCase(),new BulkItemResponse.Failure(indexRequest.index(),indexRequest.type(),indexRequest.id(),ExceptionsHelper.detailedMessage(failures[i])));
+      }
+ else {
+        responses[i]=new BulkItemResponse(item.id(),indexRequest.opType().toString().toLowerCase(),new IndexResponse(indexRequest.index(),indexRequest.type(),indexRequest.id()));
+      }
+    }
+ else     if (item.request() instanceof DeleteRequest) {
+      DeleteRequest deleteRequest=(DeleteRequest)item.request();
+      if (failures != null && failures[i] != null) {
+        responses[i]=new BulkItemResponse(item.id(),"delete",new BulkItemResponse.Failure(deleteRequest.index(),deleteRequest.type(),deleteRequest.id(),ExceptionsHelper.detailedMessage(failures[i])));
+      }
+ else {
+        responses[i]=new BulkItemResponse(item.id(),"delete",new DeleteResponse(deleteRequest.index(),deleteRequest.type(),deleteRequest.id()));
+      }
+    }
+  }
+  return new BulkShardResponse(new ShardId(request.index(),request.shardId()),responses);
+}

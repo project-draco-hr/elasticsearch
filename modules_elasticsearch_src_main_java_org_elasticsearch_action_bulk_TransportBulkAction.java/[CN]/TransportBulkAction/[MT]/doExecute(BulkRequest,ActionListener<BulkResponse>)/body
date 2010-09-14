@@ -1,0 +1,88 @@
+{
+  ClusterState clusterState=clusterService.state();
+  for (  ActionRequest request : bulkRequest.requests) {
+    if (request instanceof IndexRequest) {
+      IndexRequest indexRequest=(IndexRequest)request;
+      indexRequest.index(clusterState.metaData().concreteIndex(indexRequest.index()));
+      if (allowIdGeneration) {
+        if (indexRequest.id() == null) {
+          indexRequest.id(UUID.randomUUID().toString());
+          indexRequest.opType(IndexRequest.OpType.CREATE);
+        }
+      }
+    }
+ else     if (request instanceof DeleteRequest) {
+      DeleteRequest deleteRequest=(DeleteRequest)request;
+      deleteRequest.index(clusterState.metaData().concreteIndex(deleteRequest.index()));
+    }
+  }
+  Map<ShardId,List<BulkItemRequest>> requestsByShard=Maps.newHashMap();
+  for (int i=0; i < bulkRequest.requests.size(); i++) {
+    ActionRequest request=bulkRequest.requests.get(i);
+    ShardId shardId=null;
+    if (request instanceof IndexRequest) {
+      IndexRequest indexRequest=(IndexRequest)request;
+      shardId=indicesService.indexServiceSafe(indexRequest.index()).operationRouting().indexShards(clusterState,indexRequest.type(),indexRequest.id()).shardId();
+    }
+ else     if (request instanceof DeleteRequest) {
+      DeleteRequest deleteRequest=(DeleteRequest)request;
+      shardId=indicesService.indexServiceSafe(deleteRequest.index()).operationRouting().deleteShards(clusterState,deleteRequest.type(),deleteRequest.id()).shardId();
+    }
+    List<BulkItemRequest> list=requestsByShard.get(shardId);
+    if (list == null) {
+      list=Lists.newArrayList();
+      requestsByShard.put(shardId,list);
+    }
+    list.add(new BulkItemRequest(i,request));
+  }
+  final AtomicInteger counter=new AtomicInteger(requestsByShard.size());
+  final BulkItemResponse[] responses=new BulkItemResponse[bulkRequest.requests.size()];
+  for (  Map.Entry<ShardId,List<BulkItemRequest>> entry : requestsByShard.entrySet()) {
+    final ShardId shardId=entry.getKey();
+    final List<BulkItemRequest> requests=entry.getValue();
+    shardBulkAction.execute(new BulkShardRequest(shardId.index().name(),shardId.id(),requests.toArray(new BulkItemRequest[requests.size()])),new ActionListener<BulkShardResponse>(){
+      @Override public void onResponse(      BulkShardResponse bulkShardResponse){
+synchronized (responses) {
+          for (          BulkItemResponse bulkItemResponse : bulkShardResponse.responses()) {
+            responses[bulkItemResponse.itemId()]=bulkItemResponse;
+          }
+        }
+        if (counter.decrementAndGet() == 0) {
+          finishHim();
+        }
+      }
+      @Override public void onFailure(      Throwable e){
+        String message=ExceptionsHelper.detailedMessage(e);
+synchronized (responses) {
+          for (          BulkItemRequest request : requests) {
+            if (request.request() instanceof IndexRequest) {
+              IndexRequest indexRequest=(IndexRequest)request.request();
+              responses[request.id()]=new BulkItemResponse(request.id(),indexRequest.opType().toString().toLowerCase(),new BulkItemResponse.Failure(indexRequest.index(),indexRequest.type(),indexRequest.id(),message));
+            }
+ else             if (request.request() instanceof DeleteRequest) {
+              DeleteRequest deleteRequest=(DeleteRequest)request.request();
+              responses[request.id()]=new BulkItemResponse(request.id(),"delete",new BulkItemResponse.Failure(deleteRequest.index(),deleteRequest.type(),deleteRequest.id(),message));
+            }
+          }
+        }
+        if (counter.decrementAndGet() == 0) {
+          finishHim();
+        }
+      }
+      private void finishHim(){
+        if (bulkRequest.listenerThreaded()) {
+          threadPool.execute(new Runnable(){
+            @Override public void run(){
+              listener.onResponse(new BulkResponse(responses));
+            }
+          }
+);
+        }
+ else {
+          listener.onResponse(new BulkResponse(responses));
+        }
+      }
+    }
+);
+  }
+}

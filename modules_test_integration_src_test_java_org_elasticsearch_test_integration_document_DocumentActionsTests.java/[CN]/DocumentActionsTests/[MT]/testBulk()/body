@@ -1,0 +1,49 @@
+{
+  createIndex();
+  logger.info("-> running Cluster Health");
+  ClusterHealthResponse clusterHealth=client1.admin().cluster().health(clusterHealthRequest().waitForGreenStatus()).actionGet();
+  logger.info("Done Cluster Health, status " + clusterHealth.status());
+  assertThat(clusterHealth.timedOut(),equalTo(false));
+  assertThat(clusterHealth.status(),equalTo(ClusterHealthStatus.GREEN));
+  BulkResponse bulkResponse=client1.prepareBulk().add(client1.prepareIndex().setIndex("test").setType("type1").setId("1").setSource(source("1","test"))).add(client1.prepareIndex().setIndex("test").setType("type1").setId("2").setSource(source("2","test")).setCreate(true)).add(client1.prepareIndex().setIndex("test").setType("type1").setSource(source("3","test"))).add(client1.prepareDelete().setIndex("test").setType("type1").setId("1")).add(client1.prepareIndex().setIndex("test").setType("type1").setSource("{ xxx }")).execute().actionGet();
+  assertThat(bulkResponse.hasFailures(),equalTo(true));
+  assertThat(bulkResponse.items().length,equalTo(5));
+  assertThat(bulkResponse.items()[0].isFailed(),equalTo(false));
+  assertThat(bulkResponse.items()[0].opType(),equalTo("index"));
+  assertThat(bulkResponse.items()[0].index(),equalTo(getConcreteIndexName()));
+  assertThat(bulkResponse.items()[0].type(),equalTo("type1"));
+  assertThat(bulkResponse.items()[0].id(),equalTo("1"));
+  assertThat(bulkResponse.items()[1].isFailed(),equalTo(false));
+  assertThat(bulkResponse.items()[1].opType(),equalTo("create"));
+  assertThat(bulkResponse.items()[1].index(),equalTo(getConcreteIndexName()));
+  assertThat(bulkResponse.items()[1].type(),equalTo("type1"));
+  assertThat(bulkResponse.items()[1].id(),equalTo("2"));
+  assertThat(bulkResponse.items()[2].isFailed(),equalTo(false));
+  assertThat(bulkResponse.items()[2].opType(),equalTo("create"));
+  assertThat(bulkResponse.items()[2].index(),equalTo(getConcreteIndexName()));
+  assertThat(bulkResponse.items()[2].type(),equalTo("type1"));
+  String generatedId3=bulkResponse.items()[2].id();
+  assertThat(bulkResponse.items()[3].isFailed(),equalTo(false));
+  assertThat(bulkResponse.items()[3].opType(),equalTo("delete"));
+  assertThat(bulkResponse.items()[3].index(),equalTo(getConcreteIndexName()));
+  assertThat(bulkResponse.items()[3].type(),equalTo("type1"));
+  assertThat(bulkResponse.items()[3].id(),equalTo("1"));
+  assertThat(bulkResponse.items()[4].isFailed(),equalTo(true));
+  assertThat(bulkResponse.items()[4].opType(),equalTo("create"));
+  assertThat(bulkResponse.items()[4].index(),equalTo(getConcreteIndexName()));
+  assertThat(bulkResponse.items()[4].type(),equalTo("type1"));
+  RefreshResponse refreshResponse=client1.admin().indices().prepareRefresh("test").execute().actionGet();
+  assertThat(refreshResponse.successfulShards(),equalTo(10));
+  assertThat(refreshResponse.failedShards(),equalTo(0));
+  for (int i=0; i < 5; i++) {
+    GetResponse getResult=client1.get(getRequest("test").type("type1").id("1")).actionGet();
+    assertThat(getResult.index(),equalTo(getConcreteIndexName()));
+    assertThat("cycle #" + i,getResult.exists(),equalTo(false));
+    getResult=client1.get(getRequest("test").type("type1").id("2")).actionGet();
+    assertThat("cycle #" + i,getResult.sourceAsString(),equalTo(source("2","test").string()));
+    assertThat(getResult.index(),equalTo(getConcreteIndexName()));
+    getResult=client1.get(getRequest("test").type("type1").id(generatedId3)).actionGet();
+    assertThat("cycle #" + i,getResult.sourceAsString(),equalTo(source("3","test").string()));
+    assertThat(getResult.index(),equalTo(getConcreteIndexName()));
+  }
+}
