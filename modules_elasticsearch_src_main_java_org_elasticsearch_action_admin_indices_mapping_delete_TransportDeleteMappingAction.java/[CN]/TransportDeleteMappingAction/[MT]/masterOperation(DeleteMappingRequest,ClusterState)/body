@@ -1,0 +1,30 @@
+{
+  final AtomicReference<Throwable> failureRef=new AtomicReference<Throwable>();
+  final CountDownLatch latch=new CountDownLatch(1);
+  deleteByQueryAction.execute(Requests.deleteByQueryRequest(request.indices()).query(QueryBuilders.filtered(QueryBuilders.matchAllQuery(),FilterBuilders.termFilter(TypeFieldMapper.NAME,request.type()))),new ActionListener<DeleteByQueryResponse>(){
+    @Override public void onResponse(    DeleteByQueryResponse deleteByQueryResponse){
+      metaDataMappingService.removeMapping(new MetaDataMappingService.RemoveRequest(request.indices(),request.type()));
+      latch.countDown();
+    }
+    @Override public void onFailure(    Throwable e){
+      failureRef.set(e);
+      latch.countDown();
+    }
+  }
+);
+  try {
+    latch.await();
+  }
+ catch (  InterruptedException e) {
+    failureRef.set(e);
+  }
+  if (failureRef.get() != null) {
+    if (failureRef.get() instanceof ElasticSearchException) {
+      throw (ElasticSearchException)failureRef.get();
+    }
+ else {
+      throw new ElasticSearchException(failureRef.get().getMessage(),failureRef.get());
+    }
+  }
+  return new DeleteMappingResponse();
+}

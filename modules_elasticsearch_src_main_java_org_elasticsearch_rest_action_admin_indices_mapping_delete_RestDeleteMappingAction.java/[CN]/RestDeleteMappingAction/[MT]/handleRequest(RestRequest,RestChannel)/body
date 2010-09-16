@@ -1,0 +1,33 @@
+{
+  DeleteMappingRequest deleteMappingRequest=deleteMappingRequest(splitIndices(request.param("index")));
+  deleteMappingRequest.type(request.param("type"));
+  client.admin().indices().deleteMapping(deleteMappingRequest,new ActionListener<DeleteMappingResponse>(){
+    @Override public void onResponse(    DeleteMappingResponse response){
+      try {
+        XContentBuilder builder=RestXContentBuilder.restContentBuilder(request);
+        builder.startObject().field("ok",true);
+        builder.endObject();
+        channel.sendResponse(new XContentRestResponse(request,OK,builder));
+      }
+ catch (      IOException e) {
+        onFailure(e);
+      }
+    }
+    @Override public void onFailure(    Throwable e){
+      try {
+        XContentBuilder builder=RestXContentBuilder.restContentBuilder(request);
+        Throwable t=unwrapCause(e);
+        if (t instanceof IndexMissingException || t instanceof InvalidTypeNameException || t instanceof MergeMappingException) {
+          channel.sendResponse(new XContentRestResponse(request,BAD_REQUEST,builder.startObject().field("error",t.getMessage()).endObject()));
+        }
+ else {
+          channel.sendResponse(new XContentThrowableRestResponse(request,e));
+        }
+      }
+ catch (      IOException e1) {
+        logger.error("Failed to send failure response",e1);
+      }
+    }
+  }
+);
+}
