@@ -1,8 +1,50 @@
 {
-  if (event.nodesChanged()) {
+  if (!event.localNodeMaster()) {
+    return;
+  }
+  if (event.nodesChanged() || event.metaDataChanged()) {
     indexerClusterService.submitStateUpdateTask("reroute_indexers_node_changed",new IndexerClusterStateUpdateTask(){
       @Override public IndexerClusterState execute(      IndexerClusterState currentState){
-        return null;
+        if (!event.state().metaData().hasIndex(indexerIndexName)) {
+          if (!currentState.routing().isEmpty()) {
+            return IndexerClusterState.builder().state(currentState).routing(IndexersRouting.builder()).build();
+          }
+          return currentState;
+        }
+        IndexersRouting.Builder routingBuilder=IndexersRouting.builder().routing(currentState.routing());
+        boolean dirty=false;
+        IndexMetaData indexMetaData=event.state().metaData().index(indexerIndexName);
+        for (        Map.Entry<String,CompressedString> entry : indexMetaData.mappings().entrySet()) {
+          String mappingType=entry.getKey();
+          if (!currentState.routing().hasIndexerByName(mappingType)) {
+            try {
+              GetResponse getResponse=client.prepareGet(indexerIndexName,mappingType,"_meta").execute().actionGet();
+              if (getResponse.exists()) {
+                String indexerType=XContentMapValues.nodeStringValue(getResponse.sourceAsMap().get("type"),null);
+                if (indexerType == null) {
+                  logger.warn("no indexer type provided for [{}], ignoring...",indexerIndexName);
+                }
+ else {
+                  routingBuilder.put(new IndexerRouting(new IndexerName(mappingType,indexerType),IndexerRoutingState.UNASSIGNED,null));
+                  dirty=true;
+                }
+              }
+            }
+ catch (            Exception e) {
+              logger.warn("failed to get/parse _meta for [{}]",mappingType);
+            }
+          }
+        }
+        for (        IndexerRouting routing : currentState.routing()) {
+          if (!indexMetaData.mappings().containsKey(routing.indexerName().name())) {
+            routingBuilder.remove(routing);
+            dirty=true;
+          }
+        }
+        if (dirty) {
+          return IndexerClusterState.builder().state(currentState).routing(routingBuilder).build();
+        }
+        return currentState;
       }
     }
 );
