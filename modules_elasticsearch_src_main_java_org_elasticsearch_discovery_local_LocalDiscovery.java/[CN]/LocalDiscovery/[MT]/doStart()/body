@@ -8,12 +8,24 @@ synchronized (clusterGroups) {
     logger.debug("Connected to cluster [{}]",clusterName);
     this.localNode=new DiscoveryNode(settings.get("name"),Long.toString(nodeIdGenerator.incrementAndGet()),transportService.boundAddress().publishAddress(),buildCommonNodesAttributes(settings));
     clusterGroup.members().add(this);
-    if (clusterGroup.members().size() == 1) {
+    LocalDiscovery firstMaster=null;
+    for (    LocalDiscovery localDiscovery : clusterGroup.members()) {
+      if (localDiscovery.localNode().masterNode()) {
+        firstMaster=localDiscovery;
+        break;
+      }
+    }
+    if (firstMaster != null && firstMaster.equals(this)) {
       master=true;
+      final LocalDiscovery master=firstMaster;
       clusterService.submitStateUpdateTask("local-disco-initial_connect(master)",new ProcessedClusterStateUpdateTask(){
         @Override public ClusterState execute(        ClusterState currentState){
-          DiscoveryNodes.Builder builder=new DiscoveryNodes.Builder().localNodeId(localNode.id()).masterNodeId(localNode.id()).put(localNode);
-          return newClusterStateBuilder().state(currentState).nodes(builder).build();
+          DiscoveryNodes.Builder nodesBuilder=DiscoveryNodes.newNodesBuilder();
+          for (          LocalDiscovery discovery : clusterGroups.get(clusterName).members()) {
+            nodesBuilder.put(discovery.localNode);
+          }
+          nodesBuilder.localNodeId(master.localNode().id()).masterNodeId(master.localNode().id());
+          return newClusterStateBuilder().state(currentState).nodes(nodesBuilder).build();
         }
         @Override public void clusterStateProcessed(        ClusterState clusterState){
           sendInitialStateEventIfNeeded();
@@ -21,9 +33,8 @@ synchronized (clusterGroups) {
       }
 );
     }
- else {
-      LocalDiscovery master=clusterGroup.members().peek();
-      final ClusterState masterState=master.clusterService.state();
+ else     if (firstMaster != null) {
+      final ClusterState masterState=firstMaster.clusterService.state();
       clusterService.submitStateUpdateTask("local-disco(detected_master)",new ClusterStateUpdateTask(){
         @Override public ClusterState execute(        ClusterState currentState){
           DiscoveryNodes.Builder nodesBuilder=DiscoveryNodes.newNodesBuilder().putAll(currentState.nodes()).put(localNode).localNodeId(localNode.id());
@@ -31,13 +42,15 @@ synchronized (clusterGroups) {
         }
       }
 );
-      master.clusterService.submitStateUpdateTask("local-disco-receive(from node[" + localNode + "])",new ProcessedClusterStateUpdateTask(){
+      final LocalDiscovery master=firstMaster;
+      firstMaster.clusterService.submitStateUpdateTask("local-disco-receive(from node[" + localNode + "])",new ProcessedClusterStateUpdateTask(){
         @Override public ClusterState execute(        ClusterState currentState){
-          if (currentState.nodes().nodeExists(localNode.id())) {
-            logger.warn("received an address [{}] for an existing node [{}]",localNode.address(),localNode);
-            return currentState;
+          DiscoveryNodes.Builder nodesBuilder=DiscoveryNodes.newNodesBuilder();
+          for (          LocalDiscovery discovery : clusterGroups.get(clusterName).members()) {
+            nodesBuilder.put(discovery.localNode);
           }
-          return newClusterStateBuilder().state(currentState).nodes(currentState.nodes().newNode(localNode)).build();
+          nodesBuilder.localNodeId(master.localNode().id()).masterNodeId(master.localNode().id());
+          return newClusterStateBuilder().state(currentState).nodes(nodesBuilder).build();
         }
         @Override public void clusterStateProcessed(        ClusterState clusterState){
           sendInitialStateEventIfNeeded();

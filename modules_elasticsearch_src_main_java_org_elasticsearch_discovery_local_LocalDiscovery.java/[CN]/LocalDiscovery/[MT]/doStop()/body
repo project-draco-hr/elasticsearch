@@ -10,24 +10,33 @@ synchronized (clusterGroups) {
       clusterGroups.remove(clusterName);
       return;
     }
-    final LocalDiscovery masterDiscovery=clusterGroup.members().peek();
-    if (master) {
-      masterDiscovery.master=true;
-    }
-    final Set<String> newMembers=newHashSet();
-    for (    LocalDiscovery discovery : clusterGroup.members()) {
-      newMembers.add(discovery.localNode.id());
-    }
-    masterDiscovery.clusterService.submitStateUpdateTask("local-disco-update",new ClusterStateUpdateTask(){
-      @Override public ClusterState execute(      ClusterState currentState){
-        DiscoveryNodes newNodes=currentState.nodes().removeDeadMembers(newMembers,masterDiscovery.localNode.id());
-        DiscoveryNodes.Delta delta=newNodes.delta(currentState.nodes());
-        if (delta.added()) {
-          logger.warn("No new nodes should be created when a new discovery view is accepted");
-        }
-        return newClusterStateBuilder().state(currentState).nodes(newNodes).build();
+    LocalDiscovery firstMaster=null;
+    for (    LocalDiscovery localDiscovery : clusterGroup.members()) {
+      if (localDiscovery.localNode().masterNode()) {
+        firstMaster=localDiscovery;
+        break;
       }
     }
+    if (firstMaster != null) {
+      if (master) {
+        firstMaster.master=true;
+      }
+      final Set<String> newMembers=newHashSet();
+      for (      LocalDiscovery discovery : clusterGroup.members()) {
+        newMembers.add(discovery.localNode.id());
+      }
+      final LocalDiscovery master=firstMaster;
+      master.clusterService.submitStateUpdateTask("local-disco-update",new ClusterStateUpdateTask(){
+        @Override public ClusterState execute(        ClusterState currentState){
+          DiscoveryNodes newNodes=currentState.nodes().removeDeadMembers(newMembers,master.localNode.id());
+          DiscoveryNodes.Delta delta=newNodes.delta(currentState.nodes());
+          if (delta.added()) {
+            logger.warn("No new nodes should be created when a new discovery view is accepted");
+          }
+          return newClusterStateBuilder().state(currentState).nodes(newNodes).build();
+        }
+      }
 );
+    }
   }
 }
