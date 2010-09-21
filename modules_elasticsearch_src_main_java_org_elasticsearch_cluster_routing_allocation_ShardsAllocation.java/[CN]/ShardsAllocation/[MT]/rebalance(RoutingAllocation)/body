@@ -1,0 +1,46 @@
+{
+  boolean changed=false;
+  List<RoutingNode> sortedNodesLeastToHigh=allocation.routingNodes().sortedNodesLeastToHigh();
+  if (sortedNodesLeastToHigh.isEmpty()) {
+    return false;
+  }
+  int lowIndex=0;
+  int highIndex=sortedNodesLeastToHigh.size() - 1;
+  boolean relocationPerformed;
+  do {
+    relocationPerformed=false;
+    while (lowIndex != highIndex) {
+      RoutingNode lowRoutingNode=sortedNodesLeastToHigh.get(lowIndex);
+      RoutingNode highRoutingNode=sortedNodesLeastToHigh.get(highIndex);
+      int averageNumOfShards=allocation.routingNodes().requiredAverageNumberOfShardsPerNode();
+      if (highRoutingNode.numberOfOwningShards() <= averageNumOfShards) {
+        highIndex--;
+        continue;
+      }
+      if (lowRoutingNode.shards().size() >= averageNumOfShards) {
+        lowIndex++;
+        continue;
+      }
+      boolean relocated=false;
+      List<MutableShardRouting> startedShards=highRoutingNode.shardsWithState(STARTED);
+      for (      MutableShardRouting startedShard : startedShards) {
+        if (!nodeAllocations.canRebalance(startedShard,allocation)) {
+          continue;
+        }
+        if (nodeAllocations.canAllocate(startedShard,lowRoutingNode,allocation).allocate()) {
+          changed=true;
+          lowRoutingNode.add(new MutableShardRouting(startedShard.index(),startedShard.id(),lowRoutingNode.nodeId(),startedShard.currentNodeId(),startedShard.primary(),INITIALIZING));
+          startedShard.relocate(lowRoutingNode.nodeId());
+          relocated=true;
+          relocationPerformed=true;
+          break;
+        }
+      }
+      if (!relocated) {
+        highIndex--;
+      }
+    }
+  }
+ while (relocationPerformed);
+  return changed;
+}

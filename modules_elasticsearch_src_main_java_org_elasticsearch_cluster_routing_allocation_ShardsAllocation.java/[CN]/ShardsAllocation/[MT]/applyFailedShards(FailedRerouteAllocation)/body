@@ -1,0 +1,64 @@
+{
+  boolean dirty=false;
+  for (  ShardRouting failedShard : allocation.failedShards()) {
+    boolean shardDirty=false;
+    boolean inRelocation=failedShard.relocatingNodeId() != null;
+    if (inRelocation) {
+      RoutingNode routingNode=allocation.routingNodes().nodesToShards().get(failedShard.currentNodeId());
+      if (routingNode != null) {
+        Iterator<MutableShardRouting> shards=routingNode.iterator();
+        while (shards.hasNext()) {
+          MutableShardRouting shard=shards.next();
+          if (shard.shardId().equals(failedShard.shardId())) {
+            shardDirty=true;
+            shard.deassignNode();
+            shards.remove();
+            break;
+          }
+        }
+      }
+    }
+    String nodeId=inRelocation ? failedShard.relocatingNodeId() : failedShard.currentNodeId();
+    RoutingNode currentRoutingNode=allocation.routingNodes().nodesToShards().get(nodeId);
+    if (currentRoutingNode == null) {
+      continue;
+    }
+    Iterator<MutableShardRouting> shards=currentRoutingNode.iterator();
+    while (shards.hasNext()) {
+      MutableShardRouting shard=shards.next();
+      if (shard.shardId().equals(failedShard.shardId())) {
+        shardDirty=true;
+        if (!inRelocation) {
+          shard.deassignNode();
+          shards.remove();
+        }
+ else {
+          shard.cancelRelocation();
+        }
+        break;
+      }
+    }
+    if (!shardDirty) {
+      continue;
+    }
+ else {
+      dirty=true;
+    }
+    if (inRelocation) {
+      continue;
+    }
+    boolean allocated=false;
+    List<RoutingNode> sortedNodesLeastToHigh=allocation.routingNodes().sortedNodesLeastToHigh();
+    for (    RoutingNode target : sortedNodesLeastToHigh) {
+      if (!target.nodeId().equals(failedShard.currentNodeId()) && nodeAllocations.canAllocate(failedShard,target,allocation).allocate()) {
+        target.add(new MutableShardRouting(failedShard.index(),failedShard.id(),target.nodeId(),failedShard.relocatingNodeId(),failedShard.primary(),INITIALIZING));
+        allocated=true;
+        break;
+      }
+    }
+    if (!allocated) {
+      allocation.routingNodes().unassigned().add(new MutableShardRouting(failedShard.index(),failedShard.id(),null,failedShard.primary(),ShardRoutingState.UNASSIGNED));
+    }
+  }
+  return dirty;
+}
