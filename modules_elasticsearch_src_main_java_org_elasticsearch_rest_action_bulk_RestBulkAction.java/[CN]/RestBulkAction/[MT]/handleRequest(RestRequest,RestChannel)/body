@@ -1,2 +1,52 @@
 {
+  BulkRequest bulkRequest=Requests.bulkRequest();
+  try {
+    bulkRequest.add(request.contentByteArray(),request.contentByteArrayOffset(),request.contentLength(),request.contentUnsafe());
+  }
+ catch (  Exception e) {
+    try {
+      XContentBuilder builder=restContentBuilder(request);
+      channel.sendResponse(new XContentRestResponse(request,BAD_REQUEST,builder.startObject().field("error",e.getMessage()).endObject()));
+    }
+ catch (    IOException e1) {
+      logger.error("Failed to send failure response",e1);
+    }
+    return;
+  }
+  client.bulk(bulkRequest,new ActionListener<BulkResponse>(){
+    @Override public void onResponse(    BulkResponse response){
+      try {
+        XContentBuilder builder=restContentBuilder(request);
+        builder.startObject();
+        builder.startArray("items");
+        for (        BulkItemResponse itemResponse : response) {
+          builder.startObject();
+          builder.startObject(itemResponse.opType());
+          builder.field("index",itemResponse.index());
+          builder.field("type",itemResponse.type());
+          builder.field("id",itemResponse.id());
+          if (itemResponse.failed()) {
+            builder.field("error",itemResponse.failure().message());
+          }
+          builder.endObject();
+          builder.endObject();
+        }
+        builder.endArray();
+        builder.endObject();
+        channel.sendResponse(new XContentRestResponse(request,OK,builder));
+      }
+ catch (      Exception e) {
+        onFailure(e);
+      }
+    }
+    @Override public void onFailure(    Throwable e){
+      try {
+        channel.sendResponse(new XContentThrowableRestResponse(request,e));
+      }
+ catch (      IOException e1) {
+        logger.error("Failed to send failure response",e1);
+      }
+    }
+  }
+);
 }
