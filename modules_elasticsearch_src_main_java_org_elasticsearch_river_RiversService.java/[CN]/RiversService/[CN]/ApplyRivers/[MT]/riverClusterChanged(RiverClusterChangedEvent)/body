@@ -1,0 +1,34 @@
+{
+  DiscoveryNode localNode=clusterService.localNode();
+  RiverClusterState state=event.state();
+  for (  RiverName riverName : rivers.keySet()) {
+    RiverRouting routing=state.routing().routing(riverName);
+    if (routing == null || !localNode.equals(routing.node())) {
+      closeRiver(riverName);
+    }
+  }
+  for (  final RiverRouting routing : state.routing()) {
+    if (routing.node() == null) {
+      continue;
+    }
+    if (!routing.node().equals(localNode)) {
+      continue;
+    }
+    if (rivers.containsKey(routing.riverName())) {
+      continue;
+    }
+    client.prepareGet(riverIndexName,routing.riverName().name(),"_meta").execute(new ActionListener<GetResponse>(){
+      @Override public void onResponse(      GetResponse getResponse){
+        if (!rivers.containsKey(routing.riverName())) {
+          if (getResponse.exists()) {
+            createRiver(routing.riverName(),getResponse.sourceAsMap());
+          }
+        }
+      }
+      @Override public void onFailure(      Throwable e){
+        logger.warn("failed to get _meta from [{}]/[{}]",e,routing.riverName().type(),routing.riverName().name());
+      }
+    }
+);
+  }
+}
