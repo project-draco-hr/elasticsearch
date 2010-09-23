@@ -21,21 +21,16 @@
  catch (      InterruptedException e1) {
       }
     }
-    int bulkSize=XContentMapValues.nodeIntegerValue(settings.settings().get("bulk_size"),100);
-    long bulkTimeout=XContentMapValues.nodeIntegerValue(settings.settings().get("bulk_timeout"),10);
-    String queue=XContentMapValues.nodeStringValue(settings.settings().get("queue"),"elasticsearch");
-    String exchange=XContentMapValues.nodeStringValue(settings.settings().get("exchange"),"elasticsearch");
-    String routingKey=XContentMapValues.nodeStringValue(settings.settings().get("routing_key"),"elasticsearch");
     QueueingConsumer consumer=new QueueingConsumer(channel);
     try {
-      channel.exchangeDeclare(exchange,"direct",true);
-      channel.queueDeclare(queue,true,false,false,null);
-      channel.queueBind(queue,exchange,routingKey);
-      channel.basicConsume(queue,false,consumer);
+      channel.exchangeDeclare(rabbitExchange,"direct",true);
+      channel.queueDeclare(rabbitQueue,true,false,false,null);
+      channel.queueBind(rabbitQueue,rabbitExchange,rabbitRoutingKey);
+      channel.basicConsume(rabbitQueue,false,consumer);
     }
  catch (    Exception e) {
       if (!closed) {
-        logger.warn("failed to create queue [{}]",e,queue);
+        logger.warn("failed to create queue [{}]",e,rabbitQueue);
       }
       cleanup(0,"failed to create queue");
       continue;
@@ -74,7 +69,7 @@
         deliveryTags.add(task.getEnvelope().getDeliveryTag());
         if (bulkRequestBuilder.numberOfActions() < bulkSize) {
           try {
-            while ((task=consumer.nextDelivery(bulkTimeout)) != null) {
+            while ((task=consumer.nextDelivery(bulkTimeout.millis())) != null) {
               try {
                 bulkRequestBuilder.add(task.getBody(),0,task.getBody().length,false);
               }
@@ -102,8 +97,9 @@
         if (logger.isTraceEnabled()) {
           logger.trace("executing bulk with [{}] actions",bulkRequestBuilder.numberOfActions());
         }
-        bulkRequestBuilder.execute(new ActionListener<BulkResponse>(){
-          @Override public void onResponse(          BulkResponse response){
+        if (ordered) {
+          try {
+            BulkResponse response=bulkRequestBuilder.execute().actionGet();
             if (response.hasFailures()) {
               logger.warn("failed to execute" + response.buildFailureMessage());
             }
@@ -116,11 +112,31 @@
               }
             }
           }
-          @Override public void onFailure(          Throwable e){
-            logger.warn("failed to execute bulk for delivery tags , not ack'ing",e,deliveryTags);
+ catch (          Exception e) {
+            logger.warn("failed to execute bulk",e);
           }
         }
+ else {
+          bulkRequestBuilder.execute(new ActionListener<BulkResponse>(){
+            @Override public void onResponse(            BulkResponse response){
+              if (response.hasFailures()) {
+                logger.warn("failed to execute" + response.buildFailureMessage());
+              }
+              for (              Long deliveryTag : deliveryTags) {
+                try {
+                  channel.basicAck(deliveryTag,false);
+                }
+ catch (                IOException e1) {
+                  logger.warn("failed to ack [{}]",e1,deliveryTag);
+                }
+              }
+            }
+            @Override public void onFailure(            Throwable e){
+              logger.warn("failed to execute bulk for delivery tags , not ack'ing",e,deliveryTags);
+            }
+          }
 );
+        }
       }
     }
   }

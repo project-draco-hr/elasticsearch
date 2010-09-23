@@ -1,0 +1,56 @@
+{
+  while (true) {
+    if (closed) {
+      return;
+    }
+    String s=null;
+    try {
+      s=stream.take();
+    }
+ catch (    InterruptedException e) {
+      if (closed) {
+        return;
+      }
+      continue;
+    }
+    BulkRequestBuilder bulk=client.prepareBulk();
+    String lastSeq=null;
+    String lineSeq=processLine(s,bulk);
+    if (lineSeq != null) {
+      lastSeq=lineSeq;
+    }
+    try {
+      while ((s=stream.poll(bulkTimeout.millis(),TimeUnit.MILLISECONDS)) != null) {
+        lineSeq=processLine(s,bulk);
+        if (lineSeq != null) {
+          lastSeq=lineSeq;
+        }
+        if (bulk.numberOfActions() >= bulkSize) {
+          break;
+        }
+      }
+    }
+ catch (    InterruptedException e) {
+      if (closed) {
+        return;
+      }
+    }
+    if (lastSeq != null) {
+      try {
+        bulk.add(indexRequest(riverIndexName).type(riverName.name()).id("_seq").source(jsonBuilder().startObject().field("last_seq",lastSeq).endObject()));
+      }
+ catch (      IOException e) {
+        logger.warn("failed to add last_seq entry to bulk indexing");
+      }
+    }
+    try {
+      BulkResponse response=bulk.execute().actionGet();
+      if (response.hasFailures()) {
+        logger.warn("failed to execute" + response.buildFailureMessage());
+      }
+    }
+ catch (    Exception e) {
+      logger.warn("failed to execute bulk",e);
+    }
+  }
+}
