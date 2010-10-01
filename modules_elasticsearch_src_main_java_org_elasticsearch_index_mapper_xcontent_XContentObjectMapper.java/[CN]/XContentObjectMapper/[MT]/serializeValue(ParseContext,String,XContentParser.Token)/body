@@ -21,7 +21,11 @@ synchronized (mutex) {
         for (        FormatDateTimeFormatter dateTimeFormatter : dateTimeFormatters) {
           try {
             dateTimeFormatter.parser().parseMillis(text);
-            mapper=dateField(currentFieldName).dateTimeFormatter(dateTimeFormatter).build(builderContext);
+            XContentMapper.Builder builder=findTemplateBuilder(context,currentFieldName,"date");
+            if (builder == null) {
+              builder=dateField(currentFieldName).dateTimeFormatter(dateTimeFormatter);
+            }
+            mapper=builder.build(builderContext);
             isDate=true;
             break;
           }
@@ -30,42 +34,85 @@ synchronized (mutex) {
         }
       }
       if (!isDate) {
-        mapper=stringField(currentFieldName).build(builderContext);
+        XContentMapper.Builder builder=findTemplateBuilder(context,currentFieldName,"string");
+        if (builder == null) {
+          builder=stringField(currentFieldName);
+        }
+        mapper=builder.build(builderContext);
       }
     }
  else     if (token == XContentParser.Token.VALUE_NUMBER) {
       XContentParser.NumberType numberType=context.parser().numberType();
       if (numberType == XContentParser.NumberType.INT) {
         if (context.parser().estimatedNumberType()) {
-          mapper=longField(currentFieldName).build(builderContext);
+          XContentMapper.Builder builder=findTemplateBuilder(context,currentFieldName,"long");
+          if (builder == null) {
+            builder=longField(currentFieldName);
+          }
+          mapper=builder.build(builderContext);
         }
  else {
-          mapper=integerField(currentFieldName).build(builderContext);
+          XContentMapper.Builder builder=findTemplateBuilder(context,currentFieldName,"integer");
+          if (builder == null) {
+            builder=integerField(currentFieldName);
+          }
+          mapper=builder.build(builderContext);
         }
       }
  else       if (numberType == XContentParser.NumberType.LONG) {
-        mapper=longField(currentFieldName).build(builderContext);
+        XContentMapper.Builder builder=findTemplateBuilder(context,currentFieldName,"long");
+        if (builder == null) {
+          builder=longField(currentFieldName);
+        }
+        mapper=builder.build(builderContext);
       }
  else       if (numberType == XContentParser.NumberType.FLOAT) {
         if (context.parser().estimatedNumberType()) {
-          mapper=doubleField(currentFieldName).build(builderContext);
+          XContentMapper.Builder builder=findTemplateBuilder(context,currentFieldName,"double");
+          if (builder == null) {
+            builder=doubleField(currentFieldName);
+          }
+          mapper=builder.build(builderContext);
         }
  else {
-          mapper=floatField(currentFieldName).build(builderContext);
+          XContentMapper.Builder builder=findTemplateBuilder(context,currentFieldName,"float");
+          if (builder == null) {
+            builder=floatField(currentFieldName);
+          }
+          mapper=builder.build(builderContext);
         }
       }
  else       if (numberType == XContentParser.NumberType.DOUBLE) {
-        mapper=doubleField(currentFieldName).build(builderContext);
+        XContentMapper.Builder builder=findTemplateBuilder(context,currentFieldName,"double");
+        if (builder == null) {
+          builder=doubleField(currentFieldName);
+        }
+        mapper=builder.build(builderContext);
       }
     }
  else     if (token == XContentParser.Token.VALUE_BOOLEAN) {
-      mapper=booleanField(currentFieldName).build(builderContext);
+      XContentMapper.Builder builder=findTemplateBuilder(context,currentFieldName,"boolean");
+      if (builder == null) {
+        builder=booleanField(currentFieldName);
+      }
+      mapper=builder.build(builderContext);
     }
  else {
-      throw new ElasticSearchIllegalStateException("Can't handle serializing a dynamic type with content token [" + token + "] and field name ["+ currentFieldName+ "]");
+      XContentMapper.Builder builder=findTemplateBuilder(context,currentFieldName,null);
+      if (builder != null) {
+        mapper=builder.build(builderContext);
+      }
+ else {
+        throw new ElasticSearchIllegalStateException("Can't handle serializing a dynamic type with content token [" + token + "] and field name ["+ currentFieldName+ "]");
+      }
     }
     putMapper(mapper);
-    context.docMapper().addFieldMapper((FieldMapper)mapper);
+    mapper.traverse(new FieldMapperListener(){
+      @Override public void fieldMapper(      FieldMapper fieldMapper){
+        context.docMapper().addFieldMapper(fieldMapper);
+      }
+    }
+);
     mapper.parse(context);
     context.addedMapper();
   }
