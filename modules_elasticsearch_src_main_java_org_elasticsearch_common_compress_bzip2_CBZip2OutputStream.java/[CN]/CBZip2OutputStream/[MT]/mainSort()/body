@@ -1,0 +1,105 @@
+{
+  final Data dataShadow=this.data;
+  final int[] runningOrder=dataShadow.mainSort_runningOrder;
+  final int[] copy=dataShadow.mainSort_copy;
+  final boolean[] bigDone=dataShadow.mainSort_bigDone;
+  final int[] ftab=dataShadow.ftab;
+  final byte[] block=dataShadow.block;
+  final int[] fmap=dataShadow.fmap;
+  final char[] quadrant=dataShadow.quadrant;
+  final int lastShadow=this.last;
+  final int workLimitShadow=this.workLimit;
+  final boolean firstAttemptShadow=this.firstAttempt;
+  for (int i=65537; --i >= 0; ) {
+    ftab[i]=0;
+  }
+  for (int i=0; i < NUM_OVERSHOOT_BYTES; i++) {
+    block[lastShadow + i + 2]=block[(i % (lastShadow + 1)) + 1];
+  }
+  for (int i=lastShadow + NUM_OVERSHOOT_BYTES + 1; --i >= 0; ) {
+    quadrant[i]=0;
+  }
+  block[0]=block[lastShadow + 1];
+  int c1=block[0] & 0xff;
+  for (int i=0; i <= lastShadow; i++) {
+    final int c2=block[i + 1] & 0xff;
+    ftab[(c1 << 8) + c2]++;
+    c1=c2;
+  }
+  for (int i=1; i <= 65536; i++)   ftab[i]+=ftab[i - 1];
+  c1=block[1] & 0xff;
+  for (int i=0; i < lastShadow; i++) {
+    final int c2=block[i + 2] & 0xff;
+    fmap[--ftab[(c1 << 8) + c2]]=i;
+    c1=c2;
+  }
+  fmap[--ftab[((block[lastShadow + 1] & 0xff) << 8) + (block[1] & 0xff)]]=lastShadow;
+  for (int i=256; --i >= 0; ) {
+    bigDone[i]=false;
+    runningOrder[i]=i;
+  }
+  for (int h=364; h != 1; ) {
+    h/=3;
+    for (int i=h; i <= 255; i++) {
+      final int vv=runningOrder[i];
+      final int a=ftab[(vv + 1) << 8] - ftab[vv << 8];
+      final int b=h - 1;
+      int j=i;
+      for (int ro=runningOrder[j - h]; (ftab[(ro + 1) << 8] - ftab[ro << 8]) > a; ro=runningOrder[j - h]) {
+        runningOrder[j]=ro;
+        j-=h;
+        if (j <= b) {
+          break;
+        }
+      }
+      runningOrder[j]=vv;
+    }
+  }
+  for (int i=0; i <= 255; i++) {
+    final int ss=runningOrder[i];
+    for (int j=0; j <= 255; j++) {
+      final int sb=(ss << 8) + j;
+      final int ftab_sb=ftab[sb];
+      if ((ftab_sb & SETMASK) != SETMASK) {
+        final int lo=ftab_sb & CLEARMASK;
+        final int hi=(ftab[sb + 1] & CLEARMASK) - 1;
+        if (hi > lo) {
+          mainQSort3(dataShadow,lo,hi,2);
+          if (firstAttemptShadow && (this.workDone > workLimitShadow)) {
+            return;
+          }
+        }
+        ftab[sb]=ftab_sb | SETMASK;
+      }
+    }
+    for (int j=0; j <= 255; j++) {
+      copy[j]=ftab[(j << 8) + ss] & CLEARMASK;
+    }
+    for (int j=ftab[ss << 8] & CLEARMASK, hj=(ftab[(ss + 1) << 8] & CLEARMASK); j < hj; j++) {
+      final int fmap_j=fmap[j];
+      c1=block[fmap_j] & 0xff;
+      if (!bigDone[c1]) {
+        fmap[copy[c1]]=(fmap_j == 0) ? lastShadow : (fmap_j - 1);
+        copy[c1]++;
+      }
+    }
+    for (int j=256; --j >= 0; )     ftab[(j << 8) + ss]|=SETMASK;
+    bigDone[ss]=true;
+    if (i < 255) {
+      final int bbStart=ftab[ss << 8] & CLEARMASK;
+      final int bbSize=(ftab[(ss + 1) << 8] & CLEARMASK) - bbStart;
+      int shifts=0;
+      while ((bbSize >> shifts) > 65534) {
+        shifts++;
+      }
+      for (int j=0; j < bbSize; j++) {
+        final int a2update=fmap[bbStart + j];
+        final char qVal=(char)(j >> shifts);
+        quadrant[a2update]=qVal;
+        if (a2update < NUM_OVERSHOOT_BYTES) {
+          quadrant[a2update + lastShadow + 1]=qVal;
+        }
+      }
+    }
+  }
+}
