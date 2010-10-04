@@ -1,0 +1,41 @@
+{
+  final CountDownLatch latch=new CountDownLatch(1);
+  final Gateway.GatewayStateRecoveredListener recoveryListener=new Gateway.GatewayStateRecoveredListener(){
+    @Override public void onSuccess(){
+      markMetaDataAsReadFromGateway("success");
+      latch.countDown();
+    }
+    @Override public void onFailure(    Throwable t){
+      markMetaDataAsReadFromGateway("failure [" + t.getMessage() + "]");
+      latch.countDown();
+    }
+  }
+;
+  if (!ignoreTimeout && recoverAfterTime != null) {
+    if (scheduledRecovery.compareAndSet(false,true)) {
+      updateClusterStateBlockedOnNotRecovered();
+      logger.debug("delaying initial state recovery for [{}]",recoverAfterTime);
+      threadPool.schedule(new Runnable(){
+        @Override public void run(){
+          if (recovered.compareAndSet(false,true)) {
+            gateway.performStateRecovery(recoveryListener);
+          }
+        }
+      }
+,recoverAfterTime);
+    }
+  }
+ else {
+    if (recovered.compareAndSet(false,true)) {
+      gateway.performStateRecovery(recoveryListener);
+    }
+  }
+  if (timeout != null) {
+    try {
+      latch.await(timeout.millis(),TimeUnit.MILLISECONDS);
+    }
+ catch (    InterruptedException e) {
+      throw new ElasticSearchInterruptedException(e.getMessage(),e);
+    }
+  }
+}
