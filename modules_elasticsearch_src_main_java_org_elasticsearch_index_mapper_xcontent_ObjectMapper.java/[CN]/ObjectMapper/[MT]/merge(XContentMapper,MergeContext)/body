@@ -1,0 +1,50 @@
+{
+  if (!(mergeWith instanceof ObjectMapper)) {
+    mergeContext.addConflict("Can't merge a non object mapping [" + mergeWith.name() + "] with an object mapping ["+ name()+ "]");
+    return;
+  }
+  ObjectMapper mergeWithObject=(ObjectMapper)mergeWith;
+  if (!mergeContext.mergeFlags().simulate()) {
+    List<DynamicTemplate> mergedTemplates=Lists.newArrayList(Arrays.asList(this.dynamicTemplates));
+    for (    DynamicTemplate template : mergeWithObject.dynamicTemplates) {
+      int index=mergedTemplates.indexOf(template);
+      if (index == -1) {
+        mergedTemplates.add(template);
+      }
+ else {
+        mergedTemplates.set(index,template);
+      }
+    }
+    this.dynamicTemplates=mergedTemplates.toArray(new DynamicTemplate[mergedTemplates.size()]);
+  }
+synchronized (mutex) {
+    for (    XContentMapper mergeWithMapper : mergeWithObject.mappers.values()) {
+      XContentMapper mergeIntoMapper=mappers.get(mergeWithMapper.name());
+      if (mergeIntoMapper == null) {
+        if (!mergeContext.mergeFlags().simulate()) {
+          putMapper(mergeWithMapper);
+          if (mergeWithMapper instanceof AbstractFieldMapper) {
+            mergeContext.docMapper().addFieldMapper((FieldMapper)mergeWithMapper);
+          }
+        }
+      }
+ else {
+        if ((mergeWithMapper instanceof MultiFieldMapper) && !(mergeIntoMapper instanceof MultiFieldMapper)) {
+          MultiFieldMapper mergeWithMultiField=(MultiFieldMapper)mergeWithMapper;
+          mergeWithMultiField.merge(mergeIntoMapper,mergeContext);
+          if (!mergeContext.mergeFlags().simulate()) {
+            putMapper(mergeWithMultiField);
+            for (            XContentMapper mapper : mergeWithMultiField.mappers().values()) {
+              if (mapper instanceof AbstractFieldMapper) {
+                mergeContext.docMapper().addFieldMapper((FieldMapper)mapper);
+              }
+            }
+          }
+        }
+ else {
+          mergeIntoMapper.merge(mergeWithMapper,mergeContext);
+        }
+      }
+    }
+  }
+}
