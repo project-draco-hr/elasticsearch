@@ -1,27 +1,39 @@
 {
-  Map<String,Object> map=null;
+  Map<String,Object> ctx;
   try {
-    map=XContentFactory.xContent(XContentType.JSON).createParser(s).mapAndClose();
+    ctx=XContentFactory.xContent(XContentType.JSON).createParser(s).mapAndClose();
   }
  catch (  IOException e) {
     logger.warn("failed to parse {}",e,s);
     return null;
   }
-  if (map.containsKey("error")) {
+  if (ctx.containsKey("error")) {
     logger.warn("received error {}",s);
     return null;
   }
-  String seq=map.get("seq").toString();
-  String id=map.get("id").toString();
+  String seq=ctx.get("seq").toString();
+  String id=ctx.get("id").toString();
   if (id.startsWith("_design/")) {
     logger.trace("ignoring design document {}",id);
     return seq;
   }
-  if (map.containsKey("deleted") && map.get("deleted").equals(Boolean.TRUE)) {
+  if (script != null) {
+    scriptParams.put("ctx",ctx);
+    try {
+      script.run(scriptParams);
+    }
+ catch (    Exception e) {
+      logger.warn("failed to script process {}, ignoring",e,ctx);
+      return seq;
+    }
+  }
+  if (ctx.containsKey("ignore") && ctx.get("ignore").equals(Boolean.TRUE)) {
+  }
+ else   if (ctx.containsKey("deleted") && ctx.get("deleted").equals(Boolean.TRUE)) {
     bulk.add(deleteRequest(indexName).type(typeName).id(id));
   }
- else   if (map.containsKey("doc")) {
-    Map<String,Object> doc=(Map<String,Object>)map.get("doc");
+ else   if (ctx.containsKey("doc")) {
+    Map<String,Object> doc=(Map<String,Object>)ctx.get("doc");
     bulk.add(indexRequest(indexName).type(typeName).id(id).source(doc));
   }
  else {
