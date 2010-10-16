@@ -1,0 +1,52 @@
+{
+  return new NumericRangeFieldDataFilter<Float>(fieldDataCache,field,lowerVal,upperVal,includeLower,includeUpper){
+    @Override public DocIdSet getDocIdSet(    IndexReader reader) throws IOException {
+      final float inclusiveLowerPoint, inclusiveUpperPoint;
+      if (lowerVal != null) {
+        float f=lowerVal.floatValue();
+        if (!includeUpper && f > 0.0f && Float.isInfinite(f))         return DocSet.EMPTY_DOC_SET;
+        int i=NumericUtils.floatToSortableInt(f);
+        inclusiveLowerPoint=NumericUtils.sortableIntToFloat(includeLower ? i : (i + 1));
+      }
+ else {
+        inclusiveLowerPoint=Float.NEGATIVE_INFINITY;
+      }
+      if (upperVal != null) {
+        float f=upperVal.floatValue();
+        if (!includeUpper && f < 0.0f && Float.isInfinite(f))         return DocSet.EMPTY_DOC_SET;
+        int i=NumericUtils.floatToSortableInt(f);
+        inclusiveUpperPoint=NumericUtils.sortableIntToFloat(includeUpper ? i : (i - 1));
+      }
+ else {
+        inclusiveUpperPoint=Float.POSITIVE_INFINITY;
+      }
+      if (inclusiveLowerPoint > inclusiveUpperPoint)       return DocSet.EMPTY_DOC_SET;
+      final FloatFieldData fieldData=(FloatFieldData)this.fieldDataCache.cache(FieldDataType.DefaultTypes.FLOAT,reader,field);
+      return new GetDocSet(reader.maxDoc()){
+        @Override public boolean isCacheable(){
+          return false;
+        }
+        @Override public boolean get(        int doc) throws IOException {
+          if (!fieldData.hasValue(doc)) {
+            return false;
+          }
+          if (fieldData.multiValued()) {
+            float[] values=fieldData.values(doc);
+            for (            float value : values) {
+              if (value >= inclusiveLowerPoint && value <= inclusiveUpperPoint) {
+                return true;
+              }
+            }
+            return false;
+          }
+ else {
+            float value=fieldData.value(doc);
+            return value >= inclusiveLowerPoint && value <= inclusiveUpperPoint;
+          }
+        }
+      }
+;
+    }
+  }
+;
+}

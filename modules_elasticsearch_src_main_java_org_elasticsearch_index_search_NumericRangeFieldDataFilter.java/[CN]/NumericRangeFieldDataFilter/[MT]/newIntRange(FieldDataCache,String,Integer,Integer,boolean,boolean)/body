@@ -1,0 +1,50 @@
+{
+  return new NumericRangeFieldDataFilter<Integer>(fieldDataCache,field,lowerVal,upperVal,includeLower,includeUpper){
+    @Override public DocIdSet getDocIdSet(    IndexReader reader) throws IOException {
+      final int inclusiveLowerPoint, inclusiveUpperPoint;
+      if (lowerVal != null) {
+        int i=lowerVal.intValue();
+        if (!includeLower && i == Integer.MAX_VALUE)         return DocSet.EMPTY_DOC_SET;
+        inclusiveLowerPoint=includeLower ? i : (i + 1);
+      }
+ else {
+        inclusiveLowerPoint=Integer.MIN_VALUE;
+      }
+      if (upperVal != null) {
+        int i=upperVal.intValue();
+        if (!includeUpper && i == Integer.MIN_VALUE)         return DocSet.EMPTY_DOC_SET;
+        inclusiveUpperPoint=includeUpper ? i : (i - 1);
+      }
+ else {
+        inclusiveUpperPoint=Integer.MAX_VALUE;
+      }
+      if (inclusiveLowerPoint > inclusiveUpperPoint)       return DocSet.EMPTY_DOC_SET;
+      final IntFieldData fieldData=(IntFieldData)this.fieldDataCache.cache(FieldDataType.DefaultTypes.INT,reader,field);
+      return new GetDocSet(reader.maxDoc()){
+        @Override public boolean isCacheable(){
+          return false;
+        }
+        @Override public boolean get(        int doc) throws IOException {
+          if (!fieldData.hasValue(doc)) {
+            return false;
+          }
+          if (fieldData.multiValued()) {
+            int[] values=fieldData.values(doc);
+            for (            int value : values) {
+              if (value >= inclusiveLowerPoint && value <= inclusiveUpperPoint) {
+                return true;
+              }
+            }
+            return false;
+          }
+ else {
+            int value=fieldData.value(doc);
+            return value >= inclusiveLowerPoint && value <= inclusiveUpperPoint;
+          }
+        }
+      }
+;
+    }
+  }
+;
+}
