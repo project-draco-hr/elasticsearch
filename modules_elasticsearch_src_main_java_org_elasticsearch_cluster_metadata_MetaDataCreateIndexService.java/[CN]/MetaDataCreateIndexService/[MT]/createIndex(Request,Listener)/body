@@ -9,9 +9,8 @@
     }
   }
   request.settings(updatedSettingsBuilder.build());
-  clusterService.submitStateUpdateTask("create-index [" + request.index + "], cause ["+ request.cause+ "]",new ClusterStateUpdateTask(){
+  clusterService.submitStateUpdateTask("create-index [" + request.index + "], cause ["+ request.cause+ "]",new ProcessedClusterStateUpdateTask(){
     @Override public ClusterState execute(    ClusterState currentState){
-      final CreateIndexListener listener=new CreateIndexListener(request,userListener);
       try {
         if (currentState.routingTable().hasIndex(request.index)) {
           listener.onFailure(new IndexAlreadyExistsException(new Index(request.index)));
@@ -105,32 +104,6 @@
         final IndexMetaData indexMetaData=indexMetaDataBuilder.build();
         MetaData newMetaData=newMetaDataBuilder().metaData(currentState.metaData()).put(indexMetaData).build();
         logger.info("[{}] creating index, cause [{}], shards [{}]/[{}], mappings {}",request.index,request.cause,indexMetaData.numberOfShards(),indexMetaData.numberOfReplicas(),mappings.keySet());
-        final AtomicInteger counter=new AtomicInteger(currentState.nodes().size() - 1);
-        if (counter.get() == 0) {
-          listener.onResponse(new Response(true,indexMetaData));
-        }
- else {
-          final NodeIndexCreatedAction.Listener nodeIndexCreateListener=new NodeIndexCreatedAction.Listener(){
-            @Override public void onNodeIndexCreated(            String index,            String nodeId){
-              if (index.equals(request.index)) {
-                if (counter.decrementAndGet() == 0) {
-                  listener.onResponse(new Response(true,indexMetaData));
-                  nodeIndexCreatedAction.remove(this);
-                }
-              }
-            }
-          }
-;
-          nodeIndexCreatedAction.add(nodeIndexCreateListener);
-          Timeout timeoutTask=timerService.newTimeout(new TimerTask(){
-            @Override public void run(            Timeout timeout) throws Exception {
-              listener.onResponse(new Response(false,indexMetaData));
-              nodeIndexCreatedAction.remove(nodeIndexCreateListener);
-            }
-          }
-,request.timeout,TimerService.ExecutionType.THREADED);
-          listener.timeout=timeoutTask;
-        }
         ClusterBlocks.Builder blocks=ClusterBlocks.builder().blocks(currentState.blocks());
         if (!request.blocks.isEmpty()) {
           for (          ClusterBlock block : request.blocks) {
@@ -143,6 +116,25 @@
         listener.onFailure(e);
         return currentState;
       }
+    }
+    @Override public void clusterStateProcessed(    ClusterState clusterState){
+      clusterService.submitStateUpdateTask("reroute after index [" + request.index + "] creation",new ProcessedClusterStateUpdateTask(){
+        @Override public ClusterState execute(        ClusterState currentState){
+          RoutingTable.Builder routingTableBuilder=new RoutingTable.Builder();
+          for (          IndexRoutingTable indexRoutingTable : currentState.routingTable().indicesRouting().values()) {
+            routingTableBuilder.add(indexRoutingTable);
+          }
+          IndexRoutingTable.Builder indexRoutingBuilder=new IndexRoutingTable.Builder(request.index).initializeEmpty(currentState.metaData().index(request.index));
+          routingTableBuilder.add(indexRoutingBuilder);
+          RoutingAllocation.Result routingResult=shardsAllocation.reroute(newClusterStateBuilder().state(currentState).routingTable(routingTableBuilder).build());
+          return newClusterStateBuilder().state(currentState).routingResult(routingResult).build();
+        }
+        @Override public void clusterStateProcessed(        ClusterState clusterState){
+          logger.info("[{}] created and added to cluster_state",request.index);
+          listener.onResponse(new Response(true,clusterState.metaData().index(request.index)));
+        }
+      }
+);
     }
   }
 );
