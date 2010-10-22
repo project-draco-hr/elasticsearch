@@ -1,0 +1,40 @@
+{
+  XContentParser parser=parseContext.parser();
+  String fieldName=null;
+  String filterName=null;
+  XContentParser.Token token;
+  String currentFieldName=null;
+  while ((token=parser.nextToken()) != XContentParser.Token.END_OBJECT) {
+    if (token == XContentParser.Token.FIELD_NAME) {
+      currentFieldName=parser.currentName();
+    }
+ else     if (token.isValue()) {
+      if ("field".equals(currentFieldName)) {
+        fieldName=parser.text();
+      }
+ else       if ("_name".equals(currentFieldName)) {
+        filterName=parser.text();
+      }
+    }
+  }
+  if (fieldName == null) {
+    throw new QueryParsingException(index,"exists must be provided with a [field]");
+  }
+  Filter filter=null;
+  MapperService.SmartNameFieldMappers smartNameFieldMappers=parseContext.smartFieldMappers(fieldName);
+  if (smartNameFieldMappers != null) {
+    if (smartNameFieldMappers.hasMapper()) {
+      filter=smartNameFieldMappers.mapper().rangeFilter(null,null,true,true);
+    }
+  }
+  if (filter == null) {
+    filter=new TermRangeFilter(fieldName,null,null,true,true);
+  }
+  filter=new NotFilter(new ExistsFilterParser.ExistsFilter((MultiTermQueryWrapperFilter)filter));
+  filter=parseContext.cacheFilter(filter);
+  filter=wrapSmartNameFilter(filter,smartNameFieldMappers,parseContext);
+  if (filterName != null) {
+    parseContext.addNamedFilter(filterName,filter);
+  }
+  return filter;
+}
