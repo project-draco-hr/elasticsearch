@@ -1,0 +1,24 @@
+{
+  clusterService.submitStateUpdateTask("close-index [" + request.index + "]",new ProcessedClusterStateUpdateTask(){
+    @Override public ClusterState execute(    ClusterState currentState){
+      IndexMetaData indexMetaData=currentState.metaData().index(request.index);
+      if (indexMetaData == null) {
+        listener.onFailure(new IndexMissingException(new Index(request.index)));
+        return currentState;
+      }
+      if (indexMetaData.state() == IndexMetaData.State.CLOSE) {
+        listener.onResponse(new Response(true));
+        return currentState;
+      }
+      logger.info("[{}] closing index",request.index);
+      MetaData.Builder mdBuilder=MetaData.builder().metaData(currentState.metaData()).put(IndexMetaData.newIndexMetaDataBuilder(currentState.metaData().index(request.index)).state(IndexMetaData.State.CLOSE));
+      RoutingTable.Builder rtBuilder=RoutingTable.builder().routingTable(currentState.routingTable()).remove(request.index);
+      ClusterBlocks.Builder blocks=ClusterBlocks.builder().blocks(currentState.blocks()).addIndexBlock(request.index,INDEX_CLOSED_BLOCK);
+      return ClusterState.builder().state(currentState).metaData(mdBuilder).routingTable(rtBuilder).blocks(blocks).build();
+    }
+    @Override public void clusterStateProcessed(    ClusterState clusterState){
+      listener.onResponse(new Response(true));
+    }
+  }
+);
+}

@@ -1,0 +1,31 @@
+{
+  final AtomicReference<CloseIndexResponse> responseRef=new AtomicReference<CloseIndexResponse>();
+  final AtomicReference<Throwable> failureRef=new AtomicReference<Throwable>();
+  final CountDownLatch latch=new CountDownLatch(1);
+  stateIndexService.closeIndex(new MetaDataStateIndexService.Request(request.index()).timeout(request.timeout()),new MetaDataStateIndexService.Listener(){
+    @Override public void onResponse(    MetaDataStateIndexService.Response response){
+      responseRef.set(new CloseIndexResponse(response.acknowledged()));
+      latch.countDown();
+    }
+    @Override public void onFailure(    Throwable t){
+      failureRef.set(t);
+      latch.countDown();
+    }
+  }
+);
+  try {
+    latch.await();
+  }
+ catch (  InterruptedException e) {
+    failureRef.set(e);
+  }
+  if (failureRef.get() != null) {
+    if (failureRef.get() instanceof ElasticSearchException) {
+      throw (ElasticSearchException)failureRef.get();
+    }
+ else {
+      throw new ElasticSearchException(failureRef.get().getMessage(),failureRef.get());
+    }
+  }
+  return responseRef.get();
+}

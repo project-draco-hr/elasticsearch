@@ -1,0 +1,26 @@
+{
+  clusterService.submitStateUpdateTask("open-index [" + request.index + "]",new ProcessedClusterStateUpdateTask(){
+    @Override public ClusterState execute(    ClusterState currentState){
+      IndexMetaData indexMetaData=currentState.metaData().index(request.index);
+      if (indexMetaData == null) {
+        listener.onFailure(new IndexMissingException(new Index(request.index)));
+        return currentState;
+      }
+      if (indexMetaData.state() == IndexMetaData.State.OPEN) {
+        listener.onResponse(new Response(true));
+        return currentState;
+      }
+      logger.info("[{}] opening index",request.index);
+      MetaData.Builder mdBuilder=MetaData.builder().metaData(currentState.metaData()).put(IndexMetaData.newIndexMetaDataBuilder(currentState.metaData().index(request.index)).state(IndexMetaData.State.OPEN));
+      RoutingTable.Builder rtBuilder=RoutingTable.builder().routingTable(currentState.routingTable());
+      IndexRoutingTable.Builder indexRoutingBuilder=new IndexRoutingTable.Builder(request.index).initializeEmpty(currentState.metaData().index(request.index));
+      rtBuilder.add(indexRoutingBuilder);
+      ClusterBlocks.Builder blocks=ClusterBlocks.builder().blocks(currentState.blocks()).removeIndexBlock(request.index,INDEX_CLOSED_BLOCK).addIndexBlock(request.index,GatewayService.INDEX_NOT_RECOVERED_BLOCK);
+      return ClusterState.builder().state(currentState).metaData(mdBuilder).routingTable(rtBuilder).blocks(blocks).build();
+    }
+    @Override public void clusterStateProcessed(    ClusterState clusterState){
+      listener.onResponse(new Response(true));
+    }
+  }
+);
+}

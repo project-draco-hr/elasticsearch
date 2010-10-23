@@ -101,6 +101,7 @@
         for (        Map.Entry<String,CompressedString> entry : mappings.entrySet()) {
           indexMetaDataBuilder.putMapping(entry.getKey(),entry.getValue());
         }
+        indexMetaDataBuilder.state(request.state);
         final IndexMetaData indexMetaData=indexMetaDataBuilder.build();
         MetaData newMetaData=newMetaDataBuilder().metaData(currentState.metaData()).put(indexMetaData).build();
         logger.info("[{}] creating index, cause [{}], shards [{}]/[{}], mappings {}",request.index,request.cause,indexMetaData.numberOfShards(),indexMetaData.numberOfReplicas(),mappings.keySet());
@@ -110,6 +111,9 @@
             blocks.addIndexBlock(request.index,block);
           }
         }
+        if (request.state == State.CLOSE) {
+          blocks.addIndexBlock(request.index,MetaDataStateIndexService.INDEX_CLOSED_BLOCK);
+        }
         return newClusterStateBuilder().state(currentState).blocks(blocks).metaData(newMetaData).build();
       }
  catch (      Exception e) {
@@ -118,12 +122,12 @@
       }
     }
     @Override public void clusterStateProcessed(    ClusterState clusterState){
+      if (request.state == State.CLOSE) {
+        return;
+      }
       clusterService.submitStateUpdateTask("reroute after index [" + request.index + "] creation",new ProcessedClusterStateUpdateTask(){
         @Override public ClusterState execute(        ClusterState currentState){
-          RoutingTable.Builder routingTableBuilder=new RoutingTable.Builder();
-          for (          IndexRoutingTable indexRoutingTable : currentState.routingTable().indicesRouting().values()) {
-            routingTableBuilder.add(indexRoutingTable);
-          }
+          RoutingTable.Builder routingTableBuilder=RoutingTable.builder().routingTable(currentState.routingTable());
           IndexRoutingTable.Builder indexRoutingBuilder=new IndexRoutingTable.Builder(request.index).initializeEmpty(currentState.metaData().index(request.index));
           routingTableBuilder.add(indexRoutingBuilder);
           RoutingAllocation.Result routingResult=shardsAllocation.reroute(newClusterStateBuilder().state(currentState).routingTable(routingTableBuilder).build());
