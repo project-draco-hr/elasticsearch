@@ -1,0 +1,47 @@
+{
+  while (true) {
+    if (close) {
+      closed=true;
+      return;
+    }
+    try {
+      String indexName=nextIndex();
+      SearchRequestBuilder builder=client.client().prepareSearch(indexName);
+      if (ThreadLocalRandom.current().nextBoolean()) {
+        builder.addSort("num",SortOrder.DESC);
+      }
+ else       if (ThreadLocalRandom.current().nextBoolean()) {
+        builder.addSort("_score",SortOrder.DESC);
+      }
+      if (ThreadLocalRandom.current().nextBoolean()) {
+        builder.setSearchType(SearchType.DFS_QUERY_THEN_FETCH);
+      }
+      int size=Math.abs(ThreadLocalRandom.current().nextInt()) % numberOfHits;
+      builder.setSize(size);
+      if (ThreadLocalRandom.current().nextBoolean()) {
+        builder.setFrom(size / 2);
+      }
+      String value=nextFieldValue();
+      builder.setQuery(QueryBuilders.termQuery("field",value));
+      searchCounter.incrementAndGet();
+      SearchResponse searchResponse=builder.execute().actionGet();
+      if (searchResponse.failedShards() > 0) {
+        logger.warn("failed search " + Arrays.toString(searchResponse.shardFailures()));
+      }
+      for (      SearchHit hit : searchResponse.hits()) {
+        if (!hit.shard().index().equals(indexName)) {
+          logger.warn("got wrong index, asked for [{}], got [{}]",indexName,hit.shard().index());
+        }
+      }
+      for (      SearchHit hit : searchResponse.hits()) {
+        if (!value.equals(hit.sourceAsMap().get("field"))) {
+          logger.warn("got wrong field, asked for [{}], got [{}]",value,hit.sourceAsMap().get("field"));
+        }
+      }
+      Thread.sleep(searcherThrottle.millis());
+    }
+ catch (    Exception e) {
+      logger.warn("failed to search",e);
+    }
+  }
+}

@@ -1,0 +1,55 @@
+{
+  Node[] nodes=new Node[numberOfNodes];
+  for (int i=0; i < nodes.length; i++) {
+    nodes[i]=NodeBuilder.nodeBuilder().settings(settings).node();
+  }
+  client=NodeBuilder.nodeBuilder().settings(settings).client(true).node();
+  for (int i=0; i < numberOfIndices; i++) {
+    client.client().admin().indices().prepareCreate("test" + i).execute().actionGet();
+  }
+  Indexer[] indexerThreads=new Indexer[indexers];
+  for (int i=0; i < indexerThreads.length; i++) {
+    indexerThreads[i]=new Indexer();
+  }
+  for (int i=0; i < indexerThreads.length; i++) {
+    indexerThreads[i].start();
+  }
+  Thread.sleep(10000);
+  Searcher[] searcherThreads=new Searcher[searchers];
+  for (int i=0; i < searcherThreads.length; i++) {
+    searcherThreads[i]=new Searcher();
+  }
+  for (int i=0; i < searcherThreads.length; i++) {
+    searcherThreads[i].start();
+  }
+  long testStart=System.currentTimeMillis();
+  while (true) {
+    Thread.sleep(5000);
+    if ((System.currentTimeMillis() - testStart) > period.millis()) {
+      break;
+    }
+  }
+  System.out.println("DONE, closing .....");
+  for (int i=0; i < searcherThreads.length; i++) {
+    searcherThreads[i].close=true;
+  }
+  for (int i=0; i < indexerThreads.length; i++) {
+    indexerThreads[i].close=true;
+  }
+  Thread.sleep(indexerThrottle.millis() + 10000);
+  for (int i=0; i < searcherThreads.length; i++) {
+    if (!searcherThreads[i].closed) {
+      logger.warn("search thread not closed!");
+    }
+  }
+  for (int i=0; i < indexerThreads.length; i++) {
+    if (!indexerThreads[i].closed) {
+      logger.warn("index thread not closed!");
+    }
+  }
+  client.close();
+  for (  Node node : nodes) {
+    node.close();
+  }
+  System.out.println("********** DONE, indexed [" + indexCounter.get() + "], searched ["+ searchCounter.get()+ "]");
+}
