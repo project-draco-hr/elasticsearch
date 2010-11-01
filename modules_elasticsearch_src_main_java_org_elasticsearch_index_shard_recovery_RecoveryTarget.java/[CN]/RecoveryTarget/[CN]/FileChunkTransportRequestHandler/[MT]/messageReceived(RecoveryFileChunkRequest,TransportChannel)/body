@@ -14,7 +14,7 @@
  catch (      IOException e) {
       }
     }
-    indexOutput=shard.store().directory().createOutput(request.name());
+    indexOutput=shard.store().createOutputWithNoChecksum(request.name());
     onGoingRecovery.openIndexOutputs.put(request.name(),indexOutput);
   }
  else {
@@ -29,6 +29,10 @@ synchronized (indexOutput) {
       onGoingRecovery.currentFilesSize.addAndGet(request.contentLength());
       if (indexOutput.getFilePointer() == request.length()) {
         indexOutput.close();
+        if (request.checksum() != null) {
+          shard.store().writeChecksum(request.name(),request.checksum());
+        }
+        shard.store().directory().sync(request.name());
         onGoingRecovery.openIndexOutputs.remove(request.name());
       }
     }
@@ -39,6 +43,7 @@ synchronized (indexOutput) {
       }
  catch (      IOException e1) {
       }
+      throw e;
     }
   }
   channel.sendResponse(VoidStreamable.INSTANCE);

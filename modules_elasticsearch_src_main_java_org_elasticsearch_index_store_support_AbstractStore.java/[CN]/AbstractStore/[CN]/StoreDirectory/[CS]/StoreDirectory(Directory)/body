@@ -3,7 +3,24 @@
 synchronized (mutex) {
     MapBuilder<String,StoreFileMetaData> builder=MapBuilder.newMapBuilder();
     for (    String file : delegate.listAll()) {
-      builder.put(file,new StoreFileMetaData(file,delegate.fileLength(file),delegate.fileModified(file)));
+      if (file.endsWith(".cks")) {
+        continue;
+      }
+      String checksum=null;
+      if (delegate.fileExists(file + ".cks")) {
+        IndexInput indexInput=delegate.openInput(file + ".cks");
+        try {
+          if (indexInput.length() > 0) {
+            byte[] checksumBytes=new byte[(int)indexInput.length()];
+            indexInput.readBytes(checksumBytes,0,checksumBytes.length,false);
+            checksum=Unicode.fromBytes(checksumBytes);
+          }
+        }
+  finally {
+          indexInput.close();
+        }
+      }
+      builder.put(file,new StoreFileMetaData(file,delegate.fileLength(file),delegate.fileModified(file),checksum));
     }
     filesMetadata=builder.immutableMap();
     files=filesMetadata.keySet().toArray(new String[filesMetadata.size()]);
