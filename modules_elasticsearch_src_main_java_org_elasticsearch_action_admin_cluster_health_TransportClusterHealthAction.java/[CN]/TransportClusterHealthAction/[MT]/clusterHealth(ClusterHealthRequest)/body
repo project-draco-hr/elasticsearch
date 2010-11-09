@@ -4,8 +4,7 @@
   ClusterHealthResponse response=new ClusterHealthResponse(clusterName.value(),validation.failures());
   response.numberOfNodes=clusterState.nodes().size();
   response.numberOfDataNodes=clusterState.nodes().dataNodes().size();
-  request.indices(clusterState.metaData().concreteIndices(request.indices()));
-  for (  String index : request.indices()) {
+  for (  String index : clusterState.metaData().concreteIndices(request.indices())) {
     IndexRoutingTable indexRoutingTable=clusterState.routingTable().index(index);
     IndexMetaData indexMetaData=clusterState.metaData().index(index);
     if (indexRoutingTable == null) {
@@ -57,6 +56,12 @@
     if (!indexHealth.validationFailures().isEmpty()) {
       indexHealth.status=ClusterHealthStatus.RED;
     }
+ else     if (clusterState.blocks().hasIndexBlock(indexHealth.index(),GatewayService.INDEX_NOT_RECOVERED_BLOCK)) {
+      indexHealth.status=ClusterHealthStatus.RED;
+    }
+ else     if (indexHealth.shards().isEmpty()) {
+      indexHealth.status=ClusterHealthStatus.RED;
+    }
  else {
       for (      ClusterShardHealth shardHealth : indexHealth) {
         if (shardHealth.status() == ClusterHealthStatus.RED) {
@@ -79,6 +84,9 @@
   }
   response.status=ClusterHealthStatus.GREEN;
   if (!response.validationFailures().isEmpty()) {
+    response.status=ClusterHealthStatus.RED;
+  }
+ else   if (clusterState.blocks().hasGlobalBlock(GatewayService.NOT_RECOVERED_FROM_GATEWAY_BLOCK)) {
     response.status=ClusterHealthStatus.RED;
   }
  else {
