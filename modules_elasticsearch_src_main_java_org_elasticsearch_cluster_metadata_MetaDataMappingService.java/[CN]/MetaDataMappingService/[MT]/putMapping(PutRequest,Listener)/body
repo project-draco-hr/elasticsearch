@@ -17,7 +17,7 @@
           final IndexMetaData indexMetaData=currentState.metaData().index(index);
           IndexService indexService=indicesService.createIndex(indexMetaData.index(),indexMetaData.settings(),currentState.nodes().localNode().id());
           if (indexMetaData.mappings().containsKey(request.mappingType)) {
-            indexService.mapperService().add(request.mappingType,indexMetaData.mappings().get(request.mappingType).string());
+            indexService.mapperService().add(request.mappingType,indexMetaData.mappings().get(request.mappingType).source().string());
           }
         }
         Map<String,DocumentMapper> newMappers=newHashMap();
@@ -50,7 +50,7 @@
         if (!MapperService.DEFAULT_MAPPING.equals(mappingType) && mappingType.charAt(0) == '_') {
           throw new InvalidTypeNameException("Document mapping type name can't start with '_'");
         }
-        final Map<String,Tuple<String,CompressedString>> mappings=newHashMap();
+        final Map<String,MappingMetaData> mappings=newHashMap();
         for (        Map.Entry<String,DocumentMapper> entry : newMappers.entrySet()) {
           String index=entry.getKey();
           DocumentMapper newMapper=entry.getValue();
@@ -62,7 +62,7 @@
             if (existingSource.equals(updatedSource)) {
             }
  else {
-              mappings.put(index,new Tuple<String,CompressedString>(existingMapper.type(),updatedSource));
+              mappings.put(index,new MappingMetaData(existingMapper));
               if (logger.isDebugEnabled()) {
                 logger.debug("[{}] update_mapping [{}] with source [{}]",index,existingMapper.type(),updatedSource);
               }
@@ -73,7 +73,7 @@
           }
  else {
             CompressedString newSource=newMapper.mappingSource();
-            mappings.put(index,new Tuple<String,CompressedString>(newMapper.type(),newSource));
+            mappings.put(index,new MappingMetaData(newMapper));
             if (logger.isDebugEnabled()) {
               logger.debug("[{}] create_mapping [{}] with source [{}]",index,newMapper.type(),newSource);
             }
@@ -92,9 +92,9 @@
           if (indexMetaData == null) {
             throw new IndexMissingException(new Index(indexName));
           }
-          Tuple<String,CompressedString> mapping=mappings.get(indexName);
-          if (mapping != null) {
-            builder.put(newIndexMetaDataBuilder(indexMetaData).putMapping(mapping.v1(),mapping.v2()));
+          MappingMetaData mappingMd=mappings.get(indexName);
+          if (mappingMd != null) {
+            builder.put(newIndexMetaDataBuilder(indexMetaData).putMapping(mappingMd));
           }
         }
         return newClusterStateBuilder().state(currentState).metaData(builder).build();
