@@ -1,0 +1,40 @@
+{
+  String text=request.param("text");
+  if (text == null && request.hasContent()) {
+    text=request.contentAsString();
+  }
+  if (text == null) {
+    try {
+      channel.sendResponse(new XContentThrowableRestResponse(request,new ElasticSearchIllegalArgumentException("text is missing")));
+    }
+ catch (    IOException e1) {
+      logger.warn("Failed to send response",e1);
+    }
+    return;
+  }
+  AnalyzeRequest analyzeRequest=new AnalyzeRequest(request.param("index"),text);
+  analyzeRequest.analyzer(request.param("analyzer"));
+  client.admin().indices().analyze(analyzeRequest,new ActionListener<AnalyzeResponse>(){
+    @Override public void onResponse(    AnalyzeResponse response){
+      try {
+        XContentBuilder builder=restContentBuilder(request);
+        builder.startObject();
+        response.toXContent(builder,request);
+        builder.endObject();
+        channel.sendResponse(new XContentRestResponse(request,OK,builder));
+      }
+ catch (      Exception e) {
+        onFailure(e);
+      }
+    }
+    @Override public void onFailure(    Throwable e){
+      try {
+        channel.sendResponse(new XContentThrowableRestResponse(request,e));
+      }
+ catch (      IOException e1) {
+        logger.error("Failed to send failure response",e1);
+      }
+    }
+  }
+);
+}

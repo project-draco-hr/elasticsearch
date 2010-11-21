@@ -1,0 +1,46 @@
+{
+  IndexService indexService=indicesService.indexServiceSafe(request.index());
+  Analyzer analyzer=null;
+  String field="contents";
+  if (request.analyzer() != null) {
+    analyzer=indexService.analysisService().analyzer(request.analyzer());
+  }
+ else {
+    analyzer=indexService.analysisService().defaultIndexAnalyzer();
+  }
+  if (analyzer == null) {
+    throw new ElasticSearchIllegalArgumentException("failed to find analyzer");
+  }
+  List<AnalyzeResponse.AnalyzeToken> tokens=Lists.newArrayList();
+  TokenStream stream=null;
+  try {
+    stream=analyzer.reusableTokenStream(field,new FastStringReader(request.text()));
+    stream.reset();
+    TermAttribute term=stream.addAttribute(TermAttribute.class);
+    PositionIncrementAttribute posIncr=stream.addAttribute(PositionIncrementAttribute.class);
+    OffsetAttribute offset=stream.addAttribute(OffsetAttribute.class);
+    TypeAttribute type=stream.addAttribute(TypeAttribute.class);
+    int position=0;
+    while (stream.incrementToken()) {
+      int increment=posIncr.getPositionIncrement();
+      if (increment > 0) {
+        position=position + increment;
+      }
+      tokens.add(new AnalyzeResponse.AnalyzeToken(term.term(),position,offset.startOffset(),offset.endOffset(),type.type()));
+    }
+    stream.end();
+  }
+ catch (  IOException e) {
+    throw new ElasticSearchException("failed to analyze",e);
+  }
+ finally {
+    if (stream != null) {
+      try {
+        stream.close();
+      }
+ catch (      IOException e) {
+      }
+    }
+  }
+  return new AnalyzeResponse(tokens);
+}

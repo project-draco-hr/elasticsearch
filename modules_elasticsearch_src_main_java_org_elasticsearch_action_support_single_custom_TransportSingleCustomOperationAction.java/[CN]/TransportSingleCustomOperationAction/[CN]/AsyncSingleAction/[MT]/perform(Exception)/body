@@ -1,0 +1,57 @@
+{
+  while (shardsIt.hasNextActive()) {
+    final ShardRouting shard=shardsIt.nextActive();
+    if (!shard.currentNodeId().equals(nodes.localNodeId())) {
+      DiscoveryNode node=nodes.get(shard.currentNodeId());
+      transportService.sendRequest(node,transportShardAction(),new ShardSingleOperationRequest(request,shard.id()),new BaseTransportResponseHandler<Response>(){
+        @Override public Response newInstance(){
+          return newResponse();
+        }
+        @Override public void handleResponse(        final Response response){
+          if (request.listenerThreaded()) {
+            threadPool.execute(new Runnable(){
+              @Override public void run(){
+                listener.onResponse(response);
+              }
+            }
+);
+          }
+ else {
+            listener.onResponse(response);
+          }
+        }
+        @Override public void handleException(        TransportException exp){
+          onFailure(shard,exp);
+        }
+        @Override public boolean spawn(){
+          return false;
+        }
+      }
+);
+      return;
+    }
+  }
+  if (!shardsIt.hasNextActive()) {
+    Exception failure=lastException;
+    if (failure == null) {
+      failure=new NoShardAvailableActionException(null,"No shard available for [" + request + "]");
+    }
+ else {
+      if (logger.isDebugEnabled()) {
+        logger.debug("failed to execute [" + request + "]",failure);
+      }
+    }
+    if (request.listenerThreaded()) {
+      final Exception fFailure=failure;
+      threadPool.execute(new Runnable(){
+        @Override public void run(){
+          listener.onFailure(fFailure);
+        }
+      }
+);
+    }
+ else {
+      listener.onFailure(failure);
+    }
+  }
+}
