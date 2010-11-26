@@ -5,6 +5,7 @@
   clusterStateRequest.filterMetaData(request.paramAsBoolean("filter_metadata",clusterStateRequest.filterMetaData()));
   clusterStateRequest.filterBlocks(request.paramAsBoolean("filter_blocks",clusterStateRequest.filterBlocks()));
   clusterStateRequest.filteredIndices(RestActions.splitIndices(request.param("filter_indices",null)));
+  clusterStateRequest.filteredIndexTemplates(request.paramAsStringArray("filter_index_templates",Strings.EMPTY_ARRAY));
   clusterStateRequest.local(request.paramAsBoolean("local",clusterStateRequest.local()));
   client.admin().cluster().state(clusterStateRequest,new ActionListener<ClusterStateResponse>(){
     @Override public void onResponse(    ClusterStateResponse response){
@@ -55,6 +56,32 @@
         }
         if (!clusterStateRequest.filterMetaData()) {
           builder.startObject("metadata");
+          builder.startObject("templates");
+          for (          IndexTemplateMetaData templateMetaData : state.metaData().templates().values()) {
+            builder.startObject(templateMetaData.name(),XContentBuilder.FieldCaseConversion.NONE);
+            builder.field("template",templateMetaData.template());
+            builder.field("order",templateMetaData.order());
+            builder.startObject("settings");
+            Settings settings=settingsFilter.filterSettings(templateMetaData.settings());
+            for (            Map.Entry<String,String> entry : settings.getAsMap().entrySet()) {
+              builder.field(entry.getKey(),entry.getValue());
+            }
+            builder.endObject();
+            builder.startObject("mappings");
+            for (            Map.Entry<String,CompressedString> entry : templateMetaData.mappings().entrySet()) {
+              byte[] mappingSource=entry.getValue().uncompressed();
+              XContentParser parser=XContentFactory.xContent(mappingSource).createParser(mappingSource);
+              Map<String,Object> mapping=parser.map();
+              if (mapping.size() == 1 && mapping.containsKey(entry.getKey())) {
+                mapping=(Map<String,Object>)mapping.get(entry.getKey());
+              }
+              builder.field(entry.getKey());
+              builder.map(mapping);
+            }
+            builder.endObject();
+            builder.endObject();
+          }
+          builder.endObject();
           builder.startObject("indices");
           for (          IndexMetaData indexMetaData : state.metaData()) {
             builder.startObject(indexMetaData.index(),XContentBuilder.FieldCaseConversion.NONE);

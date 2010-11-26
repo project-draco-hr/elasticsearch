@@ -1,0 +1,63 @@
+{
+  PutIndexTemplateRequest putRequest=new PutIndexTemplateRequest(request.param("name"));
+  try {
+    putRequest.create(request.paramAsBoolean("create",false));
+    putRequest.cause(request.param("cause",""));
+    putRequest.timeout(request.paramAsTime("timeout",timeValueSeconds(10)));
+    Map<String,Object> source=XContentFactory.xContent(request.contentByteArray(),request.contentByteArrayOffset(),request.contentLength()).createParser(request.contentByteArray(),request.contentByteArrayOffset(),request.contentLength()).mapAndClose();
+    if (source.containsKey("template")) {
+      putRequest.template(source.get("template").toString());
+    }
+    if (source.containsKey("order")) {
+      putRequest.order(XContentMapValues.nodeIntegerValue(source.get("order"),putRequest.order()));
+    }
+    if (source.containsKey("settings")) {
+      putRequest.settings((Map<String,Object>)source.get("settings"));
+    }
+    if (source.containsKey("mappings")) {
+      Map<String,Object> mappings=(Map<String,Object>)source.get("mappings");
+      for (      Map.Entry<String,Object> entry : mappings.entrySet()) {
+        putRequest.mapping(entry.getKey(),(Map<String,Object>)entry.getValue());
+      }
+    }
+  }
+ catch (  Exception e) {
+    try {
+      channel.sendResponse(new XContentThrowableRestResponse(request,e));
+    }
+ catch (    IOException e1) {
+      logger.warn("Failed to send response",e1);
+      return;
+    }
+  }
+  putRequest.template(request.param("template",putRequest.template()));
+  putRequest.order(request.paramAsInt("order",putRequest.order()));
+  client.admin().indices().putTemplate(putRequest,new ActionListener<PutIndexTemplateResponse>(){
+    @Override public void onResponse(    PutIndexTemplateResponse response){
+      try {
+        XContentBuilder builder=RestXContentBuilder.restContentBuilder(request);
+        builder.startObject().field(Fields.OK,true).field(Fields.ACKNOWLEDGED,response.acknowledged()).endObject();
+        channel.sendResponse(new XContentRestResponse(request,OK,builder));
+      }
+ catch (      IOException e) {
+        onFailure(e);
+      }
+    }
+    @Override public void onFailure(    Throwable e){
+      try {
+        Throwable t=unwrapCause(e);
+        if (t instanceof IndexTemplateAlreadyExistsException || t instanceof InvalidIndexTemplateException) {
+          XContentBuilder builder=RestXContentBuilder.restContentBuilder(request);
+          channel.sendResponse(new XContentRestResponse(request,BAD_REQUEST,builder.startObject().field("error",t.getMessage()).endObject()));
+        }
+ else {
+          channel.sendResponse(new XContentThrowableRestResponse(request,e));
+        }
+      }
+ catch (      IOException e1) {
+        logger.error("Failed to send failure response",e1);
+      }
+    }
+  }
+);
+}

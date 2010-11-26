@@ -1,0 +1,56 @@
+{
+  ImmutableSettings.Builder updatedSettingsBuilder=ImmutableSettings.settingsBuilder();
+  for (  Map.Entry<String,String> entry : request.settings.getAsMap().entrySet()) {
+    if (!entry.getKey().startsWith("index.")) {
+      updatedSettingsBuilder.put("index." + entry.getKey(),entry.getValue());
+    }
+ else {
+      updatedSettingsBuilder.put(entry.getKey(),entry.getValue());
+    }
+  }
+  request.settings(updatedSettingsBuilder.build());
+  if (request.name == null) {
+    listener.onFailure(new ElasticSearchIllegalArgumentException("index_template must provide a name"));
+    return;
+  }
+  if (request.template == null) {
+    listener.onFailure(new ElasticSearchIllegalArgumentException("index_template must provide a template"));
+    return;
+  }
+  try {
+    validate(request);
+  }
+ catch (  Exception e) {
+    listener.onFailure(e);
+    return;
+  }
+  IndexTemplateMetaData.Builder templateBuilder;
+  try {
+    templateBuilder=IndexTemplateMetaData.builder(request.name);
+    templateBuilder.order(request.order);
+    templateBuilder.template(request.template);
+    templateBuilder.settings(request.settings);
+    for (    Map.Entry<String,String> entry : request.mappings.entrySet()) {
+      templateBuilder.putMapping(entry.getKey(),entry.getValue());
+    }
+  }
+ catch (  Exception e) {
+    listener.onFailure(e);
+    return;
+  }
+  final IndexTemplateMetaData template=templateBuilder.build();
+  clusterService.submitStateUpdateTask("create-index-template [" + request.name + "], cause ["+ request.cause+ "]",new ProcessedClusterStateUpdateTask(){
+    @Override public ClusterState execute(    ClusterState currentState){
+      if (request.create && currentState.metaData().templates().containsKey(request.name)) {
+        listener.onFailure(new IndexTemplateAlreadyExistsException(request.name));
+        return currentState;
+      }
+      MetaData.Builder builder=MetaData.builder().metaData(currentState.metaData()).put(template);
+      return ClusterState.builder().state(currentState).metaData(builder).build();
+    }
+    @Override public void clusterStateProcessed(    ClusterState clusterState){
+      listener.onResponse(new PutResponse(true,template));
+    }
+  }
+);
+}

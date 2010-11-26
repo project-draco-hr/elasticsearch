@@ -12,59 +12,52 @@
   clusterService.submitStateUpdateTask("create-index [" + request.index + "], cause ["+ request.cause+ "]",new ProcessedClusterStateUpdateTask(){
     @Override public ClusterState execute(    ClusterState currentState){
       try {
-        if (currentState.routingTable().hasIndex(request.index)) {
-          listener.onFailure(new IndexAlreadyExistsException(new Index(request.index)));
-          return currentState;
-        }
-        if (currentState.metaData().hasIndex(request.index)) {
-          listener.onFailure(new IndexAlreadyExistsException(new Index(request.index)));
-          return currentState;
-        }
-        if (request.index.contains(" ")) {
-          listener.onFailure(new InvalidIndexNameException(new Index(request.index),request.index,"must not contain whitespace"));
-          return currentState;
-        }
-        if (request.index.contains(",")) {
-          listener.onFailure(new InvalidIndexNameException(new Index(request.index),request.index,"must not contain ',"));
-          return currentState;
-        }
-        if (request.index.contains("#")) {
-          listener.onFailure(new InvalidIndexNameException(new Index(request.index),request.index,"must not contain '#"));
-          return currentState;
-        }
-        if (!request.index.equals(riverIndexName) && request.index.charAt(0) == '_') {
-          listener.onFailure(new InvalidIndexNameException(new Index(request.index),request.index,"must not start with '_'"));
-          return currentState;
-        }
-        if (!request.index.toLowerCase().equals(request.index)) {
-          listener.onFailure(new InvalidIndexNameException(new Index(request.index),request.index,"must be lowercase"));
-          return currentState;
-        }
-        if (!Strings.validFileName(request.index)) {
-          listener.onFailure(new InvalidIndexNameException(new Index(request.index),request.index,"must not contain the following characters " + Strings.INVALID_FILENAME_CHARS));
-          return currentState;
-        }
-        if (currentState.metaData().aliases().contains(request.index)) {
-          listener.onFailure(new InvalidIndexNameException(new Index(request.index),request.index,"an alias with the same name already exists"));
-          return currentState;
-        }
-        Map<String,CompressedString> mappings=Maps.newHashMap();
-        File mappingsDir=new File(environment.configFile(),"mappings");
-        if (mappingsDir.exists() && mappingsDir.isDirectory()) {
-          File defaultMappingsDir=new File(mappingsDir,"_default");
-          if (defaultMappingsDir.exists() && defaultMappingsDir.isDirectory()) {
-            addMappings(mappings,defaultMappingsDir);
+        if (request.origin == Request.Origin.API) {
+          try {
+            validate(request,currentState);
           }
-          File indexMappingsDir=new File(mappingsDir,request.index);
-          if (indexMappingsDir.exists() && indexMappingsDir.isDirectory()) {
-            addMappings(mappings,indexMappingsDir);
+ catch (          Exception e) {
+            listener.onFailure(e);
+            return currentState;
           }
         }
+        List<IndexTemplateMetaData> templates=ImmutableList.of();
+        if (request.origin == Request.Origin.API) {
+          templates=findTemplates(request,currentState);
+        }
+        Map<String,Map<String,Object>> mappings=Maps.newHashMap();
         for (        Map.Entry<String,String> entry : request.mappings.entrySet()) {
-          mappings.put(entry.getKey(),new CompressedString(entry.getValue()));
+          mappings.put(entry.getKey(),parseMapping(entry.getValue()));
         }
-        ImmutableSettings.Builder indexSettingsBuilder=settingsBuilder().put(request.settings);
-        if (request.settings.get(SETTING_NUMBER_OF_SHARDS) == null) {
+        for (        IndexTemplateMetaData template : templates) {
+          for (          Map.Entry<String,CompressedString> entry : template.mappings().entrySet()) {
+            if (mappings.containsKey(entry.getKey())) {
+              XContentHelper.mergeDefaults(mappings.get(entry.getKey()),parseMapping(entry.getValue().string()));
+            }
+ else {
+              mappings.put(entry.getKey(),parseMapping(entry.getValue().string()));
+            }
+          }
+        }
+        if (request.origin == Request.Origin.API) {
+          File mappingsDir=new File(environment.configFile(),"mappings");
+          if (mappingsDir.exists() && mappingsDir.isDirectory()) {
+            File indexMappingsDir=new File(mappingsDir,request.index);
+            if (indexMappingsDir.exists() && indexMappingsDir.isDirectory()) {
+              addMappings(mappings,indexMappingsDir);
+            }
+            File defaultMappingsDir=new File(mappingsDir,"_default");
+            if (defaultMappingsDir.exists() && defaultMappingsDir.isDirectory()) {
+              addMappings(mappings,defaultMappingsDir);
+            }
+          }
+        }
+        ImmutableSettings.Builder indexSettingsBuilder=settingsBuilder();
+        for (int i=templates.size() - 1; i >= 0; i--) {
+          indexSettingsBuilder.put(templates.get(i).settings());
+        }
+        indexSettingsBuilder.put(request.settings);
+        if (indexSettingsBuilder.get(SETTING_NUMBER_OF_SHARDS) == null) {
           if (request.index.equals(riverIndexName)) {
             indexSettingsBuilder.put(SETTING_NUMBER_OF_SHARDS,settings.getAsInt(SETTING_NUMBER_OF_SHARDS,1));
           }
@@ -72,7 +65,7 @@
             indexSettingsBuilder.put(SETTING_NUMBER_OF_SHARDS,settings.getAsInt(SETTING_NUMBER_OF_SHARDS,5));
           }
         }
-        if (request.settings.get(SETTING_NUMBER_OF_REPLICAS) == null) {
+        if (indexSettingsBuilder.get(SETTING_NUMBER_OF_REPLICAS) == null) {
           if (request.index.equals(riverIndexName)) {
             indexSettingsBuilder.put(SETTING_NUMBER_OF_REPLICAS,settings.getAsInt(SETTING_NUMBER_OF_REPLICAS,1));
           }
@@ -84,9 +77,9 @@
         indicesService.createIndex(request.index,actualIndexSettings,clusterService.state().nodes().localNode().id());
         IndexService indexService=indicesService.indexServiceSafe(request.index);
         MapperService mapperService=indexService.mapperService();
-        for (        Map.Entry<String,CompressedString> entry : mappings.entrySet()) {
+        for (        Map.Entry<String,Map<String,Object>> entry : mappings.entrySet()) {
           try {
-            mapperService.add(entry.getKey(),entry.getValue().string());
+            mapperService.add(entry.getKey(),XContentFactory.jsonBuilder().map(entry.getValue()).string());
           }
  catch (          Exception e) {
             indicesService.deleteIndex(request.index);
