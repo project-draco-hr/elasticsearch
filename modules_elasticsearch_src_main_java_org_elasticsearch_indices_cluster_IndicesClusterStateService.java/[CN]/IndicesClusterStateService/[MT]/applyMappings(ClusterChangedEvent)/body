@@ -6,34 +6,16 @@
     String index=indexMetaData.index();
     IndexService indexService=indicesService.indexServiceSafe(index);
     MapperService mapperService=indexService.mapperService();
+    if (indexMetaData.mappings().containsKey(MapperService.DEFAULT_MAPPING)) {
+      processMapping(event,index,mapperService,MapperService.DEFAULT_MAPPING,indexMetaData.mapping(MapperService.DEFAULT_MAPPING).source());
+    }
     for (    MappingMetaData mappingMd : indexMetaData.mappings().values()) {
       String mappingType=mappingMd.type();
       CompressedString mappingSource=mappingMd.source();
-      if (!seenMappings.containsKey(new Tuple<String,String>(index,mappingType))) {
-        seenMappings.put(new Tuple<String,String>(index,mappingType),true);
+      if (mappingType.equals(MapperService.DEFAULT_MAPPING)) {
+        continue;
       }
-      try {
-        if (!mapperService.hasMapping(mappingType)) {
-          if (logger.isDebugEnabled()) {
-            logger.debug("[{}] adding mapping [{}], source [{}]",index,mappingType,mappingSource.string());
-          }
-          mapperService.add(mappingType,mappingSource.string());
-          nodeMappingCreatedAction.nodeMappingCreated(new NodeMappingCreatedAction.NodeMappingCreatedResponse(index,mappingType,event.state().nodes().localNodeId()));
-        }
- else {
-          DocumentMapper existingMapper=mapperService.documentMapper(mappingType);
-          if (!mappingSource.equals(existingMapper.mappingSource())) {
-            if (logger.isDebugEnabled()) {
-              logger.debug("[{}] updating mapping [{}], source [{}]",index,mappingType,mappingSource.string());
-            }
-            mapperService.add(mappingType,mappingSource.string());
-            nodeMappingCreatedAction.nodeMappingCreated(new NodeMappingCreatedAction.NodeMappingCreatedResponse(index,mappingType,event.state().nodes().localNodeId()));
-          }
-        }
-      }
- catch (      Exception e) {
-        logger.warn("[{}] failed to add mapping [{}], source [{}]",e,index,mappingType,mappingSource);
-      }
+      processMapping(event,index,mapperService,mappingType,mappingSource);
     }
     for (    DocumentMapper documentMapper : mapperService) {
       if (seenMappings.containsKey(new Tuple<String,String>(index,documentMapper.type())) && !indexMetaData.mappings().containsKey(documentMapper.type())) {
