@@ -1,4 +1,69 @@
 {
+  if (searchContext.parsedQuery().scopePhases().length > 0) {
+    try {
+      searchContext.idCache().refresh(searchContext.searcher().subReaders());
+    }
+ catch (    Exception e) {
+      throw new QueryPhaseExecutionException(searchContext,"Failed to refresh id cache for child queries",e);
+    }
+    for (int i=searchContext.parsedQuery().scopePhases().length - 1; i >= 0; i--) {
+      ScopePhase scopePhase=searchContext.parsedQuery().scopePhases()[i];
+      if (scopePhase instanceof ScopePhase.TopDocsPhase) {
+        ScopePhase.TopDocsPhase topDocsPhase=(ScopePhase.TopDocsPhase)scopePhase;
+        topDocsPhase.clear();
+        int numDocs=(searchContext.from() + searchContext.size());
+        if (numDocs == 0) {
+          numDocs=1;
+        }
+        try {
+          numDocs*=topDocsPhase.factor();
+          while (true) {
+            if (topDocsPhase.scope() != null) {
+              searchContext.searcher().processingScope(topDocsPhase.scope());
+            }
+            TopDocs topDocs=searchContext.searcher().search(topDocsPhase.query(),numDocs);
+            if (topDocsPhase.scope() != null) {
+              searchContext.searcher().processedScope();
+            }
+            topDocsPhase.processResults(topDocs,searchContext);
+            if (topDocsPhase.numHits() >= (searchContext.from() + searchContext.size())) {
+              break;
+            }
+            if (topDocs.totalHits <= numDocs) {
+              break;
+            }
+            numDocs*=topDocsPhase.incrementalFactor();
+            if (numDocs > topDocs.totalHits) {
+              numDocs=topDocs.totalHits;
+            }
+          }
+        }
+ catch (        Exception e) {
+          throw new QueryPhaseExecutionException(searchContext,"Failed to execute child query [" + scopePhase.query() + "]",e);
+        }
+      }
+ else       if (scopePhase instanceof ScopePhase.CollectorPhase) {
+        try {
+          ScopePhase.CollectorPhase collectorPhase=(ScopePhase.CollectorPhase)scopePhase;
+          if (!collectorPhase.requiresProcessing()) {
+            continue;
+          }
+          if (scopePhase.scope() != null) {
+            searchContext.searcher().processingScope(scopePhase.scope());
+          }
+          Collector collector=collectorPhase.collector();
+          searchContext.searcher().search(collectorPhase.query(),collector);
+          collectorPhase.processCollector(collector);
+          if (collectorPhase.scope() != null) {
+            searchContext.searcher().processedScope();
+          }
+        }
+ catch (        Exception e) {
+          throw new QueryPhaseExecutionException(searchContext,"Failed to execute child query [" + scopePhase.query() + "]",e);
+        }
+      }
+    }
+  }
   searchContext.searcher().processingScope(ContextIndexSearcher.Scopes.MAIN);
   try {
     searchContext.queryResult().from(searchContext.from());

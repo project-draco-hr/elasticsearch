@@ -1,0 +1,94 @@
+{
+  if (refreshNeeded(readers)) {
+synchronized (idReaders) {
+      if (!refreshNeeded(readers)) {
+        return;
+      }
+      Map<Object,Map<String,TypeBuilder>> builders=new HashMap<Object,Map<String,TypeBuilder>>();
+      for (      IndexReader reader : readers) {
+        if (idReaders.containsKey(reader.getFieldCacheKey())) {
+          continue;
+        }
+        HashMap<String,TypeBuilder> readerBuilder=new HashMap<String,TypeBuilder>();
+        builders.put(reader.getFieldCacheKey(),readerBuilder);
+        String field=StringHelper.intern(UidFieldMapper.NAME);
+        TermDocs termDocs=reader.termDocs();
+        TermEnum termEnum=reader.terms(new Term(field));
+        try {
+          do {
+            Term term=termEnum.term();
+            if (term == null || term.field() != field)             break;
+            Uid uid=Uid.createUid(term.text());
+            TypeBuilder typeBuilder=readerBuilder.get(uid.type());
+            if (typeBuilder == null) {
+              typeBuilder=new TypeBuilder(reader);
+              readerBuilder.put(StringHelper.intern(uid.type()),typeBuilder);
+            }
+            BytesWrap idAsBytes=checkIfCanReuse(builders,new BytesWrap(uid.id()));
+            termDocs.seek(termEnum);
+            while (termDocs.next()) {
+              if (!reader.isDeleted(termDocs.doc())) {
+                typeBuilder.idToDoc.put(idAsBytes,termDocs.doc());
+              }
+            }
+          }
+ while (termEnum.next());
+        }
+  finally {
+          termDocs.close();
+          termEnum.close();
+        }
+      }
+      for (      IndexReader reader : readers) {
+        if (idReaders.containsKey(reader.getFieldCacheKey())) {
+          continue;
+        }
+        Map<String,TypeBuilder> readerBuilder=builders.get(reader.getFieldCacheKey());
+        int t=1;
+        String field=StringHelper.intern(ParentFieldMapper.NAME);
+        TermDocs termDocs=reader.termDocs();
+        TermEnum termEnum=reader.terms(new Term(field));
+        try {
+          do {
+            Term term=termEnum.term();
+            if (term == null || term.field() != field)             break;
+            Uid uid=Uid.createUid(term.text());
+            TypeBuilder typeBuilder=readerBuilder.get(uid.type());
+            if (typeBuilder == null) {
+              typeBuilder=new TypeBuilder(reader);
+              readerBuilder.put(StringHelper.intern(uid.type()),typeBuilder);
+            }
+            BytesWrap idAsBytes=checkIfCanReuse(builders,new BytesWrap(uid.id()));
+            boolean added=false;
+            termDocs.seek(termEnum);
+            while (termDocs.next()) {
+              if (!reader.isDeleted(termDocs.doc())) {
+                if (!added) {
+                  typeBuilder.parentIdsValues.add(idAsBytes);
+                  added=true;
+                }
+                typeBuilder.parentIdsOrdinals[termDocs.doc()]=t;
+              }
+            }
+            if (added) {
+              t++;
+            }
+          }
+ while (termEnum.next());
+        }
+  finally {
+          termDocs.close();
+          termEnum.close();
+        }
+      }
+      for (      Map.Entry<Object,Map<String,TypeBuilder>> entry : builders.entrySet()) {
+        MapBuilder<String,SimpleIdReaderTypeCache> types=MapBuilder.newMapBuilder();
+        for (        Map.Entry<String,TypeBuilder> typeBuilderEntry : entry.getValue().entrySet()) {
+          types.put(typeBuilderEntry.getKey(),new SimpleIdReaderTypeCache(typeBuilderEntry.getKey(),typeBuilderEntry.getValue().idToDoc,typeBuilderEntry.getValue().parentIdsValues.toArray(new BytesWrap[typeBuilderEntry.getValue().parentIdsValues.size()]),typeBuilderEntry.getValue().parentIdsOrdinals));
+        }
+        SimpleIdReaderCache readerCache=new SimpleIdReaderCache(entry.getKey(),types.immutableMap());
+        idReaders.put(readerCache.readerCacheKey(),readerCache);
+      }
+    }
+  }
+}

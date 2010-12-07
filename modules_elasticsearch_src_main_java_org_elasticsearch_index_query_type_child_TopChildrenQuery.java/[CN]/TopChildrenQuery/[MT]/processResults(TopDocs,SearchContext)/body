@@ -1,0 +1,45 @@
+{
+  Map<Object,TIntObjectHashMap<ParentDoc>> parentDocsPerReader=new HashMap<Object,TIntObjectHashMap<ParentDoc>>();
+  for (  ScoreDoc scoreDoc : topDocs.scoreDocs) {
+    int readerIndex=context.searcher().readerIndex(scoreDoc.doc);
+    IndexReader subReader=context.searcher().subReaders()[readerIndex];
+    int subDoc=scoreDoc.doc - context.searcher().docStarts()[readerIndex];
+    BytesWrap parentId=context.idCache().reader(subReader).parentIdByDoc(parentType,subDoc);
+    if (parentId == null) {
+      continue;
+    }
+    for (    IndexReader indexReader : context.searcher().subReaders()) {
+      int parentDocId=context.idCache().reader(indexReader).docById(parentType,parentId);
+      if (parentDocId != -1 && !indexReader.isDeleted(parentDocId)) {
+        TIntObjectHashMap<ParentDoc> readerParentDocs=parentDocsPerReader.get(indexReader.getFieldCacheKey());
+        if (readerParentDocs == null) {
+          readerParentDocs=new TIntObjectHashMap<ParentDoc>();
+          parentDocsPerReader.put(indexReader.getFieldCacheKey(),readerParentDocs);
+        }
+        ParentDoc parentDoc=readerParentDocs.get(parentDocId);
+        if (parentDoc == null) {
+          numHits++;
+          parentDoc=new ParentDoc();
+          parentDoc.docId=parentDocId;
+          parentDoc.count=1;
+          parentDoc.maxScore=scoreDoc.score;
+          parentDoc.sumScores=scoreDoc.score;
+          readerParentDocs.put(parentDocId,parentDoc);
+        }
+ else {
+          parentDoc.count++;
+          parentDoc.sumScores+=scoreDoc.score;
+          if (scoreDoc.score > parentDoc.maxScore) {
+            parentDoc.maxScore=scoreDoc.score;
+          }
+        }
+      }
+    }
+  }
+  this.parentDocs=new HashMap<Object,ParentDoc[]>();
+  for (  Map.Entry<Object,TIntObjectHashMap<ParentDoc>> entry : parentDocsPerReader.entrySet()) {
+    ParentDoc[] values=entry.getValue().getValues(new ParentDoc[entry.getValue().size()]);
+    Arrays.sort(values,PARENT_DOC_COMP);
+    parentDocs.put(entry.getKey(),values);
+  }
+}

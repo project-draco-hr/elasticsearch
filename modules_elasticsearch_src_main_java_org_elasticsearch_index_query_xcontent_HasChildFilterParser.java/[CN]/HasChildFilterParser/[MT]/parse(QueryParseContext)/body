@@ -1,0 +1,51 @@
+{
+  XContentParser parser=parseContext.parser();
+  Query query=null;
+  String childType=null;
+  String scope=null;
+  String filterName=null;
+  String currentFieldName=null;
+  XContentParser.Token token;
+  while ((token=parser.nextToken()) != XContentParser.Token.END_OBJECT) {
+    if (token == XContentParser.Token.FIELD_NAME) {
+      currentFieldName=parser.currentName();
+    }
+ else     if (token == XContentParser.Token.START_OBJECT) {
+      if ("query".equals(currentFieldName)) {
+        query=parseContext.parseInnerQuery();
+      }
+    }
+ else     if (token.isValue()) {
+      if ("type".equals(currentFieldName)) {
+        childType=parser.text();
+      }
+ else       if ("scope".equals(currentFieldName)) {
+        scope=parser.text();
+      }
+ else       if ("_name".equals(currentFieldName)) {
+        filterName=parser.text();
+      }
+    }
+  }
+  if (query == null) {
+    throw new QueryParsingException(index,"[child] filter requires 'query' field");
+  }
+  if (childType == null) {
+    throw new QueryParsingException(index,"[child] filter requires 'type' field");
+  }
+  DocumentMapper childDocMapper=parseContext.mapperService().documentMapper(childType);
+  if (childDocMapper == null) {
+    throw new QueryParsingException(index,"No mapping for for type [" + childType + "]");
+  }
+  if (childDocMapper.parentFieldMapper() == null) {
+    throw new QueryParsingException(index,"Type [" + childType + "] does not have parent mapping");
+  }
+  String parentType=childDocMapper.parentFieldMapper().type();
+  query=new FilteredQuery(query,parseContext.cacheFilter(childDocMapper.typeFilter()));
+  HasChildFilter childFilter=new HasChildFilter(query,scope,childType,parentType,SearchContext.current());
+  parseContext.addScopePhase(childFilter);
+  if (filterName != null) {
+    parseContext.addNamedFilter(filterName,childFilter);
+  }
+  return childFilter;
+}
