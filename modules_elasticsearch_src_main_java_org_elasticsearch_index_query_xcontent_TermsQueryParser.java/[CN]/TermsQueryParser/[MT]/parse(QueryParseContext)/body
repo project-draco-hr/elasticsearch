@@ -1,0 +1,57 @@
+{
+  XContentParser parser=parseContext.parser();
+  String fieldName=null;
+  boolean disableCoord=false;
+  float boost=1.0f;
+  int minimumNumberShouldMatch=1;
+  List<String> values=newArrayList();
+  String currentFieldName=null;
+  XContentParser.Token token;
+  while ((token=parser.nextToken()) != XContentParser.Token.END_OBJECT) {
+    if (token == XContentParser.Token.FIELD_NAME) {
+      currentFieldName=parser.currentName();
+    }
+ else     if (token == XContentParser.Token.START_ARRAY) {
+      fieldName=currentFieldName;
+      while ((token=parser.nextToken()) != XContentParser.Token.END_ARRAY) {
+        String value=parser.text();
+        if (value == null) {
+          throw new QueryParsingException(index,"No value specified for terms query");
+        }
+        values.add(value);
+      }
+    }
+ else     if (token.isValue()) {
+      if ("disable_coord".equals(currentFieldName) || "disableCoord".equals(currentFieldName)) {
+        disableCoord=parser.booleanValue();
+      }
+ else       if ("minimum_match".equals(currentFieldName) || "minimumMatch".equals(currentFieldName)) {
+        minimumNumberShouldMatch=parser.intValue();
+      }
+ else       if ("boost".equals(currentFieldName)) {
+        boost=parser.floatValue();
+      }
+    }
+  }
+  FieldMapper mapper=null;
+  MapperService.SmartNameFieldMappers smartNameFieldMappers=parseContext.smartFieldMappers(fieldName);
+  if (smartNameFieldMappers != null) {
+    if (smartNameFieldMappers.hasMapper()) {
+      mapper=smartNameFieldMappers.mapper();
+    }
+  }
+  BooleanQuery query=new BooleanQuery(disableCoord);
+  for (  String value : values) {
+    if (mapper != null) {
+      query.add(new BooleanClause(mapper.fieldQuery(value),BooleanClause.Occur.SHOULD));
+    }
+ else {
+      query.add(new TermQuery(new Term(fieldName,value)),BooleanClause.Occur.SHOULD);
+    }
+  }
+  query.setBoost(boost);
+  if (minimumNumberShouldMatch != -1) {
+    query.setMinimumNumberShouldMatch(minimumNumberShouldMatch);
+  }
+  return wrapSmartNameQuery(optimizeQuery(fixNegativeQueryIfNeeded(query)),smartNameFieldMappers,parseContext);
+}
