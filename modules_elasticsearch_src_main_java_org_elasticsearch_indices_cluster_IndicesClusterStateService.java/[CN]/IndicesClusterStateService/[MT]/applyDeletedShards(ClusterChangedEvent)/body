@@ -4,7 +4,8 @@
     return;
   }
   for (  final String index : indicesService.indices()) {
-    if (event.state().metaData().hasIndex(index)) {
+    IndexMetaData indexMetaData=event.state().metaData().index(index);
+    if (indexMetaData != null) {
       Set<Integer> newShardIds=newHashSet();
       for (      final ShardRouting shardRouting : routingNodes) {
         if (shardRouting.index().equals(index)) {
@@ -17,10 +18,18 @@
       }
       for (      Integer existingShardId : indexService.shardIds()) {
         if (!newShardIds.contains(existingShardId)) {
-          if (logger.isDebugEnabled()) {
-            logger.debug("[{}][{}] deleting shard",index,existingShardId);
+          if (indexMetaData.state() == IndexMetaData.State.CLOSE) {
+            if (logger.isDebugEnabled()) {
+              logger.debug("[{}][{}] removing shard (index is closed)",index,existingShardId);
+            }
+            indexService.removeShard(existingShardId);
           }
-          indexService.cleanShard(existingShardId);
+ else {
+            if (logger.isDebugEnabled()) {
+              logger.debug("[{}][{}] cleaning shard locally (not allocated)",index,existingShardId);
+            }
+            indexService.cleanShard(existingShardId);
+          }
         }
       }
     }
