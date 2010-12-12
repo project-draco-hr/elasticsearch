@@ -3,17 +3,16 @@
     DocumentMapper documentMapper=context.mapperService().type(hit.type());
     Map<String,HighlightField> highlightFields=newHashMap();
     for (    SearchContextHighlight.Field field : context.highlight().fields()) {
-      String fieldName=field.field();
       FieldMapper mapper=documentMapper.mappers().smartNameFieldMapper(field.field());
-      if (mapper != null) {
-        fieldName=mapper.names().indexName();
+      if (mapper == null) {
+        throw new SearchException(context.shardTarget(),"No mapping found for [" + field.field() + "]");
       }
-      FastVectorHighlighter highlighter=buildHighlighter(field);
+      FastVectorHighlighter highlighter=buildHighlighter(context,mapper,field);
       FieldQuery fieldQuery=buildFieldQuery(highlighter,context.query(),reader,field);
       String[] fragments;
       try {
         int numberOfFragments=field.numberOfFragments() == 0 ? 1 : field.numberOfFragments();
-        fragments=highlighter.getBestFragments(fieldQuery,context.searcher().getIndexReader(),docId,fieldName,field.fragmentCharSize(),numberOfFragments);
+        fragments=highlighter.getBestFragments(fieldQuery,context.searcher().getIndexReader(),docId,mapper.names().indexName(),field.fragmentCharSize(),numberOfFragments);
       }
  catch (      IOException e) {
         throw new FetchPhaseExecutionException(context,"Failed to highlight field [" + field.field() + "]",e);
