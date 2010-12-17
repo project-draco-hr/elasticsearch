@@ -7,7 +7,7 @@
       @Override public void run(){
         try {
           transportService.connectToNode(listedNode);
-          transportService.sendRequest(listedNode,TransportActions.Admin.Cluster.Node.INFO,Requests.nodesInfoRequest("_local"),new BaseTransportResponseHandler<NodesInfoResponse>(){
+          transportService.sendRequest(listedNode,TransportActions.Admin.Cluster.Node.INFO,Requests.nodesInfoRequest("_all"),new BaseTransportResponseHandler<NodesInfoResponse>(){
             @Override public NodesInfoResponse newInstance(){
               return new NodesInfoResponse();
             }
@@ -38,27 +38,23 @@
   }
   HashSet<DiscoveryNode> newNodes=new HashSet<DiscoveryNode>();
   for (  NodesInfoResponse nodesInfoResponse : nodesInfoResponses) {
-    if (nodesInfoResponse.nodes().length > 0) {
-      DiscoveryNode node=nodesInfoResponse.nodes()[0].node();
+    for (    NodeInfo nodeInfo : nodesInfoResponse) {
       if (!clusterName.equals(nodesInfoResponse.clusterName())) {
-        logger.warn("Node {} not part of the cluster {}, ignoring...",node,clusterName);
+        logger.warn("Node {} not part of the cluster {}, ignoring...",nodeInfo.node(),clusterName);
       }
  else {
-        newNodes.add(node);
+        if (nodeInfo.node().dataNode()) {
+          newNodes.add(nodeInfo.node());
+        }
       }
     }
- else {
-      logger.debug("No info returned from node...");
-    }
-  }
-  if (discoveredNodes != null) {
-    newNodes.addAll(discoveredNodes.nodes().values());
   }
   for (  DiscoveryNode node : newNodes) {
     try {
       transportService.connectToNode(node);
     }
  catch (    Exception e) {
+      newNodes.remove(node);
       logger.debug("Failed to connect to discovered node [" + node + "]",e);
     }
   }
