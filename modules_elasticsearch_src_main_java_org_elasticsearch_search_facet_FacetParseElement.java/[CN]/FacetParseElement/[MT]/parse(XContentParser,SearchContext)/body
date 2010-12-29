@@ -1,0 +1,60 @@
+{
+  XContentParser.Token token;
+  List<FacetCollector> facetCollectors=null;
+  String topLevelFieldName=null;
+  while ((token=parser.nextToken()) != XContentParser.Token.END_OBJECT) {
+    if (token == XContentParser.Token.FIELD_NAME) {
+      topLevelFieldName=parser.currentName();
+    }
+ else     if (token == XContentParser.Token.START_OBJECT) {
+      FacetCollector facet=null;
+      String scope=ContextIndexSearcher.Scopes.MAIN;
+      String facetFieldName=null;
+      Filter filter=null;
+      boolean cacheFilter=true;
+      while ((token=parser.nextToken()) != XContentParser.Token.END_OBJECT) {
+        if (token == XContentParser.Token.FIELD_NAME) {
+          facetFieldName=parser.currentName();
+        }
+ else         if (token == XContentParser.Token.START_OBJECT) {
+          if ("facet_filter".equals(facetFieldName) || "facetFilter".equals(facetFieldName)) {
+            XContentIndexQueryParser indexQueryParser=(XContentIndexQueryParser)context.queryParser();
+            filter=indexQueryParser.parseInnerFilter(parser);
+          }
+ else {
+            FacetProcessor facetProcessor=facetProcessors.processor(facetFieldName);
+            if (facetProcessor == null) {
+              throw new SearchParseException(context,"No facet type for [" + facetFieldName + "]");
+            }
+            facet=facetProcessor.parse(topLevelFieldName,parser,context);
+          }
+        }
+ else         if (token.isValue()) {
+          if ("global".equals(facetFieldName)) {
+            if (parser.booleanValue()) {
+              scope=ContextIndexSearcher.Scopes.GLOBAL;
+            }
+          }
+ else           if ("scope".equals(facetFieldName)) {
+            scope=parser.text();
+          }
+ else           if ("cache_filter".equals(facetFieldName) || "cacheFilter".equals(facetFieldName)) {
+            cacheFilter=parser.booleanValue();
+          }
+        }
+      }
+      if (filter != null) {
+        if (cacheFilter) {
+          filter=context.filterCache().cache(filter);
+        }
+        facet.setFilter(filter);
+      }
+      if (facetCollectors == null) {
+        facetCollectors=Lists.newArrayList();
+      }
+      facetCollectors.add(facet);
+      context.searcher().addCollector(scope,facet);
+    }
+  }
+  context.facets(new SearchContextFacets(facetCollectors));
+}
