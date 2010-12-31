@@ -7,18 +7,91 @@
       if (mapper == null) {
         throw new SearchException(context.shardTarget(),"No mapping found for [" + field.field() + "]");
       }
-      FastVectorHighlighter highlighter=buildHighlighter(context,mapper,field);
-      FieldQuery fieldQuery=buildFieldQuery(highlighter,context.query(),reader,field);
-      String[] fragments;
-      try {
-        int numberOfFragments=field.numberOfFragments() == 0 ? 1 : field.numberOfFragments();
-        fragments=highlighter.getBestFragments(fieldQuery,context.searcher().getIndexReader(),docId,mapper.names().indexName(),field.fragmentCharSize(),numberOfFragments);
+      if (mapper.termVector() != Field.TermVector.WITH_POSITIONS_OFFSETS) {
+        if (!context.queryRewritten()) {
+          try {
+            context.updateRewriteQuery(context.searcher().rewrite(context.query()));
+          }
+ catch (          IOException e) {
+            throw new FetchPhaseExecutionException(context,"Failed to highlight field [" + field.field() + "]",e);
+          }
+        }
+        QueryScorer queryScorer=new QueryScorer(context.parsedQuery().query(),null);
+        queryScorer.setExpandMultiTermQuery(true);
+        Fragmenter fragmenter;
+        if (field.numberOfFragments() == 0) {
+          fragmenter=new NullFragmenter();
+        }
+ else {
+          fragmenter=new SimpleSpanFragmenter(queryScorer,field.fragmentCharSize());
+        }
+        Formatter formatter=new SimpleHTMLFormatter(field.preTags()[0],field.postTags()[0]);
+        Highlighter highlighter=new Highlighter(formatter,DEFAULT_ENCODER,queryScorer);
+        highlighter.setTextFragmenter(fragmenter);
+        List<Object> textsToHighlight;
+        if (mapper.stored()) {
+          try {
+            Document doc=reader.document(docId,new SingleFieldSelector(mapper.names().indexName()));
+            textsToHighlight=new ArrayList<Object>(doc.getFields().size());
+            for (            Fieldable docField : doc.getFields()) {
+              if (docField.stringValue() != null) {
+                textsToHighlight.add(docField.stringValue());
+              }
+            }
+          }
+ catch (          Exception e) {
+            throw new FetchPhaseExecutionException(context,"Failed to highlight field [" + field.field() + "]",e);
+          }
+        }
+ else {
+          SearchLookup lookup=context.lookup();
+          lookup.setNextReader(reader);
+          lookup.setNextDocId(docId);
+          textsToHighlight=lookup.source().getValues(mapper.names().fullName());
+        }
+        ArrayList<TextFragment> fragsList=new ArrayList<TextFragment>();
+        try {
+          for (          Object textToHighlight : textsToHighlight) {
+            String text=textToHighlight.toString();
+            Analyzer analyzer=context.mapperService().documentMapper(hit.type()).mappers().indexAnalyzer();
+            TokenStream tokenStream=analyzer.reusableTokenStream(mapper.names().indexName(),new FastStringReader(text));
+            TextFragment[] bestTextFragments=highlighter.getBestTextFragments(tokenStream,text,false,field.numberOfFragments());
+            Collections.addAll(fragsList,bestTextFragments);
+          }
+        }
+ catch (        Exception e) {
+          throw new FetchPhaseExecutionException(context,"Failed to highlight field [" + field.field() + "]",e);
+        }
+        if (field.scoreOrdered()) {
+          Collections.sort(fragsList,new Comparator<TextFragment>(){
+            public int compare(            TextFragment o1,            TextFragment o2){
+              return Math.round(o2.getScore() - o1.getScore());
+            }
+          }
+);
+        }
+        int numberOfFragments=fragsList.size() < field.numberOfFragments() ? fragsList.size() : field.numberOfFragments();
+        String[] fragments=new String[numberOfFragments];
+        for (int i=0; i < fragments.length; i++) {
+          fragments[i]=fragsList.get(i).toString();
+        }
+        HighlightField highlightField=new HighlightField(field.field(),fragments);
+        highlightFields.put(highlightField.name(),highlightField);
       }
- catch (      IOException e) {
-        throw new FetchPhaseExecutionException(context,"Failed to highlight field [" + field.field() + "]",e);
+ else {
+        FastVectorHighlighter highlighter=buildHighlighter(context,mapper,field);
+        FieldQuery fieldQuery=buildFieldQuery(highlighter,context.query(),reader,field);
+        String[] fragments;
+        try {
+          int numberOfFragments=field.numberOfFragments() == 0 ? 1 : field.numberOfFragments();
+          fragments=highlighter.getBestFragments(fieldQuery,context.searcher().getIndexReader(),docId,mapper.names().indexName(),field.fragmentCharSize(),numberOfFragments);
+        }
+ catch (        IOException e) {
+          throw new FetchPhaseExecutionException(context,"Failed to highlight field [" + field.field() + "]",e);
+        }
+        HighlightField highlightField=new HighlightField(field.field(),fragments);
+        highlightFields.put(highlightField.name(),highlightField);
       }
-      HighlightField highlightField=new HighlightField(field.field(),fragments);
-      highlightFields.put(highlightField.name(),highlightField);
     }
     hit.highlightFields(highlightFields);
   }
