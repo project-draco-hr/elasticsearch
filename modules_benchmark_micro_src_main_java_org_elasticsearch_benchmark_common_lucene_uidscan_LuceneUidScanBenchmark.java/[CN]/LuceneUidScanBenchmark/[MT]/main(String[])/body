@@ -1,0 +1,57 @@
+{
+  FSDirectory dir=FSDirectory.open(new File("work/test"));
+  IndexWriter writer=new IndexWriter(dir,Lucene.STANDARD_ANALYZER,true,IndexWriter.MaxFieldLength.UNLIMITED);
+  final int NUMBER_OF_THREADS=2;
+  final long INDEX_COUNT=SizeValue.parseSizeValue("1m").singles();
+  final long SCAN_COUNT=SizeValue.parseSizeValue("100k").singles();
+  final long startUid=1000000;
+  long LIMIT=startUid + INDEX_COUNT;
+  StopWatch watch=new StopWatch().start();
+  System.out.println("Indexing " + INDEX_COUNT + " docs...");
+  for (long i=startUid; i < LIMIT; i++) {
+    Document doc=new Document();
+    doc.add(new UidField(Long.toString(i),i));
+    writer.addDocument(doc);
+  }
+  System.out.println("Done indexing, took " + watch.stop().lastTaskTime());
+  final IndexReader reader=writer.getReader();
+  final CountDownLatch latch=new CountDownLatch(NUMBER_OF_THREADS);
+  Thread[] threads=new Thread[NUMBER_OF_THREADS];
+  for (int i=0; i < threads.length; i++) {
+    threads[i]=new Thread(new Runnable(){
+      @Override public void run(){
+        try {
+          for (long i=0; i < SCAN_COUNT; i++) {
+            long id=startUid + (Math.abs(ThreadLocalRandom.current().nextInt()) % INDEX_COUNT);
+            TermPositions uid=reader.termPositions(new Term("_uid",Long.toString(id)));
+            uid.next();
+            uid.nextPosition();
+            if (!uid.isPayloadAvailable()) {
+              System.err.println("no payload...");
+              break;
+            }
+            byte[] payload=uid.getPayload(new byte[8],0);
+            if (Numbers.bytesToLong(payload) != id) {
+              System.err.println("wrong id...");
+              break;
+            }
+          }
+        }
+ catch (        Exception e) {
+          e.printStackTrace();
+        }
+ finally {
+          latch.countDown();
+        }
+      }
+    }
+);
+  }
+  watch=new StopWatch().start();
+  for (int i=0; i < threads.length; i++) {
+    threads[i].start();
+  }
+  latch.await();
+  watch.stop();
+  System.out.println("Scanned in " + watch.totalTime() + " TP Seconds "+ ((SCAN_COUNT * NUMBER_OF_THREADS) / watch.totalTime().secondsFrac()));
+}
