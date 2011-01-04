@@ -16,10 +16,10 @@
         }
         SourceToParse sourceToParse=SourceToParse.source(indexRequest.source()).type(indexRequest.type()).id(indexRequest.id()).routing(indexRequest.routing()).parent(indexRequest.parent());
         if (indexRequest.opType() == IndexRequest.OpType.INDEX) {
-          ops[i]=indexShard.prepareIndex(sourceToParse);
+          ops[i]=indexShard.prepareIndex(sourceToParse).version(indexRequest.version()).origin(Engine.Operation.Origin.PRIMARY);
         }
  else {
-          ops[i]=indexShard.prepareCreate(sourceToParse);
+          ops[i]=indexShard.prepareCreate(sourceToParse).version(indexRequest.version()).origin(Engine.Operation.Origin.PRIMARY);
         }
       }
  catch (      Exception e) {
@@ -32,7 +32,7 @@
  else     if (item.request() instanceof DeleteRequest) {
       DeleteRequest deleteRequest=(DeleteRequest)item.request();
       try {
-        ops[i]=indexShard.prepareDelete(deleteRequest.type(),deleteRequest.id());
+        ops[i]=indexShard.prepareDelete(deleteRequest.type(),deleteRequest.id(),deleteRequest.version()).origin(Engine.Operation.Origin.PRIMARY);
       }
  catch (      Exception e) {
         if (logger.isDebugEnabled()) {
@@ -51,8 +51,10 @@
     BulkItemRequest item=request.items()[i];
     if (item.request() instanceof IndexRequest) {
       IndexRequest indexRequest=(IndexRequest)item.request();
+      long version;
       if (indexRequest.opType() == IndexRequest.OpType.INDEX) {
         Engine.Index engineIndex=(Engine.Index)ops[i];
+        version=engineIndex.version();
         if (!processedTypes.contains(engineIndex.type())) {
           processedTypes.add(engineIndex.type());
           ParsedDocument doc=engineIndex.parsedDoc();
@@ -63,6 +65,7 @@
       }
  else {
         Engine.Create engineCreate=(Engine.Create)ops[i];
+        version=engineCreate.version();
         if (!processedTypes.contains(engineCreate.type())) {
           processedTypes.add(engineCreate.type());
           ParsedDocument doc=engineCreate.parsedDoc();
@@ -71,20 +74,23 @@
           }
         }
       }
+      indexRequest.version(version);
       if (failures != null && failures[i] != null) {
         responses[i]=new BulkItemResponse(item.id(),indexRequest.opType().toString().toLowerCase(),new BulkItemResponse.Failure(indexRequest.index(),indexRequest.type(),indexRequest.id(),ExceptionsHelper.detailedMessage(failures[i])));
       }
  else {
-        responses[i]=new BulkItemResponse(item.id(),indexRequest.opType().toString().toLowerCase(),new IndexResponse(indexRequest.index(),indexRequest.type(),indexRequest.id()));
+        responses[i]=new BulkItemResponse(item.id(),indexRequest.opType().toString().toLowerCase(),new IndexResponse(indexRequest.index(),indexRequest.type(),indexRequest.id(),version));
       }
     }
  else     if (item.request() instanceof DeleteRequest) {
       DeleteRequest deleteRequest=(DeleteRequest)item.request();
+      Engine.Delete engineDelete=(Engine.Delete)ops[i];
+      deleteRequest.version(engineDelete.version());
       if (failures != null && failures[i] != null) {
         responses[i]=new BulkItemResponse(item.id(),"delete",new BulkItemResponse.Failure(deleteRequest.index(),deleteRequest.type(),deleteRequest.id(),ExceptionsHelper.detailedMessage(failures[i])));
       }
  else {
-        responses[i]=new BulkItemResponse(item.id(),"delete",new DeleteResponse(deleteRequest.index(),deleteRequest.type(),deleteRequest.id()));
+        responses[i]=new BulkItemResponse(item.id(),"delete",new DeleteResponse(deleteRequest.index(),deleteRequest.type(),deleteRequest.id(),engineDelete.version(),engineDelete.notFound()));
       }
     }
   }

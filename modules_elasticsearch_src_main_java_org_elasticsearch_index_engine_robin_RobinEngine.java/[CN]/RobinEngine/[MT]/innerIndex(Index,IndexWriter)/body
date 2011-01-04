@@ -1,0 +1,56 @@
+{
+synchronized (dirtyLock(index.uid())) {
+    UidField uidField=index.uidField();
+    if (index.origin() == Operation.Origin.RECOVERY) {
+      if (index.version() != 0) {
+        versionMap.put(index.uid().text(),new VersionValue(index.version(),false));
+      }
+      uidField.version(index.version());
+      writer.updateDocument(index.uid(),index.doc(),index.analyzer());
+      translog.add(new Translog.Index(index));
+    }
+ else {
+      long expectedVersion=index.version();
+      long currentVersion;
+      VersionValue versionValue=versionMap.get(index.uid().text());
+      if (versionValue == null) {
+        currentVersion=loadCurrentVersionFromIndex(index.uid());
+      }
+ else {
+        currentVersion=versionValue.version();
+      }
+      long updatedVersion;
+      if (index.origin() == Operation.Origin.PRIMARY) {
+        if (expectedVersion != 0 && currentVersion != -2) {
+          if (currentVersion == -1) {
+            throw new VersionConflictEngineException(shardId,index.type(),index.id(),-1,expectedVersion);
+          }
+ else           if (expectedVersion != currentVersion) {
+            throw new VersionConflictEngineException(shardId,index.type(),index.id(),currentVersion,expectedVersion);
+          }
+        }
+        updatedVersion=currentVersion < 0 ? 1 : currentVersion + 1;
+      }
+ else {
+        if (currentVersion != -2) {
+          if (!(currentVersion == -1 && index.version() == 1)) {
+            if (expectedVersion <= currentVersion) {
+              throw new VersionConflictEngineException(shardId,index.type(),index.id(),currentVersion,expectedVersion);
+            }
+          }
+        }
+        updatedVersion=index.version();
+      }
+      versionMap.put(index.uid().text(),new VersionValue(updatedVersion,false));
+      uidField.version(updatedVersion);
+      index.version(updatedVersion);
+      if (currentVersion == -1) {
+        writer.addDocument(index.doc(),index.analyzer());
+      }
+ else {
+        writer.updateDocument(index.uid(),index.doc(),index.analyzer());
+      }
+      translog.add(new Translog.Index(index));
+    }
+  }
+}
