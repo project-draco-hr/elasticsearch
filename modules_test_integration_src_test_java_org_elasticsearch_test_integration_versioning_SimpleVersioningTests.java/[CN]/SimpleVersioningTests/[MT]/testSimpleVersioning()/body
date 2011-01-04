@@ -1,0 +1,53 @@
+{
+  try {
+    client.admin().indices().prepareDelete("test").execute().actionGet();
+  }
+ catch (  IndexMissingException e) {
+  }
+  client.admin().indices().prepareCreate("test").execute().actionGet();
+  client.admin().cluster().prepareHealth("test").setWaitForGreenStatus().execute().actionGet();
+  IndexResponse indexResponse=client.prepareIndex("test","type","1").setSource("field1","value1_1").execute().actionGet();
+  assertThat(indexResponse.version(),equalTo(1l));
+  indexResponse=client.prepareIndex("test","type","1").setSource("field1","value1_2").setVersion(1).execute().actionGet();
+  assertThat(indexResponse.version(),equalTo(2l));
+  try {
+    client.prepareIndex("test","type","1").setSource("field1","value1_1").setVersion(1).execute().actionGet();
+  }
+ catch (  ElasticSearchException e) {
+    assertThat(e.unwrapCause(),instanceOf(VersionConflictEngineException.class));
+  }
+  try {
+    client2.prepareIndex("test","type","1").setSource("field1","value1_1").setVersion(1).execute().actionGet();
+  }
+ catch (  ElasticSearchException e) {
+    assertThat(e.unwrapCause(),instanceOf(VersionConflictEngineException.class));
+  }
+  try {
+    client.prepareIndex("test","type","1").setCreate(true).setSource("field1","value1_1").setVersion(1).execute().actionGet();
+  }
+ catch (  ElasticSearchException e) {
+    assertThat(e.unwrapCause(),instanceOf(VersionConflictEngineException.class));
+  }
+  try {
+    client2.prepareIndex("test","type","1").setCreate(true).setSource("field1","value1_1").setVersion(1).execute().actionGet();
+  }
+ catch (  ElasticSearchException e) {
+    assertThat(e.unwrapCause(),instanceOf(VersionConflictEngineException.class));
+  }
+  try {
+    client.prepareDelete("test","type","1").setVersion(1).execute().actionGet();
+  }
+ catch (  ElasticSearchException e) {
+    assertThat(e.unwrapCause(),instanceOf(VersionConflictEngineException.class));
+  }
+  try {
+    client2.prepareDelete("test","type","1").setVersion(1).execute().actionGet();
+  }
+ catch (  ElasticSearchException e) {
+    assertThat(e.unwrapCause(),instanceOf(VersionConflictEngineException.class));
+  }
+  client.admin().indices().prepareRefresh().execute().actionGet();
+  assertThat(client.prepareGet("test","type","1").execute().actionGet().version(),equalTo(2l));
+  SearchResponse searchResponse=client.prepareSearch().setQuery(matchAllQuery()).execute().actionGet();
+  assertThat(searchResponse.hits().getAt(0).version(),equalTo(2l));
+}
