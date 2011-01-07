@@ -4,19 +4,21 @@
     throw new MapperParsingException("Type mismatch, provide type [" + source.type() + "] but mapper is of type ["+ this.type+ "]");
   }
   source.type(this.type);
-  XContentParser parser=null;
+  XContentParser parser=source.parser();
   try {
-    if (LZFDecoder.isCompressed(source.source())) {
-      BytesStreamInput siBytes=new BytesStreamInput(source.source());
-      LZFStreamInput siLzf=CachedStreamInput.cachedLzf(siBytes);
-      XContentType contentType=XContentFactory.xContentType(siLzf);
-      siLzf.resetToBufferStart();
-      parser=XContentFactory.xContent(contentType).createParser(siLzf);
-    }
+    if (parser == null) {
+      if (LZFDecoder.isCompressed(source.source())) {
+        BytesStreamInput siBytes=new BytesStreamInput(source.source());
+        LZFStreamInput siLzf=CachedStreamInput.cachedLzf(siBytes);
+        XContentType contentType=XContentFactory.xContentType(siLzf);
+        siLzf.resetToBufferStart();
+        parser=XContentFactory.xContent(contentType).createParser(siLzf);
+      }
  else {
-      parser=XContentFactory.xContent(source.source()).createParser(source.source());
+        parser=XContentFactory.xContent(source.source()).createParser(source.source());
+      }
     }
-    context.reset(parser,new Document(),type,source.source(),listener);
+    context.reset(parser,new Document(),type,source.source(),source.flyweight(),listener);
     XContentParser.Token token=parser.nextToken();
     if (token != XContentParser.Token.START_OBJECT) {
       throw new MapperException("Malformed content, must start with an object");
@@ -43,11 +45,25 @@
     indexFieldMapper.parse(context);
     rootObjectMapper.parse(context);
     if (source.id() == null) {
-      uidFieldMapper.parse(context);
+      if (context.id() == null) {
+        if (!source.flyweight()) {
+          throw new MapperParsingException("No id found while parsing the content source");
+        }
+      }
+ else {
+        uidFieldMapper.parse(context);
+      }
     }
     if (context.parsedIdState() != ParseContext.ParsedIdState.PARSED) {
-      context.parsedId(ParseContext.ParsedIdState.EXTERNAL);
-      idFieldMapper.parse(context);
+      if (context.id() == null) {
+        if (!source.flyweight()) {
+          throw new MapperParsingException("No id mapping with [_id] found in the content, and not explicitly set");
+        }
+      }
+ else {
+        context.parsedId(ParseContext.ParsedIdState.EXTERNAL);
+        idFieldMapper.parse(context);
+      }
     }
     if (parentFieldMapper != null) {
       context.externalValue(source.parent());
@@ -61,11 +77,11 @@
     throw new MapperParsingException("Failed to parse",e);
   }
  finally {
-    if (parser != null) {
+    if (source.parser() == null && parser != null) {
       parser.close();
     }
   }
   ParsedDocument doc=new ParsedDocument(context.uid(),context.id(),context.type(),source.routing(),context.doc(),context.analyzer(),context.source(),context.mappersAdded()).parent(source.parent());
-  context.reset(null,null,null,null,null);
+  context.reset(null,null,null,null,false,null);
   return doc;
 }

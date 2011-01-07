@@ -1,0 +1,40 @@
+{
+  Settings settings=ImmutableSettings.settingsBuilder().put("index.cache.filter.type","none").build();
+  Index index=new Index("test");
+  Injector injector=new ModulesBuilder().add(new SettingsModule(settings),new ScriptModule(),new MapperServiceModule(),new IndexSettingsModule(settings),new IndexCacheModule(settings),new AnalysisModule(settings),new IndexEngineModule(settings),new SimilarityModule(settings),new IndexQueryParserModule(settings),new IndexNameModule(index),new PercolatorModule()).createInjector();
+  final PercolatorService percolatorService=injector.getInstance(PercolatorService.class);
+  XContentBuilder doc=XContentFactory.jsonBuilder().startObject().field("field1",1).field("field2","value").field("field3","the quick brown fox jumped over the lazy dog").endObject();
+  final byte[] source=doc.copiedBytes();
+  PercolatorService.Response percolate=percolatorService.percolate(new PercolatorService.Request("type1",source));
+  for (int i=0; i < NUMBER_OF_QUERIES; i++) {
+    percolatorService.addQuery("test" + i,termQuery("field3","quick"));
+  }
+  System.out.println("Warming Up (1000)");
+  StopWatch stopWatch=new StopWatch().start();
+  System.out.println("Running " + 1000);
+  for (long i=0; i < 1000; i++) {
+    percolate=percolatorService.percolate(new PercolatorService.Request("type1",source));
+  }
+  System.out.println("[Warmup] Percolated in " + stopWatch.stop().totalTime() + " TP Millis "+ (NUMBER_OF_ITERATIONS / stopWatch.totalTime().millisFrac()));
+  System.out.println("Percolating using " + NUMBER_OF_THREADS + " threads with "+ NUMBER_OF_ITERATIONS+ " iterations, and "+ NUMBER_OF_QUERIES+ " queries");
+  final CountDownLatch latch=new CountDownLatch(NUMBER_OF_THREADS);
+  Thread[] threads=new Thread[NUMBER_OF_THREADS];
+  for (int i=0; i < threads.length; i++) {
+    threads[i]=new Thread(new Runnable(){
+      @Override public void run(){
+        for (long i=0; i < NUMBER_OF_ITERATIONS; i++) {
+          PercolatorService.Response percolate=percolatorService.percolate(new PercolatorService.Request("type1",source));
+        }
+        latch.countDown();
+      }
+    }
+);
+  }
+  stopWatch=new StopWatch().start();
+  for (  Thread thread : threads) {
+    thread.start();
+  }
+  latch.await();
+  stopWatch.stop();
+  System.out.println("Percolated in " + stopWatch.totalTime() + " TP Millis "+ ((NUMBER_OF_ITERATIONS * NUMBER_OF_THREADS) / stopWatch.totalTime().millisFrac()));
+}
