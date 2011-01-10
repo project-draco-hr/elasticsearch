@@ -24,15 +24,18 @@
       transportService.connectToNode(nodeToSend);
     }
  catch (    ConnectTransportException e) {
+      logger.trace("[{}] failed to connect to {}",e,id,nodeToSend);
       latch.countDown();
       continue;
     }
+    logger.trace("[{}] connecting to {}, disconnect[{}]",id,nodeToSend,disconnectX);
     final boolean disconnect=disconnectX;
     transportService.sendRequest(nodeToSend,UnicastPingRequestHandler.ACTION,pingRequest,TransportRequestOptions.options().withTimeout((long)(timeout.millis() * 1.25)),new BaseTransportResponseHandler<UnicastPingResponse>(){
       @Override public UnicastPingResponse newInstance(){
         return new UnicastPingResponse();
       }
       @Override public void handleResponse(      UnicastPingResponse response){
+        logger.trace("[{}] received response from {}: {}",id,nodeToSend,Arrays.toString(response.pingResponses));
         try {
           DiscoveryNodes discoveryNodes=nodesProvider.nodes();
           for (          PingResponse pingResponse : response.pingResponses) {
@@ -43,6 +46,7 @@
               continue;
             }
             if (!pingResponse.clusterName().equals(clusterName)) {
+              logger.debug("[{}] filtering out response from {}, not same cluster_name [{}]",pingResponse.target(),pingResponse.clusterName().value());
               return;
             }
             ConcurrentMap<DiscoveryNode,PingResponse> responses=receivedResponses.get(response.id);
@@ -61,6 +65,7 @@
       @Override public void handleException(      TransportException exp){
         latch.countDown();
         if (exp instanceof ConnectTransportException) {
+          logger.trace("failed to connect to {}",exp,nodeToSend);
         }
  else {
           if (disconnect) {
