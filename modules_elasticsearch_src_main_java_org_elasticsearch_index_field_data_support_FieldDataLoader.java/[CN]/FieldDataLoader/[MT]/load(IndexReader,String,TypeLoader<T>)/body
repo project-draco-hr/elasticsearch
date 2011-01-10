@@ -1,8 +1,8 @@
 {
   loader.init();
   field=StringHelper.intern(field);
-  int[] ordinals=new int[reader.maxDoc()];
-  int[][] multiValueOrdinals=null;
+  ArrayList<int[]> ordinals=new ArrayList<int[]>();
+  ordinals.add(new int[reader.maxDoc()]);
   int t=1;
   TermDocs termDocs=reader.termDocs();
   TermEnum termEnum=reader.terms(new Term(field));
@@ -14,45 +14,19 @@
       termDocs.seek(termEnum);
       while (termDocs.next()) {
         int doc=termDocs.doc();
-        if (multiValueOrdinals != null) {
-          int[] ordinalPerDoc=multiValueOrdinals[doc];
-          if (ordinalPerDoc == null) {
-            ordinalPerDoc=new int[1];
-            ordinalPerDoc[0]=t;
-            multiValueOrdinals[doc]=ordinalPerDoc;
-          }
- else {
-            ordinalPerDoc=Arrays.copyOf(ordinalPerDoc,ordinalPerDoc.length + 1);
-            ordinalPerDoc[ordinalPerDoc.length - 1]=t;
-            multiValueOrdinals[doc]=ordinalPerDoc;
+        boolean found=false;
+        for (int i=0; i < ordinals.size(); i++) {
+          int[] ordinal=ordinals.get(i);
+          if (ordinal[doc] == 0) {
+            ordinal[doc]=t;
+            found=true;
+            break;
           }
         }
- else {
-          int ordinal=ordinals[doc];
-          if (ordinal == 0) {
-            ordinals[doc]=t;
-          }
- else {
-            multiValueOrdinals=new int[reader.maxDoc()][];
-            for (int i=0; i < ordinals.length; i++) {
-              ordinal=ordinals[i];
-              if (ordinal != 0) {
-                multiValueOrdinals[i]=new int[1];
-                multiValueOrdinals[i][0]=ordinal;
-              }
-            }
-            int[] ordinalPerDoc=multiValueOrdinals[doc];
-            if (ordinalPerDoc == null) {
-              ordinalPerDoc=new int[1];
-              ordinalPerDoc[0]=t;
-              multiValueOrdinals[doc]=ordinalPerDoc;
-            }
- else {
-              ordinalPerDoc=Arrays.copyOf(ordinalPerDoc,ordinalPerDoc.length + 1);
-              ordinalPerDoc[ordinalPerDoc.length - 1]=t;
-              multiValueOrdinals[doc]=ordinalPerDoc;
-            }
-          }
+        if (!found) {
+          int[] ordinal=new int[reader.maxDoc()];
+          ordinals.add(ordinal);
+          ordinal[doc]=t;
         }
       }
       t++;
@@ -70,10 +44,14 @@
     termDocs.close();
     termEnum.close();
   }
-  if (multiValueOrdinals != null) {
-    return loader.buildMultiValue(field,multiValueOrdinals);
+  if (ordinals.size() == 1) {
+    return loader.buildSingleValue(field,ordinals.get(0));
   }
  else {
-    return loader.buildSingleValue(field,ordinals);
+    int[][] nativeOrdinals=new int[ordinals.size()][];
+    for (int i=0; i < nativeOrdinals.length; i++) {
+      nativeOrdinals[i]=ordinals.get(i);
+    }
+    return loader.buildMultiValue(field,nativeOrdinals);
   }
 }
