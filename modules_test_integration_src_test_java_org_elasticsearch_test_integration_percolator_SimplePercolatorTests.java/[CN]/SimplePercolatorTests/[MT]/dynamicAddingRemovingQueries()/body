@@ -1,0 +1,30 @@
+{
+  try {
+    client.admin().indices().prepareDelete("test").execute().actionGet();
+    client.admin().indices().prepareDelete("_percolator").execute().actionGet();
+  }
+ catch (  Exception e) {
+  }
+  client.admin().indices().prepareCreate("test").setSettings(settingsBuilder().put("index.number_of_shards",1)).execute().actionGet();
+  client.admin().cluster().prepareHealth().setWaitForGreenStatus().execute().actionGet();
+  logger.info("--> register a query 1");
+  client.prepareIndex("_percolator","test","kuku").setSource(jsonBuilder().startObject().field("color","blue").field("query",termQuery("field1","value1")).endObject()).setRefresh(true).execute().actionGet();
+  client.admin().cluster().prepareHealth().setWaitForGreenStatus().setWaitForActiveShards(4).execute().actionGet();
+  PercolateResponse percolate=client.preparePercolate("test").setSource(jsonBuilder().startObject().startObject("doc").startObject("type1").field("field1","value1").endObject().endObject().endObject()).execute().actionGet();
+  assertThat(percolate.matches().size(),equalTo(1));
+  assertThat(percolate.matches(),hasItem("kuku"));
+  logger.info("--> register a query 2");
+  client.prepareIndex("_percolator","test","bubu").setSource(jsonBuilder().startObject().field("color","green").field("query",termQuery("field1","value2")).endObject()).setRefresh(true).execute().actionGet();
+  percolate=client.preparePercolate("test").setSource(jsonBuilder().startObject().startObject("doc").startObject("type1").field("field1","value2").endObject().endObject().endObject()).execute().actionGet();
+  assertThat(percolate.matches().size(),equalTo(1));
+  assertThat(percolate.matches(),hasItem("bubu"));
+  logger.info("--> register a query 3");
+  client.prepareIndex("_percolator","test","susu").setSource(jsonBuilder().startObject().field("color","red").field("query",termQuery("field1","value2")).endObject()).setRefresh(true).execute().actionGet();
+  percolate=client.preparePercolate("test").setSource(jsonBuilder().startObject().startObject("doc").startObject("type1").field("field1","value2").endObject().endObject().field("query",termQuery("color","red")).endObject()).execute().actionGet();
+  assertThat(percolate.matches().size(),equalTo(1));
+  assertThat(percolate.matches(),hasItem("susu"));
+  logger.info("--> deleting query 1");
+  client.prepareDelete("_percolator","test","kuku").setRefresh(true).execute().actionGet();
+  percolate=client.preparePercolate("test").setSource(jsonBuilder().startObject().startObject("doc").startObject("type1").field("field1","value1").endObject().endObject().endObject()).execute().actionGet();
+  assertThat(percolate.matches().size(),equalTo(0));
+}
