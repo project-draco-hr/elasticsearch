@@ -105,7 +105,33 @@
       }
     }
     @Override public void clusterStateProcessed(    ClusterState clusterState){
-      listener.onResponse(new Response(true));
+      int counter=0;
+      for (      String index : request.indices) {
+        IndexRoutingTable indexRoutingTable=clusterState.routingTable().index(index);
+        if (indexRoutingTable != null) {
+          counter+=indexRoutingTable.numberOfNodesShardsAreAllocatedOn();
+        }
+      }
+      if (counter > 0) {
+        counter=counter - 1;
+      }
+      if (counter == 0) {
+        listener.onResponse(new Response(true));
+        return;
+      }
+      final AtomicInteger countDown=new AtomicInteger(counter);
+      mappingCreatedAction.add(new NodeMappingCreatedAction.Listener(){
+        @Override public void onNodeMappingCreated(        NodeMappingCreatedAction.NodeMappingCreatedResponse response){
+          if (countDown.decrementAndGet() == 0) {
+            mappingCreatedAction.remove(this);
+            listener.onResponse(new Response(true));
+          }
+        }
+        @Override public void onTimeout(){
+          listener.onResponse(new Response(false));
+        }
+      }
+,request.timeout);
     }
   }
 );
