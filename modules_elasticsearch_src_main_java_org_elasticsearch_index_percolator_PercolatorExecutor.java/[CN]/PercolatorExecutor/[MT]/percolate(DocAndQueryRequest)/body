@@ -1,0 +1,67 @@
+{
+  final MemoryIndex memoryIndex=new MemoryIndex();
+  for (  Fieldable field : request.doc().doc().getFields()) {
+    if (!field.isIndexed()) {
+      continue;
+    }
+    TokenStream tokenStream=field.tokenStreamValue();
+    if (tokenStream != null) {
+      memoryIndex.addField(field.name(),tokenStream,field.getBoost());
+    }
+ else {
+      Reader reader=field.readerValue();
+      if (reader != null) {
+        try {
+          memoryIndex.addField(field.name(),request.doc().analyzer().reusableTokenStream(field.name(),reader),field.getBoost() * request.doc().doc().getBoost());
+        }
+ catch (        IOException e) {
+          throw new MapperParsingException("Failed to analyze field [" + field.name() + "]",e);
+        }
+      }
+ else {
+        String value=field.stringValue();
+        if (value != null) {
+          try {
+            memoryIndex.addField(field.name(),request.doc().analyzer().reusableTokenStream(field.name(),new FastStringReader(value)),field.getBoost() * request.doc().doc().getBoost());
+          }
+ catch (          IOException e) {
+            throw new MapperParsingException("Failed to analyze field [" + field.name() + "]",e);
+          }
+        }
+      }
+    }
+  }
+  final IndexSearcher searcher=memoryIndex.createSearcher();
+  List<String> matches=new ArrayList<String>();
+  if (request.query() == null) {
+    Lucene.ExistsCollector collector=new Lucene.ExistsCollector();
+    for (    Map.Entry<String,Query> entry : queries.entrySet()) {
+      try {
+        searcher.search(entry.getValue(),collector);
+      }
+ catch (      IOException e) {
+        logger.warn("[" + entry.getKey() + "] failed to execute query",e);
+      }
+      if (collector.exists()) {
+        matches.add(entry.getKey());
+      }
+    }
+  }
+ else {
+    if (percolatorIndex == null || percolatorShard == null) {
+      throw new PercolateIndexUnavailable(new Index(PercolatorService.INDEX_NAME));
+    }
+    Engine.Searcher percolatorSearcher=percolatorShard.searcher();
+    try {
+      percolatorSearcher.searcher().search(request.query(),new QueryCollector(logger,queries,searcher,percolatorIndex,matches));
+    }
+ catch (    IOException e) {
+      logger.warn("failed to execute",e);
+    }
+ finally {
+      percolatorSearcher.release();
+    }
+  }
+  indexCache.clear(searcher.getIndexReader());
+  return new Response(matches,request.doc().mappersAdded());
+}
