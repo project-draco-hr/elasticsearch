@@ -1,12 +1,13 @@
 {
   if (ignoreReplicas() || shardIt.size() == 1) {
+    postPrimaryOperation(request,response);
     if (alreadyThreaded || !request.listenerThreaded()) {
-      listener.onResponse(response);
+      listener.onResponse(response.response());
     }
  else {
       threadPool.execute(new Runnable(){
         @Override public void run(){
-          listener.onResponse(response);
+          listener.onResponse(response.response());
         }
       }
 );
@@ -31,13 +32,14 @@
     }
   }
   if (replicaCounter == 0) {
+    postPrimaryOperation(request,response);
     if (alreadyThreaded || !request.listenerThreaded()) {
-      listener.onResponse(response);
+      listener.onResponse(response.response());
     }
  else {
       threadPool.execute(new Runnable(){
         @Override public void run(){
-          listener.onResponse(response);
+          listener.onResponse(response.response());
         }
       }
 );
@@ -45,19 +47,21 @@
     return;
   }
   if (replicationType == ReplicationType.ASYNC) {
+    postPrimaryOperation(request,response);
     if (alreadyThreaded || !request.listenerThreaded()) {
-      listener.onResponse(response);
+      listener.onResponse(response.response());
     }
  else {
       threadPool.execute(new Runnable(){
         @Override public void run(){
-          listener.onResponse(response);
+          listener.onResponse(response.response());
         }
       }
 );
     }
     replicaCounter=-100;
   }
+  replicaCounter++;
   AtomicInteger counter=new AtomicInteger(replicaCounter);
   for (  final ShardRouting shard : shardIt.reset()) {
     if (shard.unassigned()) {
@@ -77,6 +81,20 @@
     }
     if (shard.relocating()) {
       performOnReplica(response,alreadyThreaded,counter,shard,shard.relocatingNodeId());
+    }
+  }
+  postPrimaryOperation(request,response);
+  if (counter.decrementAndGet() == 0) {
+    if (alreadyThreaded || !request.listenerThreaded()) {
+      listener.onResponse(response.response());
+    }
+ else {
+      threadPool.execute(new Runnable(){
+        @Override public void run(){
+          listener.onResponse(response.response());
+        }
+      }
+);
     }
   }
 }
