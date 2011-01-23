@@ -1,0 +1,43 @@
+{
+  super(facetName);
+  this.fieldDataCache=context.fieldDataCache();
+  this.size=size;
+  this.comparatorType=comparatorType;
+  this.numberOfShards=context.numberOfShards();
+  this.fieldName=fieldName;
+  MapperService.SmartNameFieldMappers smartMappers=context.mapperService().smartName(fieldName);
+  if (smartMappers == null || !smartMappers.hasMapper()) {
+    this.indexFieldName=fieldName;
+    this.fieldDataType=FieldDataType.DefaultTypes.STRING;
+  }
+ else {
+    if (smartMappers.hasDocMapper()) {
+      setFilter(context.filterCache().cache(smartMappers.docMapper().typeFilter()));
+    }
+    this.indexFieldName=smartMappers.mapper().names().indexName();
+    this.fieldDataType=smartMappers.mapper().fieldDataType();
+  }
+  if (script != null) {
+    this.script=new SearchScript(context.lookup(),scriptLang,script,params,context.scriptService());
+  }
+ else {
+    this.script=null;
+  }
+  if (excluded.isEmpty() && pattern == null && this.script == null) {
+    aggregator=new StaticAggregatorValueProc(popFacets());
+  }
+ else {
+    aggregator=new AggregatorValueProc(popFacets(),excluded,pattern,this.script);
+  }
+  if (allTerms) {
+    try {
+      for (      IndexReader reader : context.searcher().subReaders()) {
+        FieldData fieldData=fieldDataCache.cache(fieldDataType,reader,indexFieldName);
+        fieldData.forEachValue(aggregator);
+      }
+    }
+ catch (    Exception e) {
+      throw new FacetPhaseExecutionException(facetName,"failed to load all terms",e);
+    }
+  }
+}

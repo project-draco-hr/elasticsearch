@@ -1,0 +1,47 @@
+{
+  super(facetName);
+  this.fieldDataCache=context.fieldDataCache();
+  this.size=size;
+  this.comparatorType=comparatorType;
+  this.numberOfShards=context.numberOfShards();
+  this.fieldsNames=fieldsNames;
+  fieldsDataType=new FieldDataType[fieldsNames.length];
+  fieldsData=new FieldData[fieldsNames.length];
+  indexFieldsNames=new String[fieldsNames.length];
+  for (int i=0; i < fieldsNames.length; i++) {
+    MapperService.SmartNameFieldMappers smartMappers=context.mapperService().smartName(fieldsNames[i]);
+    if (smartMappers == null || !smartMappers.hasMapper()) {
+      this.indexFieldsNames[i]=fieldsNames[i];
+      this.fieldsDataType[i]=FieldDataType.DefaultTypes.STRING;
+    }
+ else {
+      this.indexFieldsNames[i]=smartMappers.mapper().names().indexName();
+      this.fieldsDataType[i]=smartMappers.mapper().fieldDataType();
+    }
+  }
+  if (script != null) {
+    this.script=new SearchScript(context.lookup(),scriptLang,script,params,context.scriptService());
+  }
+ else {
+    this.script=null;
+  }
+  if (excluded.isEmpty() && pattern == null && this.script == null) {
+    aggregator=new StaticAggregatorValueProc(TermsStringFacetCollector.popFacets());
+  }
+ else {
+    aggregator=new AggregatorValueProc(TermsStringFacetCollector.popFacets(),excluded,pattern,this.script);
+  }
+  if (allTerms) {
+    try {
+      for (int i=0; i < fieldsNames.length; i++) {
+        for (        IndexReader reader : context.searcher().subReaders()) {
+          FieldData fieldData=fieldDataCache.cache(fieldsDataType[i],reader,indexFieldsNames[i]);
+          fieldData.forEachValue(aggregator);
+        }
+      }
+    }
+ catch (    Exception e) {
+      throw new FacetPhaseExecutionException(facetName,"failed to load all terms",e);
+    }
+  }
+}
