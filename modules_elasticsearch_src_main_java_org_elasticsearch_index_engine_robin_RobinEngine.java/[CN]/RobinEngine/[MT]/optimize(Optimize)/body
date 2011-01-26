@@ -5,31 +5,34 @@
       if (indexWriter == null) {
         throw new EngineClosedException(shardId);
       }
-      int maxNumberOfSegments=optimize.maxNumSegments();
-      if (maxNumberOfSegments == -1) {
-        if (indexWriter.getMergePolicy() instanceof LogMergePolicy) {
-          maxNumberOfSegments=((LogMergePolicy)indexWriter.getMergePolicy()).getMergeFactor() / 2;
-          if (maxNumberOfSegments < 0) {
-            maxNumberOfSegments=1;
-          }
-        }
+      if (indexWriter.getMergePolicy() instanceof EnableMergePolicy) {
+        ((EnableMergePolicy)indexWriter.getMergePolicy()).enableMerge();
       }
       if (optimize.onlyExpungeDeletes()) {
-        indexWriter.expungeDeletes(optimize.waitForMerge());
+        indexWriter.expungeDeletes(false);
+      }
+ else       if (optimize.maxNumSegments() <= 0) {
+        indexWriter.maybeMerge();
       }
  else {
-        indexWriter.optimize(maxNumberOfSegments,optimize.waitForMerge());
+        indexWriter.optimize(optimize.maxNumSegments(),false);
       }
-      dirty=true;
     }
  catch (    Exception e) {
       throw new OptimizeFailedEngineException(shardId,e);
     }
  finally {
+      if (indexWriter != null && indexWriter.getMergePolicy() instanceof EnableMergePolicy) {
+        ((EnableMergePolicy)indexWriter.getMergePolicy()).disableMerge();
+      }
       rwl.readLock().unlock();
       optimizeMutex.set(false);
     }
   }
+  if (optimize.waitForMerge()) {
+    indexWriter.waitForMerges();
+  }
+  dirty=true;
   if (optimize.flush()) {
     flush(new Flush());
   }
