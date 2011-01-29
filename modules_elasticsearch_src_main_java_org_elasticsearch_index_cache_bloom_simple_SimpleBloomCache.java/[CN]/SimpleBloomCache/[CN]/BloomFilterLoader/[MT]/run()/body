@@ -1,0 +1,48 @@
+{
+  TermDocs termDocs=null;
+  TermEnum termEnum=null;
+  try {
+    BloomFilter filter=BloomFilterFactory.getFilter(reader.numDocs(),15);
+    termDocs=reader.termDocs();
+    termEnum=reader.terms(new Term(field));
+    do {
+      Term term=termEnum.term();
+      if (term == null || term.field() != field)       break;
+      UnicodeUtil.UTF8Result utf8Result=Unicode.fromStringAsUtf8(term.text());
+      termDocs.seek(termEnum);
+      while (termDocs.next()) {
+        if (!reader.isDeleted(termDocs.doc())) {
+          filter.add(utf8Result.result,0,utf8Result.length);
+        }
+      }
+    }
+ while (termEnum.next());
+    ConcurrentMap<String,BloomFilterEntry> fieldCache=cache.get(reader.getFieldCacheKey());
+    if (fieldCache != null) {
+      if (fieldCache.containsKey(field)) {
+        BloomFilterEntry filterEntry=new BloomFilterEntry(reader.numDocs(),filter);
+        filterEntry.loading.set(false);
+        fieldCache.put(field,filterEntry);
+      }
+    }
+  }
+ catch (  Exception e) {
+    logger.warn("failed to load bloom filter for [{}]",e,field);
+  }
+ finally {
+    try {
+      if (termDocs != null) {
+        termDocs.close();
+      }
+    }
+ catch (    IOException e) {
+    }
+    try {
+      if (termEnum != null) {
+        termEnum.close();
+      }
+    }
+ catch (    IOException e) {
+    }
+  }
+}

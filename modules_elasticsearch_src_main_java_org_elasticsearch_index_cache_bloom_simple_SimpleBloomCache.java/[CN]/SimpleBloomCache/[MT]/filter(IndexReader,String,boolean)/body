@@ -1,0 +1,48 @@
+{
+  int currentNumDocs=reader.numDocs();
+  if (currentNumDocs == 0) {
+    return BloomFilter.EMPTY;
+  }
+  ConcurrentMap<String,BloomFilterEntry> fieldCache=cache.get(reader.getFieldCacheKey());
+  if (fieldCache == null) {
+synchronized (creationMutex) {
+      fieldCache=cache.get(reader.getFieldCacheKey());
+      if (fieldCache == null) {
+        fieldCache=ConcurrentCollections.newConcurrentMap();
+        cache.put(reader.getFieldCacheKey(),fieldCache);
+      }
+    }
+  }
+  BloomFilterEntry filter=fieldCache.get(fieldName);
+  if (filter == null) {
+synchronized (fieldCache) {
+      filter=fieldCache.get(fieldName);
+      if (filter == null) {
+        filter=new BloomFilterEntry(reader.numDocs(),BloomFilter.NONE);
+        filter.loading.set(true);
+        fieldCache.put(fieldName,filter);
+        BloomFilterLoader loader=new BloomFilterLoader(reader,fieldName);
+        if (asyncLoad) {
+          threadPool.cached().execute(loader);
+        }
+ else {
+          loader.run();
+          filter=fieldCache.get(fieldName);
+        }
+      }
+    }
+  }
+  if (filter.numDocs > 1000 && (currentNumDocs / filter.numDocs) < 0.6) {
+    if (filter.loading.compareAndSet(false,true)) {
+      BloomFilterLoader loader=new BloomFilterLoader(reader,fieldName);
+      if (asyncLoad) {
+        threadPool.cached().execute(loader);
+      }
+ else {
+        loader.run();
+        filter=fieldCache.get(fieldName);
+      }
+    }
+  }
+  return filter.filter;
+}
