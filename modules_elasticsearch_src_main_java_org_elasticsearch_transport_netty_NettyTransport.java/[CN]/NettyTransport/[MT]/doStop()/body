@@ -1,59 +1,48 @@
 {
-  if (serverChannel != null) {
-    try {
-      serverChannel.close().awaitUninterruptibly();
-    }
+  final CountDownLatch latch=new CountDownLatch(1);
+  threadPool.cached().execute(new Runnable(){
+    @Override public void run(){
+      try {
+        for (Iterator<NodeChannels> it=connectedNodes.values().iterator(); it.hasNext(); ) {
+          NodeChannels nodeChannels=it.next();
+          it.remove();
+          nodeChannels.close();
+        }
+        if (serverChannel != null) {
+          try {
+            serverChannel.close().awaitUninterruptibly();
+          }
   finally {
-      serverChannel=null;
-    }
-  }
-  if (serverOpenChannels != null) {
-    serverOpenChannels.close();
-    serverOpenChannels=null;
-  }
-  if (serverBootstrap != null) {
-    final CountDownLatch latch=new CountDownLatch(1);
-    threadPool.cached().execute(new Runnable(){
-      @Override public void run(){
-        try {
+            serverChannel=null;
+          }
+        }
+        if (serverOpenChannels != null) {
+          serverOpenChannels.close();
+          serverOpenChannels=null;
+        }
+        if (serverBootstrap != null) {
           serverBootstrap.releaseExternalResources();
+          serverBootstrap=null;
         }
-  finally {
-          latch.countDown();
+        for (Iterator<NodeChannels> it=connectedNodes.values().iterator(); it.hasNext(); ) {
+          NodeChannels nodeChannels=it.next();
+          it.remove();
+          nodeChannels.close();
         }
-      }
-    }
-);
-    try {
-      latch.await(30,TimeUnit.SECONDS);
-    }
- catch (    InterruptedException e) {
-    }
-    serverBootstrap=null;
-  }
-  for (Iterator<NodeChannels> it=connectedNodes.values().iterator(); it.hasNext(); ) {
-    NodeChannels nodeChannels=it.next();
-    it.remove();
-    nodeChannels.close();
-  }
-  if (clientBootstrap != null) {
-    final CountDownLatch latch=new CountDownLatch(1);
-    threadPool.cached().execute(new Runnable(){
-      @Override public void run(){
-        try {
+        if (clientBootstrap != null) {
           clientBootstrap.releaseExternalResources();
-        }
-  finally {
-          latch.countDown();
+          clientBootstrap=null;
         }
       }
+  finally {
+        latch.countDown();
+      }
     }
+  }
 );
-    try {
-      latch.await(30,TimeUnit.SECONDS);
-    }
- catch (    InterruptedException e) {
-    }
-    clientBootstrap=null;
+  try {
+    latch.await(30,TimeUnit.SECONDS);
+  }
+ catch (  InterruptedException e) {
   }
 }
