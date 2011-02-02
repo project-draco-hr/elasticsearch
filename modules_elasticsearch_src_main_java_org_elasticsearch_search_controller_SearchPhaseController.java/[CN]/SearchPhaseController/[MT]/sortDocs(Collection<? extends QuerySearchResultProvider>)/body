@@ -2,6 +2,52 @@
   if (results1.isEmpty()) {
     return EMPTY;
   }
+  if (optimizeSingleShard) {
+    boolean canOptimize=false;
+    QuerySearchResult result=null;
+    if (results1.size() == 1) {
+      canOptimize=true;
+      result=results1.iterator().next().queryResult();
+    }
+ else {
+      for (      QuerySearchResultProvider queryResult : results1) {
+        if (queryResult.queryResult().topDocs().scoreDocs.length > 0) {
+          if (result != null) {
+            canOptimize=false;
+            break;
+          }
+          canOptimize=true;
+          result=queryResult.queryResult();
+        }
+      }
+    }
+    if (canOptimize) {
+      ScoreDoc[] scoreDocs=result.topDocs().scoreDocs;
+      if (scoreDocs.length < result.from()) {
+        return EMPTY;
+      }
+      int resultDocsSize=result.size();
+      if ((scoreDocs.length - result.from()) < resultDocsSize) {
+        resultDocsSize=scoreDocs.length - result.from();
+      }
+      if (result.topDocs() instanceof TopFieldDocs) {
+        ShardDoc[] docs=new ShardDoc[resultDocsSize];
+        for (int i=0; i < resultDocsSize; i++) {
+          ScoreDoc scoreDoc=scoreDocs[result.from() + i];
+          docs[i]=new ShardFieldDoc(result.shardTarget(),scoreDoc.doc,scoreDoc.score,((FieldDoc)scoreDoc).fields);
+        }
+        return docs;
+      }
+ else {
+        ShardDoc[] docs=new ShardDoc[resultDocsSize];
+        for (int i=0; i < resultDocsSize; i++) {
+          ScoreDoc scoreDoc=scoreDocs[result.from() + i];
+          docs[i]=new ShardScoreDoc(result.shardTarget(),scoreDoc.doc,scoreDoc.score);
+        }
+        return docs;
+      }
+    }
+  }
   List<? extends QuerySearchResultProvider> results=QUERY_RESULT_ORDERING.sortedCopy(results1);
   QuerySearchResultProvider queryResultProvider=results.get(0);
   int totalNumDocs=0;
