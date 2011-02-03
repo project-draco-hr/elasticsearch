@@ -1,9 +1,28 @@
 {
+  final CountDownLatch latch=new CountDownLatch(1);
+  final AtomicReference<Throwable> failure=new AtomicReference<Throwable>();
   try {
-    metaDataMappingService.updateMapping(request.index(),request.type(),request.mappingSource());
+    metaDataMappingService.updateMapping(request.index(),request.type(),request.mappingSource(),new MetaDataMappingService.Listener(){
+      @Override public void onResponse(      MetaDataMappingService.Response response){
+        latch.countDown();
+      }
+      @Override public void onFailure(      Throwable t){
+        failure.set(t);
+        latch.countDown();
+      }
+    }
+);
   }
  catch (  Exception e) {
-    throw new ElasticSearchParseException("failed to update mapping",e);
+    failure.set(e);
+  }
+  if (failure.get() != null) {
+    if (failure.get() instanceof ElasticSearchException) {
+      throw (ElasticSearchException)failure.get();
+    }
+ else {
+      throw new ElasticSearchException("failed to update mapping",failure.get());
+    }
   }
   return new MappingUpdatedResponse();
 }
