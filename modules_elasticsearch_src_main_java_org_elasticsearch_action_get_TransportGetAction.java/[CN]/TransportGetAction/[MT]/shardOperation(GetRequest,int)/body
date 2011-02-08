@@ -1,5 +1,6 @@
 {
   IndexService indexService=indicesService.indexServiceSafe(request.index());
+  BloomCache bloomCache=indexService.cache().bloomCache();
   IndexShard indexShard=indexService.shardSafe(shardId);
   DocumentMapper docMapper=indexService.mapperService().documentMapper(request.type());
   if (docMapper == null) {
@@ -14,15 +15,15 @@
   Map<String,GetField> fields=null;
   long version=-1;
   try {
-    UidField.DocIdAndVersion docIdAndVersion=UidField.loadDocIdAndVersion(searcher.reader(),docMapper.uidMapper().term(request.type(),request.id()));
-    if (docIdAndVersion.docId != Lucene.NO_DOC) {
+    UidField.DocIdAndVersion docIdAndVersion=loadCurrentVersionFromIndex(bloomCache,searcher,docMapper.uidMapper().term(request.type(),request.id()));
+    if (docIdAndVersion != null && docIdAndVersion.docId != Lucene.NO_DOC) {
       if (docIdAndVersion.version > 0) {
         version=docIdAndVersion.version;
       }
       exists=true;
       FieldSelector fieldSelector=buildFieldSelectors(docMapper,request.fields());
       if (fieldSelector != null) {
-        Document doc=searcher.reader().document(docIdAndVersion.docId,fieldSelector);
+        Document doc=docIdAndVersion.reader.document(docIdAndVersion.docId,fieldSelector);
         source=extractSource(doc,docMapper);
         for (        Object oField : doc.getFields()) {
           Fieldable field=(Fieldable)oField;
