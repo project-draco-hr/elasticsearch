@@ -18,21 +18,23 @@ synchronized (creationMutex) {
 synchronized (fieldCache) {
       filter=fieldCache.get(fieldName);
       if (filter == null) {
-        filter=new BloomFilterEntry(reader.numDocs(),BloomFilter.NONE);
+        filter=new BloomFilterEntry(currentNumDocs,BloomFilter.NONE);
         filter.loading.set(true);
         fieldCache.put(fieldName,filter);
-        BloomFilterLoader loader=new BloomFilterLoader(reader,fieldName);
-        if (asyncLoad) {
-          threadPool.cached().execute(loader);
-        }
+        if (currentNumDocs < maxSize) {
+          BloomFilterLoader loader=new BloomFilterLoader(reader,fieldName);
+          if (asyncLoad) {
+            threadPool.cached().execute(loader);
+          }
  else {
-          loader.run();
-          filter=fieldCache.get(fieldName);
+            loader.run();
+            filter=fieldCache.get(fieldName);
+          }
         }
       }
     }
   }
-  if (filter.numDocs > 1000 && (currentNumDocs / filter.numDocs) < 0.6) {
+  if (filter.numDocs > 1000 && filter.numDocs < maxSize && (currentNumDocs / filter.numDocs) < 0.6) {
     if (filter.loading.compareAndSet(false,true)) {
       BloomFilterLoader loader=new BloomFilterLoader(reader,fieldName);
       if (asyncLoad) {
