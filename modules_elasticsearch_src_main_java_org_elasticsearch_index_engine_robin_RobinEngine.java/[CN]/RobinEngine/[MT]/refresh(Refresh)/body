@@ -1,41 +1,36 @@
 {
-  rwl.readLock().lock();
   if (indexWriter == null) {
     throw new EngineClosedException(shardId);
   }
+  rwl.readLock().lock();
   try {
-    if (refreshMutex.compareAndSet(false,true)) {
-      IndexWriter currentWriter=indexWriter;
-      if (currentWriter == null) {
+    IndexWriter currentWriter=indexWriter;
+    if (currentWriter == null) {
+      throw new EngineClosedException(shardId);
+    }
+    try {
+      if (dirty) {
+        dirty=false;
+        AcquirableResource<ReaderSearcherHolder> current=nrtResource;
+        IndexReader newReader=current.resource().reader().reopen(true);
+        if (newReader != current.resource().reader()) {
+          ExtendedIndexSearcher indexSearcher=new ExtendedIndexSearcher(newReader);
+          indexSearcher.setSimilarity(similarityService.defaultSearchSimilarity());
+          nrtResource=newAcquirableResource(new ReaderSearcherHolder(indexSearcher));
+          current.markForClose();
+        }
+      }
+    }
+ catch (    AlreadyClosedException e) {
+    }
+catch (    Exception e) {
+      if (indexWriter == null) {
         throw new EngineClosedException(shardId);
       }
-      try {
-        if (dirty) {
-          dirty=false;
-          AcquirableResource<ReaderSearcherHolder> current=nrtResource;
-          IndexReader newReader=current.resource().reader().reopen(true);
-          if (newReader != current.resource().reader()) {
-            ExtendedIndexSearcher indexSearcher=new ExtendedIndexSearcher(newReader);
-            indexSearcher.setSimilarity(similarityService.defaultSearchSimilarity());
-            nrtResource=newAcquirableResource(new ReaderSearcherHolder(indexSearcher));
-            current.markForClose();
-          }
-        }
+ else       if (currentWriter != indexWriter) {
       }
- catch (      AlreadyClosedException e) {
-      }
-catch (      Exception e) {
-        if (indexWriter == null) {
-          throw new EngineClosedException(shardId);
-        }
- else         if (currentWriter != indexWriter) {
-        }
  else {
-          throw new RefreshFailedEngineException(shardId,e);
-        }
-      }
- finally {
-        refreshMutex.set(false);
+        throw new RefreshFailedEngineException(shardId,e);
       }
     }
   }
