@@ -1,17 +1,18 @@
 {
   final long requestId=newRequestId();
-  Timeout timeoutX=null;
+  TimeoutHandler timeoutHandler=null;
   try {
     if (options.timeout() != null) {
-      timeoutX=timerService.newTimeout(new TimeoutTimerTask(requestId),options.timeout(),TimerService.ExecutionType.THREADED);
+      timeoutHandler=new TimeoutHandler(requestId);
+      timeoutHandler.future=threadPool.schedule(timeoutHandler,options.timeout(),ThreadPool.ExecutionType.THREADED);
     }
-    clientHandlers.put(requestId,new RequestHolder<T>(handler,node,action,timeoutX));
+    clientHandlers.put(requestId,new RequestHolder<T>(handler,node,action,timeoutHandler));
     transport.sendRequest(node,requestId,action,message,options);
   }
  catch (  final Exception e) {
     clientHandlers.remove(requestId);
-    if (timeoutX != null) {
-      timeoutX.cancel();
+    if (timeoutHandler != null) {
+      timeoutHandler.future.cancel(false);
     }
     if (throwConnectException) {
       if (e instanceof ConnectTransportException) {
