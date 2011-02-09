@@ -1,0 +1,97 @@
+{
+  final boolean spawn=true;
+  final boolean waitForRequest=true;
+  final ByteSizeValue payloadSize=new ByteSizeValue(100,ByteSizeUnit.BYTES);
+  final int NUMBER_OF_CLIENTS=1;
+  final int NUMBER_OF_ITERATIONS=10000000;
+  final byte[] payload=new byte[(int)payloadSize.bytes()];
+  final AtomicLong idGenerator=new AtomicLong();
+  final Type type=Type.LOCAL;
+  Settings settings=ImmutableSettings.settingsBuilder().build();
+  final ThreadPool serverThreadPool=new CachedThreadPool(settings);
+  final TransportService serverTransportService=new TransportService(type.newTransport(settings,serverThreadPool),serverThreadPool).start();
+  final ThreadPool clientThreadPool=new CachedThreadPool(settings);
+  final TransportService clientTransportService=new TransportService(type.newTransport(settings,clientThreadPool),clientThreadPool).start();
+  final DiscoveryNode node=new DiscoveryNode("server",serverTransportService.boundAddress().publishAddress());
+  serverTransportService.registerHandler("benchmark",new BaseTransportRequestHandler<BenchmarkMessage>(){
+    @Override public BenchmarkMessage newInstance(){
+      return new BenchmarkMessage();
+    }
+    @Override public void messageReceived(    BenchmarkMessage request,    TransportChannel channel) throws Exception {
+      channel.sendResponse(request);
+    }
+    @Override public boolean spawn(){
+      return spawn;
+    }
+  }
+);
+  clientTransportService.connectToNode(node);
+  for (int i=0; i < 10000; i++) {
+    BenchmarkMessage message=new BenchmarkMessage(1,payload);
+    clientTransportService.submitRequest(node,"benchmark",message,new BaseTransportResponseHandler<BenchmarkMessage>(){
+      @Override public BenchmarkMessage newInstance(){
+        return new BenchmarkMessage();
+      }
+      @Override public void handleResponse(      BenchmarkMessage response){
+      }
+      @Override public void handleException(      TransportException exp){
+        exp.printStackTrace();
+      }
+    }
+).txGet();
+  }
+  Thread[] clients=new Thread[NUMBER_OF_CLIENTS];
+  final CountDownLatch latch=new CountDownLatch(NUMBER_OF_CLIENTS * NUMBER_OF_ITERATIONS);
+  for (int i=0; i < NUMBER_OF_CLIENTS; i++) {
+    clients[i]=new Thread(new Runnable(){
+      @Override public void run(){
+        for (int j=0; j < NUMBER_OF_ITERATIONS; j++) {
+          final long id=idGenerator.incrementAndGet();
+          BenchmarkMessage message=new BenchmarkMessage(id,payload);
+          BaseTransportResponseHandler<BenchmarkMessage> handler=new BaseTransportResponseHandler<BenchmarkMessage>(){
+            @Override public BenchmarkMessage newInstance(){
+              return new BenchmarkMessage();
+            }
+            @Override public void handleResponse(            BenchmarkMessage response){
+              if (response.id != id) {
+                System.out.println("NO ID MATCH [" + response.id + "] and ["+ id+ "]");
+              }
+              latch.countDown();
+            }
+            @Override public void handleException(            TransportException exp){
+              exp.printStackTrace();
+              latch.countDown();
+            }
+            @Override public boolean spawn(){
+              return spawn;
+            }
+          }
+;
+          if (waitForRequest) {
+            clientTransportService.submitRequest(node,"benchmark",message,handler).txGet();
+          }
+ else {
+            clientTransportService.sendRequest(node,"benchmark",message,handler);
+          }
+        }
+      }
+    }
+);
+  }
+  StopWatch stopWatch=new StopWatch().start();
+  for (int i=0; i < NUMBER_OF_CLIENTS; i++) {
+    clients[i].start();
+  }
+  try {
+    latch.await();
+  }
+ catch (  InterruptedException e) {
+    e.printStackTrace();
+  }
+  stopWatch.stop();
+  System.out.println("Ran [" + NUMBER_OF_CLIENTS + "], each with ["+ NUMBER_OF_ITERATIONS+ "] iterations, payload ["+ payloadSize+ "]: took ["+ stopWatch.totalTime()+ "], TPS: "+ (NUMBER_OF_CLIENTS * NUMBER_OF_ITERATIONS) / stopWatch.totalTime().secondsFrac());
+  clientTransportService.close();
+  clientThreadPool.shutdownNow();
+  serverTransportService.close();
+  serverThreadPool.shutdownNow();
+}
