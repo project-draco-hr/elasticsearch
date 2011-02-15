@@ -5,7 +5,7 @@
       if (!request.preferLocalShard()) {
         if (request.operationThreaded()) {
           request.beforeLocalFork();
-          threadPool.execute(new Runnable(){
+          threadPool.executor(executor).execute(new Runnable(){
             @Override public void run(){
               try {
                 Response response=shardOperation(request,shard.id());
@@ -23,7 +23,7 @@
           try {
             final Response response=shardOperation(request,shard.id());
             if (request.listenerThreaded()) {
-              threadPool.execute(new Runnable(){
+              threadPool.cached().execute(new Runnable(){
                 @Override public void run(){
                   listener.onResponse(response);
                 }
@@ -43,13 +43,16 @@
     }
  else {
       DiscoveryNode node=nodes.get(shard.currentNodeId());
-      transportService.sendRequest(node,transportShardAction(),new ShardSingleOperationRequest(request,shard.id()),new BaseTransportResponseHandler<Response>(){
+      transportService.sendRequest(node,transportShardAction,new ShardSingleOperationRequest(request,shard.id()),new BaseTransportResponseHandler<Response>(){
         @Override public Response newInstance(){
           return newResponse();
         }
+        @Override public String executor(){
+          return ThreadPool.Names.SAME;
+        }
         @Override public void handleResponse(        final Response response){
           if (request.listenerThreaded()) {
-            threadPool.execute(new Runnable(){
+            threadPool.cached().execute(new Runnable(){
               @Override public void run(){
                 listener.onResponse(response);
               }
@@ -62,9 +65,6 @@
         }
         @Override public void handleException(        TransportException exp){
           onFailure(shard,exp);
-        }
-        @Override public boolean spawn(){
-          return false;
         }
       }
 );
@@ -83,7 +83,7 @@
     }
     if (request.listenerThreaded()) {
       final Exception fFailure=failure;
-      threadPool.execute(new Runnable(){
+      threadPool.cached().execute(new Runnable(){
         @Override public void run(){
           listener.onFailure(fFailure);
         }

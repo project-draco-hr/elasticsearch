@@ -1,0 +1,34 @@
+{
+  if (settings == null) {
+    settings=ImmutableSettings.Builder.EMPTY_SETTINGS;
+  }
+  String type=settings.get("type",defaultType);
+  ThreadFactory threadFactory=EsExecutors.daemonThreadFactory(settings,"[" + name + "]");
+  if ("cached".equals(type)) {
+    TimeValue keepAlive=settings.getAsTime("keep_alive",defaultSettings.getAsTime("keep_alive",timeValueMinutes(5)));
+    logger.debug("creating thread_pool [{}], type [{}], keep_alive [{}]",name,type,keepAlive);
+    return new ThreadPoolExecutor(0,Integer.MAX_VALUE,keepAlive.millis(),TimeUnit.MILLISECONDS,new SynchronousQueue<Runnable>(),threadFactory);
+  }
+ else   if ("fixed".equals(type)) {
+    int size=settings.getAsInt("size",defaultSettings.getAsInt("size",Runtime.getRuntime().availableProcessors() * 5));
+    logger.debug("creating thread_pool [{}], type [{}], size [{}]",name,type,size);
+    return new ThreadPoolExecutor(size,size,0L,TimeUnit.MILLISECONDS,new LinkedTransferQueue<Runnable>(),threadFactory);
+  }
+ else   if ("scaling".equals(type)) {
+    TimeValue keepAlive=settings.getAsTime("keep_alive",defaultSettings.getAsTime("keep_alive",timeValueMinutes(5)));
+    int min=settings.getAsInt("min",defaultSettings.getAsInt("min",1));
+    int size=settings.getAsInt("size",defaultSettings.getAsInt("size",Runtime.getRuntime().availableProcessors() * 5));
+    logger.debug("creating thread_pool [{}], type [{}], min [{}], size [{}], keep_alive [{}]",name,type,min,size,keepAlive);
+    return DynamicExecutors.newScalingThreadPool(min,size,keepAlive.millis(),threadFactory);
+  }
+ else   if ("blocking".equals(type)) {
+    TimeValue keepAlive=settings.getAsTime("keep_alive",defaultSettings.getAsTime("keep_alive",timeValueMinutes(5)));
+    int min=settings.getAsInt("min",defaultSettings.getAsInt("min",1));
+    int size=settings.getAsInt("size",defaultSettings.getAsInt("size",Runtime.getRuntime().availableProcessors() * 5));
+    SizeValue capacity=settings.getAsSize("capacity",defaultSettings.getAsSize("capacity",new SizeValue(0)));
+    TimeValue waitTime=settings.getAsTime("wait_time",defaultSettings.getAsTime("wait_time",timeValueSeconds(60)));
+    logger.debug("creating thread_pool [{}], type [{}], min [{}], size [{}], keep_alive [{}], wait_time [{}]",name,type,min,size,keepAlive,waitTime);
+    return DynamicExecutors.newBlockingThreadPool(min,size,keepAlive.millis(),(int)capacity.singles(),waitTime.millis(),threadFactory);
+  }
+  throw new ElasticSearchIllegalArgumentException("No type found [" + type + "], for ["+ name+ "]");
+}

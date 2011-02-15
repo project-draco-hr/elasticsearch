@@ -1,5 +1,5 @@
 {
-  final boolean spawn=true;
+  final String executor=ThreadPool.Names.CACHED;
   final boolean waitForRequest=true;
   final ByteSizeValue payloadSize=new ByteSizeValue(100,ByteSizeUnit.BYTES);
   final int NUMBER_OF_CLIENTS=1;
@@ -8,20 +8,20 @@
   final AtomicLong idGenerator=new AtomicLong();
   final Type type=Type.NETTY;
   Settings settings=ImmutableSettings.settingsBuilder().build();
-  final ThreadPool serverThreadPool=newThreadPool(settings);
+  final ThreadPool serverThreadPool=new ThreadPool();
   final TransportService serverTransportService=new TransportService(type.newTransport(settings,serverThreadPool),serverThreadPool).start();
-  final ThreadPool clientThreadPool=newThreadPool(settings);
+  final ThreadPool clientThreadPool=new ThreadPool();
   final TransportService clientTransportService=new TransportService(type.newTransport(settings,clientThreadPool),clientThreadPool).start();
   final DiscoveryNode node=new DiscoveryNode("server",serverTransportService.boundAddress().publishAddress());
   serverTransportService.registerHandler("benchmark",new BaseTransportRequestHandler<BenchmarkMessage>(){
     @Override public BenchmarkMessage newInstance(){
       return new BenchmarkMessage();
     }
+    @Override public String executor(){
+      return executor;
+    }
     @Override public void messageReceived(    BenchmarkMessage request,    TransportChannel channel) throws Exception {
       channel.sendResponse(request);
-    }
-    @Override public boolean spawn(){
-      return spawn;
     }
   }
 );
@@ -31,6 +31,9 @@
     clientTransportService.submitRequest(node,"benchmark",message,new BaseTransportResponseHandler<BenchmarkMessage>(){
       @Override public BenchmarkMessage newInstance(){
         return new BenchmarkMessage();
+      }
+      @Override public String executor(){
+        return ThreadPool.Names.SAME;
       }
       @Override public void handleResponse(      BenchmarkMessage response){
       }
@@ -52,6 +55,9 @@
             @Override public BenchmarkMessage newInstance(){
               return new BenchmarkMessage();
             }
+            @Override public String executor(){
+              return executor;
+            }
             @Override public void handleResponse(            BenchmarkMessage response){
               if (response.id != id) {
                 System.out.println("NO ID MATCH [" + response.id + "] and ["+ id+ "]");
@@ -61,9 +67,6 @@
             @Override public void handleException(            TransportException exp){
               exp.printStackTrace();
               latch.countDown();
-            }
-            @Override public boolean spawn(){
-              return spawn;
             }
           }
 ;

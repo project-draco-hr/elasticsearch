@@ -25,7 +25,7 @@
       retry(fromClusterEvent,shard.shardId());
       return false;
     }
-    if (checkWriteConsistency()) {
+    if (checkWriteConsistency) {
       WriteConsistencyLevel consistencyLevel=defaultWriteConsistencyLevel;
       if (request.consistencyLevel() != WriteConsistencyLevel.DEFAULT) {
         consistencyLevel=request.consistencyLevel();
@@ -49,7 +49,7 @@
     if (shard.currentNodeId().equals(nodes.localNodeId())) {
       if (request.operationThreaded()) {
         request.beforeLocalFork();
-        threadPool.execute(new Runnable(){
+        threadPool.executor(executor).execute(new Runnable(){
           @Override public void run(){
             performOnPrimary(shard.id(),fromClusterEvent,true,shard,clusterState);
           }
@@ -62,9 +62,12 @@
     }
  else {
       DiscoveryNode node=nodes.get(shard.currentNodeId());
-      transportService.sendRequest(node,transportAction(),request,transportOptions(),new BaseTransportResponseHandler<Response>(){
+      transportService.sendRequest(node,transportAction,request,transportOptions(),new BaseTransportResponseHandler<Response>(){
         @Override public Response newInstance(){
           return newResponseInstance();
+        }
+        @Override public String executor(){
+          return ThreadPool.Names.SAME;
         }
         @Override public void handleResponse(        Response response){
           listener.onResponse(response);
@@ -78,9 +81,6 @@
             listener.onFailure(exp);
           }
         }
-        @Override public boolean spawn(){
-          return request.listenerThreaded();
-        }
       }
 );
     }
@@ -89,7 +89,7 @@
   if (!foundPrimary) {
     final UnavailableShardsException failure=new UnavailableShardsException(shardIt.shardId(),request.toString());
     if (request.listenerThreaded()) {
-      threadPool.execute(new Runnable(){
+      threadPool.cached().execute(new Runnable(){
         @Override public void run(){
           listener.onFailure(failure);
         }

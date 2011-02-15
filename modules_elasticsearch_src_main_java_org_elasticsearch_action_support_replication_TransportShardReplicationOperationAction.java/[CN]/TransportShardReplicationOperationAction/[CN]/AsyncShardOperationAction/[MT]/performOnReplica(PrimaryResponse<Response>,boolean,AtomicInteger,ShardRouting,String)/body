@@ -5,7 +5,7 @@
         listener.onResponse(response.response());
       }
  else {
-        threadPool.execute(new Runnable(){
+        threadPool.cached().execute(new Runnable(){
           @Override public void run(){
             listener.onResponse(response.response());
           }
@@ -18,21 +18,21 @@
   final ShardOperationRequest shardRequest=new ShardOperationRequest(shardIt.shardId().id(),request);
   if (!nodeId.equals(nodes.localNodeId())) {
     DiscoveryNode node=nodes.get(nodeId);
-    transportService.sendRequest(node,transportReplicaAction(),shardRequest,transportOptions(),new VoidTransportResponseHandler(){
+    transportService.sendRequest(node,transportReplicaAction,shardRequest,transportOptions(),new VoidTransportResponseHandler(ThreadPool.Names.SAME){
       @Override public void handleResponse(      VoidStreamable vResponse){
         finishIfPossible();
       }
       @Override public void handleException(      TransportException exp){
         if (!ignoreReplicaException(exp.unwrapCause())) {
-          logger.warn("Failed to perform " + transportAction() + " on replica "+ shardIt.shardId(),exp);
-          shardStateAction.shardFailed(shard,"Failed to perform [" + transportAction() + "] on replica, message ["+ detailedMessage(exp)+ "]");
+          logger.warn("Failed to perform " + transportAction + " on replica "+ shardIt.shardId(),exp);
+          shardStateAction.shardFailed(shard,"Failed to perform [" + transportAction + "] on replica, message ["+ detailedMessage(exp)+ "]");
         }
         finishIfPossible();
       }
       private void finishIfPossible(){
         if (counter.decrementAndGet() == 0) {
           if (request.listenerThreaded()) {
-            threadPool.execute(new Runnable(){
+            threadPool.cached().execute(new Runnable(){
               @Override public void run(){
                 listener.onResponse(response.response());
               }
@@ -44,24 +44,21 @@
           }
         }
       }
-      @Override public boolean spawn(){
-        return false;
-      }
     }
 );
   }
  else {
     if (request.operationThreaded()) {
       request.beforeLocalFork();
-      threadPool.execute(new Runnable(){
+      threadPool.executor(executor).execute(new Runnable(){
         @Override public void run(){
           try {
             shardOperationOnReplica(shardRequest);
           }
  catch (          Exception e) {
             if (!ignoreReplicaException(e)) {
-              logger.warn("Failed to perform " + transportAction() + " on replica "+ shardIt.shardId(),e);
-              shardStateAction.shardFailed(shard,"Failed to perform [" + transportAction() + "] on replica, message ["+ detailedMessage(e)+ "]");
+              logger.warn("Failed to perform " + transportAction + " on replica "+ shardIt.shardId(),e);
+              shardStateAction.shardFailed(shard,"Failed to perform [" + transportAction + "] on replica, message ["+ detailedMessage(e)+ "]");
             }
           }
           if (counter.decrementAndGet() == 0) {
@@ -77,13 +74,13 @@
       }
  catch (      Exception e) {
         if (!ignoreReplicaException(e)) {
-          logger.warn("Failed to perform " + transportAction() + " on replica"+ shardIt.shardId(),e);
-          shardStateAction.shardFailed(shard,"Failed to perform [" + transportAction() + "] on replica, message ["+ detailedMessage(e)+ "]");
+          logger.warn("Failed to perform " + transportAction + " on replica"+ shardIt.shardId(),e);
+          shardStateAction.shardFailed(shard,"Failed to perform [" + transportAction + "] on replica, message ["+ detailedMessage(e)+ "]");
         }
       }
       if (counter.decrementAndGet() == 0) {
         if (request.listenerThreaded()) {
-          threadPool.execute(new Runnable(){
+          threadPool.cached().execute(new Runnable(){
             @Override public void run(){
               listener.onResponse(response.response());
             }

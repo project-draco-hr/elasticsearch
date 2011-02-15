@@ -3,13 +3,16 @@
     final ShardRouting shard=shardIt.nextActive();
     if (!shard.currentNodeId().equals(nodes.localNodeId())) {
       DiscoveryNode node=nodes.get(shard.currentNodeId());
-      transportService.sendRequest(node,transportShardAction(),new ShardSingleOperationRequest(request,shard.id()),new BaseTransportResponseHandler<Response>(){
+      transportService.sendRequest(node,transportShardAction,new ShardSingleOperationRequest(request,shard.id()),new BaseTransportResponseHandler<Response>(){
         @Override public Response newInstance(){
           return newResponse();
         }
+        @Override public String executor(){
+          return ThreadPool.Names.SAME;
+        }
         @Override public void handleResponse(        final Response response){
           if (request.listenerThreaded()) {
-            threadPool.execute(new Runnable(){
+            threadPool.cached().execute(new Runnable(){
               @Override public void run(){
                 listener.onResponse(response);
               }
@@ -22,9 +25,6 @@
         }
         @Override public void handleException(        TransportException exp){
           onFailure(shard,exp);
-        }
-        @Override public boolean spawn(){
-          return false;
         }
       }
 );
@@ -43,7 +43,7 @@
     }
     if (request.listenerThreaded()) {
       final Exception fFailure=failure;
-      threadPool.execute(new Runnable(){
+      threadPool.cached().execute(new Runnable(){
         @Override public void run(){
           listener.onFailure(fFailure);
         }
