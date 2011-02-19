@@ -1,0 +1,40 @@
+{
+  if (facets.size() == 1) {
+    if (requiredSize == 0) {
+      InternalTermsStatsStringFacet tsFacet=(InternalTermsStatsStringFacet)facets.get(0);
+      List<StringEntry> entries=tsFacet.entries();
+      if (!entries.isEmpty()) {
+        Collections.sort(entries,comparatorType.comparator());
+      }
+    }
+    return facets.get(0);
+  }
+  int missing=0;
+  THashMap<String,StringEntry> map=aggregateCache.get().get();
+  map.clear();
+  for (  Facet facet : facets) {
+    InternalTermsStatsStringFacet tsFacet=(InternalTermsStatsStringFacet)facet;
+    missing+=tsFacet.missing;
+    for (    Entry entry : tsFacet) {
+      StringEntry stringEntry=(StringEntry)entry;
+      StringEntry current=map.get(stringEntry.term());
+      if (current != null) {
+        current.count+=stringEntry.count;
+        current.total+=stringEntry.total;
+      }
+ else {
+        map.put(stringEntry.term(),stringEntry);
+      }
+    }
+  }
+  if (requiredSize == 0) {
+    StringEntry[] entries1=map.values().toArray(new StringEntry[map.size()]);
+    Arrays.sort(entries1,comparatorType.comparator());
+    return new InternalTermsStatsStringFacet(name,comparatorType,requiredSize,Arrays.asList(entries1),missing);
+  }
+ else {
+    TreeSet<StringEntry> ordered=new BoundedTreeSet<StringEntry>(comparatorType.comparator(),requiredSize);
+    ordered.addAll(map.values());
+    return new InternalTermsStatsStringFacet(name,comparatorType,requiredSize,ordered,missing);
+  }
+}
