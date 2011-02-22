@@ -1,0 +1,25 @@
+{
+  try {
+    client.admin().indices().prepareDelete("test").execute().actionGet();
+  }
+ catch (  Exception e) {
+  }
+  client.admin().indices().prepareCreate("test").execute().actionGet();
+  client.admin().cluster().prepareHealth().setWaitForGreenStatus().execute().actionGet();
+  for (int i=0; i < 20; i++) {
+    client.prepareIndex("test","type1",Integer.toString(i)).setSource("num",i % 10).execute().actionGet();
+  }
+  client.admin().indices().prepareRefresh().execute().actionGet();
+  SearchResponse searchResponse=client.prepareSearch().setQuery(matchAllQuery()).addFacet(termsStats("stats1").keyField("num").valueScript("doc.score").order(TermsStatsFacet.ComparatorType.COUNT)).addFacet(termsStats("stats2").keyField("num").valueScript("doc.score").order(TermsStatsFacet.ComparatorType.TOTAL)).execute().actionGet();
+  if (searchResponse.failedShards() > 0) {
+    logger.warn("Failed shards:");
+    for (    ShardSearchFailure shardSearchFailure : searchResponse.shardFailures()) {
+      logger.warn("-> {}",shardSearchFailure);
+    }
+  }
+  assertThat(searchResponse.failedShards(),equalTo(0));
+  TermsStatsFacet facet=searchResponse.facets().facet("stats1");
+  assertThat(facet.entries().size(),equalTo(10));
+  facet=searchResponse.facets().facet("stats2");
+  assertThat(facet.entries().size(),equalTo(10));
+}
