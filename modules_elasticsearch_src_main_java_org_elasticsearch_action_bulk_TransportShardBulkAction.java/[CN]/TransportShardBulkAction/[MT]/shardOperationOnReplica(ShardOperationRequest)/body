@@ -1,18 +1,19 @@
 {
   IndexShard indexShard=indexShard(shardRequest);
   final BulkShardRequest request=shardRequest.request;
-  Engine.Operation[] ops=new Engine.Operation[request.items().length];
-  for (int i=0; i < ops.length; i++) {
+  for (int i=0; i < request.items().length; i++) {
     BulkItemRequest item=request.items()[i];
     if (item.request() instanceof IndexRequest) {
       IndexRequest indexRequest=(IndexRequest)item.request();
       try {
         SourceToParse sourceToParse=SourceToParse.source(indexRequest.source()).type(indexRequest.type()).id(indexRequest.id()).routing(indexRequest.routing()).parent(indexRequest.parent());
         if (indexRequest.opType() == IndexRequest.OpType.INDEX) {
-          ops[i]=indexShard.prepareIndex(sourceToParse).version(indexRequest.version()).origin(Engine.Operation.Origin.REPLICA);
+          Engine.Index index=indexShard.prepareIndex(sourceToParse).version(indexRequest.version()).origin(Engine.Operation.Origin.REPLICA);
+          indexShard.index(index);
         }
  else {
-          ops[i]=indexShard.prepareCreate(sourceToParse).version(indexRequest.version()).origin(Engine.Operation.Origin.REPLICA);
+          Engine.Create create=indexShard.prepareCreate(sourceToParse).version(indexRequest.version()).origin(Engine.Operation.Origin.REPLICA);
+          indexShard.create(create);
         }
       }
  catch (      Exception e) {
@@ -21,11 +22,18 @@
  else     if (item.request() instanceof DeleteRequest) {
       DeleteRequest deleteRequest=(DeleteRequest)item.request();
       try {
-        ops[i]=indexShard.prepareDelete(deleteRequest.type(),deleteRequest.id(),deleteRequest.version()).origin(Engine.Operation.Origin.REPLICA);
+        Engine.Delete delete=indexShard.prepareDelete(deleteRequest.type(),deleteRequest.id(),deleteRequest.version()).origin(Engine.Operation.Origin.REPLICA);
+        indexShard.delete(delete);
       }
  catch (      Exception e) {
       }
     }
   }
-  indexShard.bulk(new Engine.Bulk(ops).refresh(request.refresh()));
+  if (request.refresh()) {
+    try {
+      indexShard.refresh(new Engine.Refresh(false));
+    }
+ catch (    Exception e) {
+    }
+  }
 }
