@@ -2,13 +2,27 @@
   for (  ShardRouting shardRouting : allocation.failedShards()) {
     cachedStores.remove(shardRouting.shardId());
   }
+  TransportNodesListGatewayStartedShards.NodesLocalGatewayStartedShards nodesState=null;
   for (  ShardRouting failedShard : allocation.failedShards()) {
     if (!allocation.routingNodes().routingTable().index(failedShard.index()).shard(failedShard.id()).allocatedPostApi()) {
       continue;
     }
-    Set<String> nodesIds=Sets.newHashSet();
-    nodesIds.addAll(allocation.nodes().dataNodes().keySet());
-    TransportNodesListGatewayStartedShards.NodesLocalGatewayStartedShards nodesState=listGatewayStartedShards.list(nodesIds,null).actionGet();
+    if (nodesState == null) {
+      Set<String> nodesIds=Sets.newHashSet();
+      nodesIds.addAll(allocation.nodes().dataNodes().keySet());
+      nodesState=listGatewayStartedShards.list(nodesIds,null).actionGet();
+      if (nodesState.failures().length > 0) {
+        StringBuilder sb=new StringBuilder("failures when trying to list started shards on nodes:");
+        for (int i=0; i < nodesState.failures().length; i++) {
+          Throwable cause=ExceptionsHelper.unwrapCause(nodesState.failures()[i]);
+          if (cause instanceof ConnectTransportException) {
+            continue;
+          }
+          sb.append("\n    -> ").append(nodesState.failures()[i].getDetailedMessage());
+        }
+        logger.warn(sb.toString());
+      }
+    }
     Tuple<DiscoveryNode,Long> t=null;
     for (    TransportNodesListGatewayStartedShards.NodeLocalGatewayStartedShards nodeState : nodesState) {
       if (nodeState.state() == null) {
