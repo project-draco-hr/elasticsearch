@@ -129,20 +129,25 @@
       response.phase3Operations=totalOperations;
     }
     private int sendSnapshot(    Translog.Snapshot snapshot) throws ElasticSearchException {
-      int counter=0;
+      int ops=0;
+      long size=0;
       int totalOperations=0;
       List<Translog.Operation> operations=Lists.newArrayList();
       while (snapshot.hasNext()) {
         if (shard.state() == IndexShardState.CLOSED) {
           throw new IndexShardClosedException(request.shardId());
         }
-        operations.add(snapshot.next());
+        Translog.Operation operation=snapshot.next();
+        operations.add(operation);
+        ops+=1;
+        size+=operation.estimateSize();
         totalOperations++;
-        if (++counter == translogBatchSize) {
+        if (ops >= translogOps || size >= translogSize.bytes()) {
           RecoveryTranslogOperationsRequest translogOperationsRequest=new RecoveryTranslogOperationsRequest(request.shardId(),operations);
           transportService.submitRequest(request.targetNode(),RecoveryTarget.Actions.TRANSLOG_OPS,translogOperationsRequest,TransportRequestOptions.options().withCompress(compress).withLowType(),VoidTransportResponseHandler.INSTANCE_SAME).txGet();
-          counter=0;
-          operations=Lists.newArrayList();
+          ops=0;
+          size=0;
+          operations.clear();
         }
       }
       if (!operations.isEmpty()) {
