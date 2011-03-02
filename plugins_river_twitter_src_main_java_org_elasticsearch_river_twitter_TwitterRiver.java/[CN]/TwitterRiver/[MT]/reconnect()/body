@@ -1,0 +1,51 @@
+{
+  if (closed) {
+    return;
+  }
+  try {
+    stream.cleanUp();
+  }
+ catch (  Exception e) {
+    logger.debug("failed to cleanup after failure",e);
+  }
+  try {
+    stream.shutdown();
+  }
+ catch (  Exception e) {
+    logger.debug("failed to shutdown after failure",e);
+  }
+  if (closed) {
+    return;
+  }
+  try {
+    stream=new TwitterStreamFactory().getInstance(user,password);
+    stream.addListener(new StatusHandler());
+    if (streamType.equals("filter") || filterQuery != null) {
+      try {
+        stream.filter(filterQuery);
+      }
+ catch (      TwitterException e) {
+        logger.warn("failed to create filter stream based on query, disabling river....");
+      }
+    }
+ else     if (streamType.equals("firehose")) {
+      stream.firehose(0);
+    }
+ else {
+      stream.sample();
+    }
+  }
+ catch (  Exception e) {
+    if (closed) {
+      close();
+      return;
+    }
+    logger.warn("failed to connect after failure, throttling",e);
+    threadPool.schedule(TimeValue.timeValueSeconds(10),ThreadPool.Names.CACHED,new Runnable(){
+      @Override public void run(){
+        reconnect();
+      }
+    }
+);
+  }
+}
