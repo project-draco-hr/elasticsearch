@@ -1,0 +1,61 @@
+{
+  try {
+    if (fieldName == null)     throw new IllegalArgumentException("fieldName must not be null");
+    if (stream == null)     throw new IllegalArgumentException("token stream must not be null");
+    if (boost <= 0.0f)     throw new IllegalArgumentException("boost factor must be greater than 0.0");
+    HashMap<String,ArrayIntList> terms=new HashMap<String,ArrayIntList>();
+    int numTokens=0;
+    int numOverlapTokens=0;
+    int pos=-1;
+    if (fields.get(fieldName) != null) {
+      Info info=fields.get(fieldName);
+      terms=info.terms;
+      numTokens=info.numTokens;
+      numOverlapTokens=info.numOverlapTokens;
+      pos=info.pos;
+    }
+ else {
+      terms=new HashMap<String,ArrayIntList>();
+    }
+    TermAttribute termAtt=stream.addAttribute(TermAttribute.class);
+    PositionIncrementAttribute posIncrAttribute=stream.addAttribute(PositionIncrementAttribute.class);
+    OffsetAttribute offsetAtt=stream.addAttribute(OffsetAttribute.class);
+    stream.reset();
+    while (stream.incrementToken()) {
+      String term=termAtt.term();
+      if (term.length() == 0)       continue;
+      numTokens++;
+      final int posIncr=posIncrAttribute.getPositionIncrement();
+      if (posIncr == 0)       numOverlapTokens++;
+      pos+=posIncr;
+      ArrayIntList positions=terms.get(term);
+      if (positions == null) {
+        positions=new ArrayIntList(stride);
+        terms.put(term,positions);
+      }
+      if (stride == 1) {
+        positions.add(pos);
+      }
+ else {
+        positions.add(pos,offsetAtt.startOffset(),offsetAtt.endOffset());
+      }
+    }
+    stream.end();
+    if (numTokens > 0) {
+      boost=boost * docBoost;
+      fields.put(fieldName,new Info(terms,numTokens,numOverlapTokens,boost,pos));
+      sortedFields=null;
+    }
+  }
+ catch (  IOException e) {
+    throw new RuntimeException(e);
+  }
+ finally {
+    try {
+      if (stream != null)       stream.close();
+    }
+ catch (    IOException e2) {
+      throw new RuntimeException(e2);
+    }
+  }
+}
