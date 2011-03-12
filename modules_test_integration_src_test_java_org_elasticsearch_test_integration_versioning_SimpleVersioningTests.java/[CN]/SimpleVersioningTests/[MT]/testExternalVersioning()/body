@@ -1,0 +1,23 @@
+{
+  try {
+    client.admin().indices().prepareDelete("test").execute().actionGet();
+  }
+ catch (  IndexMissingException e) {
+  }
+  client.admin().indices().prepareCreate("test").execute().actionGet();
+  client.admin().cluster().prepareHealth("test").setWaitForGreenStatus().execute().actionGet();
+  IndexResponse indexResponse=client.prepareIndex("test","type","1").setSource("field1","value1_1").setVersion(12).setVersionType(VersionType.EXTERNAL).execute().actionGet();
+  assertThat(indexResponse.version(),equalTo(12l));
+  indexResponse=client.prepareIndex("test","type","1").setSource("field1","value1_1").setVersion(14).setVersionType(VersionType.EXTERNAL).execute().actionGet();
+  assertThat(indexResponse.version(),equalTo(14l));
+  try {
+    client.prepareIndex("test","type","1").setSource("field1","value1_1").setVersion(13).setVersionType(VersionType.EXTERNAL).execute().actionGet();
+  }
+ catch (  ElasticSearchException e) {
+    assertThat(e.unwrapCause(),instanceOf(VersionConflictEngineException.class));
+  }
+  client.admin().indices().prepareRefresh().execute().actionGet();
+  for (int i=0; i < 10; i++) {
+    assertThat(client.prepareGet("test","type","1").execute().actionGet().version(),equalTo(14l));
+  }
+}
