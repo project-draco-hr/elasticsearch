@@ -2,11 +2,22 @@
   final AtomicReference<DeleteIndexResponse> responseRef=new AtomicReference<DeleteIndexResponse>();
   final AtomicReference<Throwable> failureRef=new AtomicReference<Throwable>();
   final CountDownLatch latch=new CountDownLatch(request.indices().length);
-  for (  String index : request.indices()) {
+  for (  final String index : request.indices()) {
     deleteIndexService.deleteIndex(new MetaDataDeleteIndexService.Request(index).timeout(request.timeout()),new MetaDataDeleteIndexService.Listener(){
       @Override public void onResponse(      MetaDataDeleteIndexService.Response response){
         responseRef.set(new DeleteIndexResponse(response.acknowledged()));
-        latch.countDown();
+        IndexMetaData percolatorMetaData=state.metaData().index(PercolatorService.INDEX_NAME);
+        if (percolatorMetaData != null && percolatorMetaData.mappings().containsKey(index)) {
+          deleteMappingAction.execute(new DeleteMappingRequest(PercolatorService.INDEX_NAME).type(index),new ActionListener<DeleteMappingResponse>(){
+            @Override public void onResponse(            DeleteMappingResponse deleteMappingResponse){
+              latch.countDown();
+            }
+            @Override public void onFailure(            Throwable e){
+              latch.countDown();
+            }
+          }
+);
+        }
       }
       @Override public void onFailure(      Throwable t){
         failureRef.set(t);
