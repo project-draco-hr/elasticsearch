@@ -4,6 +4,7 @@
     nodes[i]=NodeBuilder.nodeBuilder().settings(settings).node();
   }
   client=NodeBuilder.nodeBuilder().settings(settings).client(true).node();
+  client.client().admin().indices().prepareCreate("test").setSettings(settingsBuilder().put("index.number_of_shards",numberOfShards).put("index.number_of_replicas",numberOfReplicas)).execute().actionGet();
   logger.info("********** [START] INDEXING INITIAL DOCS");
   for (long i=0; i < initialNumberOfDocs; i++) {
     indexDoc();
@@ -78,6 +79,30 @@
       logger.warn("count does not match!");
     }
   }
+  SearchResponse searchResponse=client.client().prepareSearch().setSearchType(SearchType.SCAN).setQuery(matchAllQuery()).setSize(50).setScroll(TimeValue.timeValueMinutes(2)).execute().actionGet();
+  logger.info("Verifying versions for {} hits...",searchResponse.hits().totalHits());
+  while (true) {
+    searchResponse=client.client().prepareSearchScroll(searchResponse.scrollId()).setScroll(TimeValue.timeValueMinutes(2)).execute().actionGet();
+    assertThat(searchResponse.failedShards(),equalTo(0));
+    for (    SearchHit hit : searchResponse.hits()) {
+      long version=-1;
+      for (int i=0; i < (numberOfReplicas + 1); i++) {
+        GetResponse getResponse=client.client().prepareGet(hit.index(),hit.type(),hit.id()).execute().actionGet();
+        if (version == -1) {
+          version=getResponse.version();
+        }
+ else {
+          if (version != getResponse.version()) {
+            logger.warn("Doc {} has different version numbers {} and {}",hit.id(),version,getResponse.version());
+          }
+        }
+      }
+    }
+    if (searchResponse.hits().hits().length == 0) {
+      break;
+    }
+  }
+  logger.info("Done verifying versions");
   client.close();
   for (  Node node : nodes) {
     node.close();
