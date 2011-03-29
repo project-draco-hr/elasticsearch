@@ -1,0 +1,37 @@
+{
+  final String[] indices=splitIndices(request.param("index"));
+  ClusterStateRequest clusterStateRequest=Requests.clusterStateRequest().filterRoutingTable(true).filterNodes(true).filteredIndices(indices);
+  client.admin().cluster().state(clusterStateRequest,new ActionListener<ClusterStateResponse>(){
+    @Override public void onResponse(    ClusterStateResponse response){
+      try {
+        MetaData metaData=response.state().metaData();
+        XContentBuilder builder=RestXContentBuilder.restContentBuilder(request);
+        builder.startObject();
+        for (        IndexMetaData indexMetaData : metaData) {
+          builder.startObject(indexMetaData.index());
+          builder.startObject("settings");
+          Settings settings=settingsFilter.filterSettings(indexMetaData.settings());
+          for (          Map.Entry<String,String> entry : settings.getAsMap().entrySet()) {
+            builder.field(entry.getKey(),entry.getValue());
+          }
+          builder.endObject();
+          builder.endObject();
+        }
+        builder.endObject();
+        channel.sendResponse(new XContentRestResponse(request,OK,builder));
+      }
+ catch (      Exception e) {
+        onFailure(e);
+      }
+    }
+    @Override public void onFailure(    Throwable e){
+      try {
+        channel.sendResponse(new XContentThrowableRestResponse(request,e));
+      }
+ catch (      IOException e1) {
+        logger.error("Failed to send failure response",e1);
+      }
+    }
+  }
+);
+}
