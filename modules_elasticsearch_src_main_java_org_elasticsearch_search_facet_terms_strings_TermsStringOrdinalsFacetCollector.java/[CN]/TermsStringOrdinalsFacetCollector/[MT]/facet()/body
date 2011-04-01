@@ -1,0 +1,69 @@
+{
+  if (current != null) {
+    missing+=current.counts[0];
+    if (current.values.length > 1) {
+      aggregators.add(current);
+    }
+  }
+  AggregatorPriorityQueue queue=new AggregatorPriorityQueue(aggregators.size());
+  for (  ReaderAggregator aggregator : aggregators) {
+    CacheRecycler.pushIntArray(aggregator.counts);
+    if (aggregator.nextPosition()) {
+      queue.add(aggregator);
+    }
+  }
+  if (size < EntryPriorityQueue.LIMIT) {
+    EntryPriorityQueue ordered=new EntryPriorityQueue(size,comparatorType.comparator());
+    while (queue.size() > 0) {
+      ReaderAggregator agg=queue.top();
+      String value=agg.current;
+      int count=0;
+      do {
+        count+=agg.counts[agg.position];
+        if (agg.nextPosition()) {
+          agg=queue.updateTop();
+        }
+ else {
+          queue.pop();
+          agg=queue.top();
+        }
+      }
+ while (agg != null && value.equals(agg.current));
+      if (count > minCount) {
+        if (excluded == null || !excluded.contains(value)) {
+          InternalStringTermsFacet.StringEntry entry=new InternalStringTermsFacet.StringEntry(value,count);
+          ordered.insertWithOverflow(entry);
+        }
+      }
+    }
+    InternalStringTermsFacet.StringEntry[] list=new InternalStringTermsFacet.StringEntry[ordered.size()];
+    for (int i=ordered.size() - 1; i >= 0; i--) {
+      list[i]=(InternalStringTermsFacet.StringEntry)ordered.pop();
+    }
+    return new InternalStringTermsFacet(facetName,comparatorType,size,Arrays.asList(list),missing);
+  }
+  BoundedTreeSet<InternalStringTermsFacet.StringEntry> ordered=new BoundedTreeSet<InternalStringTermsFacet.StringEntry>(comparatorType.comparator(),size);
+  while (queue.size() > 0) {
+    ReaderAggregator agg=queue.top();
+    String value=agg.current;
+    int count=0;
+    do {
+      count+=agg.counts[agg.position];
+      if (agg.nextPosition()) {
+        agg=queue.updateTop();
+      }
+ else {
+        queue.pop();
+        agg=queue.top();
+      }
+    }
+ while (agg != null && value.equals(agg.current));
+    if (count > minCount) {
+      if (excluded == null || !excluded.contains(value)) {
+        InternalStringTermsFacet.StringEntry entry=new InternalStringTermsFacet.StringEntry(value,count);
+        ordered.add(entry);
+      }
+    }
+  }
+  return new InternalStringTermsFacet(facetName,comparatorType,size,ordered,missing);
+}

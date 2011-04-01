@@ -1,15 +1,30 @@
 {
   if (facets.isEmpty()) {
-    TermsStringFacetCollector.pushFacets(facets);
+    CacheRecycler.pushObjectIntMap(facets);
     return new InternalStringTermsFacet(facetName,comparatorType,size,ImmutableList.<InternalStringTermsFacet.StringEntry>of(),missing);
   }
  else {
-    BoundedTreeSet<InternalStringTermsFacet.StringEntry> ordered=new BoundedTreeSet<InternalStringTermsFacet.StringEntry>(comparatorType.comparator(),size * numberOfShards);
-    for (TObjectIntIterator<String> it=facets.iterator(); it.hasNext(); ) {
-      it.advance();
-      ordered.add(new InternalStringTermsFacet.StringEntry(it.key(),it.value()));
+    if (size < EntryPriorityQueue.LIMIT) {
+      EntryPriorityQueue ordered=new EntryPriorityQueue(size,comparatorType.comparator());
+      for (TObjectIntIterator<String> it=facets.iterator(); it.hasNext(); ) {
+        it.advance();
+        ordered.insertWithOverflow(new InternalStringTermsFacet.StringEntry(it.key(),it.value()));
+      }
+      InternalStringTermsFacet.StringEntry[] list=new InternalStringTermsFacet.StringEntry[ordered.size()];
+      for (int i=ordered.size() - 1; i >= 0; i--) {
+        list[i]=((InternalStringTermsFacet.StringEntry)ordered.pop());
+      }
+      CacheRecycler.pushObjectIntMap(facets);
+      return new InternalStringTermsFacet(facetName,comparatorType,size,Arrays.asList(list),missing);
     }
-    TermsStringFacetCollector.pushFacets(facets);
-    return new InternalStringTermsFacet(facetName,comparatorType,size,ordered,missing);
+ else {
+      BoundedTreeSet<InternalStringTermsFacet.StringEntry> ordered=new BoundedTreeSet<InternalStringTermsFacet.StringEntry>(comparatorType.comparator(),size);
+      for (TObjectIntIterator<String> it=facets.iterator(); it.hasNext(); ) {
+        it.advance();
+        ordered.add(new InternalStringTermsFacet.StringEntry(it.key(),it.value()));
+      }
+      CacheRecycler.pushObjectIntMap(facets);
+      return new InternalStringTermsFacet(facetName,comparatorType,size,ordered,missing);
+    }
   }
 }
