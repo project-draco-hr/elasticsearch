@@ -9,6 +9,8 @@
   HistogramFacet.ComparatorType comparatorType=HistogramFacet.ComparatorType.KEY;
   XContentParser.Token token;
   String fieldName=null;
+  String sFrom=null;
+  String sTo=null;
   while ((token=parser.nextToken()) != XContentParser.Token.END_OBJECT) {
     if (token == XContentParser.Token.FIELD_NAME) {
       fieldName=parser.currentName();
@@ -30,6 +32,12 @@
       }
  else       if ("interval".equals(fieldName)) {
         interval=parser.longValue();
+      }
+ else       if ("from".equals(fieldName)) {
+        sFrom=parser.text();
+      }
+ else       if ("to".equals(fieldName)) {
+        sTo=parser.text();
       }
  else       if ("time_interval".equals(fieldName)) {
         interval=TimeValue.parseTimeValue(parser.text(),null).millis();
@@ -56,6 +64,23 @@
   }
   if (interval <= 0) {
     throw new FacetPhaseExecutionException(facetName,"[interval] is required to be set for histogram facet");
+  }
+  if (sFrom != null && sTo != null && keyField != null) {
+    FieldMapper mapper=context.mapperService().smartNameFieldMapper(keyField);
+    if (mapper == null) {
+      throw new FacetPhaseExecutionException(facetName,"No mapping found for key_field [" + keyField + "]");
+    }
+    long from=((Number)mapper.valueFromString(sFrom)).longValue();
+    long to=((Number)mapper.valueFromString(sTo)).longValue();
+    if (valueField != null) {
+      return new BoundedValueHistogramFacetCollector(facetName,keyField,valueField,interval,from,to,comparatorType,context);
+    }
+ else     if (valueScript != null) {
+      return new BoundedValueScriptHistogramFacetCollector(facetName,keyField,scriptLang,valueScript,params,interval,from,to,comparatorType,context);
+    }
+ else {
+      return new BoundedCountHistogramFacetCollector(facetName,keyField,interval,from,to,comparatorType,context);
+    }
   }
   if (valueScript != null) {
     return new ValueScriptHistogramFacetCollector(facetName,keyField,scriptLang,valueScript,params,interval,comparatorType,context);
