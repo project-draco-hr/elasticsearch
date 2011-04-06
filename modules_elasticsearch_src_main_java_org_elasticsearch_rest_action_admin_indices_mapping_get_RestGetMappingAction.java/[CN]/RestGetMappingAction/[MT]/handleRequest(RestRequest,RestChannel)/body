@@ -8,8 +8,8 @@
         MetaData metaData=response.state().metaData();
         XContentBuilder builder=RestXContentBuilder.restContentBuilder(request);
         builder.startObject();
-        for (        IndexMetaData indexMetaData : metaData) {
-          builder.startObject(indexMetaData.index());
+        if (indices.length == 1 && types.size() == 1) {
+          IndexMetaData indexMetaData=metaData.iterator().next();
           for (          MappingMetaData mappingMd : indexMetaData.mappings().values()) {
             if (!types.isEmpty() && !types.contains(mappingMd.type())) {
               continue;
@@ -23,7 +23,25 @@
             builder.field(mappingMd.type());
             builder.map(mapping);
           }
-          builder.endObject();
+        }
+ else {
+          for (          IndexMetaData indexMetaData : metaData) {
+            builder.startObject(indexMetaData.index());
+            for (            MappingMetaData mappingMd : indexMetaData.mappings().values()) {
+              if (!types.isEmpty() && !types.contains(mappingMd.type())) {
+                continue;
+              }
+              byte[] mappingSource=mappingMd.source().uncompressed();
+              XContentParser parser=XContentFactory.xContent(mappingSource).createParser(mappingSource);
+              Map<String,Object> mapping=parser.map();
+              if (mapping.size() == 1 && mapping.containsKey(mappingMd.type())) {
+                mapping=(Map<String,Object>)mapping.get(mappingMd.type());
+              }
+              builder.field(mappingMd.type());
+              builder.map(mapping);
+            }
+            builder.endObject();
+          }
         }
         builder.endObject();
         channel.sendResponse(new XContentRestResponse(request,OK,builder));
