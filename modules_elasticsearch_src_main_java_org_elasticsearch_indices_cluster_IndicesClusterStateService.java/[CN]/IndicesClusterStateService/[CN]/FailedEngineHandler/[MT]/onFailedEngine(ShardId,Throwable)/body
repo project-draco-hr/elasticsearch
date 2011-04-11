@@ -1,0 +1,38 @@
+{
+  ShardRouting shardRouting=null;
+  final IndexService indexService=indicesService.indexService(shardId.index().name());
+  if (indexService != null) {
+    IndexShard indexShard=indexService.shard(shardId.id());
+    if (indexShard != null) {
+      shardRouting=indexShard.routingEntry();
+    }
+  }
+  if (shardRouting == null) {
+    logger.warn("[{}][{}] engine failed, but can't find index shard",shardId.index().name(),shardId.id());
+    return;
+  }
+  final ShardRouting fShardRouting=shardRouting;
+  threadPool.cached().execute(new Runnable(){
+    @Override public void run(){
+synchronized (mutex) {
+        if (indexService.hasShard(shardId.id())) {
+          try {
+            indexService.cleanShard(shardId.id(),"engine failure [" + ExceptionsHelper.detailedMessage(failure) + "]");
+          }
+ catch (          IndexShardMissingException e) {
+          }
+catch (          Exception e1) {
+            logger.warn("[{}][{}] failed to delete shard after failed engine",e1,indexService.index().name(),shardId.id());
+          }
+        }
+        try {
+          shardStateAction.shardFailed(fShardRouting,"engine failure, message [" + detailedMessage(failure) + "]");
+        }
+ catch (        Exception e1) {
+          logger.warn("[{}][{}] failed to mark shard as failed after a failed engine",e1,indexService.index().name(),shardId.id());
+        }
+      }
+    }
+  }
+);
+}
