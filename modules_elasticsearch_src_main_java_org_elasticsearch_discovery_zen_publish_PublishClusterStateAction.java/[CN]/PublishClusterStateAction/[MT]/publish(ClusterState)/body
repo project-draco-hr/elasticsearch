@@ -1,10 +1,22 @@
 {
   DiscoveryNode localNode=nodesProvider.nodes().localNode();
+  byte[] clusterStateInBytes;
+  try {
+    HandlesStreamOutput stream=CachedStreamOutput.cachedHandlesLzfBytes();
+    ClusterState.Builder.writeTo(clusterState,stream);
+    stream.flush();
+    BytesStreamOutput wrapped=((BytesStreamOutput)((LZFStreamOutput)stream.wrappedOut()).wrappedOut());
+    clusterStateInBytes=wrapped.copiedByteArray();
+  }
+ catch (  Exception e) {
+    logger.warn("failed to serialize cluster_state before publishing it to nodes",e);
+    return;
+  }
   for (  final DiscoveryNode node : clusterState.nodes()) {
     if (node.equals(localNode)) {
       continue;
     }
-    transportService.sendRequest(node,PublishClusterStateRequestHandler.ACTION,new PublishClusterStateRequest(clusterState),TransportRequestOptions.options().withHighType().withCompress(compesss),new VoidTransportResponseHandler(ThreadPool.Names.SAME){
+    transportService.sendRequest(node,PublishClusterStateRequestHandler.ACTION,new PublishClusterStateRequest(clusterStateInBytes),TransportRequestOptions.options().withHighType().withCompress(false),new VoidTransportResponseHandler(ThreadPool.Names.SAME){
       @Override public void handleException(      TransportException exp){
         logger.debug("failed to send cluster state to [{}], should be detected as failed soon...",exp,node);
       }
