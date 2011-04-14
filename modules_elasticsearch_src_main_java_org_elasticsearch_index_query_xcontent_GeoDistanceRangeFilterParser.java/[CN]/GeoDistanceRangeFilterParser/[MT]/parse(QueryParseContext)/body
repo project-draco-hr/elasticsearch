@@ -1,0 +1,196 @@
+{
+  XContentParser parser=parseContext.parser();
+  XContentParser.Token token;
+  boolean cache=false;
+  String filterName=null;
+  String currentFieldName=null;
+  double lat=0;
+  double lon=0;
+  String fieldName=null;
+  Object vFrom=null;
+  Object vTo=null;
+  boolean includeLower=true;
+  boolean includeUpper=true;
+  DistanceUnit unit=DistanceUnit.KILOMETERS;
+  GeoDistance geoDistance=GeoDistance.ARC;
+  while ((token=parser.nextToken()) != XContentParser.Token.END_OBJECT) {
+    if (token == XContentParser.Token.FIELD_NAME) {
+      currentFieldName=parser.currentName();
+    }
+ else     if (token == XContentParser.Token.START_ARRAY) {
+      token=parser.nextToken();
+      lon=parser.doubleValue();
+      token=parser.nextToken();
+      lat=parser.doubleValue();
+      while ((token=parser.nextToken()) != XContentParser.Token.END_ARRAY) {
+      }
+      fieldName=currentFieldName;
+    }
+ else     if (token == XContentParser.Token.START_OBJECT) {
+      String currentName=parser.currentName();
+      fieldName=currentFieldName;
+      while ((token=parser.nextToken()) != XContentParser.Token.END_OBJECT) {
+        if (token == XContentParser.Token.FIELD_NAME) {
+          currentName=parser.currentName();
+        }
+ else         if (token.isValue()) {
+          if (currentName.equals(GeoPointFieldMapper.Names.LAT)) {
+            lat=parser.doubleValue();
+          }
+ else           if (currentName.equals(GeoPointFieldMapper.Names.LON)) {
+            lon=parser.doubleValue();
+          }
+ else           if (currentName.equals(GeoPointFieldMapper.Names.GEOHASH)) {
+            double[] values=GeoHashUtils.decode(parser.text());
+            lat=values[0];
+            lon=values[1];
+          }
+        }
+      }
+    }
+ else     if (token.isValue()) {
+      if (currentFieldName.equals("from")) {
+        if (token == XContentParser.Token.VALUE_NULL) {
+        }
+ else         if (token == XContentParser.Token.VALUE_STRING) {
+          vFrom=parser.text();
+        }
+ else {
+          vFrom=parser.numberValue();
+        }
+      }
+ else       if (currentFieldName.equals("to")) {
+        if (token == XContentParser.Token.VALUE_NULL) {
+        }
+        if (token == XContentParser.Token.VALUE_STRING) {
+          vTo=parser.text();
+        }
+ else {
+          vTo=parser.numberValue();
+        }
+      }
+ else       if ("include_lower".equals(currentFieldName) || "includeLower".equals(currentFieldName)) {
+        includeLower=parser.booleanValue();
+      }
+ else       if ("include_upper".equals(currentFieldName) || "includeUpper".equals(currentFieldName)) {
+        includeUpper=parser.booleanValue();
+      }
+ else       if ("gt".equals(currentFieldName)) {
+        if (token == XContentParser.Token.VALUE_NULL) {
+        }
+ else         if (token == XContentParser.Token.VALUE_STRING) {
+          vFrom=parser.text();
+        }
+ else {
+          vFrom=parser.numberValue();
+        }
+        includeLower=false;
+      }
+ else       if ("gte".equals(currentFieldName) || "ge".equals(currentFieldName)) {
+        if (token == XContentParser.Token.VALUE_NULL) {
+        }
+ else         if (token == XContentParser.Token.VALUE_STRING) {
+          vFrom=parser.text();
+        }
+ else {
+          vFrom=parser.numberValue();
+        }
+        includeLower=true;
+      }
+ else       if ("lt".equals(currentFieldName)) {
+        if (token == XContentParser.Token.VALUE_NULL) {
+        }
+        if (token == XContentParser.Token.VALUE_STRING) {
+          vTo=parser.text();
+        }
+ else {
+          vTo=parser.numberValue();
+        }
+        includeUpper=false;
+      }
+ else       if ("lte".equals(currentFieldName) || "le".equals(currentFieldName)) {
+        if (token == XContentParser.Token.VALUE_NULL) {
+        }
+        if (token == XContentParser.Token.VALUE_STRING) {
+          vTo=parser.text();
+        }
+ else {
+          vTo=parser.numberValue();
+        }
+        includeUpper=true;
+      }
+ else       if (currentFieldName.equals("unit")) {
+        unit=DistanceUnit.fromString(parser.text());
+      }
+ else       if (currentFieldName.equals("distance_type") || currentFieldName.equals("distanceType")) {
+        geoDistance=GeoDistance.fromString(parser.text());
+      }
+ else       if (currentFieldName.endsWith(GeoPointFieldMapper.Names.LAT_SUFFIX)) {
+        lat=parser.doubleValue();
+        fieldName=currentFieldName.substring(0,currentFieldName.length() - GeoPointFieldMapper.Names.LAT_SUFFIX.length());
+      }
+ else       if (currentFieldName.endsWith(GeoPointFieldMapper.Names.LON_SUFFIX)) {
+        lon=parser.doubleValue();
+        fieldName=currentFieldName.substring(0,currentFieldName.length() - GeoPointFieldMapper.Names.LON_SUFFIX.length());
+      }
+ else       if (currentFieldName.endsWith(GeoPointFieldMapper.Names.GEOHASH_SUFFIX)) {
+        double[] values=GeoHashUtils.decode(parser.text());
+        lat=values[0];
+        lon=values[1];
+        fieldName=currentFieldName.substring(0,currentFieldName.length() - GeoPointFieldMapper.Names.GEOHASH_SUFFIX.length());
+      }
+ else       if ("_name".equals(currentFieldName)) {
+        filterName=parser.text();
+      }
+ else       if ("_cache".equals(currentFieldName)) {
+        cache=parser.booleanValue();
+      }
+ else {
+        String value=parser.text();
+        int comma=value.indexOf(',');
+        if (comma != -1) {
+          lat=Double.parseDouble(value.substring(0,comma).trim());
+          lon=Double.parseDouble(value.substring(comma + 1).trim());
+        }
+ else {
+          double[] values=GeoHashUtils.decode(value);
+          lat=values[0];
+          lon=values[1];
+        }
+        fieldName=currentFieldName;
+      }
+    }
+  }
+  double from;
+  double to;
+  if (vFrom instanceof Number) {
+    from=unit.toMiles(((Number)vFrom).doubleValue());
+  }
+ else {
+    from=DistanceUnit.parse((String)vFrom,unit,DistanceUnit.MILES);
+  }
+  if (vTo instanceof Number) {
+    to=unit.toMiles(((Number)vTo).doubleValue());
+  }
+ else {
+    to=DistanceUnit.parse((String)vTo,unit,DistanceUnit.MILES);
+  }
+  MapperService mapperService=parseContext.mapperService();
+  FieldMapper mapper=mapperService.smartNameFieldMapper(fieldName);
+  if (mapper == null) {
+    throw new QueryParsingException(index,"failed to find geo_point field [" + fieldName + "]");
+  }
+  if (mapper.fieldDataType() != GeoPointFieldDataType.TYPE) {
+    throw new QueryParsingException(index,"field [" + fieldName + "] is not a geo_point field");
+  }
+  fieldName=mapper.names().indexName();
+  Filter filter=new GeoDistanceRangeFilter(lat,lon,from,to,includeLower,includeUpper,geoDistance,fieldName,parseContext.indexCache().fieldData());
+  if (cache) {
+    filter=parseContext.cacheFilter(filter);
+  }
+  filter=wrapSmartNameFilter(filter,parseContext.smartFieldMappers(fieldName),parseContext);
+  if (filterName != null) {
+    parseContext.addNamedFilter(filterName,filter);
+  }
+  return filter;
+}
