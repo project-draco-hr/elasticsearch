@@ -2,7 +2,6 @@
   boolean changed=false;
   DiscoveryNodes nodes=allocation.nodes();
   RoutingNodes routingNodes=allocation.routingNodes();
-  TransportNodesListGatewayStartedShards.NodesLocalGatewayStartedShards nodesState=null;
   Iterator<MutableShardRouting> unassignedIterator=routingNodes.unassigned().iterator();
   while (unassignedIterator.hasNext()) {
     MutableShardRouting shard=unassignedIterator.next();
@@ -12,42 +11,26 @@
     if (!routingNodes.routingTable().index(shard.index()).shard(shard.id()).allocatedPostApi()) {
       continue;
     }
-    if (nodesState == null) {
-      Set<String> nodesIds=Sets.newHashSet();
-      nodesIds.addAll(nodes.dataNodes().keySet());
-      nodesState=listGatewayStartedShards.list(nodesIds,null).actionGet();
-      if (nodesState.failures().length > 0) {
-        StringBuilder sb=new StringBuilder("failures when trying to list started shards on nodes:");
-        for (int i=0; i < nodesState.failures().length; i++) {
-          Throwable cause=ExceptionsHelper.unwrapCause(nodesState.failures()[i]);
-          if (cause instanceof ConnectTransportException) {
-            continue;
-          }
-          sb.append("\n    -> ").append(nodesState.failures()[i].getDetailedMessage());
-        }
-        logger.warn(sb.toString());
-      }
-    }
+    TObjectLongHashMap<DiscoveryNode> nodesState=buildShardStates(nodes,shard);
     int numberOfAllocationsFound=0;
     long highestVersion=-1;
     DiscoveryNode nodeWithHighestVersion=null;
-    for (    TransportNodesListGatewayStartedShards.NodeLocalGatewayStartedShards nodeState : nodesState) {
-      if (nodeState.state() == null) {
+    for (TObjectLongIterator<DiscoveryNode> it=nodesState.iterator(); it.hasNext(); ) {
+      it.advance();
+      DiscoveryNode node=it.key();
+      long version=it.value();
+      if (allocation.shouldIgnoreShardForNode(shard.shardId(),node.id())) {
         continue;
       }
-      if (allocation.shouldIgnoreShardForNode(shard.shardId(),nodeState.node().id())) {
-        continue;
-      }
-      Long version=nodeState.state().shards().get(shard.shardId());
-      if (version != null) {
+      if (version != -1) {
         numberOfAllocationsFound++;
         if (highestVersion == -1) {
-          nodeWithHighestVersion=nodeState.node();
+          nodeWithHighestVersion=node;
           highestVersion=version;
         }
  else {
           if (version > highestVersion) {
-            nodeWithHighestVersion=nodeState.node();
+            nodeWithHighestVersion=node;
             highestVersion=version;
           }
         }
@@ -116,7 +99,7 @@
     if (!canBeAllocatedToAtLeastOneNode) {
       continue;
     }
-    ConcurrentMap<DiscoveryNode,TransportNodesListShardStoreMetaData.StoreFilesMetaData> shardStores=buildShardStores(nodes,shard);
+    Map<DiscoveryNode,TransportNodesListShardStoreMetaData.StoreFilesMetaData> shardStores=buildShardStores(nodes,shard);
     long lastSizeMatched=0;
     DiscoveryNode lastDiscoNodeMatched=null;
     RoutingNode lastNodeMatched=null;
