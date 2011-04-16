@@ -3,7 +3,7 @@ synchronized (dirtyLock(create.uid())) {
     UidField uidField=create.uidField();
     if (create.origin() == Operation.Origin.RECOVERY) {
       if (create.version() != 0) {
-        versionMap.put(create.uid().text(),new VersionValue(create.version(),false));
+        versionMap.put(create.uid().text(),new VersionValue(create.version(),false,threadPool.estimatedTimeInMillis()));
       }
       uidField.version(create.version());
       writer.addDocument(create.doc(),create.analyzer());
@@ -16,7 +16,12 @@ synchronized (dirtyLock(create.uid())) {
         currentVersion=loadCurrentVersionFromIndex(create.uid());
       }
  else {
-        currentVersion=versionValue.version();
+        if (versionValue.delete() && (threadPool.estimatedTimeInMillis() - versionValue.time()) > gcDeletesInMillis) {
+          currentVersion=-1;
+        }
+ else {
+          currentVersion=versionValue.version();
+        }
       }
       long updatedVersion;
       if (create.origin() == Operation.Origin.PRIMARY) {
@@ -60,7 +65,7 @@ synchronized (dirtyLock(create.uid())) {
  else       if (currentVersion != -1) {
         throw new DocumentAlreadyExistsEngineException(shardId,create.type(),create.id());
       }
-      versionMap.put(create.uid().text(),new VersionValue(updatedVersion,false));
+      versionMap.put(create.uid().text(),new VersionValue(updatedVersion,false,threadPool.estimatedTimeInMillis()));
       uidField.version(updatedVersion);
       create.version(updatedVersion);
       writer.addDocument(create.doc(),create.analyzer());

@@ -2,7 +2,7 @@
 synchronized (dirtyLock(delete.uid())) {
     if (delete.origin() == Operation.Origin.RECOVERY) {
       if (delete.version() != 0) {
-        versionMap.put(delete.uid().text(),new VersionValue(delete.version(),true));
+        versionMap.put(delete.uid().text(),new VersionValue(delete.version(),true,threadPool.estimatedTimeInMillis()));
       }
       writer.deleteDocuments(delete.uid());
       translog.add(new Translog.Delete(delete));
@@ -14,7 +14,12 @@ synchronized (dirtyLock(delete.uid())) {
         currentVersion=loadCurrentVersionFromIndex(delete.uid());
       }
  else {
-        currentVersion=versionValue.version();
+        if (versionValue.delete() && (threadPool.estimatedTimeInMillis() - versionValue.time()) > gcDeletesInMillis) {
+          currentVersion=-1;
+        }
+ else {
+          currentVersion=versionValue.version();
+        }
       }
       long updatedVersion;
       if (delete.origin() == Operation.Origin.PRIMARY) {
@@ -56,7 +61,7 @@ synchronized (dirtyLock(delete.uid())) {
         delete.version(versionValue.version()).notFound(true);
       }
  else {
-        versionMap.put(delete.uid().text(),new VersionValue(updatedVersion,true));
+        versionMap.put(delete.uid().text(),new VersionValue(updatedVersion,true,threadPool.estimatedTimeInMillis()));
         delete.version(updatedVersion);
         writer.deleteDocuments(delete.uid());
         translog.add(new Translog.Delete(delete));

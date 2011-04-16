@@ -3,7 +3,7 @@ synchronized (dirtyLock(index.uid())) {
     UidField uidField=index.uidField();
     if (index.origin() == Operation.Origin.RECOVERY) {
       if (index.version() != 0) {
-        versionMap.put(index.uid().text(),new VersionValue(index.version(),false));
+        versionMap.put(index.uid().text(),new VersionValue(index.version(),false,threadPool.estimatedTimeInMillis()));
       }
       uidField.version(index.version());
       writer.updateDocument(index.uid(),index.doc(),index.analyzer());
@@ -16,7 +16,12 @@ synchronized (dirtyLock(index.uid())) {
         currentVersion=loadCurrentVersionFromIndex(index.uid());
       }
  else {
-        currentVersion=versionValue.version();
+        if (versionValue.delete() && (threadPool.estimatedTimeInMillis() - versionValue.time()) > gcDeletesInMillis) {
+          currentVersion=-1;
+        }
+ else {
+          currentVersion=versionValue.version();
+        }
       }
       long updatedVersion;
       if (index.origin() == Operation.Origin.PRIMARY) {
@@ -52,7 +57,7 @@ synchronized (dirtyLock(index.uid())) {
         }
         updatedVersion=index.version();
       }
-      versionMap.put(index.uid().text(),new VersionValue(updatedVersion,false));
+      versionMap.put(index.uid().text(),new VersionValue(updatedVersion,false,threadPool.estimatedTimeInMillis()));
       uidField.version(updatedVersion);
       index.version(updatedVersion);
       if (currentVersion == -1) {
