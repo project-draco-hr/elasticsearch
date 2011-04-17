@@ -1,16 +1,18 @@
 {
   Random random=new Random();
-  Settings settings=settingsBuilder().put("cluster.routing.schedule",200,TimeUnit.MILLISECONDS).put("index.refresh_interval","-1").put("index.merge.async",true).put("gateway.type","local").put(SETTING_NUMBER_OF_SHARDS,2).put(SETTING_NUMBER_OF_REPLICAS,1).build();
-  Node node1=nodeBuilder().settings(settingsBuilder().put(settings).put("name","server1")).node();
-  Node node2=nodeBuilder().settings(settingsBuilder().put(settings).put("name","server2")).node();
+  Settings settings=settingsBuilder().put("cluster.routing.schedule",200,TimeUnit.MILLISECONDS).put("index.refresh_interval","-1").put("index.merge.async",true).put("index.translog.flush_threshold_ops",5000).put("gateway.type","local").put(SETTING_NUMBER_OF_SHARDS,1).put(SETTING_NUMBER_OF_REPLICAS,1).build();
+  Node[] nodes=new Node[1];
+  for (int i=0; i < nodes.length; i++) {
+    nodes[i]=nodeBuilder().settings(settingsBuilder().put(settings).put("name","node" + i)).node();
+  }
   Node client=nodeBuilder().settings(settingsBuilder().put(settings).put("name","client")).client(true).node();
   Client client1=client.client();
   Thread.sleep(1000);
-  client1.admin().indices().create(createIndexRequest("test")).actionGet();
+  client1.admin().indices().prepareCreate("test").setSettings(settings).addMapping("type1",XContentFactory.jsonBuilder().startObject().startObject("type1").startObject("_source").field("enabled",false).endObject().startObject("_all").field("enabled",false).endObject().startObject("properties").startObject("field").field("type","string").field("index","not_analyzed").field("omit_norms",true).endObject().endObject().endObject().endObject()).execute().actionGet();
   Thread.sleep(5000);
   StopWatch stopWatch=new StopWatch().start();
-  long COUNT=SizeValue.parseSizeValue("5m").singles();
-  int BATCH=100;
+  long COUNT=SizeValue.parseSizeValue("2m").singles();
+  int BATCH=500;
   System.out.println("Indexing [" + COUNT + "] ...");
   long ITERS=COUNT / BATCH;
   long i=1;
@@ -34,6 +36,7 @@
   client.client().admin().indices().prepareRefresh().execute().actionGet();
   System.out.println("Count: " + client.client().prepareCount().setQuery(matchAllQuery()).execute().actionGet().count());
   client.close();
-  node1.close();
-  node2.close();
+  for (  Node node : nodes) {
+    node.close();
+  }
 }
