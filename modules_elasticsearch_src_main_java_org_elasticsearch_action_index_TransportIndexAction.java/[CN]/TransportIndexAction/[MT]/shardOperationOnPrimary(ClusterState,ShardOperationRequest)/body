@@ -8,17 +8,19 @@
   }
   IndexShard indexShard=indexShard(shardRequest);
   SourceToParse sourceToParse=SourceToParse.source(request.source()).type(request.type()).id(request.id()).routing(request.routing()).parent(request.parent());
-  ParsedDocument doc;
   long version;
+  Engine.IndexingOperation op;
   if (request.opType() == IndexRequest.OpType.INDEX) {
     Engine.Index index=indexShard.prepareIndex(sourceToParse).version(request.version()).versionType(request.versionType()).origin(Engine.Operation.Origin.PRIMARY);
-    doc=indexShard.index(index);
+    indexShard.index(index);
     version=index.version();
+    op=index;
   }
  else {
     Engine.Create create=indexShard.prepareCreate(sourceToParse).version(request.version()).versionType(request.versionType()).origin(Engine.Operation.Origin.PRIMARY);
-    doc=indexShard.create(create);
+    indexShard.create(create);
     version=create.version();
+    op=create;
   }
   if (request.refresh()) {
     try {
@@ -27,10 +29,10 @@
  catch (    Exception e) {
     }
   }
-  if (doc.mappersAdded()) {
+  if (op.parsedDoc().mappersAdded()) {
     updateMappingOnMaster(request);
   }
   request.version(version);
   IndexResponse response=new IndexResponse(request.index(),request.type(),request.id(),version);
-  return new PrimaryResponse<IndexResponse>(response,doc);
+  return new PrimaryResponse<IndexResponse>(response,op);
 }

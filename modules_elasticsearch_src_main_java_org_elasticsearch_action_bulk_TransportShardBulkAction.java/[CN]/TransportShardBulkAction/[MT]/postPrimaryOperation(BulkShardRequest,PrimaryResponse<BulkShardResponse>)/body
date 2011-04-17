@@ -1,13 +1,14 @@
 {
   IndexService indexService=indicesService.indexServiceSafe(request.index());
-  Engine.Operation[] ops=(Engine.Operation[])response.payload();
+  Engine.IndexingOperation[] ops=(Engine.IndexingOperation[])response.payload();
   for (int i=0; i < ops.length; i++) {
     BulkItemRequest itemRequest=request.items()[i];
     BulkItemResponse itemResponse=response.response().responses()[i];
     if (itemResponse.failed()) {
       continue;
     }
-    if (ops[i] == null) {
+    Engine.IndexingOperation op=ops[i];
+    if (op == null) {
       continue;
     }
     if (itemRequest.request() instanceof IndexRequest) {
@@ -15,19 +16,15 @@
       if (!Strings.hasLength(indexRequest.percolate())) {
         continue;
       }
-      ParsedDocument doc;
-      if (ops[i] instanceof Engine.Create) {
-        doc=((Engine.Create)ops[i]).parsedDoc();
-      }
- else {
-        doc=((Engine.Index)ops[i]).parsedDoc();
-      }
       try {
-        PercolatorExecutor.Response percolate=indexService.percolateService().percolate(new PercolatorExecutor.DocAndSourceQueryRequest(doc,indexRequest.percolate()));
+        PercolatorExecutor.Response percolate=indexService.percolateService().percolate(new PercolatorExecutor.DocAndSourceQueryRequest(op.parsedDoc(),indexRequest.percolate()));
         ((IndexResponse)itemResponse.response()).matches(percolate.matches());
       }
  catch (      Exception e) {
         logger.warn("failed to percolate [{}]",e,itemRequest.request());
+      }
+ finally {
+        op.docMapper().processDocumentAfterIndex(op.doc());
       }
     }
   }
