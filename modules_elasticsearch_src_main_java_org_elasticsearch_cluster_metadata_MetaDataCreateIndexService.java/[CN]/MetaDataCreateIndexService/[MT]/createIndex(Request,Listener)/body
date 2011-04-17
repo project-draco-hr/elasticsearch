@@ -12,19 +12,15 @@
   clusterService.submitStateUpdateTask("create-index [" + request.index + "], cause ["+ request.cause+ "]",new ProcessedClusterStateUpdateTask(){
     @Override public ClusterState execute(    ClusterState currentState){
       try {
-        if (request.origin == Request.Origin.API) {
-          try {
-            validate(request,currentState);
-          }
- catch (          Exception e) {
-            listener.onFailure(e);
-            return currentState;
-          }
+        try {
+          validate(request,currentState);
+        }
+ catch (        Exception e) {
+          listener.onFailure(e);
+          return currentState;
         }
         List<IndexTemplateMetaData> templates=ImmutableList.of();
-        if (request.origin == Request.Origin.API) {
-          templates=findTemplates(request,currentState);
-        }
+        templates=findTemplates(request,currentState);
         Map<String,Map<String,Object>> mappings=Maps.newHashMap();
         for (        Map.Entry<String,String> entry : request.mappings.entrySet()) {
           mappings.put(entry.getKey(),parseMapping(entry.getValue()));
@@ -39,17 +35,15 @@
             }
           }
         }
-        if (request.origin == Request.Origin.API) {
-          File mappingsDir=new File(environment.configFile(),"mappings");
-          if (mappingsDir.exists() && mappingsDir.isDirectory()) {
-            File indexMappingsDir=new File(mappingsDir,request.index);
-            if (indexMappingsDir.exists() && indexMappingsDir.isDirectory()) {
-              addMappings(mappings,indexMappingsDir);
-            }
-            File defaultMappingsDir=new File(mappingsDir,"_default");
-            if (defaultMappingsDir.exists() && defaultMappingsDir.isDirectory()) {
-              addMappings(mappings,defaultMappingsDir);
-            }
+        File mappingsDir=new File(environment.configFile(),"mappings");
+        if (mappingsDir.exists() && mappingsDir.isDirectory()) {
+          File indexMappingsDir=new File(mappingsDir,request.index);
+          if (indexMappingsDir.exists() && indexMappingsDir.isDirectory()) {
+            addMappings(mappings,indexMappingsDir);
+          }
+          File defaultMappingsDir=new File(mappingsDir,"_default");
+          if (defaultMappingsDir.exists() && defaultMappingsDir.isDirectory()) {
+            addMappings(mappings,defaultMappingsDir);
           }
         }
         ImmutableSettings.Builder indexSettingsBuilder=settingsBuilder();
@@ -131,7 +125,15 @@
         if (request.state == State.CLOSE) {
           blocks.addIndexBlock(request.index,MetaDataStateIndexService.INDEX_CLOSED_BLOCK);
         }
-        return newClusterStateBuilder().state(currentState).blocks(blocks).metaData(newMetaData).build();
+        ClusterState updatedState=newClusterStateBuilder().state(currentState).blocks(blocks).metaData(newMetaData).build();
+        if (request.state == State.OPEN) {
+          RoutingTable.Builder routingTableBuilder=RoutingTable.builder().routingTable(updatedState.routingTable());
+          IndexRoutingTable.Builder indexRoutingBuilder=new IndexRoutingTable.Builder(request.index).initializeEmpty(updatedState.metaData().index(request.index),true);
+          routingTableBuilder.add(indexRoutingBuilder);
+          RoutingAllocation.Result routingResult=shardsAllocation.reroute(newClusterStateBuilder().state(updatedState).routingTable(routingTableBuilder).build());
+          updatedState=newClusterStateBuilder().state(updatedState).routingResult(routingResult).build();
+        }
+        return updatedState;
       }
  catch (      Exception e) {
         logger.warn("[{}] failed to create",e,request.index);
@@ -140,28 +142,7 @@
       }
     }
     @Override public void clusterStateProcessed(    ClusterState clusterState){
-      if (request.state == State.CLOSE) {
-        listener.onResponse(new Response(true,clusterState.metaData().index(request.index)));
-        return;
-      }
-      if (!request.rerouteAfterCreation) {
-        listener.onResponse(new Response(true,clusterState.metaData().index(request.index)));
-        return;
-      }
-      clusterService.submitStateUpdateTask("reroute after index [" + request.index + "] creation",new ProcessedClusterStateUpdateTask(){
-        @Override public ClusterState execute(        ClusterState currentState){
-          RoutingTable.Builder routingTableBuilder=RoutingTable.builder().routingTable(currentState.routingTable());
-          IndexRoutingTable.Builder indexRoutingBuilder=new IndexRoutingTable.Builder(request.index).initializeEmpty(currentState.metaData().index(request.index),request.origin == Request.Origin.API);
-          routingTableBuilder.add(indexRoutingBuilder);
-          RoutingAllocation.Result routingResult=shardsAllocation.reroute(newClusterStateBuilder().state(currentState).routingTable(routingTableBuilder).build());
-          return newClusterStateBuilder().state(currentState).routingResult(routingResult).build();
-        }
-        @Override public void clusterStateProcessed(        ClusterState clusterState){
-          logger.info("[{}] created and added to cluster_state",request.index);
-          listener.onResponse(new Response(true,clusterState.metaData().index(request.index)));
-        }
-      }
-);
+      listener.onResponse(new Response(true,clusterState.metaData().index(request.index)));
     }
   }
 );
