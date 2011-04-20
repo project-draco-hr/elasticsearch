@@ -49,15 +49,24 @@
   try {
     InputStreamStreamInput si=new InputStreamStreamInput(new FileInputStream(recoveringTranslogFile));
     while (true) {
-      int opSize=si.readInt();
-      Translog.Operation operation=TranslogStreams.readTranslogOperation(si);
+      Translog.Operation operation;
+      try {
+        int opSize=si.readInt();
+        operation=TranslogStreams.readTranslogOperation(si);
+      }
+ catch (      EOFException e) {
+        break;
+      }
+catch (      IOException e) {
+        break;
+      }
       recoveryStatus.translog().addTranslogOperations(1);
       indexShard.performRecoveryOperation(operation);
     }
   }
- catch (  EOFException e) {
-  }
-catch (  IOException e) {
+ catch (  Throwable e) {
+    indexShard.translog().close(true);
+    throw new IndexShardGatewayRecoveryException(shardId,"failed to recover shard",e);
   }
   indexShard.performRecoveryFinalization(true);
   recoveringTranslogFile.delete();
