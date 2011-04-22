@@ -3,6 +3,7 @@
     if (!indicesService.hasIndex(indexMetaData.index())) {
       continue;
     }
+    List<String> typesToRefresh=null;
     String index=indexMetaData.index();
     IndexService indexService=indicesService.indexServiceSafe(index);
     MapperService mapperService=indexService.mapperService();
@@ -15,7 +16,16 @@
       if (mappingType.equals(MapperService.DEFAULT_MAPPING)) {
         continue;
       }
-      processMapping(event,index,mapperService,mappingType,mappingSource);
+      boolean requireRefresh=processMapping(event,index,mapperService,mappingType,mappingSource);
+      if (requireRefresh) {
+        if (typesToRefresh == null) {
+          typesToRefresh=Lists.newArrayList();
+        }
+        typesToRefresh.add(mappingType);
+      }
+    }
+    if (typesToRefresh != null) {
+      nodeMappingRefreshAction.nodeMappingRefresh(new NodeMappingRefreshAction.NodeMappingRefreshRequest(index,typesToRefresh.toArray(new String[typesToRefresh.size()]),event.state().nodes().localNodeId()));
     }
     for (    DocumentMapper documentMapper : mapperService) {
       if (seenMappings.containsKey(new Tuple<String,String>(index,documentMapper.type())) && !indexMetaData.mappings().containsKey(documentMapper.type())) {
