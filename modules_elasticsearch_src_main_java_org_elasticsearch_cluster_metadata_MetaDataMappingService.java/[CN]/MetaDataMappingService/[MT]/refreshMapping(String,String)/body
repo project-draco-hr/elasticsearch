@@ -1,6 +1,7 @@
 {
   clusterService.submitStateUpdateTask("refresh-mapping [" + index + "]["+ Arrays.toString(types)+ "]",new ClusterStateUpdateTask(){
     @Override public ClusterState execute(    ClusterState currentState){
+      boolean createdIndex=false;
       try {
         final IndexMetaData indexMetaData=currentState.metaData().index(index);
         if (indexMetaData == null) {
@@ -9,6 +10,7 @@
         IndexService indexService=indicesService.indexService(index);
         if (indexService == null) {
           indexService=indicesService.createIndex(indexMetaData.index(),indexMetaData.settings(),currentState.nodes().localNode().id());
+          createdIndex=true;
           for (          String type : types) {
             if (indexMetaData.mappings().containsKey(type)) {
               indexService.mapperService().add(type,indexMetaData.mappings().get(type).source().string());
@@ -35,6 +37,11 @@
  catch (      Exception e) {
         logger.warn("failed to dynamically refresh the mapping in cluster_state from shard",e);
         return currentState;
+      }
+ finally {
+        if (createdIndex) {
+          indicesService.cleanIndex(index,"created for mapping processing");
+        }
       }
     }
   }
