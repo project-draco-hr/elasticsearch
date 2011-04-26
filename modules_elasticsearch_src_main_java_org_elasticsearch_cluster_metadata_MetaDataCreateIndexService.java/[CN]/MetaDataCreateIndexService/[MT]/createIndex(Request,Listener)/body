@@ -9,7 +9,9 @@
     }
   }
   request.settings(updatedSettingsBuilder.build());
+  final CreateIndexListener listener=new CreateIndexListener(request,userListener);
   clusterService.submitStateUpdateTask("create-index [" + request.index + "], cause ["+ request.cause+ "]",new ProcessedClusterStateUpdateTask(){
+    final Set<String> allocatedNodes=Sets.newHashSet();
     @Override public ClusterState execute(    ClusterState currentState){
       try {
         try {
@@ -133,6 +135,37 @@
           RoutingAllocation.Result routingResult=shardsAllocation.reroute(newClusterStateBuilder().state(updatedState).routingTable(routingTableBuilder).build());
           updatedState=newClusterStateBuilder().state(updatedState).routingResult(routingResult).build();
         }
+        if (updatedState.routingTable().hasIndex(request.index)) {
+          for (          IndexShardRoutingTable indexShardRoutingTable : updatedState.routingTable().index(request.index)) {
+            for (            ShardRouting shardRouting : indexShardRoutingTable) {
+              if (shardRouting.currentNodeId() != null && !updatedState.nodes().localNodeId().equals(shardRouting.currentNodeId())) {
+                allocatedNodes.add(shardRouting.currentNodeId());
+              }
+            }
+          }
+        }
+        if (!allocatedNodes.isEmpty()) {
+          final AtomicInteger counter=new AtomicInteger(allocatedNodes.size());
+          final NodeIndexCreatedAction.Listener nodeIndexCreatedListener=new NodeIndexCreatedAction.Listener(){
+            @Override public void onNodeIndexCreated(            String index,            String nodeId){
+              if (index.equals(request.index)) {
+                if (counter.decrementAndGet() == 0) {
+                  listener.onResponse(new Response(true,indexMetaData));
+                  nodeIndexCreatedAction.remove(this);
+                }
+              }
+            }
+          }
+;
+          nodeIndexCreatedAction.add(nodeIndexCreatedListener);
+          listener.future=threadPool.schedule(request.timeout,ThreadPool.Names.SAME,new Runnable(){
+            @Override public void run(){
+              listener.onResponse(new Response(false,indexMetaData));
+              nodeIndexCreatedAction.remove(nodeIndexCreatedListener);
+            }
+          }
+);
+        }
         return updatedState;
       }
  catch (      Exception e) {
@@ -142,7 +175,9 @@
       }
     }
     @Override public void clusterStateProcessed(    ClusterState clusterState){
-      listener.onResponse(new Response(true,clusterState.metaData().index(request.index)));
+      if (allocatedNodes.isEmpty()) {
+        listener.onResponse(new Response(true,clusterState.metaData().index(request.index)));
+      }
     }
   }
 );
