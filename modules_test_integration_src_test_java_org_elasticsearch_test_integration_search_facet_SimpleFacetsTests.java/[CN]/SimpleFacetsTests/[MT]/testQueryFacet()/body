@@ -1,0 +1,24 @@
+{
+  try {
+    client.admin().indices().prepareDelete("test").execute().actionGet();
+  }
+ catch (  Exception e) {
+  }
+  client.admin().indices().prepareCreate("test").execute().actionGet();
+  client.admin().cluster().prepareHealth().setWaitForGreenStatus().execute().actionGet();
+  for (int i=0; i < 20; i++) {
+    client.prepareIndex("test","type1",Integer.toString(i)).setSource("num",i % 10).execute().actionGet();
+  }
+  client.admin().indices().prepareRefresh().execute().actionGet();
+  for (int i=0; i < numberOfRuns(); i++) {
+    SearchResponse searchResponse=client.prepareSearch().setQuery(matchAllQuery()).addFacet(queryFacet("query").query(termQuery("num",1))).execute().actionGet();
+    QueryFacet facet=searchResponse.facets().facet("query");
+    assertThat(facet.count(),equalTo(2l));
+    searchResponse=client.prepareSearch().setQuery(matchAllQuery()).addFacet(queryFacet("query").query(termQuery("num",1)).global(true)).execute().actionGet();
+    facet=searchResponse.facets().facet("query");
+    assertThat(facet.count(),equalTo(2l));
+    searchResponse=client.prepareSearch().setQuery(matchAllQuery()).addFacet(queryFacet("query").query(termsQuery("num",new long[]{1,2})).facetFilter(termFilter("num",1)).global(true)).execute().actionGet();
+    facet=searchResponse.facets().facet("query");
+    assertThat(facet.count(),equalTo(2l));
+  }
+}
