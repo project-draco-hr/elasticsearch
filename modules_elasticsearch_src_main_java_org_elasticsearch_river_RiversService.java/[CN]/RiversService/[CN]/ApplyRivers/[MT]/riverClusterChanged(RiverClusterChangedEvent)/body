@@ -26,7 +26,20 @@
         }
       }
       @Override public void onFailure(      Throwable e){
-        logger.warn("failed to get _meta from [{}]/[{}]",e,routing.riverName().type(),routing.riverName().name());
+        Throwable failure=ExceptionsHelper.unwrapCause(e);
+        if ((failure instanceof NoShardAvailableActionException) || (failure instanceof ClusterBlockException)) {
+          logger.debug("failed to get _meta from [{}]/[{}], retrying...",e,routing.riverName().type(),routing.riverName().name());
+          final ActionListener<GetResponse> listener=this;
+          threadPool.schedule(TimeValue.timeValueSeconds(5),ThreadPool.Names.SAME,new Runnable(){
+            @Override public void run(){
+              client.prepareGet(riverIndexName,routing.riverName().name(),"_meta").execute(listener);
+            }
+          }
+);
+        }
+ else {
+          logger.warn("failed to get _meta from [{}]/[{}]",e,routing.riverName().type(),routing.riverName().name());
+        }
       }
     }
 );
