@@ -1,0 +1,69 @@
+{
+  while (true) {
+    if (replacement != null && replacement.hasNext()) {
+      copy(this,replacement.next());
+      return true;
+    }
+    AttributeSource firstTok=nextTok();
+    if (firstTok == null)     return false;
+    CharTermAttribute termAtt=firstTok.addAttribute(CharTermAttribute.class);
+    SynonymMap result=map.submap != null ? map.submap.get(termAtt.buffer(),0,termAtt.length()) : null;
+    if (result == null) {
+      copy(this,firstTok);
+      return true;
+    }
+    if (firstTok == this)     firstTok=cloneAttributes();
+    matched=new LinkedList<AttributeSource>();
+    result=match(result);
+    if (result == null) {
+      copy(this,firstTok);
+      return true;
+    }
+    ArrayList<AttributeSource> generated=new ArrayList<AttributeSource>(result.synonyms.length + matched.size() + 1);
+    AttributeSource lastTok=matched.isEmpty() ? firstTok : matched.getLast();
+    boolean includeOrig=result.includeOrig();
+    AttributeSource origTok=includeOrig ? firstTok : null;
+    PositionIncrementAttribute firstPosIncAtt=firstTok.addAttribute(PositionIncrementAttribute.class);
+    int origPos=firstPosIncAtt.getPositionIncrement();
+    int repPos=0;
+    int pos=0;
+    for (int i=0; i < result.synonyms.length; i++) {
+      Token repTok=result.synonyms[i];
+      AttributeSource newTok=firstTok.cloneAttributes();
+      CharTermAttribute newTermAtt=newTok.addAttribute(CharTermAttribute.class);
+      OffsetAttribute newOffsetAtt=newTok.addAttribute(OffsetAttribute.class);
+      PositionIncrementAttribute newPosIncAtt=newTok.addAttribute(PositionIncrementAttribute.class);
+      OffsetAttribute lastOffsetAtt=lastTok.addAttribute(OffsetAttribute.class);
+      newOffsetAtt.setOffset(newOffsetAtt.startOffset(),lastOffsetAtt.endOffset());
+      newTermAtt.copyBuffer(repTok.buffer(),0,repTok.length());
+      repPos+=repTok.getPositionIncrement();
+      if (i == 0)       repPos=origPos;
+      while (origTok != null && origPos <= repPos) {
+        PositionIncrementAttribute origPosInc=origTok.addAttribute(PositionIncrementAttribute.class);
+        origPosInc.setPositionIncrement(origPos - pos);
+        generated.add(origTok);
+        pos+=origPosInc.getPositionIncrement();
+        origTok=matched.isEmpty() ? null : matched.removeFirst();
+        if (origTok != null) {
+          origPosInc=origTok.addAttribute(PositionIncrementAttribute.class);
+          origPos+=origPosInc.getPositionIncrement();
+        }
+      }
+      newPosIncAtt.setPositionIncrement(repPos - pos);
+      generated.add(newTok);
+      pos+=newPosIncAtt.getPositionIncrement();
+    }
+    while (origTok != null) {
+      PositionIncrementAttribute origPosInc=origTok.addAttribute(PositionIncrementAttribute.class);
+      origPosInc.setPositionIncrement(origPos - pos);
+      generated.add(origTok);
+      pos+=origPosInc.getPositionIncrement();
+      origTok=matched.isEmpty() ? null : matched.removeFirst();
+      if (origTok != null) {
+        origPosInc=origTok.addAttribute(PositionIncrementAttribute.class);
+        origPos+=origPosInc.getPositionIncrement();
+      }
+    }
+    replacement=generated.iterator();
+  }
+}
