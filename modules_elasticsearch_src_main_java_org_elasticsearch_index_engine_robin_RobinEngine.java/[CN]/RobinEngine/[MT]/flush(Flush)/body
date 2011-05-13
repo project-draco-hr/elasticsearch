@@ -8,65 +8,78 @@
   if (!flushing.compareAndSet(false,true)) {
     throw new FlushNotAllowedEngineException(shardId,"Already flushing...");
   }
-  rwl.writeLock().lock();
   try {
-    if (indexWriter == null) {
-      throw new EngineClosedException(shardId,failedEngine);
+    rwl.writeLock().lock();
+    try {
+      if (indexWriter == null) {
+        throw new EngineClosedException(shardId,failedEngine);
+      }
+      if (disableFlushCounter > 0) {
+        throw new FlushNotAllowedEngineException(shardId,"Recovery is in progress, flush is not allowed");
+      }
+      if (flush.full()) {
+        dirty=false;
+        try {
+          indexWriter.close();
+          indexWriter=createWriter();
+          AcquirableResource<ReaderSearcherHolder> current=nrtResource;
+          nrtResource=buildNrtResource(indexWriter);
+          current.markForClose();
+          translog.newTranslog(newTransactionLogId());
+        }
+ catch (        Exception e) {
+          throw new FlushFailedEngineException(shardId,e);
+        }
+catch (        OutOfMemoryError e) {
+          failEngine(e);
+          throw new FlushFailedEngineException(shardId,e);
+        }
+      }
+ else {
+        try {
+          indexWriter.commit();
+          translog.newTranslog(newTransactionLogId());
+        }
+ catch (        Exception e) {
+          throw new FlushFailedEngineException(shardId,e);
+        }
+catch (        OutOfMemoryError e) {
+          failEngine(e);
+          throw new FlushFailedEngineException(shardId,e);
+        }
+      }
     }
-    if (disableFlushCounter > 0) {
-      throw new FlushNotAllowedEngineException(shardId,"Recovery is in progress, flush is not allowed");
+  finally {
+      rwl.writeLock().unlock();
     }
+    long time=threadPool.estimatedTimeInMillis();
+    refresh(new Refresh(true).force(true));
     if (indexingSearcher.get() != null) {
       indexingSearcher.get().release();
       indexingSearcher.set(null);
     }
-    if (flush.full()) {
-      dirty=false;
-      try {
-        indexWriter.close();
-        indexWriter=createWriter();
-        AcquirableResource<ReaderSearcherHolder> current=nrtResource;
-        nrtResource=buildNrtResource(indexWriter);
-        current.markForClose();
-        translog.newTranslog(newTransactionLogId());
-      }
- catch (      Exception e) {
-        throw new FlushFailedEngineException(shardId,e);
-      }
-catch (      OutOfMemoryError e) {
-        failEngine(e);
-        throw new FlushFailedEngineException(shardId,e);
-      }
-    }
- else {
-      try {
-        indexWriter.commit();
-        translog.newTranslog(newTransactionLogId());
-      }
- catch (      Exception e) {
-        throw new FlushFailedEngineException(shardId,e);
-      }
-catch (      OutOfMemoryError e) {
-        failEngine(e);
-        throw new FlushFailedEngineException(shardId,e);
-      }
-    }
-    long time=threadPool.estimatedTimeInMillis();
     for (    Map.Entry<String,VersionValue> entry : versionMap.entrySet()) {
-      if (entry.getValue().delete()) {
-        if ((time - entry.getValue().time()) > gcDeletesInMillis) {
-          versionMap.remove(entry.getKey());
+      String id=entry.getKey();
+synchronized (dirtyLock(id)) {
+        VersionValue versionValue=versionMap.get(id);
+        if (versionValue == null) {
+          continue;
+        }
+        if (time - versionValue.time() <= 0) {
+          continue;
+        }
+        if (versionValue.delete()) {
+          if ((time - versionValue.time()) > gcDeletesInMillis) {
+            versionMap.remove(id);
+          }
+        }
+ else {
+          versionMap.remove(id);
         }
       }
- else {
-        versionMap.remove(entry.getKey());
-      }
     }
-    dirty=true;
-    refresh(new Refresh(true).force(true));
   }
   finally {
-    rwl.writeLock().unlock();
     flushing.set(false);
   }
 }
