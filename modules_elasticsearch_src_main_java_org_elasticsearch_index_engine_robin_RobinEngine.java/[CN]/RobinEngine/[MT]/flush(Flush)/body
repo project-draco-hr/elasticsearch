@@ -9,15 +9,15 @@
     throw new FlushNotAllowedEngineException(shardId,"Already flushing...");
   }
   try {
-    rwl.writeLock().lock();
-    try {
-      if (indexWriter == null) {
-        throw new EngineClosedException(shardId,failedEngine);
-      }
-      if (disableFlushCounter > 0) {
-        throw new FlushNotAllowedEngineException(shardId,"Recovery is in progress, flush is not allowed");
-      }
-      if (flush.full()) {
+    if (flush.full()) {
+      rwl.writeLock().lock();
+      try {
+        if (indexWriter == null) {
+          throw new EngineClosedException(shardId,failedEngine);
+        }
+        if (disableFlushCounter > 0) {
+          throw new FlushNotAllowedEngineException(shardId,"Recovery is in progress, flush is not allowed");
+        }
         dirty=false;
         try {
           indexWriter.close();
@@ -40,13 +40,26 @@ catch (        OutOfMemoryError e) {
           throw new FlushFailedEngineException(shardId,e);
         }
       }
+  finally {
+        rwl.writeLock().unlock();
+      }
+    }
  else {
+      rwl.readLock().lock();
+      try {
+        if (indexWriter == null) {
+          throw new EngineClosedException(shardId,failedEngine);
+        }
+        if (disableFlushCounter > 0) {
+          throw new FlushNotAllowedEngineException(shardId,"Recovery is in progress, flush is not allowed");
+        }
         if (flushNeeded) {
           flushNeeded=false;
           try {
             long translogId=translogIdGenerator.incrementAndGet();
+            translog.newTransientTranslog(translogId);
             indexWriter.commit(MapBuilder.<String,String>newMapBuilder().put(Translog.TRANSLOG_ID_KEY,Long.toString(translogId)).map());
-            translog.newTranslog(translogId);
+            translog.makeTransientCurrent();
           }
  catch (          Exception e) {
             throw new FlushFailedEngineException(shardId,e);
@@ -57,9 +70,9 @@ catch (          OutOfMemoryError e) {
           }
         }
       }
-    }
   finally {
-      rwl.writeLock().unlock();
+        rwl.readLock().unlock();
+      }
     }
     long time=threadPool.estimatedTimeInMillis();
     refresh(new Refresh(true).force(true));
