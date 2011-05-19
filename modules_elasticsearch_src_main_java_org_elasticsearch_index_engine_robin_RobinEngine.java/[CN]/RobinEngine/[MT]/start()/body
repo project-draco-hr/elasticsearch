@@ -14,11 +14,25 @@
       throw new EngineCreationFailureException(shardId,"Failed to create engine",e);
     }
     try {
-      translog.newTranslog(newTransactionLogId());
+      if (IndexReader.indexExists(store.directory())) {
+        Map<String,String> commitUserData=IndexReader.getCommitUserData(store.directory());
+        if (commitUserData.containsKey(Translog.TRANSLOG_ID_KEY)) {
+          translogIdGenerator.set(Long.parseLong(commitUserData.get(Translog.TRANSLOG_ID_KEY)));
+        }
+ else {
+          translogIdGenerator.set(System.currentTimeMillis());
+          indexWriter.commit(MapBuilder.<String,String>newMapBuilder().put(Translog.TRANSLOG_ID_KEY,Long.toString(translogIdGenerator.get())).map());
+        }
+      }
+ else {
+        translogIdGenerator.set(System.currentTimeMillis());
+        indexWriter.commit(MapBuilder.<String,String>newMapBuilder().put(Translog.TRANSLOG_ID_KEY,Long.toString(translogIdGenerator.get())).map());
+      }
+      translog.newTranslog(translogIdGenerator.get());
       this.nrtResource=buildNrtResource(indexWriter);
       if (indexingSearcher.get() != null) {
-        indexingSearcher.get().release();
         indexingSearcher.set(null);
+        indexingSearcher.get().release();
       }
     }
  catch (    IOException e) {

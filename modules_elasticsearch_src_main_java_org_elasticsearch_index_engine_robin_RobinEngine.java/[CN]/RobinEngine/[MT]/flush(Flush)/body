@@ -22,10 +22,15 @@
         try {
           indexWriter.close();
           indexWriter=createWriter();
+          if (flushNeeded) {
+            flushNeeded=false;
+            long translogId=translogIdGenerator.incrementAndGet();
+            indexWriter.commit(MapBuilder.<String,String>newMapBuilder().put(Translog.TRANSLOG_ID_KEY,Long.toString(translogId)).map());
+            translog.newTranslog(translogId);
+          }
           AcquirableResource<ReaderSearcherHolder> current=nrtResource;
           nrtResource=buildNrtResource(indexWriter);
           current.markForClose();
-          translog.newTranslog(newTransactionLogId());
         }
  catch (        Exception e) {
           throw new FlushFailedEngineException(shardId,e);
@@ -36,16 +41,20 @@ catch (        OutOfMemoryError e) {
         }
       }
  else {
-        try {
-          indexWriter.commit();
-          translog.newTranslog(newTransactionLogId());
-        }
- catch (        Exception e) {
-          throw new FlushFailedEngineException(shardId,e);
-        }
-catch (        OutOfMemoryError e) {
-          failEngine(e);
-          throw new FlushFailedEngineException(shardId,e);
+        if (flushNeeded) {
+          flushNeeded=false;
+          try {
+            long translogId=translogIdGenerator.incrementAndGet();
+            indexWriter.commit(MapBuilder.<String,String>newMapBuilder().put(Translog.TRANSLOG_ID_KEY,Long.toString(translogId)).map());
+            translog.newTranslog(translogId);
+          }
+ catch (          Exception e) {
+            throw new FlushFailedEngineException(shardId,e);
+          }
+catch (          OutOfMemoryError e) {
+            failEngine(e);
+            throw new FlushFailedEngineException(shardId,e);
+          }
         }
       }
     }

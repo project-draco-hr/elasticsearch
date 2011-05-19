@@ -1,9 +1,17 @@
 {
   recoveryStatus.index().startTime(System.currentTimeMillis());
   long version=-1;
+  long translogId=-1;
   try {
     if (IndexReader.indexExists(indexShard.store().directory())) {
       version=IndexReader.getCurrentVersion(indexShard.store().directory());
+      Map<String,String> commitUserData=IndexReader.getCommitUserData(indexShard.store().directory());
+      if (commitUserData.containsKey(Translog.TRANSLOG_ID_KEY)) {
+        translogId=Long.parseLong(commitUserData.get(Translog.TRANSLOG_ID_KEY));
+      }
+ else {
+        translogId=version;
+      }
     }
   }
  catch (  IOException e) {
@@ -23,15 +31,15 @@
  catch (  Exception e) {
   }
   recoveryStatus.translog().startTime(System.currentTimeMillis());
-  if (version == -1) {
+  if (translogId == -1) {
     indexShard.start("post recovery from gateway, no translog");
     recoveryStatus.translog().time(System.currentTimeMillis() - recoveryStatus.index().startTime());
     return;
   }
   FsTranslog translog=(FsTranslog)indexShard.translog();
-  File recoveringTranslogFile=new File(translog.location(),"translog-" + version + ".recovering");
+  File recoveringTranslogFile=new File(translog.location(),"translog-" + translogId + ".recovering");
   if (!recoveringTranslogFile.exists()) {
-    File translogFile=new File(translog.location(),"translog-" + version);
+    File translogFile=new File(translog.location(),"translog-" + translogId);
     if (translogFile.exists()) {
       for (int i=0; i < 3; i++) {
         if (translogFile.renameTo(recoveringTranslogFile)) {
