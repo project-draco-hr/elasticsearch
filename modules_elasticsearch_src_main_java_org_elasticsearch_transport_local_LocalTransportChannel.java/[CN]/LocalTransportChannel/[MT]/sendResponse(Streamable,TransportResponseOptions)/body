@@ -1,15 +1,21 @@
 {
-  HandlesStreamOutput stream=CachedStreamOutput.cachedHandlesBytes();
-  stream.writeLong(requestId);
-  byte status=0;
-  status=TransportStreams.statusSetResponse(status);
-  stream.writeByte(status);
-  message.writeTo(stream);
-  final byte[] data=((BytesStreamOutput)stream.wrappedOut()).copiedByteArray();
-  targetTransport.threadPool().cached().execute(new Runnable(){
-    @Override public void run(){
-      targetTransport.messageReceived(data,action,sourceTransport,null);
+  CachedStreamOutput.Entry cachedEntry=CachedStreamOutput.popEntry();
+  try {
+    HandlesStreamOutput stream=cachedEntry.cachedHandlesBytes();
+    stream.writeLong(requestId);
+    byte status=0;
+    status=TransportStreams.statusSetResponse(status);
+    stream.writeByte(status);
+    message.writeTo(stream);
+    final byte[] data=cachedEntry.bytes().copiedByteArray();
+    targetTransport.threadPool().cached().execute(new Runnable(){
+      @Override public void run(){
+        targetTransport.messageReceived(data,action,sourceTransport,null);
+      }
     }
-  }
 );
+  }
+  finally {
+    CachedStreamOutput.pushEntry(cachedEntry);
+  }
 }
