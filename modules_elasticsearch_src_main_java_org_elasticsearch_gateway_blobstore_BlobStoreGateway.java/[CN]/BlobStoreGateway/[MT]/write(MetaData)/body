@@ -1,26 +1,26 @@
 {
   final String newMetaData="metadata-" + (currentIndex + 1);
-  XContentBuilder builder;
+  CachedStreamOutput.Entry cachedEntry=CachedStreamOutput.popEntry();
   try {
-    builder=XContentFactory.contentBuilder(XContentType.JSON);
+    StreamOutput out;
+    if (compress) {
+      out=cachedEntry.cachedLZFBytes();
+    }
+ else {
+      out=cachedEntry.cachedBytes();
+    }
+    XContentBuilder builder=XContentFactory.contentBuilder(XContentType.JSON,out);
     builder.startObject();
     MetaData.Builder.toXContent(metaData,builder,ToXContent.EMPTY_PARAMS);
     builder.endObject();
-  }
- catch (  IOException e) {
-    throw new GatewayException("Failed to serialize metadata into gateway",e);
-  }
-  try {
-    byte[] data=builder.unsafeBytes();
-    int size=builder.unsafeBytesLength();
-    if (compress) {
-      data=LZFEncoder.encode(data,size);
-      size=data.length;
-    }
-    metaDataBlobContainer.writeBlob(newMetaData,new ByteArrayInputStream(data,0,size),size);
+    builder.close();
+    metaDataBlobContainer.writeBlob(newMetaData,new ByteArrayInputStream(cachedEntry.bytes().unsafeByteArray(),0,cachedEntry.bytes().size()),cachedEntry.bytes().size());
   }
  catch (  IOException e) {
     throw new GatewayException("Failed to write metadata [" + newMetaData + "]",e);
+  }
+ finally {
+    CachedStreamOutput.pushEntry(cachedEntry);
   }
   currentIndex++;
   try {
