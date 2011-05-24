@@ -18,13 +18,29 @@
     resp.addHeader("Access-Control-Allow-Methods","PUT, DELETE");
     resp.addHeader("Access-Control-Allow-Headers","X-Requested-With");
   }
+  ChannelFutureListener releaseContentListener=null;
   ChannelBuffer buf;
   try {
-    if (response.contentThreadSafe()) {
-      buf=ChannelBuffers.wrappedBuffer(response.content(),0,response.contentLength());
+    if (response instanceof XContentRestResponse) {
+      XContentBuilder builder=((XContentRestResponse)response).builder();
+      if (builder.payload() instanceof CachedStreamOutput.Entry) {
+        releaseContentListener=new NettyTransport.CacheFutureListener((CachedStreamOutput.Entry)builder.payload());
+        buf=ChannelBuffers.wrappedBuffer(builder.unsafeBytes(),0,builder.unsafeBytesLength());
+      }
+ else       if (response.contentThreadSafe()) {
+        buf=ChannelBuffers.wrappedBuffer(response.content(),0,response.contentLength());
+      }
+ else {
+        buf=ChannelBuffers.copiedBuffer(response.content(),0,response.contentLength());
+      }
     }
  else {
-      buf=ChannelBuffers.copiedBuffer(response.content(),0,response.contentLength());
+      if (response.contentThreadSafe()) {
+        buf=ChannelBuffers.wrappedBuffer(response.content(),0,response.contentLength());
+      }
+ else {
+        buf=ChannelBuffers.copiedBuffer(response.content(),0,response.contentLength());
+      }
     }
   }
  catch (  IOException e) {
@@ -57,6 +73,9 @@
     }
   }
   ChannelFuture future=channel.write(resp);
+  if (releaseContentListener != null) {
+    future.addListener(releaseContentListener);
+  }
   if (close) {
     future.addListener(ChannelFutureListener.CLOSE);
   }

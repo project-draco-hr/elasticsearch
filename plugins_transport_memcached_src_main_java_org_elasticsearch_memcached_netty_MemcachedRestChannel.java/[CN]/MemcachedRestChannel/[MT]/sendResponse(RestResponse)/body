@@ -42,10 +42,37 @@
       if (keyLength > 0) {
         writeBuffer.writeBytes(request.getUriBytes());
       }
+      ChannelFutureListener releaseContentListener=null;
       if (dataLength > 0) {
-        writeBuffer.writeBytes(response.content(),0,response.contentLength());
+        if (response instanceof XContentRestResponse) {
+          XContentBuilder builder=((XContentRestResponse)response).builder();
+          if (builder.payload() instanceof CachedStreamOutput.Entry) {
+            releaseContentListener=new NettyTransport.CacheFutureListener((CachedStreamOutput.Entry)builder.payload());
+            ChannelBuffer buf=ChannelBuffers.wrappedBuffer(builder.unsafeBytes(),0,builder.unsafeBytesLength());
+            writeBuffer=ChannelBuffers.wrappedBuffer(writeBuffer,buf);
+          }
+ else           if (response.contentThreadSafe()) {
+            ChannelBuffer buf=ChannelBuffers.wrappedBuffer(builder.unsafeBytes(),0,builder.unsafeBytesLength());
+            writeBuffer=ChannelBuffers.wrappedBuffer(writeBuffer,buf);
+          }
+ else {
+            writeBuffer.writeBytes(response.content(),0,response.contentLength());
+          }
+        }
+ else {
+          if (response.contentThreadSafe()) {
+            ChannelBuffer buf=ChannelBuffers.wrappedBuffer(response.content(),0,response.contentLength());
+            writeBuffer=ChannelBuffers.wrappedBuffer(writeBuffer,buf);
+          }
+ else {
+            writeBuffer.writeBytes(response.content(),0,response.contentLength());
+          }
+        }
       }
-      channel.write(writeBuffer);
+      ChannelFuture future=channel.write(writeBuffer);
+      if (releaseContentListener != null) {
+        future.addListener(releaseContentListener);
+      }
     }
  catch (    Exception e) {
       throw new MemcachedTransportException("Failed to write response",e);
