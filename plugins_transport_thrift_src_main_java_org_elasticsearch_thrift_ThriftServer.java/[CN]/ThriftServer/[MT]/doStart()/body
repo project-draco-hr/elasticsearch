@@ -1,4 +1,12 @@
 {
+  InetAddress bindAddrX;
+  try {
+    bindAddrX=networkService.resolveBindHostAddress(bindHost);
+  }
+ catch (  IOException e) {
+    throw new BindTransportException("Failed to resolve host [" + bindHost + "]",e);
+  }
+  final InetAddress bindAddr=bindAddrX;
   PortsRange portsRange=new PortsRange(port);
   final AtomicReference<Exception> lastException=new AtomicReference<Exception>();
   boolean success=portsRange.iterate(new PortsRange.PortCallback(){
@@ -6,27 +14,17 @@
       ThriftServer.this.portNumber=portNumber;
       try {
         Rest.Processor processor=new Rest.Processor(client);
-        if ("threadpool_framed".equals(type) || "threadpool".equals("threadpool")) {
-          TTransportFactory transportFactory;
-          if ("threadpool_framed".equals(type)) {
-            transportFactory=new TFramedTransport.Factory();
-          }
- else {
-            transportFactory=new TTransportFactory();
-          }
-          TServerTransport serverTransport=new TServerSocket(portNumber);
-          server=new TThreadPoolServer(processor,serverTransport,transportFactory,protocolFactory);
+        TServerSocket serverSocket=new TServerSocket(new InetSocketAddress(bindAddr,portNumber));
+        TThreadPoolServer.Args args=new TThreadPoolServer.Args(serverSocket).minWorkerThreads(16).maxWorkerThreads(Integer.MAX_VALUE).inputProtocolFactory(protocolFactory).outputProtocolFactory(protocolFactory).processor(processor);
+        if (frame <= 0) {
+          args.inputTransportFactory(new TTransportFactory());
+          args.outputTransportFactory(new TTransportFactory());
         }
- else         if ("nonblocking".equals(type) || "hsha".equals(type)) {
-          TNonblockingServerTransport serverTransport=new TNonblockingServerSocket(portNumber);
-          TFramedTransport.Factory transportFactory=new TFramedTransport.Factory();
-          if ("nonblocking".equals(type)) {
-            server=new TNonblockingServer(processor,serverTransport,transportFactory,protocolFactory);
-          }
  else {
-            server=new THsHaServer(processor,serverTransport,transportFactory,protocolFactory);
-          }
+          args.inputTransportFactory(new TFramedTransport.Factory(frame));
+          args.outputTransportFactory(new TFramedTransport.Factory(frame));
         }
+        server=new TThreadPoolServer(args);
       }
  catch (      Exception e) {
         lastException.set(e);
