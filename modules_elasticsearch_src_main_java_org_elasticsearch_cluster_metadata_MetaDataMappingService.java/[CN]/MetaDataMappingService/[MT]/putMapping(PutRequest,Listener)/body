@@ -99,7 +99,20 @@
             builder.put(newIndexMetaDataBuilder(indexMetaData).putMapping(mappingMd));
           }
         }
-        return newClusterStateBuilder().state(currentState).metaData(builder).build();
+        ClusterState updatedState=newClusterStateBuilder().state(currentState).metaData(builder).build();
+        int counter=0;
+        for (        String index : request.indices) {
+          IndexRoutingTable indexRoutingTable=updatedState.routingTable().index(index);
+          if (indexRoutingTable != null) {
+            counter+=indexRoutingTable.numberOfNodesShardsAreAllocatedOn(updatedState.nodes().masterNodeId());
+          }
+        }
+        if (counter == 0) {
+          listener.onResponse(new Response(true));
+          return updatedState;
+        }
+        mappingCreatedAction.add(new CountDownListener(counter,listener),request.timeout);
+        return updatedState;
       }
  catch (      Exception e) {
         listener.onFailure(e);
@@ -112,30 +125,6 @@
       }
     }
     @Override public void clusterStateProcessed(    ClusterState clusterState){
-      int counter=0;
-      for (      String index : request.indices) {
-        IndexRoutingTable indexRoutingTable=clusterState.routingTable().index(index);
-        if (indexRoutingTable != null) {
-          counter+=indexRoutingTable.numberOfNodesShardsAreAllocatedOn(clusterState.nodes().masterNodeId());
-        }
-      }
-      if (counter == 0) {
-        listener.onResponse(new Response(true));
-        return;
-      }
-      final AtomicInteger countDown=new AtomicInteger(counter);
-      mappingCreatedAction.add(new NodeMappingCreatedAction.Listener(){
-        @Override public void onNodeMappingCreated(        NodeMappingCreatedAction.NodeMappingCreatedResponse response){
-          if (countDown.decrementAndGet() == 0) {
-            mappingCreatedAction.remove(this);
-            listener.onResponse(new Response(true));
-          }
-        }
-        @Override public void onTimeout(){
-          listener.onResponse(new Response(false));
-        }
-      }
-,request.timeout);
     }
   }
 );
