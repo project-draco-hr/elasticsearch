@@ -11,22 +11,57 @@
           return currentState;
         }
       }
-      MetaData.Builder builder=newMetaDataBuilder().metaData(currentState.metaData());
-      for (      AliasAction aliasAction : request.actions) {
-        IndexMetaData indexMetaData=builder.get(aliasAction.index());
-        if (indexMetaData == null) {
-          throw new IndexMissingException(new Index(aliasAction.index()));
+      List<String> indicesToClose=Lists.newArrayList();
+      Map<String,IndexService> indices=Maps.newHashMap();
+      try {
+        MetaData.Builder builder=newMetaDataBuilder().metaData(currentState.metaData());
+        for (        AliasAction aliasAction : request.actions) {
+          IndexMetaData indexMetaData=builder.get(aliasAction.index());
+          if (indexMetaData == null) {
+            throw new IndexMissingException(new Index(aliasAction.index()));
+          }
+          IndexMetaData.Builder indexMetaDataBuilder=newIndexMetaDataBuilder(indexMetaData);
+          if (aliasAction.actionType() == AliasAction.Type.ADD) {
+            String filter=aliasAction.filter();
+            if (Strings.hasLength(filter)) {
+              IndexService indexService=indices.get(indexMetaData.index());
+              if (indexService == null) {
+                indexService=indicesService.indexService(indexMetaData.index());
+                if (indexService == null) {
+                  indexService=indicesService.createIndex(indexMetaData.index(),indexMetaData.settings(),currentState.nodes().localNode().id());
+                  indicesToClose.add(indexMetaData.index());
+                }
+                indices.put(indexMetaData.index(),indexService);
+              }
+              XContentIndexQueryParser indexQueryParser=(XContentIndexQueryParser)indexService.queryParserService().defaultIndexQueryParser();
+              try {
+                XContentParser parser=XContentFactory.xContent(filter).createParser(filter);
+                try {
+                  indexQueryParser.parseInnerFilter(parser);
+                }
+  finally {
+                  parser.close();
+                }
+              }
+ catch (              Exception e) {
+                listener.onFailure(new ElasticSearchIllegalArgumentException("failed to parse filter for [" + aliasAction.alias() + "]",e));
+                return currentState;
+              }
+            }
+            indexMetaDataBuilder.putAlias(AliasMetaData.newAliasMetaDataBuilder(aliasAction.alias()).filter(filter).build());
+          }
+ else           if (aliasAction.actionType() == AliasAction.Type.REMOVE) {
+            indexMetaDataBuilder.removerAlias(aliasAction.alias());
+          }
+          builder.put(indexMetaDataBuilder);
         }
-        IndexMetaData.Builder indexMetaDataBuilder=newIndexMetaDataBuilder(indexMetaData);
-        if (aliasAction.actionType() == AliasAction.Type.ADD) {
-          indexMetaDataBuilder.putAlias(AliasMetaData.newAliasMetaDataBuilder(aliasAction.alias()).filter(aliasAction.filter()).build());
-        }
- else         if (aliasAction.actionType() == AliasAction.Type.REMOVE) {
-          indexMetaDataBuilder.removerAlias(aliasAction.alias());
-        }
-        builder.put(indexMetaDataBuilder);
+        return newClusterStateBuilder().state(currentState).metaData(builder).build();
       }
-      return newClusterStateBuilder().state(currentState).metaData(builder).build();
+  finally {
+        for (        String index : indicesToClose) {
+          indicesService.cleanIndex(index,"created for mapping processing");
+        }
+      }
     }
     @Override public void clusterStateProcessed(    ClusterState clusterState){
       listener.onResponse(new Response());
