@@ -9,11 +9,17 @@
         XContentBuilder builder=RestXContentBuilder.restContentBuilder(request);
         builder.startObject();
         if (indices.length == 1 && types.size() == 1) {
+          if (metaData.indices().isEmpty()) {
+            channel.sendResponse(new XContentThrowableRestResponse(request,new IndexMissingException(new Index(indices[0]))));
+            return;
+          }
+          boolean foundType=false;
           IndexMetaData indexMetaData=metaData.iterator().next();
           for (          MappingMetaData mappingMd : indexMetaData.mappings().values()) {
             if (!types.isEmpty() && !types.contains(mappingMd.type())) {
               continue;
             }
+            foundType=true;
             byte[] mappingSource=mappingMd.source().uncompressed();
             XContentParser parser=XContentFactory.xContent(mappingSource).createParser(mappingSource);
             Map<String,Object> mapping=parser.map();
@@ -22,6 +28,10 @@
             }
             builder.field(mappingMd.type());
             builder.map(mapping);
+          }
+          if (!foundType) {
+            channel.sendResponse(new XContentThrowableRestResponse(request,new TypeMissingException(new Index(indices[0]),types.iterator().next())));
+            return;
           }
         }
  else {
