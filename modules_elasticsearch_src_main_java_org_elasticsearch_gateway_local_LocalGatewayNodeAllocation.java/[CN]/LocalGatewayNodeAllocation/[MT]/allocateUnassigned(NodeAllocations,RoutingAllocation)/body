@@ -14,7 +14,7 @@
     TObjectLongHashMap<DiscoveryNode> nodesState=buildShardStates(nodes,shard);
     int numberOfAllocationsFound=0;
     long highestVersion=-1;
-    DiscoveryNode nodeWithHighestVersion=null;
+    Set<DiscoveryNode> nodesWithHighestVersion=Sets.newHashSet();
     for (TObjectLongIterator<DiscoveryNode> it=nodesState.iterator(); it.hasNext(); ) {
       it.advance();
       DiscoveryNode node=it.key();
@@ -25,13 +25,17 @@
       if (version != -1) {
         numberOfAllocationsFound++;
         if (highestVersion == -1) {
-          nodeWithHighestVersion=node;
+          nodesWithHighestVersion.add(node);
           highestVersion=version;
         }
  else {
           if (version > highestVersion) {
-            nodeWithHighestVersion=node;
+            nodesWithHighestVersion.clear();
+            nodesWithHighestVersion.add(node);
             highestVersion=version;
+          }
+ else           if (version == highestVersion) {
+            nodesWithHighestVersion.add(node);
           }
         }
       }
@@ -62,21 +66,47 @@
       }
       continue;
     }
-    RoutingNode node=routingNodes.node(nodeWithHighestVersion.id());
-    if (nodeAllocations.canAllocate(shard,node,allocation) == NodeAllocation.Decision.THROTTLE) {
-      if (logger.isDebugEnabled()) {
-        logger.debug("[{}][{}]: throttling allocation [{}] to [{}] on primary allocation",shard.index(),shard.id(),shard,nodeWithHighestVersion);
+    Set<DiscoveryNode> throttledNodes=Sets.newHashSet();
+    Set<DiscoveryNode> noNodes=Sets.newHashSet();
+    for (    DiscoveryNode discoNode : nodesWithHighestVersion) {
+      RoutingNode node=routingNodes.node(discoNode.id());
+      Decision decision=nodeAllocations.canAllocate(shard,node,allocation);
+      if (decision == NodeAllocation.Decision.THROTTLE) {
+        throttledNodes.add(discoNode);
       }
-      unassignedIterator.remove();
-      routingNodes.ignoredUnassigned().add(shard);
+ else       if (decision == Decision.NO) {
+        noNodes.add(discoNode);
+      }
+ else {
+        if (logger.isDebugEnabled()) {
+          logger.debug("[{}][{}]: allocating [{}] to [{}] on primary allocation",shard.index(),shard.id(),shard,discoNode);
+        }
+        changed=true;
+        node.add(shard);
+        unassignedIterator.remove();
+        throttledNodes.clear();
+        noNodes.clear();
+        break;
+      }
+    }
+    if (throttledNodes.isEmpty()) {
+      if (!noNodes.isEmpty()) {
+        DiscoveryNode discoNode=noNodes.iterator().next();
+        RoutingNode node=routingNodes.node(discoNode.id());
+        if (logger.isDebugEnabled()) {
+          logger.debug("[{}][{}]: forcing allocating [{}] to [{}] on primary allocation",shard.index(),shard.id(),shard,discoNode);
+        }
+        changed=true;
+        node.add(shard);
+        unassignedIterator.remove();
+      }
     }
  else {
       if (logger.isDebugEnabled()) {
-        logger.debug("[{}][{}]: allocating [{}] to [{}] on primary allocation",shard.index(),shard.id(),shard,nodeWithHighestVersion);
+        logger.debug("[{}][{}]: throttling allocation [{}] to [{}] on primary allocation",shard.index(),shard.id(),shard,throttledNodes);
       }
-      changed=true;
-      node.add(shard);
       unassignedIterator.remove();
+      routingNodes.ignoredUnassigned().add(shard);
     }
   }
   if (!routingNodes.hasUnassigned()) {
