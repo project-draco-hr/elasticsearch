@@ -12,11 +12,44 @@
     allIndicesLst.add(indexMetaData.index());
   }
   allIndices=allIndicesLst.toArray(new String[allIndicesLst.size()]);
-  Set<String> aliases=newHashSet();
+  MapBuilder<String,MapBuilder<String,AliasMetaData>> tmpAliasesMap=newMapBuilder();
   for (  IndexMetaData indexMetaData : indices.values()) {
-    aliases.addAll(indexMetaData.aliases().keySet());
+    String index=indexMetaData.index();
+    for (    AliasMetaData aliasMd : indexMetaData.aliases().values()) {
+      MapBuilder<String,AliasMetaData> indexAliasMap=tmpAliasesMap.get(aliasMd.alias());
+      if (indexAliasMap == null) {
+        indexAliasMap=newMapBuilder();
+        tmpAliasesMap.put(aliasMd.alias(),indexAliasMap);
+      }
+      indexAliasMap.put(index,aliasMd);
+    }
   }
-  this.aliases=ImmutableSet.copyOf(aliases);
+  MapBuilder<String,ImmutableMap<String,AliasMetaData>> aliases=newMapBuilder();
+  for (  Map.Entry<String,MapBuilder<String,AliasMetaData>> alias : tmpAliasesMap.map().entrySet()) {
+    aliases.put(alias.getKey(),alias.getValue().immutableMap());
+  }
+  this.aliases=aliases.immutableMap();
+  MapBuilder<String,MapBuilder<String,ImmutableSet<String>>> tmpAliasToIndexToSearchRoutingMap=newMapBuilder();
+  for (  IndexMetaData indexMetaData : indices.values()) {
+    for (    AliasMetaData aliasMd : indexMetaData.aliases().values()) {
+      MapBuilder<String,ImmutableSet<String>> indexToSearchRoutingMap=tmpAliasToIndexToSearchRoutingMap.get(aliasMd.alias());
+      if (indexToSearchRoutingMap == null) {
+        indexToSearchRoutingMap=newMapBuilder();
+        tmpAliasToIndexToSearchRoutingMap.put(aliasMd.alias(),indexToSearchRoutingMap);
+      }
+      if (aliasMd.searchRouting() != null) {
+        indexToSearchRoutingMap.put(indexMetaData.index(),ImmutableSet.copyOf(routingPattern.split(aliasMd.searchRouting())));
+      }
+ else {
+        indexToSearchRoutingMap.put(indexMetaData.index(),ImmutableSet.<String>of());
+      }
+    }
+  }
+  MapBuilder<String,ImmutableMap<String,ImmutableSet<String>>> aliasToIndexToSearchRoutingMap=newMapBuilder();
+  for (  Map.Entry<String,MapBuilder<String,ImmutableSet<String>>> alias : tmpAliasToIndexToSearchRoutingMap.map().entrySet()) {
+    aliasToIndexToSearchRoutingMap.put(alias.getKey(),alias.getValue().immutableMap());
+  }
+  this.aliasToIndexToSearchRoutingMap=aliasToIndexToSearchRoutingMap.immutableMap();
   MapBuilder<String,ImmutableMap<String,Boolean>> filteringRequiredMap=newMapBuilder();
   for (  IndexMetaData indexMetaData : indices.values()) {
     MapBuilder<String,Boolean> indexFilteringRequiredMap=newMapBuilder();

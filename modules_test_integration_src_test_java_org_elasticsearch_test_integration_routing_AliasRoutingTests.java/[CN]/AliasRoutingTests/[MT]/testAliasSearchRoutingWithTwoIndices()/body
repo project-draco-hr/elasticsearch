@@ -1,0 +1,48 @@
+{
+  try {
+    client.admin().indices().prepareDelete("test-a").execute().actionGet();
+    client.admin().indices().prepareDelete("test-b").execute().actionGet();
+  }
+ catch (  Exception e) {
+  }
+  client.admin().indices().prepareCreate("test-a").execute().actionGet();
+  client.admin().indices().prepareCreate("test-b").execute().actionGet();
+  client.admin().cluster().prepareHealth().setWaitForGreenStatus().execute().actionGet();
+  client.admin().indices().prepareAliases().addAliasAction(newAddAliasAction("test-a","alias-a0").routing("0")).addAliasAction(newAddAliasAction("test-a","alias-a1").routing("1")).addAliasAction(newAddAliasAction("test-b","alias-b0").routing("0")).addAliasAction(newAddAliasAction("test-b","alias-b1").routing("1")).addAliasAction(newAddAliasAction("test-a","alias-ab").searchRouting("0")).addAliasAction(newAddAliasAction("test-b","alias-ab").searchRouting("1")).execute().actionGet();
+  Thread.sleep(300);
+  logger.info("--> indexing with id [1], and routing [0] using alias to test-a");
+  client.prepareIndex("alias-a0","type1","1").setSource("field","value1").setRefresh(true).execute().actionGet();
+  logger.info("--> verifying get with no routing, should not find anything");
+  for (int i=0; i < 5; i++) {
+    assertThat(client.prepareGet("test","type1","1").execute().actionGet().exists(),equalTo(false));
+  }
+  logger.info("--> verifying get with routing, should find");
+  for (int i=0; i < 5; i++) {
+    assertThat(client.prepareGet("alias-a0","type1","1").execute().actionGet().exists(),equalTo(true));
+  }
+  logger.info("--> indexing with id [0], and routing [1] using alias to test-b");
+  client.prepareIndex("alias-b1","type1","1").setSource("field","value1").setRefresh(true).execute().actionGet();
+  logger.info("--> verifying get with no routing, should not find anything");
+  for (int i=0; i < 5; i++) {
+    assertThat(client.prepareGet("test","type1","1").execute().actionGet().exists(),equalTo(false));
+  }
+  logger.info("--> verifying get with routing, should find");
+  for (int i=0; i < 5; i++) {
+    assertThat(client.prepareGet("alias-b1","type1","1").execute().actionGet().exists(),equalTo(true));
+  }
+  logger.info("--> search with alias-a1,alias-b0, should not find");
+  for (int i=0; i < 5; i++) {
+    assertThat(client.prepareSearch("alias-a1","alias-b0").setQuery(QueryBuilders.matchAllQuery()).execute().actionGet().hits().totalHits(),equalTo(0l));
+    assertThat(client.prepareCount("alias-a1","alias-b0").setQuery(QueryBuilders.matchAllQuery()).execute().actionGet().count(),equalTo(0l));
+  }
+  logger.info("--> search with alias-ab, should find two");
+  for (int i=0; i < 5; i++) {
+    assertThat(client.prepareSearch("alias-ab").setQuery(QueryBuilders.matchAllQuery()).execute().actionGet().hits().totalHits(),equalTo(2l));
+    assertThat(client.prepareCount("alias-ab").setQuery(QueryBuilders.matchAllQuery()).execute().actionGet().count(),equalTo(2l));
+  }
+  logger.info("--> search with alias-a0,alias-b1 should find two");
+  for (int i=0; i < 5; i++) {
+    assertThat(client.prepareSearch("alias-a0","alias-b1").setQuery(QueryBuilders.matchAllQuery()).execute().actionGet().hits().totalHits(),equalTo(2l));
+    assertThat(client.prepareCount("alias-a0","alias-b1").setQuery(QueryBuilders.matchAllQuery()).execute().actionGet().count(),equalTo(2l));
+  }
+}
