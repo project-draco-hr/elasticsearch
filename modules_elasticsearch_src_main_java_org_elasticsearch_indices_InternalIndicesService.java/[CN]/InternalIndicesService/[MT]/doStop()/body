@@ -1,11 +1,13 @@
 {
   ImmutableSet<String> indices=ImmutableSet.copyOf(this.indices.keySet());
   final CountDownLatch latch=new CountDownLatch(indices.size());
+  final ExecutorService indicesStopExecutor=Executors.newFixedThreadPool(5,EsExecutors.daemonThreadFactory("indices_shutdown"));
+  final ExecutorService shardsStopExecutor=Executors.newFixedThreadPool(5,EsExecutors.daemonThreadFactory("shards_shutdown"));
   for (  final String index : indices) {
-    threadPool.cached().execute(new Runnable(){
+    indicesStopExecutor.execute(new Runnable(){
       @Override public void run(){
         try {
-          deleteIndex(index,false,"shutdown");
+          deleteIndex(index,false,"shutdown",shardsStopExecutor);
         }
  catch (        Exception e) {
           logger.warn("failed to delete index on stop [" + index + "]",e);
@@ -21,5 +23,9 @@
     latch.await();
   }
  catch (  InterruptedException e) {
+  }
+ finally {
+    shardsStopExecutor.shutdown();
+    indicesStopExecutor.shutdown();
   }
 }
