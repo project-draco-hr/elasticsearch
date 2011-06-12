@@ -51,67 +51,70 @@
 );
   }
   if (event.state().nodes().localNode().dataNode() && event.routingTableChanged()) {
-    executor.execute(new Runnable(){
-      @Override public void run(){
-        LocalGatewayStartedShards.Builder builder=LocalGatewayStartedShards.builder();
-        if (currentStartedShards != null) {
-          builder.state(currentStartedShards);
-        }
-        builder.version(event.state().version());
-        for (        IndexRoutingTable indexRoutingTable : event.state().routingTable()) {
-          for (          IndexShardRoutingTable indexShardRoutingTable : indexRoutingTable) {
-            if (indexShardRoutingTable.countWithState(ShardRoutingState.STARTED) == indexShardRoutingTable.size()) {
-              builder.remove(indexShardRoutingTable.shardId());
-            }
-          }
-        }
-        for (        ShardId shardId : builder.build().shards().keySet()) {
-          if (!event.state().metaData().hasIndex(shardId.index().name())) {
-            builder.remove(shardId);
-          }
-        }
-        RoutingNode routingNode=event.state().readOnlyRoutingNodes().node(event.state().nodes().localNodeId());
-        if (routingNode != null) {
-          for (          MutableShardRouting shardRouting : routingNode) {
-            if (shardRouting.active()) {
-              builder.put(shardRouting.shardId(),event.state().version());
-            }
-          }
-        }
-        try {
-          File stateFile=new File(location,"shards-" + event.state().version());
-          OutputStream fos=new FileOutputStream(stateFile);
-          if (compress) {
-            fos=new LZFOutputStream(fos);
-          }
-          LocalGatewayStartedShards stateToWrite=builder.build();
-          XContentBuilder xContentBuilder=XContentFactory.contentBuilder(XContentType.JSON,fos);
-          if (prettyPrint) {
-            xContentBuilder.prettyPrint();
-          }
-          xContentBuilder.startObject();
-          LocalGatewayStartedShards.Builder.toXContent(stateToWrite,xContentBuilder,ToXContent.EMPTY_PARAMS);
-          xContentBuilder.endObject();
-          xContentBuilder.close();
-          fos.close();
-          FileSystemUtils.syncFile(stateFile);
-          currentStartedShards=stateToWrite;
-        }
- catch (        IOException e) {
-          logger.warn("failed to write updated state",e);
-          return;
-        }
-        File[] files=location.listFiles(new FilenameFilter(){
-          @Override public boolean accept(          File dir,          String name){
-            return name.startsWith("shards-") && !name.equals("shards-" + event.state().version());
-          }
-        }
-);
-        for (        File file : files) {
-          file.delete();
+    LocalGatewayStartedShards.Builder builder=LocalGatewayStartedShards.builder();
+    if (currentStartedShards != null) {
+      builder.state(currentStartedShards);
+    }
+    builder.version(event.state().version());
+    boolean changed=false;
+    for (    IndexRoutingTable indexRoutingTable : event.state().routingTable()) {
+      for (      IndexShardRoutingTable indexShardRoutingTable : indexRoutingTable) {
+        if (indexShardRoutingTable.countWithState(ShardRoutingState.STARTED) == indexShardRoutingTable.size()) {
+          changed|=builder.remove(indexShardRoutingTable.shardId());
         }
       }
     }
+    for (    ShardId shardId : builder.build().shards().keySet()) {
+      if (!event.state().metaData().hasIndex(shardId.index().name())) {
+        changed|=builder.remove(shardId);
+      }
+    }
+    RoutingNode routingNode=event.state().readOnlyRoutingNodes().node(event.state().nodes().localNodeId());
+    if (routingNode != null) {
+      for (      MutableShardRouting shardRouting : routingNode) {
+        if (shardRouting.active()) {
+          changed|=builder.put(shardRouting.shardId(),shardRouting.version());
+        }
+      }
+    }
+    if (changed) {
+      final LocalGatewayStartedShards stateToWrite=builder.build();
+      executor.execute(new Runnable(){
+        @Override public void run(){
+          try {
+            File stateFile=new File(location,"shards-" + event.state().version());
+            OutputStream fos=new FileOutputStream(stateFile);
+            if (compress) {
+              fos=new LZFOutputStream(fos);
+            }
+            XContentBuilder xContentBuilder=XContentFactory.contentBuilder(XContentType.JSON,fos);
+            if (prettyPrint) {
+              xContentBuilder.prettyPrint();
+            }
+            xContentBuilder.startObject();
+            LocalGatewayStartedShards.Builder.toXContent(stateToWrite,xContentBuilder,ToXContent.EMPTY_PARAMS);
+            xContentBuilder.endObject();
+            xContentBuilder.close();
+            fos.close();
+            FileSystemUtils.syncFile(stateFile);
+            currentStartedShards=stateToWrite;
+          }
+ catch (          IOException e) {
+            logger.warn("failed to write updated state",e);
+            return;
+          }
+          File[] files=location.listFiles(new FilenameFilter(){
+            @Override public boolean accept(            File dir,            String name){
+              return name.startsWith("shards-") && !name.equals("shards-" + event.state().version());
+            }
+          }
 );
+          for (          File file : files) {
+            file.delete();
+          }
+        }
+      }
+);
+    }
   }
 }
