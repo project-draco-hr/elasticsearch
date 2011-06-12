@@ -2,25 +2,39 @@
   if (logger.isDebugEnabled()) {
     logger.debug("received shard started for {}, reason [{}]",shardRouting,reason);
   }
+  startedShardsQueue.add(shardRouting);
   clusterService.submitStateUpdateTask("shard-started (" + shardRouting + "), reason ["+ reason+ "]",new ClusterStateUpdateTask(){
     @Override public ClusterState execute(    ClusterState currentState){
-      RoutingTable routingTable=currentState.routingTable();
-      IndexRoutingTable indexRoutingTable=routingTable.index(shardRouting.index());
-      if (indexRoutingTable == null) {
+      List<ShardRouting> shards=new ArrayList<ShardRouting>();
+      startedShardsQueue.drainTo(shards);
+      if (shards.isEmpty()) {
         return currentState;
       }
-      IndexShardRoutingTable indexShardRoutingTable=indexRoutingTable.shard(shardRouting.id());
-      for (      ShardRouting entry : indexShardRoutingTable) {
-        if (shardRouting.currentNodeId().equals(entry.currentNodeId())) {
-          if (entry.started()) {
-            return currentState;
+      RoutingTable routingTable=currentState.routingTable();
+      for (int i=0; i < shards.size(); i++) {
+        ShardRouting shardRouting=shards.get(i);
+        IndexRoutingTable indexRoutingTable=routingTable.index(shardRouting.index());
+        if (indexRoutingTable == null) {
+          shards.remove(i);
+        }
+ else {
+          IndexShardRoutingTable indexShardRoutingTable=indexRoutingTable.shard(shardRouting.id());
+          for (          ShardRouting entry : indexShardRoutingTable) {
+            if (shardRouting.currentNodeId().equals(entry.currentNodeId())) {
+              if (entry.started()) {
+                shards.remove(i);
+              }
+            }
           }
         }
       }
-      if (logger.isDebugEnabled()) {
-        logger.debug("applying started shard {}, reason [{}]",shardRouting,reason);
+      if (shards.isEmpty()) {
+        return currentState;
       }
-      RoutingAllocation.Result routingResult=shardsAllocation.applyStartedShards(currentState,newArrayList(shardRouting));
+      if (logger.isDebugEnabled()) {
+        logger.debug("applying started shards {}, reason [{}]",shards,reason);
+      }
+      RoutingAllocation.Result routingResult=shardsAllocation.applyStartedShards(currentState,shards);
       if (!routingResult.changed()) {
         return currentState;
       }
