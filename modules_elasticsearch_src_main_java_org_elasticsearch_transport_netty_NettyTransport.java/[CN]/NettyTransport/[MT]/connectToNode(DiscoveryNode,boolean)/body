@@ -1,0 +1,43 @@
+{
+  if (!lifecycle.started()) {
+    throw new ElasticSearchIllegalStateException("Can't add nodes to a stopped transport");
+  }
+  if (node == null) {
+    throw new ConnectTransportException(null,"Can't connect to a null node");
+  }
+  try {
+    NodeChannels nodeChannels=connectedNodes.get(node);
+    if (nodeChannels != null) {
+      return;
+    }
+    if (light) {
+      nodeChannels=connectToChannelsLight(node);
+    }
+ else {
+      nodeChannels=new NodeChannels(new Channel[connectionsPerNodeLow],new Channel[connectionsPerNodeMed],new Channel[connectionsPerNodeHigh]);
+      try {
+        connectToChannels(nodeChannels,node);
+      }
+ catch (      Exception e) {
+        nodeChannels.close();
+        throw e;
+      }
+    }
+    NodeChannels existing=connectedNodes.putIfAbsent(node,nodeChannels);
+    if (existing != null) {
+      nodeChannels.close();
+    }
+ else {
+      if (logger.isDebugEnabled()) {
+        logger.debug("Connected to node [{}]",node);
+      }
+      transportServiceAdapter.raiseNodeConnected(node);
+    }
+  }
+ catch (  ConnectTransportException e) {
+    throw e;
+  }
+catch (  Exception e) {
+    throw new ConnectTransportException(node,"General node connection failure",e);
+  }
+}
