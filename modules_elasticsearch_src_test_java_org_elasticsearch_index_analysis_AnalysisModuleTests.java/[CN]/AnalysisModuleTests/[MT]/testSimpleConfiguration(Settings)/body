@@ -1,6 +1,7 @@
 {
   Index index=new Index("test");
-  Injector injector=new ModulesBuilder().add(new EnvironmentModule(new Environment(settings)),new IndexSettingsModule(index,settings),new IndexNameModule(index),new AnalysisModule(settings)).createInjector();
+  Injector parentInjector=new ModulesBuilder().add(new SettingsModule(settings),new EnvironmentModule(new Environment(settings)),new IndicesAnalysisModule()).createInjector();
+  Injector injector=new ModulesBuilder().add(new IndexSettingsModule(index,settings),new IndexNameModule(index),new AnalysisModule(settings,parentInjector.getInstance(IndicesAnalysisService.class))).createChildInjector(parentInjector);
   AnalysisService analysisService=injector.getInstance(AnalysisService.class);
   Analyzer analyzer=analysisService.analyzer("custom1").analyzer();
   assertThat(analyzer,instanceOf(CustomAnalyzer.class));
@@ -13,10 +14,6 @@
   analyzer=analysisService.analyzer("custom2").analyzer();
   assertThat(analyzer,instanceOf(CustomAnalyzer.class));
   CustomAnalyzer custom2=(CustomAnalyzer)analyzer;
-  HtmlStripCharFilterFactory html=(HtmlStripCharFilterFactory)custom2.charFilters()[0];
-  assertThat(html.readAheadLimit(),equalTo(HTMLStripCharFilter.DEFAULT_READ_AHEAD));
-  html=(HtmlStripCharFilterFactory)custom2.charFilters()[1];
-  assertThat(html.readAheadLimit(),equalTo(1024));
   analyzer=analysisService.analyzer("alias1").analyzer();
   assertThat(analyzer,instanceOf(StandardAnalyzer.class));
   analyzer=analysisService.analyzer("custom3").analyzer();
@@ -27,18 +24,6 @@
   assertThat(analyzer,instanceOf(CustomAnalyzer.class));
   CustomAnalyzer custom4=(CustomAnalyzer)analyzer;
   assertThat(custom4.tokenFilters()[0],instanceOf(MyFilterTokenFilterFactory.class));
-  analyzer=analysisService.analyzer("czechAnalyzerWithStemmer").analyzer();
-  assertThat(analyzer,instanceOf(CustomAnalyzer.class));
-  CustomAnalyzer czechstemmeranalyzer=(CustomAnalyzer)analyzer;
-  assertThat(czechstemmeranalyzer.tokenizerFactory(),instanceOf(StandardTokenizerFactory.class));
-  assertThat(czechstemmeranalyzer.tokenFilters().length,equalTo(4));
-  assertThat(czechstemmeranalyzer.tokenFilters()[3],instanceOf(CzechStemTokenFilterFactory.class));
-  analyzer=analysisService.analyzer("decompoundingAnalyzer").analyzer();
-  assertThat(analyzer,instanceOf(CustomAnalyzer.class));
-  CustomAnalyzer dictionaryDecompounderAnalyze=(CustomAnalyzer)analyzer;
-  assertThat(dictionaryDecompounderAnalyze.tokenizerFactory(),instanceOf(StandardTokenizerFactory.class));
-  assertThat(dictionaryDecompounderAnalyze.tokenFilters().length,equalTo(1));
-  assertThat(dictionaryDecompounderAnalyze.tokenFilters()[0],instanceOf(DictionaryCompoundWordTokenFilterFactory.class));
   Set<String> wordList=Analysis.getWordSet(null,settings,"index.analysis.filter.dict_dec.word_list");
   MatcherAssert.assertThat(wordList.size(),equalTo(6));
   MatcherAssert.assertThat(wordList,hasItems("donau","dampf","schiff","spargel","creme","suppe"));
