@@ -18,6 +18,7 @@
       List<String> indicesToClose=Lists.newArrayList();
       Map<String,IndexService> indices=Maps.newHashMap();
       try {
+        boolean changed=false;
         MetaData.Builder builder=newMetaDataBuilder().metaData(currentState.metaData());
         for (        AliasAction aliasAction : request.actions) {
           IndexMetaData indexMetaData=builder.get(aliasAction.index());
@@ -52,23 +53,42 @@
                 return currentState;
               }
             }
-            indexMetaDataBuilder.putAlias(AliasMetaData.newAliasMetaDataBuilder(aliasAction.alias()).filter(filter).indexRouting(aliasAction.indexRouting()).searchRouting(aliasAction.searchRouting()).build());
+            AliasMetaData newAliasMd=AliasMetaData.newAliasMetaDataBuilder(aliasAction.alias()).filter(filter).indexRouting(aliasAction.indexRouting()).searchRouting(aliasAction.searchRouting()).build();
+            AliasMetaData aliasMd=indexMetaData.aliases().get(aliasAction.alias());
+            if (aliasMd != null && aliasMd.equals(newAliasMd)) {
+              continue;
+            }
+            indexMetaDataBuilder.putAlias(newAliasMd);
           }
  else           if (aliasAction.actionType() == AliasAction.Type.REMOVE) {
+            if (!indexMetaData.aliases().containsKey(aliasAction.alias())) {
+              continue;
+            }
             indexMetaDataBuilder.removerAlias(aliasAction.alias());
           }
+          changed=true;
           builder.put(indexMetaDataBuilder);
         }
-        return newClusterStateBuilder().state(currentState).metaData(builder).build();
+        if (changed) {
+          ClusterState updatedState=newClusterStateBuilder().state(currentState).metaData(builder).build();
+          int responseCount=updatedState.getNodes().size();
+          long version=updatedState.version() + 1;
+          logger.trace("Waiting for [{}] notifications with version [{}]",responseCount,version);
+          aliasOperationPerformedAction.add(new CountDownListener(responseCount,listener,version),request.timeout);
+          return updatedState;
+        }
+ else {
+          listener.onResponse(new Response(true));
+          return currentState;
+        }
       }
   finally {
         for (        String index : indicesToClose) {
-          indicesService.cleanIndex(index,"created for mapping processing");
+          indicesService.cleanIndex(index,"created for alias processing");
         }
       }
     }
     @Override public void clusterStateProcessed(    ClusterState clusterState){
-      listener.onResponse(new Response());
     }
   }
 );
