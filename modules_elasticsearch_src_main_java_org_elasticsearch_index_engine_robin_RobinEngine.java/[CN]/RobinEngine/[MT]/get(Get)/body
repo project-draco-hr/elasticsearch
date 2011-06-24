@@ -1,0 +1,44 @@
+{
+  rwl.readLock().lock();
+  try {
+    if (get.realtime()) {
+      VersionValue versionValue=versionMap.get(get.uid().text());
+      if (versionValue != null) {
+        if (versionValue.delete()) {
+          return GetResult.NOT_EXISTS;
+        }
+        byte[] data=translog.read(versionValue.translogLocation());
+        if (data != null) {
+          try {
+            BytesHolder source=TranslogStreams.readSource(data);
+            return new GetResult(true,versionValue.version(),source);
+          }
+ catch (          IOException e) {
+          }
+        }
+      }
+    }
+    Searcher searcher=searcher();
+    try {
+      UnicodeUtil.UTF8Result utf8=Unicode.fromStringAsUtf8(get.uid().text());
+      for (      IndexReader reader : searcher.searcher().subReaders()) {
+        BloomFilter filter=bloomCache.filter(reader,UidFieldMapper.NAME,asyncLoadBloomFilter);
+        if (!filter.isPresent(utf8.result,0,utf8.length)) {
+          continue;
+        }
+        UidField.DocIdAndVersion docIdAndVersion=UidField.loadDocIdAndVersion(reader,get.uid());
+        if (docIdAndVersion != null && docIdAndVersion.docId != Lucene.NO_DOC) {
+          return new GetResult(searcher,docIdAndVersion);
+        }
+      }
+    }
+ catch (    Exception e) {
+      searcher.release();
+      throw new EngineException(shardId(),"failed to load document",e);
+    }
+    return GetResult.NOT_EXISTS;
+  }
+  finally {
+    rwl.readLock().unlock();
+  }
+}

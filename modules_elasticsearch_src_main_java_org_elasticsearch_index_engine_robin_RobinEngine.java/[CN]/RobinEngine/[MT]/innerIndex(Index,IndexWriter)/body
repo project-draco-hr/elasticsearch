@@ -2,12 +2,12 @@
 synchronized (dirtyLock(index.uid())) {
     UidField uidField=index.uidField();
     if (index.origin() == Operation.Origin.RECOVERY) {
-      if (index.version() != 0) {
-        versionMap.put(index.uid().text(),new VersionValue(index.version(),false,threadPool.estimatedTimeInMillis()));
-      }
       uidField.version(index.version());
       writer.updateDocument(index.uid(),index.doc(),index.analyzer());
-      translog.add(new Translog.Index(index));
+      Translog.Location translogLocation=translog.add(new Translog.Index(index));
+      if (index.version() != 0) {
+        versionMap.put(index.uid().text(),new VersionValue(index.version(),false,threadPool.estimatedTimeInMillis(),translogLocation));
+      }
     }
  else {
       long currentVersion;
@@ -57,7 +57,6 @@ synchronized (dirtyLock(index.uid())) {
         }
         updatedVersion=index.version();
       }
-      versionMap.put(index.uid().text(),new VersionValue(updatedVersion,false,threadPool.estimatedTimeInMillis()));
       uidField.version(updatedVersion);
       index.version(updatedVersion);
       if (currentVersion == -1) {
@@ -66,7 +65,8 @@ synchronized (dirtyLock(index.uid())) {
  else {
         writer.updateDocument(index.uid(),index.doc(),index.analyzer());
       }
-      translog.add(new Translog.Index(index));
+      Translog.Location translogLocation=translog.add(new Translog.Index(index));
+      versionMap.put(index.uid().text(),new VersionValue(updatedVersion,false,threadPool.estimatedTimeInMillis(),translogLocation));
     }
   }
 }

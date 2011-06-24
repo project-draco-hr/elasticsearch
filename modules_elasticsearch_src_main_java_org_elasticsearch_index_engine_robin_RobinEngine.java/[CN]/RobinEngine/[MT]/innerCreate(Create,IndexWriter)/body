@@ -2,12 +2,12 @@
 synchronized (dirtyLock(create.uid())) {
     UidField uidField=create.uidField();
     if (create.origin() == Operation.Origin.RECOVERY) {
-      if (create.version() != 0) {
-        versionMap.put(create.uid().text(),new VersionValue(create.version(),false,threadPool.estimatedTimeInMillis()));
-      }
       uidField.version(create.version());
       writer.updateDocument(create.uid(),create.doc(),create.analyzer());
-      translog.add(new Translog.Create(create));
+      Translog.Location translogLocation=translog.add(new Translog.Create(create));
+      if (create.version() != 0) {
+        versionMap.put(create.uid().text(),new VersionValue(create.version(),false,threadPool.estimatedTimeInMillis(),translogLocation));
+      }
     }
  else {
       long currentVersion;
@@ -65,11 +65,11 @@ synchronized (dirtyLock(create.uid())) {
  else       if (currentVersion != -1) {
         throw new DocumentAlreadyExistsEngineException(shardId,create.type(),create.id());
       }
-      versionMap.put(create.uid().text(),new VersionValue(updatedVersion,false,threadPool.estimatedTimeInMillis()));
       uidField.version(updatedVersion);
       create.version(updatedVersion);
       writer.addDocument(create.doc(),create.analyzer());
-      translog.add(new Translog.Create(create));
+      Translog.Location translogLocation=translog.add(new Translog.Create(create));
+      versionMap.put(create.uid().text(),new VersionValue(updatedVersion,false,threadPool.estimatedTimeInMillis(),translogLocation));
     }
   }
 }

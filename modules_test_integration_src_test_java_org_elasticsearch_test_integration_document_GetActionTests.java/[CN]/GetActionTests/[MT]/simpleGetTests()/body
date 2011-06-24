@@ -1,0 +1,47 @@
+{
+  try {
+    client.admin().indices().prepareDelete("test").execute().actionGet();
+  }
+ catch (  Exception e) {
+  }
+  client.admin().indices().prepareCreate("test").setSettings(ImmutableSettings.settingsBuilder().put("index.refresh_interval",-1)).execute().actionGet();
+  ClusterHealthResponse clusterHealth=client.admin().cluster().health(clusterHealthRequest().waitForGreenStatus()).actionGet();
+  assertThat(clusterHealth.timedOut(),equalTo(false));
+  assertThat(clusterHealth.status(),equalTo(ClusterHealthStatus.GREEN));
+  GetResponse response=client.prepareGet("test","type1","1").execute().actionGet();
+  assertThat(response.exists(),equalTo(false));
+  logger.info("--> index doc 1");
+  client.prepareIndex("test","type1","1").setSource("field1","value1","field2","value2").execute().actionGet();
+  logger.info("--> realtime get 1");
+  response=client.prepareGet("test","type1","1").execute().actionGet();
+  assertThat(response.exists(),equalTo(true));
+  assertThat(response.sourceAsMap().get("field1").toString(),equalTo("value1"));
+  assertThat(response.sourceAsMap().get("field2").toString(),equalTo("value2"));
+  logger.info("--> non realtime get 1");
+  response=client.prepareGet("test","type1","1").setRealtime(false).execute().actionGet();
+  assertThat(response.exists(),equalTo(false));
+  logger.info("--> realtime fetch of field (requires fetching parsing source)");
+  response=client.prepareGet("test","type1","1").setFields("field1").execute().actionGet();
+  assertThat(response.exists(),equalTo(true));
+  assertThat(response.source(),nullValue());
+  assertThat(response.field("field1").values().get(0).toString(),equalTo("value1"));
+  assertThat(response.field("field2"),nullValue());
+  logger.info("--> flush the index, so we load it from it");
+  client.admin().indices().prepareFlush().execute().actionGet();
+  logger.info("--> realtime get 1 (loaded from index)");
+  response=client.prepareGet("test","type1","1").execute().actionGet();
+  assertThat(response.exists(),equalTo(true));
+  assertThat(response.sourceAsMap().get("field1").toString(),equalTo("value1"));
+  assertThat(response.sourceAsMap().get("field2").toString(),equalTo("value2"));
+  logger.info("--> non realtime get 1 (loaded from index)");
+  response=client.prepareGet("test","type1","1").setRealtime(false).execute().actionGet();
+  assertThat(response.exists(),equalTo(true));
+  assertThat(response.sourceAsMap().get("field1").toString(),equalTo("value1"));
+  assertThat(response.sourceAsMap().get("field2").toString(),equalTo("value2"));
+  logger.info("--> realtime fetch of field (loaded from index)");
+  response=client.prepareGet("test","type1","1").setFields("field1").execute().actionGet();
+  assertThat(response.exists(),equalTo(true));
+  assertThat(response.source(),nullValue());
+  assertThat(response.field("field1").values().get(0).toString(),equalTo("value1"));
+  assertThat(response.field("field2"),nullValue());
+}
