@@ -1,0 +1,34 @@
+{
+  IndicesSegmentsRequest indicesSegmentsRequest=new IndicesSegmentsRequest(splitIndices(request.param("index")));
+  indicesSegmentsRequest.listenerThreaded(false);
+  BroadcastOperationThreading operationThreading=BroadcastOperationThreading.fromString(request.param("operation_threading"),BroadcastOperationThreading.SINGLE_THREAD);
+  if (operationThreading == BroadcastOperationThreading.NO_THREADS) {
+    operationThreading=BroadcastOperationThreading.SINGLE_THREAD;
+  }
+  indicesSegmentsRequest.operationThreading(operationThreading);
+  client.admin().indices().segments(indicesSegmentsRequest,new ActionListener<IndicesSegmentResponse>(){
+    @Override public void onResponse(    IndicesSegmentResponse response){
+      try {
+        XContentBuilder builder=RestXContentBuilder.restContentBuilder(request);
+        builder.startObject();
+        builder.field("ok",true);
+        buildBroadcastShardsHeader(builder,response);
+        response.toXContent(builder,request);
+        builder.endObject();
+        channel.sendResponse(new XContentRestResponse(request,OK,builder));
+      }
+ catch (      Exception e) {
+        onFailure(e);
+      }
+    }
+    @Override public void onFailure(    Throwable e){
+      try {
+        channel.sendResponse(new XContentThrowableRestResponse(request,e));
+      }
+ catch (      IOException e1) {
+        logger.error("Failed to send failure response",e1);
+      }
+    }
+  }
+);
+}
