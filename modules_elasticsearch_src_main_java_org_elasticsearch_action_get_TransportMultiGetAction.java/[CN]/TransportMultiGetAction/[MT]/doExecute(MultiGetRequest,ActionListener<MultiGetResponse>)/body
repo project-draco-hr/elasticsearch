@@ -1,0 +1,48 @@
+{
+  ClusterState clusterState=clusterService.state();
+  Map<ShardId,MultiGetShardRequest> shardRequests=new HashMap<ShardId,MultiGetShardRequest>();
+  for (int i=0; i < request.items.size(); i++) {
+    MultiGetRequest.Item item=request.items.get(i);
+    ShardId shardId=clusterService.operationRouting().getShards(clusterState,item.index(),item.type(),item.id(),item.routing(),null).shardId();
+    MultiGetShardRequest shardRequest=shardRequests.get(shardId);
+    if (shardRequest == null) {
+      shardRequest=new MultiGetShardRequest(shardId.index().name(),shardId.id());
+      shardRequest.preference(request.preference);
+      shardRequest.realtime(request.realtime);
+      shardRequest.refresh(request.refresh);
+      shardRequests.put(shardId,shardRequest);
+    }
+    shardRequest.add(i,item.type(),item.id());
+  }
+  final MultiGetItemResponse[] responses=new MultiGetItemResponse[request.items.size()];
+  final AtomicInteger counter=new AtomicInteger(shardRequests.size());
+  for (  final MultiGetShardRequest shardRequest : shardRequests.values()) {
+    shardAction.execute(shardRequest,new ActionListener<MultiGetShardResponse>(){
+      @Override public void onResponse(      MultiGetShardResponse response){
+synchronized (responses) {
+          for (int i=0; i < response.locations.size(); i++) {
+            responses[response.locations.get(i)]=new MultiGetItemResponse(response.responses.get(i),response.failures.get(i));
+          }
+        }
+        if (counter.decrementAndGet() == 0) {
+          finishHim();
+        }
+      }
+      @Override public void onFailure(      Throwable e){
+        String message=ExceptionsHelper.detailedMessage(e);
+synchronized (responses) {
+          for (int i=0; i < shardRequest.locations.size(); i++) {
+            responses[shardRequest.locations.get(i)]=new MultiGetItemResponse(null,new MultiGetResponse.Failure(shardRequest.index(),shardRequest.types.get(i),shardRequest.ids.get(i),message));
+          }
+        }
+        if (counter.decrementAndGet() == 0) {
+          finishHim();
+        }
+      }
+      private void finishHim(){
+        listener.onResponse(new MultiGetResponse(responses));
+      }
+    }
+);
+  }
+}
