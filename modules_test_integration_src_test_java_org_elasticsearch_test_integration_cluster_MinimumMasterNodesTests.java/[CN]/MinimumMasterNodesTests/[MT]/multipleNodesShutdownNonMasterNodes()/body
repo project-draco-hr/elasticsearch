@@ -1,0 +1,70 @@
+{
+  logger.info("--> cleaning nodes");
+  buildNode("node1",settingsBuilder().put("gateway.type","local"));
+  buildNode("node2",settingsBuilder().put("gateway.type","local"));
+  buildNode("node3",settingsBuilder().put("gateway.type","local"));
+  buildNode("node4",settingsBuilder().put("gateway.type","local"));
+  cleanAndCloseNodes();
+  Settings settings=settingsBuilder().put("discovery.zen.minimum_master_nodes",3).put("discovery.zen.ping_timeout","500ms").put("discovery.initial_state_timeout","1s").put("gateway.type","local").build();
+  logger.info("--> start first 2 nodes");
+  startNode("node1",settings);
+  startNode("node2",settings);
+  Thread.sleep(500);
+  ClusterState state=client("node1").admin().cluster().prepareState().setLocal(true).execute().actionGet().state();
+  assertThat(state.blocks().hasGlobalBlock(Discovery.NO_MASTER_BLOCK),equalTo(true));
+  state=client("node2").admin().cluster().prepareState().setLocal(true).execute().actionGet().state();
+  assertThat(state.blocks().hasGlobalBlock(Discovery.NO_MASTER_BLOCK),equalTo(true));
+  logger.info("--> start two more nodes");
+  startNode("node3",settings);
+  startNode("node4",settings);
+  Thread.sleep(1000);
+  state=client("node1").admin().cluster().prepareState().execute().actionGet().state();
+  assertThat(state.nodes().size(),equalTo(4));
+  String masterNode=state.nodes().masterNode().name();
+  LinkedList<String> nonMasterNodes=new LinkedList<String>();
+  for (  DiscoveryNode node : state.nodes()) {
+    if (!node.name().equals(masterNode)) {
+      nonMasterNodes.add(node.name());
+    }
+  }
+  logger.info("--> indexing some data");
+  for (int i=0; i < 100; i++) {
+    client("node1").prepareIndex("test","type1",Integer.toString(i)).setSource("field","value").execute().actionGet();
+  }
+  client("node1").admin().indices().prepareFlush().execute().actionGet();
+  client("node1").admin().indices().prepareRefresh().execute().actionGet();
+  logger.info("--> verify we the data back");
+  for (int i=0; i < 10; i++) {
+    assertThat(client("node1").prepareCount().setQuery(QueryBuilders.matchAllQuery()).execute().actionGet().count(),equalTo(100l));
+  }
+  Set<String> nodesToShutdown=Sets.newHashSet();
+  nodesToShutdown.add(nonMasterNodes.removeLast());
+  nodesToShutdown.add(nonMasterNodes.removeLast());
+  logger.info("--> shutting down two master nodes {}",nodesToShutdown);
+  for (  String nodeToShutdown : nodesToShutdown) {
+    closeNode(nodeToShutdown);
+  }
+  Thread.sleep(3000);
+  String lastNonMasterNodeUp=nonMasterNodes.removeLast();
+  logger.info("--> verify that there is no master anymore on remaining nodes");
+  state=client(masterNode).admin().cluster().prepareState().setLocal(true).execute().actionGet().state();
+  assertThat(state.blocks().hasGlobalBlock(Discovery.NO_MASTER_BLOCK),equalTo(true));
+  state=client(lastNonMasterNodeUp).admin().cluster().prepareState().setLocal(true).execute().actionGet().state();
+  assertThat(state.blocks().hasGlobalBlock(Discovery.NO_MASTER_BLOCK),equalTo(true));
+  logger.info("--> start back the nodes {}",nodesToShutdown);
+  for (  String nodeToShutdown : nodesToShutdown) {
+    startNode(nodeToShutdown,settings);
+  }
+  Thread.sleep(1000);
+  logger.info("Running Cluster Health");
+  ClusterHealthResponse clusterHealth=client("node1").admin().cluster().health(clusterHealthRequest().waitForGreenStatus()).actionGet();
+  logger.info("Done Cluster Health, status " + clusterHealth.status());
+  assertThat(clusterHealth.timedOut(),equalTo(false));
+  assertThat(clusterHealth.status(),equalTo(ClusterHealthStatus.GREEN));
+  state=client("node1").admin().cluster().prepareState().execute().actionGet().state();
+  assertThat(state.nodes().size(),equalTo(4));
+  logger.info("--> verify we the data back");
+  for (int i=0; i < 10; i++) {
+    assertThat(client("node1").prepareCount().setQuery(QueryBuilders.matchAllQuery()).execute().actionGet().count(),equalTo(100l));
+  }
+}

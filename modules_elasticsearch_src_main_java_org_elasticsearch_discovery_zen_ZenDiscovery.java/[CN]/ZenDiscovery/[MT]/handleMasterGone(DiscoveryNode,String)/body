@@ -11,40 +11,30 @@
       if (!masterNode.id().equals(currentState.nodes().masterNodeId())) {
         return currentState;
       }
-      ClusterBlocks clusterBlocks=currentState.blocks();
-      MetaData metaData=currentState.metaData();
-      RoutingTable routingTable=currentState.routingTable();
-      List<DiscoveryNode> nodes=newArrayList(currentState.nodes().nodes().values());
-      nodes.remove(masterNode);
-      final DiscoveryNode electedMaster=electMaster.electMaster(nodes);
+      DiscoveryNodes.Builder nodesBuilder=DiscoveryNodes.newNodesBuilder().putAll(currentState.nodes()).remove(masterNode.id()).masterNodeId(null);
+      if (!electMaster.hasEnoughMasterNodes(nodesBuilder.build())) {
+        return disconnectFromCluster(ClusterState.builder().state(currentState).nodes(nodesBuilder).build(),"not enough master nodes after master left (reason = " + reason + ")");
+      }
+      final DiscoveryNode electedMaster=electMaster.electMaster(nodesBuilder.build());
       if (localNode.equals(electedMaster)) {
         master=true;
         masterFD.stop("got elected as new master since master left (reason = " + reason + ")");
         nodesFD.start();
-        DiscoveryNodes.Builder builder=DiscoveryNodes.newNodesBuilder().putAll(currentState.nodes()).remove(masterNode.id()).masterNodeId(localNode.id());
-        latestDiscoNodes=builder.build();
+        nodesBuilder.masterNodeId(localNode.id());
+        latestDiscoNodes=nodesBuilder.build();
         return newClusterStateBuilder().state(currentState).nodes(latestDiscoNodes).build();
       }
  else {
         nodesFD.stop();
-        DiscoveryNodes.Builder builder=DiscoveryNodes.newNodesBuilder().putAll(currentState.nodes()).remove(masterNode.id());
         if (electedMaster != null) {
-          builder.masterNodeId(electedMaster.id());
+          nodesBuilder.masterNodeId(electedMaster.id());
           masterFD.restart(electedMaster,"possible elected master since master left (reason = " + reason + ")");
+          latestDiscoNodes=nodesBuilder.build();
+          return newClusterStateBuilder().state(currentState).nodes(latestDiscoNodes).build();
         }
  else {
-          logger.warn("master_left and no other node elected to become master, current nodes: {}",nodes);
-          builder.masterNodeId(null);
-          clusterBlocks=ClusterBlocks.builder().blocks(clusterBlocks).addGlobalBlock(NO_MASTER_BLOCK).build();
-          if (currentState.nodes().localNode().dataNode()) {
-            metaData=MetaData.newMetaDataBuilder().build();
-            routingTable=RoutingTable.builder().build();
-          }
-          masterFD.stop("no master elected since master left (reason = " + reason + ")");
-          asyncJoinCluster();
+          return disconnectFromCluster(newClusterStateBuilder().state(currentState).nodes(nodesBuilder.build()).build(),"master_left and no other node elected to become master");
         }
-        latestDiscoNodes=builder.build();
-        return newClusterStateBuilder().state(currentState).blocks(clusterBlocks).nodes(latestDiscoNodes).metaData(metaData).routingTable(routingTable).build();
       }
     }
     @Override public void clusterStateProcessed(    ClusterState clusterState){
