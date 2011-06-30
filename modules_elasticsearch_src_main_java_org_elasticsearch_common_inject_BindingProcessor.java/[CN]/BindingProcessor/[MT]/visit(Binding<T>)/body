@@ -1,0 +1,102 @@
+{
+  final Object source=command.getSource();
+  if (Void.class.equals(command.getKey().getRawType())) {
+    if (command instanceof ProviderInstanceBinding && ((ProviderInstanceBinding)command).getProviderInstance() instanceof ProviderMethod) {
+      errors.voidProviderMethod();
+    }
+ else {
+      errors.missingConstantValues();
+    }
+    return true;
+  }
+  final Key<T> key=command.getKey();
+  Class<? super T> rawType=key.getTypeLiteral().getRawType();
+  if (rawType == Provider.class) {
+    errors.bindingToProvider();
+    return true;
+  }
+  validateKey(command.getSource(),command.getKey());
+  final Scoping scoping=Scopes.makeInjectable(((BindingImpl<?>)command).getScoping(),injector,errors);
+  command.acceptTargetVisitor(new BindingTargetVisitor<T,Void>(){
+    public Void visit(    InstanceBinding<? extends T> binding){
+      Set<InjectionPoint> injectionPoints=binding.getInjectionPoints();
+      T instance=binding.getInstance();
+      Initializable<T> ref=initializer.requestInjection(injector,instance,source,injectionPoints);
+      ConstantFactory<? extends T> factory=new ConstantFactory<T>(ref);
+      InternalFactory<? extends T> scopedFactory=Scopes.scope(key,injector,factory,scoping);
+      putBinding(new InstanceBindingImpl<T>(injector,key,source,scopedFactory,injectionPoints,instance));
+      return null;
+    }
+    public Void visit(    ProviderInstanceBinding<? extends T> binding){
+      Provider<? extends T> provider=binding.getProviderInstance();
+      Set<InjectionPoint> injectionPoints=binding.getInjectionPoints();
+      Initializable<Provider<? extends T>> initializable=initializer.<Provider<? extends T>>requestInjection(injector,provider,source,injectionPoints);
+      InternalFactory<T> factory=new InternalFactoryToProviderAdapter<T>(initializable,source);
+      InternalFactory<? extends T> scopedFactory=Scopes.scope(key,injector,factory,scoping);
+      putBinding(new ProviderInstanceBindingImpl<T>(injector,key,source,scopedFactory,scoping,provider,injectionPoints));
+      return null;
+    }
+    public Void visit(    ProviderKeyBinding<? extends T> binding){
+      Key<? extends Provider<? extends T>> providerKey=binding.getProviderKey();
+      BoundProviderFactory<T> boundProviderFactory=new BoundProviderFactory<T>(injector,providerKey,source);
+      creationListeners.add(boundProviderFactory);
+      InternalFactory<? extends T> scopedFactory=Scopes.scope(key,injector,(InternalFactory<? extends T>)boundProviderFactory,scoping);
+      putBinding(new LinkedProviderBindingImpl<T>(injector,key,source,scopedFactory,scoping,providerKey));
+      return null;
+    }
+    public Void visit(    LinkedKeyBinding<? extends T> binding){
+      Key<? extends T> linkedKey=binding.getLinkedKey();
+      if (key.equals(linkedKey)) {
+        errors.recursiveBinding();
+      }
+      FactoryProxy<T> factory=new FactoryProxy<T>(injector,key,linkedKey,source);
+      creationListeners.add(factory);
+      InternalFactory<? extends T> scopedFactory=Scopes.scope(key,injector,factory,scoping);
+      putBinding(new LinkedBindingImpl<T>(injector,key,source,scopedFactory,scoping,linkedKey));
+      return null;
+    }
+    public Void visit(    UntargettedBinding<? extends T> untargetted){
+      if (key.hasAnnotationType()) {
+        errors.missingImplementation(key);
+        putBinding(invalidBinding(injector,key,source));
+        return null;
+      }
+      final BindingImpl<T> binding;
+      try {
+        binding=injector.createUnitializedBinding(key,scoping,source,errors);
+        putBinding(binding);
+      }
+ catch (      ErrorsException e) {
+        errors.merge(e.getErrors());
+        putBinding(invalidBinding(injector,key,source));
+        return null;
+      }
+      uninitializedBindings.add(new Runnable(){
+        public void run(){
+          try {
+            ((InjectorImpl)binding.getInjector()).initializeBinding(binding,errors.withSource(source));
+          }
+ catch (          ErrorsException e) {
+            errors.merge(e.getErrors());
+          }
+        }
+      }
+);
+      return null;
+    }
+    public Void visit(    ExposedBinding<? extends T> binding){
+      throw new IllegalArgumentException("Cannot apply a non-module element");
+    }
+    public Void visit(    ConvertedConstantBinding<? extends T> binding){
+      throw new IllegalArgumentException("Cannot apply a non-module element");
+    }
+    public Void visit(    ConstructorBinding<? extends T> binding){
+      throw new IllegalArgumentException("Cannot apply a non-module element");
+    }
+    public Void visit(    ProviderBinding<? extends T> binding){
+      throw new IllegalArgumentException("Cannot apply a non-module element");
+    }
+  }
+);
+  return true;
+}

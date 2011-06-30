@@ -1,0 +1,48 @@
+{
+  List<AssistedConstructor<?>> constructors=Lists.newArrayList();
+  for (  Constructor<?> constructor : implementationType.getRawType().getDeclaredConstructors()) {
+    if (constructor.getAnnotation(AssistedInject.class) != null) {
+      @SuppressWarnings("unchecked") AssistedConstructor assistedConstructor=new AssistedConstructor(constructor,implementationType.getParameterTypes(constructor));
+      constructors.add(assistedConstructor);
+    }
+  }
+  if (constructors.isEmpty()) {
+    return ImmutableMap.of();
+  }
+  Method[] factoryMethods=factoryType.getRawType().getMethods();
+  if (constructors.size() != factoryMethods.length) {
+    throw newConfigurationException("Constructor mismatch: %s has %s @AssistedInject " + "constructors, factory %s has %s creation methods",implementationType,constructors.size(),factoryType,factoryMethods.length);
+  }
+  Map<ParameterListKey,AssistedConstructor> paramsToConstructor=Maps.newHashMap();
+  for (  AssistedConstructor c : constructors) {
+    if (paramsToConstructor.containsKey(c.getAssistedParameters())) {
+      throw new RuntimeException("Duplicate constructor, " + c);
+    }
+    paramsToConstructor.put(c.getAssistedParameters(),c);
+  }
+  Map<Method,AssistedConstructor<?>> result=Maps.newHashMap();
+  for (  Method method : factoryMethods) {
+    if (!method.getReturnType().isAssignableFrom(implementationType.getRawType())) {
+      throw newConfigurationException("Return type of method %s is not assignable from %s",method,implementationType);
+    }
+    List<Type> parameterTypes=Lists.newArrayList();
+    for (    TypeLiteral<?> parameterType : factoryType.getParameterTypes(method)) {
+      parameterTypes.add(parameterType.getType());
+    }
+    ParameterListKey methodParams=new ParameterListKey(parameterTypes);
+    if (!paramsToConstructor.containsKey(methodParams)) {
+      throw newConfigurationException("%s has no @AssistInject constructor that takes the " + "@Assisted parameters %s in that order. @AssistInject constructors are %s",implementationType,methodParams,paramsToConstructor.values());
+    }
+    method.getParameterAnnotations();
+    for (    Annotation[] parameterAnnotations : method.getParameterAnnotations()) {
+      for (      Annotation parameterAnnotation : parameterAnnotations) {
+        if (parameterAnnotation.annotationType() == Assisted.class) {
+          throw newConfigurationException("Factory method %s has an @Assisted parameter, which " + "is incompatible with the deprecated @AssistedInject annotation. Please replace " + "@AssistedInject with @Inject on the %s constructor.",method,implementationType);
+        }
+      }
+    }
+    AssistedConstructor matchingConstructor=paramsToConstructor.remove(methodParams);
+    result.put(method,matchingConstructor);
+  }
+  return result;
+}

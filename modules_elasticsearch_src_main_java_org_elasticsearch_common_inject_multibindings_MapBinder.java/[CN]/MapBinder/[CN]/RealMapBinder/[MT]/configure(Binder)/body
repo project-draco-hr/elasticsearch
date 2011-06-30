@@ -1,0 +1,40 @@
+{
+  Multibinder.checkConfiguration(!isInitialized(),"MapBinder was already initialized");
+  final ImmutableSet<Dependency<?>> dependencies=ImmutableSet.<Dependency<?>>of(Dependency.get(entrySetBinder.getSetKey()));
+  final Provider<Set<Entry<K,Provider<V>>>> entrySetProvider=binder.getProvider(entrySetBinder.getSetKey());
+  binder.bind(providerMapKey).toProvider(new ProviderWithDependencies<Map<K,Provider<V>>>(){
+    private Map<K,Provider<V>> providerMap;
+    @SuppressWarnings("unused") @Inject void initialize(){
+      RealMapBinder.this.binder=null;
+      Map<K,Provider<V>> providerMapMutable=new LinkedHashMap<K,Provider<V>>();
+      for (      Entry<K,Provider<V>> entry : entrySetProvider.get()) {
+        Multibinder.checkConfiguration(providerMapMutable.put(entry.getKey(),entry.getValue()) == null,"Map injection failed due to duplicated key \"%s\"",entry.getKey());
+      }
+      providerMap=Collections.unmodifiableMap(providerMapMutable);
+    }
+    public Map<K,Provider<V>> get(){
+      return providerMap;
+    }
+    public Set<Dependency<?>> getDependencies(){
+      return dependencies;
+    }
+  }
+);
+  final Provider<Map<K,Provider<V>>> mapProvider=binder.getProvider(providerMapKey);
+  binder.bind(mapKey).toProvider(new ProviderWithDependencies<Map<K,V>>(){
+    public Map<K,V> get(){
+      Map<K,V> map=new LinkedHashMap<K,V>();
+      for (      Entry<K,Provider<V>> entry : mapProvider.get().entrySet()) {
+        V value=entry.getValue().get();
+        K key=entry.getKey();
+        Multibinder.checkConfiguration(value != null,"Map injection failed due to null value for key \"%s\"",key);
+        map.put(key,value);
+      }
+      return Collections.unmodifiableMap(map);
+    }
+    public Set<Dependency<?>> getDependencies(){
+      return dependencies;
+    }
+  }
+);
+}
