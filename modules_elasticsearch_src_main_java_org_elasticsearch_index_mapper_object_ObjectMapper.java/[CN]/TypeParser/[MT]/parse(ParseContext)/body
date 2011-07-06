@@ -1,0 +1,81 @@
+{
+  if (!enabled) {
+    context.parser().skipChildren();
+    return;
+  }
+  XContentParser parser=context.parser();
+  Document restoreDoc=null;
+  if (nested.isNested()) {
+    Document nestedDoc=new Document();
+    Fieldable uidField=(Fieldable)context.doc().getFieldable(UidFieldMapper.NAME);
+    if (uidField != null) {
+      if (uidField.stringValue() != null) {
+        nestedDoc.add(new Field(UidFieldMapper.NAME,uidField.stringValue(),Field.Store.NO,Field.Index.NOT_ANALYZED));
+      }
+ else {
+        nestedDoc.add(new Field(UidFieldMapper.NAME,((UidField)uidField).uid(),Field.Store.NO,Field.Index.NOT_ANALYZED));
+      }
+    }
+    nestedDoc.add(new Field(TypeFieldMapper.NAME,nestedTypePath,Field.Store.NO,Field.Index.NOT_ANALYZED));
+    restoreDoc=context.switchDoc(nestedDoc);
+    context.addDoc(nestedDoc);
+  }
+  ContentPath.Type origPathType=context.path().pathType();
+  context.path().pathType(pathType);
+  String currentFieldName=parser.currentName();
+  XContentParser.Token token=parser.currentToken();
+  if (token == XContentParser.Token.VALUE_NULL) {
+    return;
+  }
+  if (token == XContentParser.Token.END_OBJECT) {
+    token=parser.nextToken();
+  }
+  if (token == XContentParser.Token.START_OBJECT) {
+    token=parser.nextToken();
+  }
+  while (token != XContentParser.Token.END_OBJECT) {
+    if (token == XContentParser.Token.START_OBJECT) {
+      serializeObject(context,currentFieldName);
+    }
+ else     if (token == XContentParser.Token.START_ARRAY) {
+      serializeArray(context,currentFieldName);
+    }
+ else     if (token == XContentParser.Token.FIELD_NAME) {
+      currentFieldName=parser.currentName();
+    }
+ else     if (token == XContentParser.Token.VALUE_NULL) {
+      serializeNullValue(context,currentFieldName);
+    }
+ else     if (token == null) {
+      throw new MapperParsingException("object_mapper [" + name + "] tried to parse as object, but got EOF, has a concrete value been provided to it?");
+    }
+ else     if (token.isValue()) {
+      serializeValue(context,currentFieldName,token);
+    }
+    token=parser.nextToken();
+  }
+  context.path().pathType(origPathType);
+  if (nested.isNested()) {
+    Document nestedDoc=context.switchDoc(restoreDoc);
+    if (nested == Nested.OBJECT_AND_NESTED) {
+      for (      Fieldable field : nestedDoc.getFields()) {
+        if (field.name().equals(UidFieldMapper.NAME) || field.name().equals(TypeFieldMapper.NAME)) {
+          continue;
+        }
+ else {
+          context.doc().add(field);
+        }
+      }
+    }
+ else     if (nested == Nested.ROOT_AND_NESTED) {
+      for (      Fieldable field : nestedDoc.getFields()) {
+        if (field.name().equals(UidFieldMapper.NAME) || field.name().equals(TypeFieldMapper.NAME)) {
+          continue;
+        }
+ else {
+          context.docs().get(0).add(field);
+        }
+      }
+    }
+  }
+}

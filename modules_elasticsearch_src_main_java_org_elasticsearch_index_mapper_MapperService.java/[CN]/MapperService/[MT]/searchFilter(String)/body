@@ -1,0 +1,49 @@
+{
+  if (types == null || types.length == 0) {
+    if (hasNested) {
+      return NonNestedDocsFilter.INSTANCE;
+    }
+ else {
+      return null;
+    }
+  }
+  if (types.length == 1) {
+    DocumentMapper docMapper=documentMapper(types[0]);
+    if (docMapper == null) {
+      return new TermFilter(new Term(types[0]));
+    }
+    return docMapper.typeFilter();
+  }
+  boolean useTermsFilter=true;
+  for (  String type : types) {
+    DocumentMapper docMapper=documentMapper(type);
+    if (docMapper == null) {
+      useTermsFilter=false;
+      break;
+    }
+    if (!docMapper.typeMapper().indexed()) {
+      useTermsFilter=false;
+      break;
+    }
+  }
+  if (useTermsFilter) {
+    PublicTermsFilter termsFilter=new PublicTermsFilter();
+    for (    String type : types) {
+      termsFilter.addTerm(TypeFieldMapper.TERM_FACTORY.createTerm(type));
+    }
+    return termsFilter;
+  }
+ else {
+    XBooleanFilter bool=new XBooleanFilter();
+    for (    String type : types) {
+      DocumentMapper docMapper=documentMapper(type);
+      if (docMapper == null) {
+        bool.add(new FilterClause(new TermFilter(TypeFieldMapper.TERM_FACTORY.createTerm(type)),BooleanClause.Occur.SHOULD));
+      }
+ else {
+        bool.add(new FilterClause(docMapper.typeFilter(),BooleanClause.Occur.SHOULD));
+      }
+    }
+    return bool;
+  }
+}

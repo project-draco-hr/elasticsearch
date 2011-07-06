@@ -1,0 +1,53 @@
+{
+  context.path().add(currentFieldName);
+  Mapper objectMapper=mappers.get(currentFieldName);
+  if (objectMapper != null) {
+    objectMapper.parse(context);
+  }
+ else {
+    Dynamic dynamic=this.dynamic;
+    if (dynamic == null) {
+      dynamic=context.root().dynamic();
+    }
+    if (dynamic == Dynamic.STRICT) {
+      throw new StrictDynamicMappingException(currentFieldName);
+    }
+ else     if (dynamic == Dynamic.TRUE) {
+synchronized (mutex) {
+        objectMapper=mappers.get(currentFieldName);
+        if (objectMapper != null) {
+          objectMapper.parse(context);
+        }
+ else {
+          Mapper.Builder builder=context.root().findTemplateBuilder(context,currentFieldName,"object");
+          if (builder == null) {
+            builder=MapperBuilders.object(currentFieldName).enabled(true).dynamic(dynamic).pathType(pathType);
+          }
+          context.path().remove();
+          BuilderContext builderContext=new BuilderContext(context.path());
+          objectMapper=builder.build(builderContext);
+          putMapper(objectMapper);
+          objectMapper.traverse(new FieldMapperListener(){
+            @Override public void fieldMapper(            FieldMapper fieldMapper){
+              context.docMapper().addFieldMapper(fieldMapper);
+            }
+          }
+);
+          objectMapper.traverse(new ObjectMapperListener(){
+            @Override public void objectMapper(            ObjectMapper objectMapper){
+              context.docMapper().addObjectMapper(objectMapper);
+            }
+          }
+);
+          context.path().add(currentFieldName);
+          objectMapper.parse(context);
+          context.addedMapper();
+        }
+      }
+    }
+ else {
+      context.parser().skipChildren();
+    }
+  }
+  context.path().remove();
+}
