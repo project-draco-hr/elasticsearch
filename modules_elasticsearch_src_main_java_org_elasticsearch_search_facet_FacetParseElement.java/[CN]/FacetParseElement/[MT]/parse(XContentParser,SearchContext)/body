@@ -12,6 +12,7 @@
       String facetFieldName=null;
       Filter filter=null;
       boolean cacheFilter=true;
+      String nestedPath=null;
       while ((token=parser.nextToken()) != XContentParser.Token.END_OBJECT) {
         if (token == XContentParser.Token.FIELD_NAME) {
           facetFieldName=parser.currentName();
@@ -34,11 +35,14 @@
               scope=ContextIndexSearcher.Scopes.GLOBAL;
             }
           }
- else           if ("scope".equals(facetFieldName)) {
+ else           if ("scope".equals(facetFieldName) || "_scope".equals(facetFieldName)) {
             scope=parser.text();
           }
  else           if ("cache_filter".equals(facetFieldName) || "cacheFilter".equals(facetFieldName)) {
             cacheFilter=parser.booleanValue();
+          }
+ else           if ("nested".equals(facetFieldName)) {
+            nestedPath=parser.text();
           }
         }
       }
@@ -47,6 +51,20 @@
           filter=context.filterCache().cache(filter);
         }
         facet.setFilter(filter);
+      }
+      if (nestedPath != null) {
+        MapperService.SmartNameObjectMapper mapper=context.mapperService().smartNameObjectMapper(nestedPath);
+        if (mapper == null) {
+          throw new SearchParseException(context,"facet nested path [" + nestedPath + "] not found");
+        }
+        ObjectMapper objectMapper=mapper.mapper();
+        if (objectMapper == null) {
+          throw new SearchParseException(context,"facet nested path [" + nestedPath + "] not found");
+        }
+        if (!objectMapper.nested().isNested()) {
+          throw new SearchParseException(context,"facet nested path [" + nestedPath + "] is not nested");
+        }
+        facet=new NestedChildrenCollector(facet,context.filterCache().cache(NonNestedDocsFilter.INSTANCE),context.filterCache().cache(objectMapper.nestedTypeFilter()));
       }
       if (facetCollectors == null) {
         facetCollectors=Lists.newArrayList();
