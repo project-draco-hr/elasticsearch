@@ -9,6 +9,30 @@
   for (  IndexRoutingTable indexRoutingTable : routingTable) {
     IndexService indexService=indicesService.indexService(indexRoutingTable.index());
     if (indexService == null) {
+      for (      Map.Entry<Integer,IndexShardRoutingTable> shardEntry : indexRoutingTable.getShards().entrySet()) {
+        if (indexRoutingTable != null) {
+          IndexShardRoutingTable indexShardRoutingTable=indexRoutingTable.shard(shardEntry.getKey());
+          if (indexShardRoutingTable != null) {
+            boolean shardCanBeDeleted=true;
+            for (            ShardRouting routing : indexShardRoutingTable) {
+              if (!routing.started()) {
+                shardCanBeDeleted=false;
+                break;
+              }
+              String localNodeId=clusterService.localNode().id();
+              if (localNodeId.equals(routing.currentNodeId()) || localNodeId.equals(routing.relocatingNodeId())) {
+                shardCanBeDeleted=false;
+                break;
+              }
+            }
+            if (shardCanBeDeleted) {
+              ShardId shardId=shardEntry.getValue().getShardId();
+              logger.debug("[{}] deleting shard that is no longer used",shardId);
+              FileSystemUtils.deleteRecursively(nodeEnv.shardLocation(shardId));
+            }
+          }
+        }
+      }
       continue;
     }
     if (!indexService.store().persistent()) {
