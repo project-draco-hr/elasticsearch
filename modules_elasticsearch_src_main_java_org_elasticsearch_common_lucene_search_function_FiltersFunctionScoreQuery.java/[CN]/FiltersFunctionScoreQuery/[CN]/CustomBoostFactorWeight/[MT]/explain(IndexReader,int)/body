@@ -1,0 +1,24 @@
+{
+  Explanation subQueryExpl=subQueryWeight.explain(reader,doc);
+  if (!subQueryExpl.isMatch()) {
+    return subQueryExpl;
+  }
+  for (  FilterFunction filterFunction : filterFunctions) {
+    DocSet docSet=DocSets.convert(reader,filterFunction.filter.getDocIdSet(reader));
+    if (docSet.get(doc)) {
+      filterFunction.function.setNextReader(reader);
+      Explanation functionExplanation=filterFunction.function.explain(doc,subQueryExpl);
+      float sc=getValue() * functionExplanation.getValue();
+      Explanation res=new ComplexExplanation(true,sc,"custom score, product of:");
+      res.addDetail(new Explanation(1.0f,"match filter: " + filterFunction.filter.toString()));
+      res.addDetail(functionExplanation);
+      res.addDetail(new Explanation(getValue(),"queryBoost"));
+      return res;
+    }
+  }
+  float sc=getValue() * subQueryExpl.getValue();
+  Explanation res=new ComplexExplanation(true,sc,"custom score, no filter match, product of:");
+  res.addDetail(subQueryExpl);
+  res.addDetail(new Explanation(getValue(),"queryBoost"));
+  return res;
+}
