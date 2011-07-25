@@ -1,6 +1,18 @@
 {
-  while (shardsIt.hasNextActive()) {
-    final ShardRouting shard=shardsIt.nextActive();
+  final ShardRouting shard=shardsIt.nextOrNull();
+  if (shard == null) {
+    Exception failure=lastException;
+    if (failure == null) {
+      failure=new NoShardAvailableActionException(null,"No shard available for [" + request + "]");
+    }
+ else {
+      if (logger.isDebugEnabled()) {
+        logger.debug("failed to execute [" + request + "]",failure);
+      }
+    }
+    listener.onFailure(failure);
+  }
+ else {
     if (shard.currentNodeId().equals(nodes.localNodeId())) {
       if (!request.preferLocalShard()) {
         if (request.operationThreaded()) {
@@ -17,13 +29,11 @@
             }
           }
 );
-          return;
         }
  else {
           try {
             final Response response=shardOperation(request,shard.id());
             listener.onResponse(response);
-            return;
           }
  catch (          Exception e) {
             onFailure(shard,e);
@@ -48,19 +58,6 @@
         }
       }
 );
-      return;
     }
-  }
-  if (!shardsIt.hasNextActive()) {
-    Exception failure=lastException;
-    if (failure == null) {
-      failure=new NoShardAvailableActionException(null,"No shard available for [" + request + "]");
-    }
- else {
-      if (logger.isDebugEnabled()) {
-        logger.debug("failed to execute [" + request + "]",failure);
-      }
-    }
-    listener.onFailure(failure);
   }
 }
