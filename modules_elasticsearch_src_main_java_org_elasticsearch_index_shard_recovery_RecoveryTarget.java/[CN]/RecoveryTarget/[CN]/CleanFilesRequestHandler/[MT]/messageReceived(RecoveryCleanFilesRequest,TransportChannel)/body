@@ -1,5 +1,35 @@
 {
   InternalIndexShard shard=(InternalIndexShard)indicesService.indexServiceSafe(request.shardId().index().name()).shardSafe(request.shardId().id());
+  RecoveryStatus onGoingRecovery=onGoingRecoveries.get(shard.shardId());
+  if (onGoingRecovery == null) {
+    throw new IndexShardClosedException(shard.shardId());
+  }
+  String suffix="." + onGoingRecovery.startTime;
+  Set<String> filesToRename=Sets.newHashSet();
+  for (  String existingFile : shard.store().directory().listAll()) {
+    if (existingFile.endsWith(suffix)) {
+      filesToRename.add(existingFile.substring(0,existingFile.length() - suffix.length()));
+    }
+  }
+  Exception failureToRename=null;
+  if (!filesToRename.isEmpty()) {
+    for (    String fileToRename : filesToRename) {
+      shard.store().directory().deleteFile(fileToRename);
+    }
+    for (    String fileToRename : filesToRename) {
+      try {
+        shard.store().renameFile(fileToRename + suffix,fileToRename);
+      }
+ catch (      Exception e) {
+        failureToRename=e;
+        break;
+      }
+    }
+  }
+  if (failureToRename != null) {
+    throw failureToRename;
+  }
+  shard.store().writeChecksums(onGoingRecovery.checksums);
   for (  String existingFile : shard.store().directory().listAll()) {
     if (!request.snapshotFiles().contains(existingFile)) {
       try {

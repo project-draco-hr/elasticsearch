@@ -6,6 +6,7 @@
   }
   IndexOutput indexOutput;
   if (request.position() == 0) {
+    onGoingRecovery.checksums.remove(request.name());
     indexOutput=onGoingRecovery.openIndexOutputs.remove(request.name());
     if (indexOutput != null) {
       try {
@@ -14,7 +15,11 @@
  catch (      IOException e) {
       }
     }
-    indexOutput=shard.store().createOutputWithNoChecksum(request.name());
+    String name=request.name();
+    if (shard.store().directory().fileExists(name)) {
+      name=name + "." + onGoingRecovery.startTime;
+    }
+    indexOutput=shard.store().createOutputWithNoChecksum(name);
     onGoingRecovery.openIndexOutputs.put(request.name(),indexOutput);
   }
  else {
@@ -30,7 +35,7 @@ synchronized (indexOutput) {
       if (indexOutput.getFilePointer() == request.length()) {
         indexOutput.close();
         if (request.checksum() != null) {
-          shard.store().writeChecksum(request.name(),request.checksum());
+          onGoingRecovery.checksums.put(request.name(),request.checksum());
         }
         shard.store().directory().sync(Collections.singleton(request.name()));
         onGoingRecovery.openIndexOutputs.remove(request.name());
