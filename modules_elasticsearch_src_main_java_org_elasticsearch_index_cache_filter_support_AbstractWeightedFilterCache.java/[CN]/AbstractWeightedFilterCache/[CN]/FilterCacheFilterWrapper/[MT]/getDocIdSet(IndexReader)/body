@@ -8,8 +8,11 @@
   FilterCacheValue<DocSet> cacheValue=innerCache.get(cacheKey);
   if (cacheValue == null) {
     if (!cache.seenReaders.containsKey(reader.getCoreCacheKey())) {
-      reader.addReaderFinishedListener(cache);
-      cache.seenReaders.put(reader.getCoreCacheKey(),Boolean.TRUE);
+      Boolean previous=cache.seenReaders.putIfAbsent(reader.getCoreCacheKey(),Boolean.TRUE);
+      if (previous == null) {
+        reader.addReaderFinishedListener(cache);
+        cache.seenReadersCount.incrementAndGet();
+      }
     }
     LongsLAB longsLAB=null;
     if (cache.labEnabled) {
@@ -18,7 +21,11 @@
     DocIdSet docIdSet=filter.getDocIdSet(reader);
     DocSet docSet=FilterCacheValue.cacheable(reader,longsLAB,docIdSet);
     cacheValue=new FilterCacheValue<DocSet>(docSet,longsLAB);
-    innerCache.putIfAbsent(cacheKey,cacheValue);
+    FilterCacheValue<DocSet> previous=innerCache.putIfAbsent(cacheKey,cacheValue);
+    if (previous == null) {
+      cache.totalSizeInBytes.addAndGet(cacheValue.value().sizeInBytes());
+      cache.totalCount.incrementAndGet();
+    }
   }
   return cacheValue.value() == DocSet.EMPTY_DOC_SET ? null : cacheValue.value();
 }
