@@ -3,22 +3,66 @@
   if (!subQueryExpl.isMatch()) {
     return subQueryExpl;
   }
-  for (  FilterFunction filterFunction : filterFunctions) {
-    DocSet docSet=DocSets.convert(reader,filterFunction.filter.getDocIdSet(reader));
-    if (docSet.get(doc)) {
-      filterFunction.function.setNextReader(reader);
-      Explanation functionExplanation=filterFunction.function.explain(doc,subQueryExpl);
-      float sc=getValue() * functionExplanation.getValue();
-      Explanation res=new ComplexExplanation(true,sc,"custom score, product of:");
-      res.addDetail(new Explanation(1.0f,"match filter: " + filterFunction.filter.toString()));
-      res.addDetail(functionExplanation);
-      res.addDetail(new Explanation(getValue(),"queryBoost"));
-      return res;
+  if (scoreMode == ScoreMode.First) {
+    for (    FilterFunction filterFunction : filterFunctions) {
+      DocSet docSet=DocSets.convert(reader,filterFunction.filter.getDocIdSet(reader));
+      if (docSet.get(doc)) {
+        filterFunction.function.setNextReader(reader);
+        Explanation functionExplanation=filterFunction.function.explain(doc,subQueryExpl);
+        float sc=getValue() * functionExplanation.getValue();
+        Explanation res=new ComplexExplanation(true,sc,"custom score, product of:");
+        res.addDetail(new Explanation(1.0f,"match filter: " + filterFunction.filter.toString()));
+        res.addDetail(functionExplanation);
+        res.addDetail(new Explanation(getValue(),"queryBoost"));
+        return res;
+      }
     }
   }
-  float sc=getValue() * subQueryExpl.getValue();
-  Explanation res=new ComplexExplanation(true,sc,"custom score, no filter match, product of:");
-  res.addDetail(subQueryExpl);
-  res.addDetail(new Explanation(getValue(),"queryBoost"));
-  return res;
+ else {
+    int count=0;
+    float total=0;
+    float max=Float.NEGATIVE_INFINITY;
+    ArrayList<Explanation> filtersExplanations=new ArrayList<Explanation>();
+    for (    FilterFunction filterFunction : filterFunctions) {
+      DocSet docSet=DocSets.convert(reader,filterFunction.filter.getDocIdSet(reader));
+      if (docSet.get(doc)) {
+        filterFunction.function.setNextReader(reader);
+        Explanation functionExplanation=filterFunction.function.explain(doc,subQueryExpl);
+        float sc=functionExplanation.getValue();
+        count++;
+        total+=sc;
+        max=Math.max(sc,max);
+        Explanation res=new ComplexExplanation(true,sc,"custom score, product of:");
+        res.addDetail(new Explanation(1.0f,"match filter: " + filterFunction.filter.toString()));
+        res.addDetail(functionExplanation);
+        res.addDetail(new Explanation(getValue(),"queryBoost"));
+        filtersExplanations.add(res);
+      }
+    }
+    if (count > 0) {
+      float sc=0;
+switch (scoreMode) {
+case Avg:
+        sc=total / count;
+      break;
+case Max:
+    sc=max;
+  break;
+case Total:
+sc=total;
+break;
+}
+sc*=getValue();
+Explanation res=new ComplexExplanation(true,sc,"custom score, score mode [" + scoreMode.toString().toLowerCase() + "]");
+for (Explanation explanation : filtersExplanations) {
+res.addDetail(explanation);
+}
+return res;
+}
+}
+float sc=getValue() * subQueryExpl.getValue();
+Explanation res=new ComplexExplanation(true,sc,"custom score, no filter match, product of:");
+res.addDetail(subQueryExpl);
+res.addDetail(new Explanation(getValue(),"queryBoost"));
+return res;
 }
