@@ -1,0 +1,42 @@
+{
+  LocalGatewayMetaState.Builder builder=LocalGatewayMetaState.builder();
+  if (currentMetaState != null) {
+    builder.state(currentMetaState);
+  }
+  final long version=event.state().metaData().version();
+  builder.version(version);
+  builder.metaData(event.state().metaData());
+  try {
+    File stateFile=new File(location,"metadata-" + version);
+    OutputStream fos=new FileOutputStream(stateFile);
+    if (compress) {
+      fos=new LZFOutputStream(fos);
+    }
+    LocalGatewayMetaState stateToWrite=builder.build();
+    XContentBuilder xContentBuilder=XContentFactory.contentBuilder(XContentType.JSON,fos);
+    if (prettyPrint) {
+      xContentBuilder.prettyPrint();
+    }
+    xContentBuilder.startObject();
+    LocalGatewayMetaState.Builder.toXContent(stateToWrite,xContentBuilder,ToXContent.EMPTY_PARAMS);
+    xContentBuilder.endObject();
+    xContentBuilder.close();
+    fos.close();
+    FileSystemUtils.syncFile(stateFile);
+    currentMetaState=stateToWrite;
+    File[] files=location.listFiles(new FilenameFilter(){
+      @Override public boolean accept(      File dir,      String name){
+        return name.startsWith("metadata-") && !name.equals("metadata-" + version);
+      }
+    }
+);
+    if (files != null) {
+      for (      File file : files) {
+        file.delete();
+      }
+    }
+  }
+ catch (  IOException e) {
+    logger.warn("failed to write updated state",e);
+  }
+}
