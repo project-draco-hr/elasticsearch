@@ -1,17 +1,15 @@
 {
-  final AtomicBoolean done=new AtomicBoolean();
-  final int id=pingIdGenerator.incrementAndGet();
-  receivedResponses.put(id,new ConcurrentHashMap<DiscoveryNode,PingResponse>());
-  final Set<DiscoveryNode> nodesToDisconnect1=sendPings(id,timeout,false,done);
+  final SendPingsHandler sendPingsHandler=new SendPingsHandler(pingIdGenerator.incrementAndGet());
+  receivedResponses.put(sendPingsHandler.id(),new ConcurrentHashMap<DiscoveryNode,PingResponse>());
+  sendPings(timeout,false,sendPingsHandler);
   threadPool.schedule(timeout,ThreadPool.Names.CACHED,new Runnable(){
     @Override public void run(){
-      final Set<DiscoveryNode> nodesToDisconnect=Sets.newHashSet(nodesToDisconnect1);
-      nodesToDisconnect.addAll(sendPings(id,timeout,true,done));
-      done.set(true);
-      for (      DiscoveryNode node : nodesToDisconnect) {
+      sendPings(timeout,true,sendPingsHandler);
+      for (      DiscoveryNode node : sendPingsHandler.nodeToDisconnect) {
         transportService.disconnectFromNode(node);
       }
-      ConcurrentMap<DiscoveryNode,PingResponse> responses=receivedResponses.remove(id);
+      ConcurrentMap<DiscoveryNode,PingResponse> responses=receivedResponses.remove(sendPingsHandler.id());
+      sendPingsHandler.close();
       listener.onPing(responses.values().toArray(new PingResponse[responses.size()]));
     }
   }

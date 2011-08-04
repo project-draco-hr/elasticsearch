@@ -1,6 +1,6 @@
 {
   final UnicastPingRequest pingRequest=new UnicastPingRequest();
-  pingRequest.id=id;
+  pingRequest.id=sendPingsHandler.id();
   pingRequest.timeout=timeout;
   DiscoveryNodes discoNodes=nodesProvider.nodes();
   pingRequest.pingResponse=new PingResponse(discoNodes.localNode(),discoNodes.masterNode(),clusterName);
@@ -8,27 +8,26 @@
   for (  UnicastHostsProvider provider : hostsProviders) {
     nodesToPing.addAll(provider.buildDynamicNodes());
   }
-  Set<DiscoveryNode> nodesToDisconnect=Sets.newHashSet();
   final CountDownLatch latch=new CountDownLatch(nodesToPing.size());
   for (  final DiscoveryNode node : nodesToPing) {
     boolean nodeFoundByAddressX;
     DiscoveryNode nodeToSendX=discoNodes.findByAddress(node.address());
     if (nodeToSendX != null) {
-      nodeFoundByAddressX=false;
+      nodeFoundByAddressX=true;
     }
  else {
       nodeToSendX=node;
-      nodeFoundByAddressX=true;
+      nodeFoundByAddressX=false;
     }
     final DiscoveryNode nodeToSend=nodeToSendX;
     final boolean nodeFoundByAddress=nodeFoundByAddressX;
     if (!transportService.nodeConnected(nodeToSend)) {
-      nodesToDisconnect.add(nodeToSend);
-      threadPool.executor(ThreadPool.Names.MANAGEMENT).execute(new Runnable(){
+      if (sendPingsHandler.isClosed()) {
+        return;
+      }
+      sendPingsHandler.nodeToDisconnect.add(nodeToSend);
+      sendPingsHandler.executor().execute(new Runnable(){
         @Override public void run(){
-          if (done.get()) {
-            return;
-          }
           try {
             if (!nodeFoundByAddress) {
               transportService.connectToNodeLight(nodeToSend);
@@ -36,10 +35,10 @@
  else {
               transportService.connectToNode(nodeToSend);
             }
-            sendPingRequestToNode(id,timeout,pingRequest,latch,node,nodeToSend);
+            sendPingRequestToNode(sendPingsHandler.id(),timeout,pingRequest,latch,node,nodeToSend);
           }
  catch (          ConnectTransportException e) {
-            logger.trace("[{}] failed to connect to {}",e,id,nodeToSend);
+            logger.trace("[{}] failed to connect to {}",e,sendPingsHandler.id(),nodeToSend);
             latch.countDown();
           }
         }
@@ -47,7 +46,7 @@
 );
     }
  else {
-      sendPingRequestToNode(id,timeout,pingRequest,latch,node,nodeToSend);
+      sendPingRequestToNode(sendPingsHandler.id(),timeout,pingRequest,latch,node,nodeToSend);
     }
   }
   if (wait) {
@@ -57,5 +56,4 @@
  catch (    InterruptedException e) {
     }
   }
-  return nodesToDisconnect;
 }
