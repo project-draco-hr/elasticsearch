@@ -1,0 +1,59 @@
+{
+  final int NUMBER_OF_NODES=2;
+  final int NUMBER_OF_DOCS=50000;
+  final int MGET_BATCH=1000;
+  Node[] nodes=new Node[NUMBER_OF_NODES];
+  for (int i=0; i < nodes.length; i++) {
+    nodes[i]=NodeBuilder.nodeBuilder().node();
+  }
+  System.out.println("---> START Indexing initial data [" + NUMBER_OF_DOCS + "]");
+  final Client client=nodes[0].client();
+  for (int i=0; i < NUMBER_OF_DOCS; i++) {
+    client.prepareIndex("test","type",Integer.toString(i)).setSource("field","value").execute().actionGet();
+  }
+  System.out.println("---> DONE Indexing initial data [" + NUMBER_OF_DOCS + "]");
+  final AtomicBoolean done=new AtomicBoolean();
+  Thread indexer=new Thread(new Runnable(){
+    @Override public void run(){
+      while (!done.get()) {
+        client.prepareIndex("test","type",Integer.toString(ThreadLocalRandom.current().nextInt(NUMBER_OF_DOCS))).setSource("field","value").execute().actionGet();
+      }
+    }
+  }
+);
+  indexer.start();
+  System.out.println("---> Starting indexer");
+  Thread mget=new Thread(new Runnable(){
+    @Override public void run(){
+      while (!done.get()) {
+        Set<String> ids=Sets.newHashSet();
+        for (int i=0; i < MGET_BATCH; i++) {
+          ids.add(Integer.toString(ThreadLocalRandom.current().nextInt(NUMBER_OF_DOCS)));
+        }
+        MultiGetResponse response=client.prepareMultiGet().add("test","type",ids).execute().actionGet();
+        int expected=ids.size();
+        int count=0;
+        for (        MultiGetItemResponse item : response) {
+          count++;
+          if (item.failed()) {
+            System.err.println("item failed... " + item.failure());
+          }
+ else {
+            boolean removed=ids.remove(item.id());
+            if (!removed) {
+              System.err.println("got id twice " + item.id());
+            }
+          }
+        }
+        if (expected != count) {
+          System.err.println("Expected [" + expected + "], got back ["+ count+ "]");
+        }
+      }
+    }
+  }
+);
+  mget.start();
+  System.out.println("---> Starting mget");
+  Thread.sleep(TimeValue.timeValueMinutes(10).millis());
+  done.set(true);
+}
