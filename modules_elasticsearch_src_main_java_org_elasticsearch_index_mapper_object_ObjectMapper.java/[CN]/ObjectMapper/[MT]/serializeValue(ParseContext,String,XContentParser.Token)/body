@@ -14,115 +14,117 @@
   if (dynamic == Dynamic.FALSE) {
     return;
   }
+  boolean newMapper=false;
 synchronized (mutex) {
     mapper=mappers.get(currentFieldName);
-    if (mapper != null) {
-      mapper.parse(context);
-      return;
-    }
-    BuilderContext builderContext=new BuilderContext(context.path());
-    if (token == XContentParser.Token.VALUE_STRING) {
-      String text=context.parser().text();
-      boolean resolved=false;
-      if (context.root().dateDetection()) {
-        if (text.contains(":") || text.contains("-") || text.contains("/")) {
-          for (          FormatDateTimeFormatter dateTimeFormatter : context.root().dynamicDateTimeFormatters()) {
-            try {
-              dateTimeFormatter.parser().parseMillis(text);
-              Mapper.Builder builder=context.root().findTemplateBuilder(context,currentFieldName,"date");
-              if (builder == null) {
-                builder=dateField(currentFieldName).dateTimeFormatter(dateTimeFormatter);
+    if (mapper == null) {
+      newMapper=true;
+      BuilderContext builderContext=new BuilderContext(context.path());
+      if (token == XContentParser.Token.VALUE_STRING) {
+        String text=context.parser().text();
+        boolean resolved=false;
+        if (context.root().dateDetection()) {
+          if (text.contains(":") || text.contains("-") || text.contains("/")) {
+            for (            FormatDateTimeFormatter dateTimeFormatter : context.root().dynamicDateTimeFormatters()) {
+              try {
+                dateTimeFormatter.parser().parseMillis(text);
+                Mapper.Builder builder=context.root().findTemplateBuilder(context,currentFieldName,"date");
+                if (builder == null) {
+                  builder=dateField(currentFieldName).dateTimeFormatter(dateTimeFormatter);
+                }
+                mapper=builder.build(builderContext);
+                resolved=true;
+                break;
               }
-              mapper=builder.build(builderContext);
-              resolved=true;
-              break;
-            }
- catch (            Exception e) {
+ catch (              Exception e) {
+              }
             }
           }
         }
-      }
-      if (!resolved) {
-        Mapper.Builder builder=context.root().findTemplateBuilder(context,currentFieldName,"string");
-        if (builder == null) {
-          builder=stringField(currentFieldName);
+        if (!resolved) {
+          Mapper.Builder builder=context.root().findTemplateBuilder(context,currentFieldName,"string");
+          if (builder == null) {
+            builder=stringField(currentFieldName);
+          }
+          mapper=builder.build(builderContext);
         }
-        mapper=builder.build(builderContext);
       }
-    }
- else     if (token == XContentParser.Token.VALUE_NUMBER) {
-      XContentParser.NumberType numberType=context.parser().numberType();
-      if (numberType == XContentParser.NumberType.INT) {
-        if (context.parser().estimatedNumberType()) {
+ else       if (token == XContentParser.Token.VALUE_NUMBER) {
+        XContentParser.NumberType numberType=context.parser().numberType();
+        if (numberType == XContentParser.NumberType.INT) {
+          if (context.parser().estimatedNumberType()) {
+            Mapper.Builder builder=context.root().findTemplateBuilder(context,currentFieldName,"long");
+            if (builder == null) {
+              builder=longField(currentFieldName);
+            }
+            mapper=builder.build(builderContext);
+          }
+ else {
+            Mapper.Builder builder=context.root().findTemplateBuilder(context,currentFieldName,"integer");
+            if (builder == null) {
+              builder=integerField(currentFieldName);
+            }
+            mapper=builder.build(builderContext);
+          }
+        }
+ else         if (numberType == XContentParser.NumberType.LONG) {
           Mapper.Builder builder=context.root().findTemplateBuilder(context,currentFieldName,"long");
           if (builder == null) {
             builder=longField(currentFieldName);
           }
           mapper=builder.build(builderContext);
         }
- else {
-          Mapper.Builder builder=context.root().findTemplateBuilder(context,currentFieldName,"integer");
-          if (builder == null) {
-            builder=integerField(currentFieldName);
+ else         if (numberType == XContentParser.NumberType.FLOAT) {
+          if (context.parser().estimatedNumberType()) {
+            Mapper.Builder builder=context.root().findTemplateBuilder(context,currentFieldName,"double");
+            if (builder == null) {
+              builder=doubleField(currentFieldName);
+            }
+            mapper=builder.build(builderContext);
           }
-          mapper=builder.build(builderContext);
+ else {
+            Mapper.Builder builder=context.root().findTemplateBuilder(context,currentFieldName,"float");
+            if (builder == null) {
+              builder=floatField(currentFieldName);
+            }
+            mapper=builder.build(builderContext);
+          }
         }
-      }
- else       if (numberType == XContentParser.NumberType.LONG) {
-        Mapper.Builder builder=context.root().findTemplateBuilder(context,currentFieldName,"long");
-        if (builder == null) {
-          builder=longField(currentFieldName);
-        }
-        mapper=builder.build(builderContext);
-      }
- else       if (numberType == XContentParser.NumberType.FLOAT) {
-        if (context.parser().estimatedNumberType()) {
+ else         if (numberType == XContentParser.NumberType.DOUBLE) {
           Mapper.Builder builder=context.root().findTemplateBuilder(context,currentFieldName,"double");
           if (builder == null) {
             builder=doubleField(currentFieldName);
           }
           mapper=builder.build(builderContext);
         }
+      }
+ else       if (token == XContentParser.Token.VALUE_BOOLEAN) {
+        Mapper.Builder builder=context.root().findTemplateBuilder(context,currentFieldName,"boolean");
+        if (builder == null) {
+          builder=booleanField(currentFieldName);
+        }
+        mapper=builder.build(builderContext);
+      }
  else {
-          Mapper.Builder builder=context.root().findTemplateBuilder(context,currentFieldName,"float");
-          if (builder == null) {
-            builder=floatField(currentFieldName);
-          }
+        Mapper.Builder builder=context.root().findTemplateBuilder(context,currentFieldName,null);
+        if (builder != null) {
           mapper=builder.build(builderContext);
         }
-      }
- else       if (numberType == XContentParser.NumberType.DOUBLE) {
-        Mapper.Builder builder=context.root().findTemplateBuilder(context,currentFieldName,"double");
-        if (builder == null) {
-          builder=doubleField(currentFieldName);
+ else {
+          throw new ElasticSearchIllegalStateException("Can't handle serializing a dynamic type with content token [" + token + "] and field name ["+ currentFieldName+ "]");
         }
-        mapper=builder.build(builderContext);
       }
+      putMapper(mapper);
+      context.addedMapper();
     }
- else     if (token == XContentParser.Token.VALUE_BOOLEAN) {
-      Mapper.Builder builder=context.root().findTemplateBuilder(context,currentFieldName,"boolean");
-      if (builder == null) {
-        builder=booleanField(currentFieldName);
-      }
-      mapper=builder.build(builderContext);
-    }
- else {
-      Mapper.Builder builder=context.root().findTemplateBuilder(context,currentFieldName,null);
-      if (builder != null) {
-        mapper=builder.build(builderContext);
-      }
- else {
-        throw new ElasticSearchIllegalStateException("Can't handle serializing a dynamic type with content token [" + token + "] and field name ["+ currentFieldName+ "]");
-      }
-    }
-    putMapper(mapper);
+  }
+  if (newMapper) {
     mapper.traverse(new FieldMapperListener(){
       @Override public void fieldMapper(      FieldMapper fieldMapper){
         context.docMapper().addFieldMapper(fieldMapper);
       }
     }
 );
-    mapper.parse(context);
-    context.addedMapper();
   }
+  mapper.parse(context);
 }

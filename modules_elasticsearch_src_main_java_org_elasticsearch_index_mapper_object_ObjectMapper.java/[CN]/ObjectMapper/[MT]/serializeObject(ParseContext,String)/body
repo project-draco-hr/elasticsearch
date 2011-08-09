@@ -13,12 +13,11 @@
       throw new StrictDynamicMappingException(currentFieldName);
     }
  else     if (dynamic == Dynamic.TRUE) {
+      boolean newMapper=false;
 synchronized (mutex) {
         objectMapper=mappers.get(currentFieldName);
-        if (objectMapper != null) {
-          objectMapper.parse(context);
-        }
- else {
+        if (objectMapper == null) {
+          newMapper=true;
           Mapper.Builder builder=context.root().findTemplateBuilder(context,currentFieldName,"object");
           if (builder == null) {
             builder=MapperBuilders.object(currentFieldName).enabled(true).dynamic(dynamic).pathType(pathType);
@@ -27,23 +26,25 @@ synchronized (mutex) {
           BuilderContext builderContext=new BuilderContext(context.path());
           objectMapper=builder.build(builderContext);
           putMapper(objectMapper);
-          objectMapper.traverse(new FieldMapperListener(){
-            @Override public void fieldMapper(            FieldMapper fieldMapper){
-              context.docMapper().addFieldMapper(fieldMapper);
-            }
-          }
-);
-          objectMapper.traverse(new ObjectMapperListener(){
-            @Override public void objectMapper(            ObjectMapper objectMapper){
-              context.docMapper().addObjectMapper(objectMapper);
-            }
-          }
-);
           context.path().add(currentFieldName);
-          objectMapper.parse(context);
           context.addedMapper();
         }
       }
+      if (newMapper) {
+        objectMapper.traverse(new FieldMapperListener(){
+          @Override public void fieldMapper(          FieldMapper fieldMapper){
+            context.docMapper().addFieldMapper(fieldMapper);
+          }
+        }
+);
+        objectMapper.traverse(new ObjectMapperListener(){
+          @Override public void objectMapper(          ObjectMapper objectMapper){
+            context.docMapper().addObjectMapper(objectMapper);
+          }
+        }
+);
+      }
+      objectMapper.parse(context);
     }
  else {
       context.parser().skipChildren();
