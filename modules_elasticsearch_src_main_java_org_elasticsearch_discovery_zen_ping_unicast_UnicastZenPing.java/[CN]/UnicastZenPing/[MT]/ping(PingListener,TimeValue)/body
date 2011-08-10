@@ -1,16 +1,22 @@
 {
   final SendPingsHandler sendPingsHandler=new SendPingsHandler(pingIdGenerator.incrementAndGet());
   receivedResponses.put(sendPingsHandler.id(),new ConcurrentHashMap<DiscoveryNode,PingResponse>());
-  sendPings(timeout,false,sendPingsHandler);
-  threadPool.schedule(timeout,ThreadPool.Names.CACHED,new Runnable(){
+  sendPings(timeout,null,sendPingsHandler);
+  threadPool.schedule(TimeValue.timeValueMillis(timeout.millis() / 2),ThreadPool.Names.CACHED,new Runnable(){
     @Override public void run(){
-      sendPings(timeout,true,sendPingsHandler);
-      for (      DiscoveryNode node : sendPingsHandler.nodeToDisconnect) {
-        transportService.disconnectFromNode(node);
+      sendPings(timeout,null,sendPingsHandler);
+      threadPool.schedule(TimeValue.timeValueMillis(timeout.millis() / 2),ThreadPool.Names.CACHED,new Runnable(){
+        @Override public void run(){
+          sendPings(timeout,TimeValue.timeValueMillis(timeout.millis() / 2),sendPingsHandler);
+          ConcurrentMap<DiscoveryNode,PingResponse> responses=receivedResponses.remove(sendPingsHandler.id());
+          listener.onPing(responses.values().toArray(new PingResponse[responses.size()]));
+          for (          DiscoveryNode node : sendPingsHandler.nodeToDisconnect) {
+            transportService.disconnectFromNode(node);
+          }
+          sendPingsHandler.close();
+        }
       }
-      ConcurrentMap<DiscoveryNode,PingResponse> responses=receivedResponses.remove(sendPingsHandler.id());
-      sendPingsHandler.close();
-      listener.onPing(responses.values().toArray(new PingResponse[responses.size()]));
+);
     }
   }
 );
