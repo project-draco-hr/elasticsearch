@@ -6,7 +6,6 @@
     String autoExpandReplicas=indexMetaData.settings().get(IndexMetaData.SETTING_AUTO_EXPAND_REPLICAS);
     if (autoExpandReplicas != null && Booleans.parseBoolean(autoExpandReplicas,true)) {
       try {
-        final int numberOfReplicas=event.state().nodes().dataNodes().size() - 1;
         int min;
         int max;
         try {
@@ -23,17 +22,25 @@
           logger.warn("failed to set [{}], wrong format [{}]",e,IndexMetaData.SETTING_AUTO_EXPAND_REPLICAS,autoExpandReplicas);
           continue;
         }
+        int numberOfReplicas=event.state().nodes().dataNodes().size() - 1;
+        if (numberOfReplicas < min) {
+          numberOfReplicas=min;
+        }
+ else         if (numberOfReplicas > max) {
+          numberOfReplicas=max;
+        }
         if (numberOfReplicas == indexMetaData.numberOfReplicas()) {
           continue;
         }
         if (numberOfReplicas >= min && numberOfReplicas <= max) {
-          Settings settings=ImmutableSettings.settingsBuilder().put(IndexMetaData.SETTING_NUMBER_OF_REPLICAS,numberOfReplicas).build();
+          final int fNumberOfReplicas=numberOfReplicas;
+          Settings settings=ImmutableSettings.settingsBuilder().put(IndexMetaData.SETTING_NUMBER_OF_REPLICAS,fNumberOfReplicas).build();
           updateSettings(settings,new String[]{indexMetaData.index()},new Listener(){
             @Override public void onSuccess(){
-              logger.info("[{}] auto expanded replicas to [{}]",indexMetaData.index(),numberOfReplicas);
+              logger.info("[{}] auto expanded replicas to [{}]",indexMetaData.index(),fNumberOfReplicas);
             }
             @Override public void onFailure(            Throwable t){
-              logger.warn("[{}] fail to auto expand replicas to [{}]",indexMetaData.index(),numberOfReplicas);
+              logger.warn("[{}] fail to auto expand replicas to [{}]",indexMetaData.index(),fNumberOfReplicas);
             }
           }
 );
