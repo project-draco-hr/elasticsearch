@@ -4,24 +4,38 @@
     this.datagramPacketSend=new DatagramPacket(new byte[bufferSize],bufferSize,InetAddress.getByName(group),port);
   }
  catch (  Exception e) {
-    throw new DiscoveryException("Failed to set datagram packets",e);
+    logger.warn("disabled, failed to setup multicast (datagram) discovery : {}",e.getMessage());
+    if (logger.isDebugEnabled()) {
+      logger.debug("disabled, failed to setup multicast (datagram) discovery",e);
+    }
+    return;
   }
+  InetAddress multicastInterface=null;
   try {
     MulticastSocket multicastSocket;
     multicastSocket=new MulticastSocket(port);
     multicastSocket.setTimeToLive(ttl);
-    InetAddress multicastInterface=networkService.resolvePublishHostAddress(address);
+    multicastInterface=networkService.resolvePublishHostAddress(address);
     multicastSocket.setInterface(multicastInterface);
     multicastSocket.joinGroup(InetAddress.getByName(group));
     multicastSocket.setReceiveBufferSize(bufferSize);
     multicastSocket.setSendBufferSize(bufferSize);
     multicastSocket.setSoTimeout(60000);
     this.multicastSocket=multicastSocket;
+    this.receiver=new Receiver();
+    this.receiverThread=daemonThreadFactory(settings,"discovery#multicast#receiver").newThread(receiver);
+    this.receiverThread.start();
   }
  catch (  Exception e) {
-    throw new DiscoveryException("Failed to setup multicast socket",e);
+    datagramPacketReceive=null;
+    datagramPacketSend=null;
+    if (multicastSocket != null) {
+      multicastSocket.close();
+      multicastSocket=null;
+    }
+    logger.warn("disabled, failed to setup multicast discovery on {}: {}",multicastInterface,e.getMessage());
+    if (logger.isDebugEnabled()) {
+      logger.debug("disabled, failed to setup multicast discovery on {}",e,multicastInterface);
+    }
   }
-  this.receiver=new Receiver();
-  this.receiverThread=daemonThreadFactory(settings,"discovery#multicast#received").newThread(receiver);
-  this.receiverThread.start();
 }
