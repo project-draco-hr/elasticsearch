@@ -1,0 +1,58 @@
+{
+  this.index=index;
+  this.type=rootObjectMapper.name();
+  this.docMapperParser=docMapperParser;
+  this.meta=meta;
+  this.rootObjectMapper=rootObjectMapper;
+  this.uidFieldMapper=uidFieldMapper;
+  this.idFieldMapper=idFieldMapper;
+  this.rootMappers=ImmutableMap.copyOf(rootMappers);
+  this.rootMappersOrdered=rootMappers.values().toArray(new RootMapper[rootMappers.values().size()]);
+  List<RootMapper> rootMappersNotIncludedInObjectLst=newArrayList();
+  for (  RootMapper rootMapper : rootMappersOrdered) {
+    if (!rootMapper.includeInObject()) {
+      rootMappersNotIncludedInObjectLst.add(rootMapper);
+    }
+  }
+  this.rootMappersNotIncludedInObject=rootMappersNotIncludedInObjectLst.toArray(new RootMapper[rootMappersNotIncludedInObjectLst.size()]);
+  this.indexAnalyzer=indexAnalyzer;
+  this.searchAnalyzer=searchAnalyzer;
+  this.typeFilter=typeMapper().fieldFilter(type);
+  rootObjectMapper.putMapper(idFieldMapper);
+  if (rootMapper(ParentFieldMapper.class) != null) {
+    rootMapper(RoutingFieldMapper.class).markAsRequired();
+  }
+  final List<FieldMapper> tempFieldMappers=newArrayList();
+  for (  RootMapper rootMapper : rootMappersOrdered) {
+    if (rootMapper.includeInObject()) {
+      rootObjectMapper.putMapper(rootMapper);
+    }
+ else {
+      if (rootMapper instanceof FieldMapper) {
+        tempFieldMappers.add((FieldMapper)rootMapper);
+      }
+    }
+  }
+  tempFieldMappers.add(uidFieldMapper);
+  rootObjectMapper.traverse(new FieldMapperListener(){
+    @Override public void fieldMapper(    FieldMapper fieldMapper){
+      tempFieldMappers.add(fieldMapper);
+    }
+  }
+);
+  this.fieldMappers=new DocumentFieldMappers(this,tempFieldMappers);
+  final Map<String,ObjectMapper> objectMappers=Maps.newHashMap();
+  rootObjectMapper.traverse(new ObjectMapperListener(){
+    @Override public void objectMapper(    ObjectMapper objectMapper){
+      objectMappers.put(objectMapper.fullPath(),objectMapper);
+    }
+  }
+);
+  this.objectMappers=ImmutableMap.copyOf(objectMappers);
+  for (  ObjectMapper objectMapper : objectMappers.values()) {
+    if (objectMapper.nested().isNested()) {
+      hasNestedObjects=true;
+    }
+  }
+  refreshSource();
+}
