@@ -1,0 +1,44 @@
+{
+  final ClusterUpdateSettingsRequest clusterUpdateSettingsRequest=Requests.clusterUpdateSettingsRequest();
+  try {
+    XContentType xContentType=XContentFactory.xContentType(request.contentByteArray(),request.contentByteArrayOffset(),request.contentLength());
+    Map<String,Object> source=XContentFactory.xContent(xContentType).createParser(request.contentByteArray(),request.contentByteArrayOffset(),request.contentLength()).mapAndClose();
+    if (source.containsKey("transient")) {
+      clusterUpdateSettingsRequest.transientSettings((Map)source.get("transient"));
+    }
+    if (source.containsKey("persistent")) {
+      clusterUpdateSettingsRequest.persistentSettings((Map)source.get("persistent"));
+    }
+  }
+ catch (  Exception e) {
+    try {
+      channel.sendResponse(new XContentThrowableRestResponse(request,e));
+    }
+ catch (    IOException e1) {
+      logger.warn("Failed to send response",e1);
+    }
+    return;
+  }
+  client.admin().cluster().updateSettings(clusterUpdateSettingsRequest,new ActionListener<ClusterUpdateSettingsResponse>(){
+    @Override public void onResponse(    ClusterUpdateSettingsResponse response){
+      try {
+        channel.sendResponse(new StringRestResponse(RestStatus.OK));
+      }
+ catch (      Exception e) {
+        onFailure(e);
+      }
+    }
+    @Override public void onFailure(    Throwable e){
+      if (logger.isDebugEnabled()) {
+        logger.debug("failed to handle cluster state",e);
+      }
+      try {
+        channel.sendResponse(new XContentThrowableRestResponse(request,e));
+      }
+ catch (      IOException e1) {
+        logger.error("Failed to send failure response",e1);
+      }
+    }
+  }
+);
+}
