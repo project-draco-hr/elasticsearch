@@ -5,7 +5,7 @@
   buildNode("node3",settingsBuilder().put("gateway.type","local"));
   buildNode("node4",settingsBuilder().put("gateway.type","local"));
   cleanAndCloseNodes();
-  Settings settings=settingsBuilder().put("discovery.zen.minimum_master_nodes",3).put("discovery.zen.ping_timeout","500ms").put("discovery.initial_state_timeout","1s").put("gateway.type","local").build();
+  Settings settings=settingsBuilder().put("discovery.zen.minimum_master_nodes",3).put("discovery.zen.ping_timeout","200ms").put("discovery.initial_state_timeout","500ms").put("gateway.type","local").build();
   logger.info("--> start first 2 nodes");
   startNode("node1",settings);
   startNode("node2",settings);
@@ -17,7 +17,8 @@
   logger.info("--> start two more nodes");
   startNode("node3",settings);
   startNode("node4",settings);
-  Thread.sleep(1000);
+  ClusterHealthResponse clusterHealthResponse=client("node1").admin().cluster().prepareHealth().setWaitForNodes("4").execute().actionGet();
+  assertThat(clusterHealthResponse.timedOut(),equalTo(false));
   state=client("node1").admin().cluster().prepareState().execute().actionGet().state();
   assertThat(state.nodes().size(),equalTo(4));
   String masterNode=state.nodes().masterNode().name();
@@ -44,7 +45,7 @@
   for (  String nodeToShutdown : nodesToShutdown) {
     closeNode(nodeToShutdown);
   }
-  Thread.sleep(3000);
+  Thread.sleep(500);
   String lastNonMasterNodeUp=nonMasterNodes.removeLast();
   logger.info("--> verify that there is no master anymore on remaining nodes");
   state=client(masterNode).admin().cluster().prepareState().setLocal(true).execute().actionGet().state();
@@ -55,7 +56,8 @@
   for (  String nodeToShutdown : nodesToShutdown) {
     startNode(nodeToShutdown,settings);
   }
-  Thread.sleep(1000);
+  clusterHealthResponse=client("node1").admin().cluster().prepareHealth().setWaitForNodes("4").execute().actionGet();
+  assertThat(clusterHealthResponse.timedOut(),equalTo(false));
   logger.info("Running Cluster Health");
   ClusterHealthResponse clusterHealth=client("node1").admin().cluster().health(clusterHealthRequest().waitForGreenStatus()).actionGet();
   logger.info("Done Cluster Health, status " + clusterHealth.status());
