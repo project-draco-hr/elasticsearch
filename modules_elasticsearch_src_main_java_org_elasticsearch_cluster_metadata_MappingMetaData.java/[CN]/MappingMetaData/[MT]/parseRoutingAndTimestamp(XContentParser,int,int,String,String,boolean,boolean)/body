@@ -1,0 +1,67 @@
+{
+  XContentParser.Token t=parser.currentToken();
+  if (t == null) {
+    t=parser.nextToken();
+  }
+  if (t == XContentParser.Token.START_OBJECT) {
+    t=parser.nextToken();
+  }
+  String routingPart=shouldParseRouting ? routing().pathElements()[locationRouting] : null;
+  String timestampPart=shouldParseTimestamp ? timestamp().pathElements()[locationTimestamp] : null;
+  for (; t == XContentParser.Token.FIELD_NAME; t=parser.nextToken()) {
+    String fieldName=parser.currentName();
+    t=parser.nextToken();
+    boolean incLocationRouting=false;
+    boolean incLocationTimestamp=false;
+    if (shouldParseRouting && routingPart.equals(fieldName)) {
+      if (locationRouting + 1 == routing.pathElements().length) {
+        routingValue=parser.textOrNull();
+        shouldParseRouting=false;
+      }
+ else {
+        incLocationRouting=true;
+      }
+    }
+    if (shouldParseTimestamp && timestampPart.equals(fieldName)) {
+      if (locationTimestamp + 1 == timestamp.pathElements().length) {
+        timestampValue=parser.textOrNull();
+        shouldParseTimestamp=false;
+      }
+ else {
+        incLocationTimestamp=true;
+      }
+    }
+    if (incLocationRouting || incLocationTimestamp) {
+      if (t == XContentParser.Token.START_OBJECT) {
+        locationRouting+=incLocationRouting ? 1 : 0;
+        locationTimestamp+=incLocationTimestamp ? 1 : 0;
+        Tuple<String,String> result=parseRoutingAndTimestamp(parser,locationRouting,locationTimestamp,routingValue,timestampValue,shouldParseRouting,shouldParseTimestamp);
+        routingValue=result.v1();
+        timestampValue=result.v2();
+        if (incLocationRouting) {
+          if (routingValue != null) {
+            shouldParseRouting=false;
+          }
+ else {
+            locationRouting--;
+          }
+        }
+        if (incLocationTimestamp) {
+          if (timestampValue != null) {
+            shouldParseTimestamp=false;
+          }
+ else {
+            locationTimestamp--;
+          }
+        }
+      }
+    }
+ else {
+      parser.skipChildren();
+    }
+    if (!shouldParseRouting && !shouldParseTimestamp) {
+      return Tuple.create(routingValue,timestampValue);
+    }
+  }
+  return Tuple.create(routingValue,timestampValue);
+}
