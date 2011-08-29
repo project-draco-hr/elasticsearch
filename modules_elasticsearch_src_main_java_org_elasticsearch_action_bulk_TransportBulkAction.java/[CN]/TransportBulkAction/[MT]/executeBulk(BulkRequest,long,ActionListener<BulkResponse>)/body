@@ -1,16 +1,22 @@
 {
   ClusterState clusterState=clusterService.state();
+  MetaData metaData=clusterState.metaData();
   for (  ActionRequest request : bulkRequest.requests) {
     if (request instanceof IndexRequest) {
       IndexRequest indexRequest=(IndexRequest)request;
-      indexRequest.routing(clusterState.metaData().resolveIndexRouting(indexRequest.routing(),indexRequest.index()));
-      indexRequest.index(clusterState.metaData().concreteIndex(indexRequest.index()));
       if (allowIdGeneration) {
         if (indexRequest.id() == null) {
           indexRequest.id(UUID.randomBase64UUID());
           indexRequest.opType(IndexRequest.OpType.CREATE);
         }
       }
+      String aliasOrIndex=indexRequest.index();
+      indexRequest.index(clusterState.metaData().concreteIndex(indexRequest.index()));
+      MappingMetaData mappingMd=null;
+      if (metaData.hasIndex(indexRequest.index())) {
+        mappingMd=metaData.index(indexRequest.index()).mapping(indexRequest.type());
+      }
+      indexRequest.process(metaData,aliasOrIndex,mappingMd);
     }
  else     if (request instanceof DeleteRequest) {
       DeleteRequest deleteRequest=(DeleteRequest)request;
@@ -23,27 +29,6 @@
     ActionRequest request=bulkRequest.requests.get(i);
     if (request instanceof IndexRequest) {
       IndexRequest indexRequest=(IndexRequest)request;
-      boolean needToParseExternalTimestamp=indexRequest.timestamp() != null;
-      MappingMetaData mappingMd=clusterState.metaData().index(indexRequest.index()).mapping(indexRequest.type());
-      if (mappingMd != null) {
-        try {
-          if (needToParseExternalTimestamp) {
-            indexRequest.parseStringTimestamp(indexRequest.timestamp(),mappingMd.tsDateTimeFormatter());
-            needToParseExternalTimestamp=false;
-          }
-          indexRequest.processRoutingAndTimestamp(mappingMd);
-        }
- catch (        ElasticSearchException e) {
-          responses[i]=new BulkItemResponse(i,indexRequest.opType().toString().toLowerCase(),new BulkItemResponse.Failure(indexRequest.index(),indexRequest.type(),indexRequest.id(),e.getDetailedMessage()));
-          continue;
-        }
-      }
-      if (needToParseExternalTimestamp) {
-        indexRequest.parseStringTimestamp(indexRequest.timestamp(),TimestampFieldMapper.Defaults.DATE_TIME_FORMATTER);
-      }
-      if (indexRequest.timestamp() == null) {
-        indexRequest.generateTimestamp();
-      }
       ShardId shardId=clusterService.operationRouting().indexShards(clusterState,indexRequest.index(),indexRequest.type(),indexRequest.id(),indexRequest.routing()).shardId();
       List<BulkItemRequest> list=requestsByShard.get(shardId);
       if (list == null) {

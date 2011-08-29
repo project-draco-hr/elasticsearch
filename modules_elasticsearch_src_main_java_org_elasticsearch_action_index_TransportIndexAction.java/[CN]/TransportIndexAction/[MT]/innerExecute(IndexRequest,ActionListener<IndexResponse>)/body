@@ -1,23 +1,17 @@
 {
-  boolean needToParseExternalTimestamp=request.timestamp() != null;
-  MetaData metaData=clusterService.state().metaData();
-  request.routing(metaData.resolveIndexRouting(request.routing(),request.index()));
-  request.index(metaData.concreteIndex(request.index()));
-  if (metaData.hasIndex(request.index())) {
-    MappingMetaData mappingMd=metaData.index(request.index()).mapping(request.type());
-    if (mappingMd != null) {
-      if (needToParseExternalTimestamp) {
-        request.parseStringTimestamp(request.timestamp(),mappingMd.tsDateTimeFormatter());
-        needToParseExternalTimestamp=false;
-      }
-      request.processRoutingAndTimestamp(mappingMd);
+  if (allowIdGeneration) {
+    if (request.id() == null) {
+      request.id(UUID.randomBase64UUID());
+      request.opType(IndexRequest.OpType.CREATE);
     }
   }
-  if (needToParseExternalTimestamp) {
-    request.parseStringTimestamp(request.timestamp(),TimestampFieldMapper.Defaults.DATE_TIME_FORMATTER);
+  MetaData metaData=clusterService.state().metaData();
+  String aliasOrIndex=request.index();
+  request.index(metaData.concreteIndex(request.index()));
+  MappingMetaData mappingMd=null;
+  if (metaData.hasIndex(request.index())) {
+    mappingMd=metaData.index(request.index()).mapping(request.type());
   }
-  if (request.timestamp() == null) {
-    request.generateTimestamp();
-  }
+  request.process(metaData,aliasOrIndex,mappingMd);
   super.doExecute(request,listener);
 }
