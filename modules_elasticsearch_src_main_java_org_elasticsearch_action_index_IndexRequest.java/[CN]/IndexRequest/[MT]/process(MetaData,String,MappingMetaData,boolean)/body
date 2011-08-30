@@ -1,0 +1,46 @@
+{
+  routing(metaData.resolveIndexRouting(routing,aliasOrIndex));
+  if (timestamp != null) {
+    timestamp=MappingMetaData.Timestamp.parseStringTimestamp(timestamp,mappingMd != null ? mappingMd.timestamp().dateTimeFormatter() : TimestampFieldMapper.Defaults.DATE_TIME_FORMATTER);
+  }
+  if (mappingMd != null) {
+    MappingMetaData.ParseContext parseContext=mappingMd.createParseContext(id,routing,timestamp);
+    if (parseContext.shouldParse()) {
+      XContentParser parser=null;
+      try {
+        parser=XContentFactory.xContent(source,sourceOffset,sourceLength).createParser(source,sourceOffset,sourceLength);
+        mappingMd.parse(parser,parseContext);
+        if (parseContext.shouldParseId()) {
+          id=parseContext.id();
+        }
+        if (parseContext.shouldParseRouting()) {
+          routing=parseContext.routing();
+        }
+        if (parseContext.shouldParseTimestamp()) {
+          timestamp=parseContext.timestamp();
+          timestamp=MappingMetaData.Timestamp.parseStringTimestamp(timestamp,mappingMd.timestamp().dateTimeFormatter());
+        }
+      }
+ catch (      Exception e) {
+        throw new ElasticSearchParseException("failed to parse doc to extract routing/timestamp",e);
+      }
+ finally {
+        if (parser != null) {
+          parser.close();
+        }
+      }
+    }
+    if (mappingMd.routing().required() && routing == null) {
+      throw new RoutingMissingException(index,type,id);
+    }
+  }
+  if (allowIdGeneration) {
+    if (id == null) {
+      id(UUID.randomBase64UUID());
+      opType(IndexRequest.OpType.CREATE);
+    }
+  }
+  if (timestamp == null) {
+    timestamp=String.valueOf(System.currentTimeMillis());
+  }
+}
