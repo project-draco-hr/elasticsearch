@@ -9,11 +9,20 @@
     return null;
   }
   byte[] data=context.source();
-  if (compress != null && compress && !LZF.isCompressed(data)) {
-    if (compressThreshold == -1 || data.length > compressThreshold) {
-      data=LZFEncoder.encode(data,data.length);
-      context.source(data);
+  int dataOffset=context.sourceOffset();
+  int dataLength=context.sourceLength();
+  if (compress != null && compress && !LZF.isCompressed(data,dataOffset,dataLength)) {
+    if (compressThreshold == -1 || dataLength > compressThreshold) {
+      CachedStreamOutput.Entry cachedEntry=CachedStreamOutput.popEntry();
+      LZFStreamOutput streamOutput=cachedEntry.cachedLZFBytes();
+      streamOutput.writeBytes(data,dataOffset,dataLength);
+      streamOutput.flush();
+      data=cachedEntry.bytes().copiedByteArray();
+      dataOffset=0;
+      dataLength=data.length;
+      CachedStreamOutput.pushEntry(cachedEntry);
+      context.source(data,dataOffset,dataLength);
     }
   }
-  return new Field(names().indexName(),data);
+  return new Field(names().indexName(),data,dataOffset,dataLength);
 }
