@@ -6,6 +6,13 @@
   this.compress=componentSettings.getAsBoolean("compress",true);
   this.concurrentStreams=componentSettings.getAsInt("concurrent_streams",settings.getAsInt("index.shard.recovery.concurrent_streams",5));
   this.concurrentStreamPool=(ThreadPoolExecutor)DynamicExecutors.newScalingThreadPool(1,concurrentStreams,TimeValue.timeValueSeconds(5).millis(),EsExecutors.daemonThreadFactory(settings,"[recovery_stream]"));
-  logger.debug("using concurrent_streams [{}], file_chunk_size [{}], translog_size [{}], translog_ops [{}], and compress [{}]",concurrentStreams,fileChunkSize,translogSize,translogOps,compress);
+  this.maxSizePerSec=componentSettings.getAsBytesSize("max_size_per_sec",new ByteSizeValue(0));
+  if (maxSizePerSec.bytes() <= 0) {
+    rateLimiter=null;
+  }
+ else {
+    rateLimiter=new RateLimiter(maxSizePerSec.mbFrac());
+  }
+  logger.debug("using max_size_per_sec[{}], concurrent_streams [{}], file_chunk_size [{}], translog_size [{}], translog_ops [{}], and compress [{}]",maxSizePerSec,concurrentStreams,fileChunkSize,translogSize,translogOps,compress);
   nodeSettingsService.addListener(new ApplySettings());
 }
