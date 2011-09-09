@@ -1,7 +1,7 @@
 {
   final AtomicReference<Throwable> failureRef=new AtomicReference<Throwable>();
   final CountDownLatch latch=new CountDownLatch(1);
-  clusterService.submitStateUpdateTask("cluster_update_settings",new ClusterStateUpdateTask(){
+  clusterService.submitStateUpdateTask("cluster_update_settings",new ProcessedClusterStateUpdateTask(){
     @Override public ClusterState execute(    ClusterState currentState){
       try {
         boolean changed=false;
@@ -31,14 +31,29 @@
           return currentState;
         }
         MetaData.Builder metaData=MetaData.builder().metaData(currentState.metaData()).persistentSettings(persistentSettings.build()).transientSettings(transientSettings.build());
-        ClusterState updatedState=ClusterState.builder().state(currentState).metaData(metaData).build();
-        RoutingAllocation.Result routingResult=allocationService.reroute(updatedState);
-        updatedState=newClusterStateBuilder().state(updatedState).routingResult(routingResult).build();
-        return updatedState;
+        return ClusterState.builder().state(currentState).metaData(metaData).build();
       }
-  finally {
+ catch (      Exception e) {
         latch.countDown();
+        logger.warn("failed to update cluster settings",e);
+        return currentState;
       }
+ finally {
+      }
+    }
+    @Override public void clusterStateProcessed(    ClusterState clusterState){
+      clusterService.submitStateUpdateTask("reroute_after_cluster_update_settings",new ClusterStateUpdateTask(){
+        @Override public ClusterState execute(        ClusterState currentState){
+          try {
+            RoutingAllocation.Result routingResult=allocationService.reroute(currentState);
+            return newClusterStateBuilder().state(currentState).routingResult(routingResult).build();
+          }
+  finally {
+            latch.countDown();
+          }
+        }
+      }
+);
     }
   }
 );
