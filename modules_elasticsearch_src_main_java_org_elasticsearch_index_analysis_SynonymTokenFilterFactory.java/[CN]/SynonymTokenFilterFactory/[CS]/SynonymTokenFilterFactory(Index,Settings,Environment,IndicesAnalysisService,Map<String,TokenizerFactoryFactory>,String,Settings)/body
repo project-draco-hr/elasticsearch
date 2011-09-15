@@ -4,7 +4,7 @@
   if (rules == null) {
     throw new ElasticSearchIllegalArgumentException("synonym requires either `synonyms` or `synonyms_path` to be configured");
   }
-  boolean ignoreCase=settings.getAsBoolean("ignore_case",false);
+  this.ignoreCase=settings.getAsBoolean("ignore_case",false);
   boolean expand=settings.getAsBoolean("expand",true);
   String tokenizerName=settings.get("tokenizer","whitespace");
   TokenizerFactoryFactory tokenizerFactoryFactory=tokenizerFactories.get(tokenizerName);
@@ -14,7 +14,20 @@
   if (tokenizerFactoryFactory == null) {
     throw new ElasticSearchIllegalArgumentException("failed to fine tokenizer [" + tokenizerName + "] for synonym token filter");
   }
-  TokenizerFactory tokenizerFactory=tokenizerFactoryFactory.create(tokenizerName,settings);
-  synonymMap=new SynonymMap(ignoreCase);
-  parseRules(rules,synonymMap,"=>",",",expand,tokenizerFactory);
+  final TokenizerFactory tokenizerFactory=tokenizerFactoryFactory.create(tokenizerName,settings);
+  Analyzer analyzer=new ReusableAnalyzerBase(){
+    @Override protected TokenStreamComponents createComponents(    String fieldName,    Reader reader){
+      Tokenizer tokenizer=tokenizerFactory == null ? new WhitespaceTokenizer(Lucene.ANALYZER_VERSION,reader) : tokenizerFactory.create(reader);
+      TokenStream stream=ignoreCase ? new LowerCaseFilter(Lucene.ANALYZER_VERSION,tokenizer) : tokenizer;
+      return new TokenStreamComponents(tokenizer,stream);
+    }
+  }
+;
+  CustomSynonymParser parser=new CustomSynonymParser(true,expand,analyzer);
+  try {
+    synonymMap=parser.build();
+  }
+ catch (  IOException e) {
+    throw new ElasticSearchIllegalArgumentException("failed to build synonyms",e);
+  }
 }
