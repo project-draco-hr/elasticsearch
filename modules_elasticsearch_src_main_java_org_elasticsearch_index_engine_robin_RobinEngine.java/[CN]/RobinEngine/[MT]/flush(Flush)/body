@@ -9,6 +9,7 @@
     throw new FlushNotAllowedEngineException(shardId,"Already flushing...");
   }
   try {
+    boolean makeTransientCurrent=false;
     if (flush.full()) {
       rwl.writeLock().lock();
       try {
@@ -66,11 +67,11 @@ catch (        OutOfMemoryError e) {
                 translog.revertTransient();
               }
  else {
-                translog.makeTransientCurrent();
+                makeTransientCurrent=true;
               }
             }
  else {
-              translog.makeTransientCurrent();
+              makeTransientCurrent=true;
             }
           }
  catch (          Exception e) {
@@ -89,13 +90,18 @@ catch (          OutOfMemoryError e) {
       }
     }
     refreshVersioningTable(threadPool.estimatedTimeInMillis());
+    if (makeTransientCurrent) {
+      translog.makeTransientCurrent();
+    }
     try {
       SegmentInfos infos=new SegmentInfos();
       infos.read(store.directory());
       lastCommittedSegmentInfos=infos;
     }
  catch (    Exception e) {
-      logger.warn("failed to read latest segment infos on flush",e);
+      if (!closed) {
+        logger.warn("failed to read latest segment infos on flush",e);
+      }
     }
   }
   finally {
