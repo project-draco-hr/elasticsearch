@@ -1,0 +1,38 @@
+{
+  AttributesKey key=new AttributesKey(attributes);
+  AttributesRoutings shardRoutings=activeShardsByAttributes.get(key);
+  if (shardRoutings == null) {
+synchronized (shardsByAttributeMutex) {
+      ArrayList<ShardRouting> from=new ArrayList<ShardRouting>(activeShards);
+      ArrayList<ShardRouting> to=new ArrayList<ShardRouting>();
+      for (      String attribute : attributes) {
+        String localAttributeValue=nodes.localNode().attributes().get(attribute);
+        if (localAttributeValue == null) {
+          continue;
+        }
+        for (Iterator<ShardRouting> iterator=from.iterator(); iterator.hasNext(); ) {
+          ShardRouting fromShard=iterator.next();
+          if (localAttributeValue.equals(nodes.get(fromShard.currentNodeId()).attributes().get(attribute))) {
+            iterator.remove();
+            to.add(fromShard);
+          }
+        }
+      }
+      shardRoutings=new AttributesRoutings(ImmutableList.copyOf(to),ImmutableList.copyOf(from));
+      activeShardsByAttributes=MapBuilder.newMapBuilder(activeShardsByAttributes).put(key,shardRoutings).immutableMap();
+    }
+  }
+  ArrayList<ShardRouting> ordered=new ArrayList<ShardRouting>(shardRoutings.totalSize);
+  index=Math.abs(index);
+  for (int i=0; i < shardRoutings.withSameAttribute.size(); i++) {
+    int loc=(index + i) % shardRoutings.withSameAttribute.size();
+    ShardRouting shardRouting=shardRoutings.withSameAttribute.get(loc);
+    ordered.add(shardRouting);
+  }
+  for (int i=0; i < shardRoutings.withoutSameAttribute.size(); i++) {
+    int loc=(index + i) % shardRoutings.withoutSameAttribute.size();
+    ShardRouting shardRouting=shardRoutings.withoutSameAttribute.get(loc);
+    ordered.add(shardRouting);
+  }
+  return new PlainShardIterator(shardId,ordered);
+}
