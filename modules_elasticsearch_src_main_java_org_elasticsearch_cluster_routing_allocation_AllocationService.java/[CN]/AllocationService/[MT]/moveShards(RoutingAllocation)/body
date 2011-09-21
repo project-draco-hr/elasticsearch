@@ -1,19 +1,33 @@
 {
   boolean changed=false;
-  for (  RoutingNode routingNode : allocation.routingNodes()) {
-    for (    MutableShardRouting shardRouting : routingNode) {
-      if (!shardRouting.started()) {
+  List<MutableShardRouting> shards=new ArrayList<MutableShardRouting>();
+  int index=0;
+  boolean found=true;
+  while (found) {
+    found=false;
+    for (    RoutingNode routingNode : allocation.routingNodes()) {
+      if (index >= routingNode.shards().size()) {
         continue;
       }
-      if (!allocation.deciders().canRemain(shardRouting,routingNode,allocation)) {
-        logger.debug("[{}][{}] allocated on [{}], but can no longer be allocated on it, moving...",shardRouting.index(),shardRouting.id(),routingNode.node());
-        boolean moved=shardsAllocators.move(shardRouting,routingNode,allocation);
-        if (!moved) {
-          logger.debug("[{}][{}] can't move",shardRouting.index(),shardRouting.id());
-        }
+      found=true;
+      shards.add(routingNode.shards().get(index));
+    }
+    index++;
+  }
+  for (int i=0; i < shards.size(); i++) {
+    MutableShardRouting shardRouting=shards.get(i);
+    if (!shardRouting.started()) {
+      continue;
+    }
+    RoutingNode routingNode=allocation.routingNodes().node(shardRouting.currentNodeId());
+    if (!allocation.deciders().canRemain(shardRouting,routingNode,allocation)) {
+      logger.debug("[{}][{}] allocated on [{}], but can no longer be allocated on it, moving...",shardRouting.index(),shardRouting.id(),routingNode.node());
+      boolean moved=shardsAllocators.move(shardRouting,routingNode,allocation);
+      if (!moved) {
+        logger.debug("[{}][{}] can't move",shardRouting.index(),shardRouting.id());
+      }
  else {
-          changed=true;
-        }
+        changed=true;
       }
     }
   }
