@@ -14,16 +14,32 @@
   if (!storeType.contains("fs")) {
     return new StoreFilesMetaData(false,shardId,ImmutableMap.<String,StoreFileMetaData>of());
   }
-  File indexFile=new File(nodeEnv.shardLocation(shardId),"index");
-  if (!indexFile.exists()) {
+  File[] shardLocations=nodeEnv.shardLocations(shardId);
+  File[] shardIndexLocations=new File[shardLocations.length];
+  for (int i=0; i < shardLocations.length; i++) {
+    shardIndexLocations[i]=new File(shardLocations[i],"index");
+  }
+  boolean exists=false;
+  for (  File shardIndexLocation : shardIndexLocations) {
+    if (shardIndexLocation.exists()) {
+      exists=true;
+      break;
+    }
+  }
+  if (!exists) {
     return new StoreFilesMetaData(false,shardId,ImmutableMap.<String,StoreFileMetaData>of());
   }
+  Map<String,String> checksums=Store.readChecksums(shardIndexLocations);
+  if (checksums == null) {
+    checksums=ImmutableMap.of();
+  }
   Map<String,StoreFileMetaData> files=Maps.newHashMap();
-  FSDirectory directory=FSDirectory.open(indexFile);
-  Map<String,String> checksums=null;
-  try {
-    checksums=Store.readChecksums(directory);
-    for (    File file : indexFile.listFiles()) {
+  for (  File shardIndexLocation : shardIndexLocations) {
+    File[] listedFiles=shardIndexLocation.listFiles();
+    if (listedFiles == null) {
+      continue;
+    }
+    for (    File file : listedFiles) {
       if (file.getName().endsWith(".cks")) {
         continue;
       }
@@ -31,26 +47,6 @@
         continue;
       }
       files.put(file.getName(),new StoreFileMetaData(file.getName(),file.length(),file.lastModified(),checksums.get(file.getName())));
-    }
-  }
-  finally {
-    directory.close();
-  }
-  for (  File file : indexFile.listFiles()) {
-    if (file.getName().endsWith(".cks")) {
-      continue;
-    }
-    if (file.getName().startsWith("_checksums")) {
-      continue;
-    }
-    String checksum=null;
-    File checksumFile=new File(file.getParentFile(),file.getName() + ".cks");
-    if (checksumFile.exists() && (checksums == null || !checksums.containsKey(file.getName()))) {
-      byte[] checksumBytes=Streams.copyToByteArray(checksumFile);
-      if (checksumBytes.length > 0) {
-        checksum=Unicode.fromBytes(checksumBytes);
-      }
-      files.put(file.getName(),new StoreFileMetaData(file.getName(),file.length(),file.lastModified(),checksum));
     }
   }
   return new StoreFilesMetaData(false,shardId,files);

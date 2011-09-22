@@ -1,46 +1,78 @@
 {
   super(settings);
   if (!DiscoveryNode.nodeRequiresLocalStorage(settings)) {
-    nodeFile=null;
-    lock=null;
+    nodeFiles=null;
+    nodeIndicesLocations=null;
+    locks=null;
     localNodeId=-1;
     return;
   }
-  Lock lock=null;
-  File dir=null;
+  File[] nodesFiles=new File[environment.dataWithClusterFiles().length];
+  Lock[] locks=new Lock[environment.dataWithClusterFiles().length];
   int localNodeId=-1;
   IOException lastException=null;
-  for (int i=0; i < 50; i++) {
-    dir=new File(new File(environment.dataWithClusterFile(),"nodes"),Integer.toString(i));
-    if (!dir.exists()) {
-      FileSystemUtils.mkdirs(dir);
-    }
-    logger.trace("obtaining node lock on {} ...",dir.getAbsolutePath());
-    try {
-      NativeFSLockFactory lockFactory=new NativeFSLockFactory(dir);
-      Lock tmpLock=lockFactory.makeLock("node.lock");
-      boolean obtained=tmpLock.obtain();
-      if (obtained) {
-        lock=tmpLock;
-        localNodeId=i;
+  for (int possibleLockId=0; possibleLockId < 50; possibleLockId++) {
+    for (int dirIndex=0; dirIndex < environment.dataWithClusterFiles().length; dirIndex++) {
+      File dir=new File(new File(environment.dataWithClusterFiles()[dirIndex],"nodes"),Integer.toString(possibleLockId));
+      if (!dir.exists()) {
+        FileSystemUtils.mkdirs(dir);
+      }
+      logger.trace("obtaining node lock on {} ...",dir.getAbsolutePath());
+      try {
+        NativeFSLockFactory lockFactory=new NativeFSLockFactory(dir);
+        Lock tmpLock=lockFactory.makeLock("node.lock");
+        boolean obtained=tmpLock.obtain();
+        if (obtained) {
+          locks[dirIndex]=tmpLock;
+          nodesFiles[dirIndex]=dir;
+          localNodeId=possibleLockId;
+        }
+ else {
+          logger.trace("failed to obtain node lock on {}",dir.getAbsolutePath());
+          for (int i=0; i < locks.length; i++) {
+            if (locks[i] != null) {
+              try {
+                locks[i].release();
+              }
+ catch (              Exception e1) {
+              }
+            }
+            locks[i]=null;
+          }
+          break;
+        }
+      }
+ catch (      IOException e) {
+        logger.trace("failed to obtain node lock on {}",e,dir.getAbsolutePath());
+        lastException=e;
+        for (int i=0; i < locks.length; i++) {
+          if (locks[i] != null) {
+            try {
+              locks[i].release();
+            }
+ catch (            Exception e1) {
+            }
+          }
+          locks[i]=null;
+        }
         break;
       }
- else {
-        logger.trace("failed to obtain node lock on {}",dir.getAbsolutePath());
-      }
     }
- catch (    IOException e) {
-      logger.trace("failed to obtain node lock on {}",e,dir.getAbsolutePath());
-      lastException=e;
+    if (locks[0] != null) {
+      break;
     }
   }
-  if (lock == null) {
+  if (locks[0] == null) {
     throw new IOException("Failed to obtain node lock",lastException);
   }
   this.localNodeId=localNodeId;
-  this.lock=lock;
-  this.nodeFile=dir;
+  this.locks=locks;
+  this.nodeFiles=nodesFiles;
   if (logger.isDebugEnabled()) {
-    logger.debug("using node location [{}], local_node_id [{}]",dir,localNodeId);
+    logger.debug("using node location [{}], local_node_id [{}]",nodesFiles,localNodeId);
+  }
+  this.nodeIndicesLocations=new File[nodeFiles.length];
+  for (int i=0; i < nodeFiles.length; i++) {
+    nodeIndicesLocations[i]=new File(nodeFiles[i],"indices");
   }
 }
