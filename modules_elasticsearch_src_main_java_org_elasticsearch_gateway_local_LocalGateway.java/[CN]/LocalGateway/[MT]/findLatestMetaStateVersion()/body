@@ -1,28 +1,40 @@
 {
   long index=-1;
-  for (  File stateFile : location.listFiles()) {
-    if (logger.isTraceEnabled()) {
-      logger.trace("[find_latest_state]: processing [" + stateFile.getName() + "]");
-    }
-    String name=stateFile.getName();
-    if (!name.startsWith("metadata-")) {
+  File latest=null;
+  for (  File dataLocation : nodeEnv.nodeDataLocations()) {
+    File stateLocation=new File(dataLocation,"_state");
+    if (!stateLocation.exists()) {
       continue;
     }
-    long fileIndex=Long.parseLong(name.substring(name.indexOf('-') + 1));
-    if (fileIndex >= index) {
-      try {
-        byte[] data=Streams.copyToByteArray(new FileInputStream(stateFile));
-        if (data.length == 0) {
-          logger.debug("[find_latest_state]: not data for [" + name + "], ignoring...");
-          continue;
-        }
-        readMetaState(data);
-        index=fileIndex;
+    File[] stateFiles=stateLocation.listFiles();
+    if (stateFiles == null) {
+      continue;
+    }
+    for (    File stateFile : stateFiles) {
+      if (logger.isTraceEnabled()) {
+        logger.trace("[find_latest_state]: processing [" + stateFile.getName() + "]");
       }
- catch (      IOException e) {
-        logger.warn("[find_latest_state]: failed to read state from [" + name + "], ignoring...",e);
+      String name=stateFile.getName();
+      if (!name.startsWith("metadata-")) {
+        continue;
+      }
+      long fileIndex=Long.parseLong(name.substring(name.indexOf('-') + 1));
+      if (fileIndex >= index) {
+        try {
+          byte[] data=Streams.copyToByteArray(new FileInputStream(stateFile));
+          if (data.length == 0) {
+            logger.debug("[find_latest_state]: not data for [" + name + "], ignoring...");
+            continue;
+          }
+          readMetaState(data);
+          index=fileIndex;
+          latest=stateFile;
+        }
+ catch (        IOException e) {
+          logger.warn("[find_latest_state]: failed to read state from [" + name + "], ignoring...",e);
+        }
       }
     }
   }
-  return index;
+  return latest;
 }
