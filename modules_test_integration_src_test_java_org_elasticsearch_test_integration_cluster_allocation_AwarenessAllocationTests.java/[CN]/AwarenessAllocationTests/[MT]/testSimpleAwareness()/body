@@ -1,0 +1,25 @@
+{
+  Settings commonSettings=ImmutableSettings.settingsBuilder().put("cluster.routing.schedule","10ms").put("cluster.routing.allocation.awareness.attributes","rack_id").build();
+  logger.info("--> starting 2 nodes on the same rack");
+  startNode("node1",ImmutableSettings.settingsBuilder().put(commonSettings).put("node.rack_id","rack_1"));
+  startNode("node2",ImmutableSettings.settingsBuilder().put(commonSettings).put("node.rack_id","rack_1"));
+  client("node1").admin().indices().prepareCreate("test1").execute().actionGet();
+  client("node1").admin().indices().prepareCreate("test2").execute().actionGet();
+  ClusterHealthResponse health=client("node1").admin().cluster().prepareHealth().setWaitForGreenStatus().execute().actionGet();
+  assertThat(health.timedOut(),equalTo(false));
+  logger.info("--> starting 1 node on a different rack");
+  startNode("node3",ImmutableSettings.settingsBuilder().put(commonSettings).put("node.rack_id","rack_2"));
+  Thread.sleep(500);
+  health=client("node1").admin().cluster().prepareHealth().setWaitForGreenStatus().setWaitForNodes("3").setWaitForRelocatingShards(0).execute().actionGet();
+  assertThat(health.timedOut(),equalTo(false));
+  ClusterState clusterState=client("node1").admin().cluster().prepareState().execute().actionGet().state();
+  TObjectIntHashMap<String> counts=new TObjectIntHashMap<String>();
+  for (  IndexRoutingTable indexRoutingTable : clusterState.routingTable()) {
+    for (    IndexShardRoutingTable indexShardRoutingTable : indexRoutingTable) {
+      for (      ShardRouting shardRouting : indexShardRoutingTable) {
+        counts.adjustOrPutValue(clusterState.nodes().get(shardRouting.currentNodeId()).name(),1,1);
+      }
+    }
+  }
+  assertThat(counts.get("node3"),equalTo(10));
+}
