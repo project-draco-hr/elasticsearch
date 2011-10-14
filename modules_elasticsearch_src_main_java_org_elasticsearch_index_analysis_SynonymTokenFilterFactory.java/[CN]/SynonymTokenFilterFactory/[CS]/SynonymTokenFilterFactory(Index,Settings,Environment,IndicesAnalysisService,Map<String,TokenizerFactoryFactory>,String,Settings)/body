@@ -1,7 +1,7 @@
 {
   super(index,indexSettings,name,settings);
-  List<String> rules=Analysis.getWordList(env,settings,"synonyms");
-  if (rules == null) {
+  Reader rulesReader=Analysis.getFileReader(env,settings,"synonyms");
+  if (rulesReader == null) {
     throw new ElasticSearchIllegalArgumentException("synonym requires either `synonyms` or `synonyms_path` to be configured");
   }
   this.ignoreCase=settings.getAsBoolean("ignore_case",false);
@@ -12,7 +12,7 @@
     tokenizerFactoryFactory=indicesAnalysisService.tokenizerFactoryFactory(tokenizerName);
   }
   if (tokenizerFactoryFactory == null) {
-    throw new ElasticSearchIllegalArgumentException("failed to fine tokenizer [" + tokenizerName + "] for synonym token filter");
+    throw new ElasticSearchIllegalArgumentException("failed to find tokenizer [" + tokenizerName + "] for synonym token filter");
   }
   final TokenizerFactory tokenizerFactory=tokenizerFactoryFactory.create(tokenizerName,settings);
   Analyzer analyzer=new ReusableAnalyzerBase(){
@@ -23,14 +23,19 @@
     }
   }
 ;
-  CustomSynonymParser parser=new CustomSynonymParser(true,expand,analyzer);
   try {
-    for (    String rule : rules) {
-      parser.addLine(rule);
+    SynonymMap.Builder parser=null;
+    if (settings.get("format","wordnet").equalsIgnoreCase("wordnet")) {
+      parser=new WordnetSynonymParser(true,expand,analyzer);
+      ((WordnetSynonymParser)parser).add(rulesReader);
+    }
+ else {
+      parser=new SolrSynonymParser(true,expand,analyzer);
+      ((SolrSynonymParser)parser).add(rulesReader);
     }
     synonymMap=parser.build();
   }
- catch (  IOException e) {
+ catch (  Exception e) {
     throw new ElasticSearchIllegalArgumentException("failed to build synonyms",e);
   }
 }
