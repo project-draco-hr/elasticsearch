@@ -1,8 +1,23 @@
 {
+synchronized (indicesAndTypesToRefresh) {
+    Set<String> sTypes=indicesAndTypesToRefresh.get(index);
+    if (sTypes == null) {
+      sTypes=Sets.newHashSet();
+      indicesAndTypesToRefresh.put(index,sTypes);
+    }
+    sTypes.addAll(Arrays.asList(types));
+  }
   clusterService.submitStateUpdateTask("refresh-mapping [" + index + "]["+ Arrays.toString(types)+ "]",new ClusterStateUpdateTask(){
     @Override public ClusterState execute(    ClusterState currentState){
       boolean createdIndex=false;
       try {
+        Set<String> sTypes;
+synchronized (indicesAndTypesToRefresh) {
+          sTypes=indicesAndTypesToRefresh.remove(index);
+        }
+        if (sTypes == null || sTypes.isEmpty()) {
+          return currentState;
+        }
         final IndexMetaData indexMetaData=currentState.metaData().index(index);
         if (indexMetaData == null) {
           return currentState;
@@ -11,7 +26,7 @@
         if (indexService == null) {
           indexService=indicesService.createIndex(indexMetaData.index(),indexMetaData.settings(),currentState.nodes().localNode().id());
           createdIndex=true;
-          for (          String type : types) {
+          for (          String type : sTypes) {
             if (indexMetaData.mappings().containsKey(type)) {
               indexService.mapperService().add(type,indexMetaData.mappings().get(type).source().string());
             }
@@ -19,7 +34,7 @@
         }
         IndexMetaData.Builder indexMetaDataBuilder=newIndexMetaDataBuilder(indexMetaData);
         List<String> updatedTypes=Lists.newArrayList();
-        for (        String type : types) {
+        for (        String type : sTypes) {
           DocumentMapper mapper=indexService.mapperService().documentMapper(type);
           if (!mapper.mappingSource().equals(indexMetaData.mappings().get(type).source())) {
             updatedTypes.add(type);
