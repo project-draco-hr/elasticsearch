@@ -1,0 +1,66 @@
+{
+  if (!nodes.nodeExists(nodeId)) {
+    if (counter.decrementAndGet() == 0) {
+      listener.onResponse(response.response());
+    }
+    return;
+  }
+  final ReplicaOperationRequest shardRequest=new ReplicaOperationRequest(shardIt.shardId().id(),response.replicaRequest());
+  if (!nodeId.equals(nodes.localNodeId())) {
+    DiscoveryNode node=nodes.get(nodeId);
+    transportService.sendRequest(node,transportReplicaAction,shardRequest,transportOptions(),new VoidTransportResponseHandler(ThreadPool.Names.SAME){
+      @Override public void handleResponse(      VoidStreamable vResponse){
+        finishIfPossible();
+      }
+      @Override public void handleException(      TransportException exp){
+        if (!ignoreReplicaException(exp.unwrapCause())) {
+          logger.warn("Failed to perform " + transportAction + " on replica "+ shardIt.shardId(),exp);
+          shardStateAction.shardFailed(shard,"Failed to perform [" + transportAction + "] on replica, message ["+ detailedMessage(exp)+ "]");
+        }
+        finishIfPossible();
+      }
+      private void finishIfPossible(){
+        if (counter.decrementAndGet() == 0) {
+          listener.onResponse(response.response());
+        }
+      }
+    }
+);
+  }
+ else {
+    if (request.operationThreaded()) {
+      request.beforeLocalFork();
+      threadPool.executor(executor).execute(new Runnable(){
+        @Override public void run(){
+          try {
+            shardOperationOnReplica(shardRequest);
+          }
+ catch (          Exception e) {
+            if (!ignoreReplicaException(e)) {
+              logger.warn("Failed to perform " + transportAction + " on replica "+ shardIt.shardId(),e);
+              shardStateAction.shardFailed(shard,"Failed to perform [" + transportAction + "] on replica, message ["+ detailedMessage(e)+ "]");
+            }
+          }
+          if (counter.decrementAndGet() == 0) {
+            listener.onResponse(response.response());
+          }
+        }
+      }
+);
+    }
+ else {
+      try {
+        shardOperationOnReplica(shardRequest);
+      }
+ catch (      Exception e) {
+        if (!ignoreReplicaException(e)) {
+          logger.warn("Failed to perform " + transportAction + " on replica"+ shardIt.shardId(),e);
+          shardStateAction.shardFailed(shard,"Failed to perform [" + transportAction + "] on replica, message ["+ detailedMessage(e)+ "]");
+        }
+      }
+      if (counter.decrementAndGet() == 0) {
+        listener.onResponse(response.response());
+      }
+    }
+  }
+}
