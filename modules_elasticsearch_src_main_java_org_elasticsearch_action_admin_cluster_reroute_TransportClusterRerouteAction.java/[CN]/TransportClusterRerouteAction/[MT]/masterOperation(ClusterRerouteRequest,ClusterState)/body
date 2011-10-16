@@ -1,0 +1,38 @@
+{
+  final AtomicReference<Throwable> failureRef=new AtomicReference<Throwable>();
+  final CountDownLatch latch=new CountDownLatch(1);
+  clusterService.submitStateUpdateTask("cluster_reroute (api)",new ProcessedClusterStateUpdateTask(){
+    @Override public ClusterState execute(    ClusterState currentState){
+      try {
+        RoutingAllocation.Result routingResult=allocationService.reroute(currentState);
+        return newClusterStateBuilder().state(currentState).routingResult(routingResult).build();
+      }
+ catch (      Exception e) {
+        latch.countDown();
+        logger.warn("failed to reroute",e);
+        return currentState;
+      }
+ finally {
+      }
+    }
+    @Override public void clusterStateProcessed(    ClusterState clusterState){
+      latch.countDown();
+    }
+  }
+);
+  try {
+    latch.await();
+  }
+ catch (  InterruptedException e) {
+    failureRef.set(e);
+  }
+  if (failureRef.get() != null) {
+    if (failureRef.get() instanceof ElasticSearchException) {
+      throw (ElasticSearchException)failureRef.get();
+    }
+ else {
+      throw new ElasticSearchException(failureRef.get().getMessage(),failureRef.get());
+    }
+  }
+  return new ClusterRerouteResponse();
+}
