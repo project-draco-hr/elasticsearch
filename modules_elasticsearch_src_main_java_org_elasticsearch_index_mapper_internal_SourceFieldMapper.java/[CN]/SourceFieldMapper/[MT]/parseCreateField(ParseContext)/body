@@ -11,7 +11,38 @@
   byte[] data=context.source();
   int dataOffset=context.sourceOffset();
   int dataLength=context.sourceLength();
-  if (compress != null && compress && !LZF.isCompressed(data,dataOffset,dataLength)) {
+  boolean filtered=includes.length > 0 || excludes.length > 0;
+  if (filtered) {
+    XContentType contentType;
+    Map<String,Object> sourceAsMap;
+    if (LZF.isCompressed(data,dataOffset,dataLength)) {
+      BytesStreamInput siBytes=new BytesStreamInput(data,dataOffset,dataLength);
+      LZFStreamInput siLzf=CachedStreamInput.cachedLzf(siBytes);
+      contentType=XContentFactory.xContentType(siLzf);
+      siLzf.resetToBufferStart();
+      sourceAsMap=XContentFactory.xContent(contentType).createParser(siLzf).mapAndClose();
+    }
+ else {
+      contentType=XContentFactory.xContentType(data,dataOffset,dataLength);
+      sourceAsMap=XContentFactory.xContent(contentType).createParser(data,dataOffset,dataLength).mapAndClose();
+    }
+    Map<String,Object> filteredSource=XContentMapValues.filter(sourceAsMap,includes,excludes);
+    CachedStreamOutput.Entry cachedEntry=CachedStreamOutput.popEntry();
+    StreamOutput streamOutput;
+    if (compress != null && compress && (compressThreshold == -1 || dataLength > compressThreshold)) {
+      streamOutput=cachedEntry.cachedLZFBytes();
+    }
+ else {
+      streamOutput=cachedEntry.cachedBytes();
+    }
+    XContentBuilder builder=XContentFactory.contentBuilder(contentType,streamOutput).map(filteredSource);
+    builder.close();
+    data=cachedEntry.bytes().copiedByteArray();
+    dataOffset=0;
+    dataLength=data.length;
+    CachedStreamOutput.pushEntry(cachedEntry);
+  }
+ else   if (compress != null && compress && !LZF.isCompressed(data,dataOffset,dataLength)) {
     if (compressThreshold == -1 || dataLength > compressThreshold) {
       CachedStreamOutput.Entry cachedEntry=CachedStreamOutput.popEntry();
       LZFStreamOutput streamOutput=cachedEntry.cachedLZFBytes();
