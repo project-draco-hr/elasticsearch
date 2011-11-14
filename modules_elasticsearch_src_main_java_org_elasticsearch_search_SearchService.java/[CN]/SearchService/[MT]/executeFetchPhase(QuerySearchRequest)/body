@@ -10,17 +10,31 @@
     throw new QueryPhaseExecutionException(context,"Failed to set aggregated df",e);
   }
   try {
+    context.indexShard().searchService().onPreQueryPhase(context);
     long time=System.nanoTime();
-    queryPhase.execute(context);
+    try {
+      queryPhase.execute(context);
+    }
+ catch (    RuntimeException e) {
+      context.indexShard().searchService().onFailedQueryPhase(context);
+      throw e;
+    }
     long time2=System.nanoTime();
     context.indexShard().searchService().onQueryPhase(context,time2 - time);
-    shortcutDocIdsToLoad(context);
-    fetchPhase.execute(context);
-    if (context.scroll() == null) {
-      freeContext(request.id());
-    }
+    context.indexShard().searchService().onPreFetchPhase(context);
+    try {
+      shortcutDocIdsToLoad(context);
+      fetchPhase.execute(context);
+      if (context.scroll() == null) {
+        freeContext(request.id());
+      }
  else {
-      contextProcessedSuccessfully(context);
+        contextProcessedSuccessfully(context);
+      }
+    }
+ catch (    RuntimeException e) {
+      context.indexShard().searchService().onFailedFetchPhase(context);
+      throw e;
     }
     context.indexShard().searchService().onFetchPhase(context,System.nanoTime() - time2);
     return new QueryFetchSearchResult(context.queryResult(),context.fetchResult());
