@@ -1,54 +1,30 @@
 {
-  ChannelBuffer buffer=(ChannelBuffer)event.getMessage();
-  int size=buffer.getInt(buffer.readerIndex() - 4);
-  transportServiceAdapter.received(size + 4);
-  int markedReaderIndex=buffer.readerIndex();
-  int expectedIndexReader=markedReaderIndex + size;
-  StreamInput streamIn=new ChannelBufferStreamInput(buffer,size);
-  long requestId=buffer.readLong();
-  byte status=buffer.readByte();
-  boolean isRequest=TransportStreams.statusIsRequest(status);
-  HandlesStreamInput handlesStream;
-  if (TransportStreams.statusIsCompress(status)) {
-    handlesStream=CachedStreamInput.cachedHandlesLzf(streamIn);
+  Object m=e.getMessage();
+  if (!(m instanceof ChannelBuffer)) {
+    ctx.sendUpstream(e);
+    return;
+  }
+  ChannelBuffer input=(ChannelBuffer)m;
+  if (!input.readable()) {
+    return;
+  }
+  ChannelBuffer cumulation=this.cumulation;
+  if (cumulation != null && cumulation.readable()) {
+    cumulation.discardReadBytes();
+    cumulation.writeBytes(input);
+    callDecode(ctx,e.getChannel(),cumulation,e.getRemoteAddress());
   }
  else {
-    handlesStream=CachedStreamInput.cachedHandles(streamIn);
-  }
-  if (isRequest) {
-    String action=handleRequest(event,handlesStream,requestId);
-    if (buffer.readerIndex() != expectedIndexReader) {
-      if (buffer.readerIndex() < expectedIndexReader) {
-        logger.warn("Message not fully read (request) for [{}] and action [{}], resetting",requestId,action);
+    int actualSize=callDecode(ctx,e.getChannel(),input,e.getRemoteAddress());
+    if (input.readable()) {
+      if (actualSize > 0) {
+        cumulation=ChannelBuffers.dynamicBuffer(actualSize,ctx.getChannel().getConfig().getBufferFactory());
       }
  else {
-        logger.warn("Message read past expected size (request) for [{}] and action [{}], resetting",requestId,action);
+        cumulation=ChannelBuffers.dynamicBuffer(ctx.getChannel().getConfig().getBufferFactory());
       }
-      buffer.readerIndex(expectedIndexReader);
+      cumulation.writeBytes(input);
+      this.cumulation=cumulation;
     }
   }
- else {
-    TransportResponseHandler handler=transportServiceAdapter.remove(requestId);
-    if (handler != null) {
-      if (TransportStreams.statusIsError(status)) {
-        handlerResponseError(handlesStream,handler);
-      }
- else {
-        handleResponse(handlesStream,handler);
-      }
-    }
- else {
-      buffer.readerIndex(markedReaderIndex + size);
-    }
-    if (buffer.readerIndex() != expectedIndexReader) {
-      if (buffer.readerIndex() < expectedIndexReader) {
-        logger.warn("Message not fully read (response) for [{}] handler {}, error [{}], resetting",requestId,handler,TransportStreams.statusIsError(status));
-      }
- else {
-        logger.warn("Message read past expected size (response) for [{}] handler {}, error [{}], resetting",requestId,handler,TransportStreams.statusIsError(status));
-      }
-      buffer.readerIndex(expectedIndexReader);
-    }
-  }
-  handlesStream.cleanHandles();
 }
