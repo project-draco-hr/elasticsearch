@@ -5,7 +5,7 @@
       DiscoveryNode requestingNodeX=null;
       ClusterName clusterName=null;
       Map<String,Object> externalPingData=null;
-      XContentType xContentType;
+      XContentType xContentType=null;
 synchronized (receiveMutex) {
         try {
           multicastSocket.receive(datagramPacketReceive);
@@ -20,15 +20,33 @@ catch (        Exception e) {
           continue;
         }
         try {
-          xContentType=XContentFactory.xContentType(datagramPacketReceive.getData(),datagramPacketReceive.getOffset(),datagramPacketReceive.getLength());
-          if (xContentType != null) {
-            externalPingData=XContentFactory.xContent(xContentType).createParser(datagramPacketReceive.getData(),datagramPacketReceive.getOffset(),datagramPacketReceive.getLength()).mapAndClose();
+          boolean internal=false;
+          if (datagramPacketReceive.getLength() > 4) {
+            int counter=0;
+            for (; counter < INTERNAL_HEADER.length; counter++) {
+              if (datagramPacketReceive.getData()[datagramPacketReceive.getOffset() + counter] != INTERNAL_HEADER[counter]) {
+                break;
+              }
+            }
+            if (counter == INTERNAL_HEADER.length) {
+              internal=true;
+            }
           }
- else {
-            StreamInput input=CachedStreamInput.cachedHandles(new BytesStreamInput(datagramPacketReceive.getData(),datagramPacketReceive.getOffset(),datagramPacketReceive.getLength()));
+          if (internal) {
+            StreamInput input=CachedStreamInput.cachedHandles(new BytesStreamInput(datagramPacketReceive.getData(),datagramPacketReceive.getOffset() + INTERNAL_HEADER.length,datagramPacketReceive.getLength()));
+            Version version=Version.readVersion(input);
             id=input.readInt();
             clusterName=ClusterName.readClusterName(input);
             requestingNodeX=readNode(input);
+          }
+ else {
+            xContentType=XContentFactory.xContentType(datagramPacketReceive.getData(),datagramPacketReceive.getOffset(),datagramPacketReceive.getLength());
+            if (xContentType != null) {
+              externalPingData=XContentFactory.xContent(xContentType).createParser(datagramPacketReceive.getData(),datagramPacketReceive.getOffset(),datagramPacketReceive.getLength()).mapAndClose();
+            }
+ else {
+              throw new ElasticSearchIllegalStateException("failed multicast message, probably message from previous version");
+            }
           }
         }
  catch (        Exception e) {
