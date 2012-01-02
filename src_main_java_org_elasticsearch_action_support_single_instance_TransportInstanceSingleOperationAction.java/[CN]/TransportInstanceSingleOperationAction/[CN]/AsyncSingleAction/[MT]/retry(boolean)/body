@@ -1,0 +1,37 @@
+{
+  if (!fromClusterEvent) {
+    request.beforeLocalFork();
+    clusterService.add(request.timeout(),new TimeoutClusterStateListener(){
+      @Override public void postAdded(){
+        if (start(true)) {
+          clusterService.remove(this);
+        }
+      }
+      @Override public void onClose(){
+        clusterService.remove(this);
+        listener.onFailure(new NodeClosedException(nodes.localNode()));
+      }
+      @Override public void clusterChanged(      ClusterChangedEvent event){
+        if (start(true)) {
+          clusterService.remove(this);
+        }
+      }
+      @Override public void onTimeout(      TimeValue timeValue){
+        if (start(true)) {
+          clusterService.remove(this);
+          return;
+        }
+        clusterService.remove(this);
+        final UnavailableShardsException failure;
+        if (shardIt == null) {
+          failure=new UnavailableShardsException(new ShardId(request.index(),-1),"Timeout waiting for [" + timeValue + "], request: "+ request.toString());
+        }
+ else {
+          failure=new UnavailableShardsException(shardIt.shardId(),"[" + shardIt.size() + "] shardIt, ["+ shardIt.sizeActive()+ "] active : Timeout waiting for ["+ timeValue+ "], request: "+ request.toString());
+        }
+        listener.onFailure(failure);
+      }
+    }
+);
+  }
+}

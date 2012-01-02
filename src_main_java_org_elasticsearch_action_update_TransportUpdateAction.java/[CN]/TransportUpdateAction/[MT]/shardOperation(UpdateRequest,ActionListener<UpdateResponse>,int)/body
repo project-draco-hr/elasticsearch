@@ -1,0 +1,88 @@
+{
+  IndexService indexService=indicesService.indexServiceSafe(request.index());
+  IndexShard indexShard=indexService.shardSafe(request.shardId());
+  GetResult getResult=indexShard.getService().get(request.type(),request.id(),new String[]{SourceFieldMapper.NAME,RoutingFieldMapper.NAME,ParentFieldMapper.NAME,TimestampFieldMapper.NAME},true);
+  if (!getResult.exists()) {
+    listener.onFailure(new DocumentMissingEngineException(new ShardId(request.index(),request.shardId()),request.type(),request.id()));
+    return;
+  }
+  if (getResult.internalSourceRef() == null) {
+    listener.onFailure(new DocumentSourceMissingEngineException(new ShardId(request.index(),request.shardId()),request.type(),request.id()));
+    return;
+  }
+  Tuple<XContentType,Map<String,Object>> sourceAndContent=XContentHelper.convertToMap(getResult.internalSourceRef().bytes(),getResult.internalSourceRef().offset(),getResult.internalSourceRef().length(),true);
+  Map<String,Object> source=sourceAndContent.v2();
+  Map<String,Object> ctx=new HashMap<String,Object>(2);
+  ctx.put("_source",source);
+  try {
+    ExecutableScript script=scriptService.executable(request.scriptLang,request.script,request.scriptParams);
+    script.setNextVar("ctx",ctx);
+    script.run();
+    ctx=(Map<String,Object>)script.unwrap(ctx);
+  }
+ catch (  Exception e) {
+    throw new ElasticSearchIllegalArgumentException("failed to execute script",e);
+  }
+  String operation=(String)ctx.get("op");
+  source=(Map<String,Object>)ctx.get("_source");
+  String routing=getResult.fields().containsKey(RoutingFieldMapper.NAME) ? getResult.field(RoutingFieldMapper.NAME).value().toString() : null;
+  String parent=getResult.fields().containsKey(ParentFieldMapper.NAME) ? getResult.field(ParentFieldMapper.NAME).value().toString() : null;
+  if (operation == null || "index".equals(operation)) {
+    IndexRequest indexRequest=Requests.indexRequest(request.index()).type(request.type()).id(request.id()).routing(routing).parent(parent).source(source,sourceAndContent.v1()).version(getResult.version()).replicationType(request.replicationType()).consistencyLevel(request.consistencyLevel());
+    indexRequest.operationThreaded(false);
+    indexAction.execute(indexRequest,new ActionListener<IndexResponse>(){
+      @Override public void onResponse(      IndexResponse response){
+        UpdateResponse update=new UpdateResponse(response.index(),response.type(),response.id(),response.version());
+        listener.onResponse(update);
+      }
+      @Override public void onFailure(      Throwable e){
+        e=ExceptionsHelper.unwrapCause(e);
+        if (e instanceof VersionConflictEngineException) {
+          if ((retryCount + 1) < request.retryOnConflict()) {
+            threadPool.executor(executor()).execute(new Runnable(){
+              @Override public void run(){
+                shardOperation(request,listener,retryCount + 1);
+              }
+            }
+);
+            return;
+          }
+        }
+      }
+    }
+);
+  }
+ else   if ("delete".equals(operation)) {
+    DeleteRequest deleteRequest=Requests.deleteRequest(request.index()).type(request.type()).id(request.id()).routing(routing).parent(parent).version(getResult.version()).replicationType(request.replicationType()).consistencyLevel(request.consistencyLevel());
+    deleteRequest.operationThreaded(false);
+    deleteAction.execute(deleteRequest,new ActionListener<DeleteResponse>(){
+      @Override public void onResponse(      DeleteResponse response){
+        UpdateResponse update=new UpdateResponse(response.index(),response.type(),response.id(),response.version());
+        listener.onResponse(update);
+      }
+      @Override public void onFailure(      Throwable e){
+        e=ExceptionsHelper.unwrapCause(e);
+        if (e instanceof VersionConflictEngineException) {
+          if ((retryCount + 1) < request.retryOnConflict()) {
+            threadPool.executor(executor()).execute(new Runnable(){
+              @Override public void run(){
+                shardOperation(request,listener,retryCount + 1);
+              }
+            }
+);
+            return;
+          }
+        }
+        listener.onFailure(e);
+      }
+    }
+);
+  }
+ else   if ("none".equals(operation)) {
+    listener.onResponse(new UpdateResponse(getResult.index(),getResult.type(),getResult.id(),getResult.version()));
+  }
+ else {
+    logger.warn("Used update operation [{}] for script [{}], doing nothing...",operation,request.script);
+    listener.onResponse(new UpdateResponse(getResult.index(),getResult.type(),getResult.id(),getResult.version()));
+  }
+}

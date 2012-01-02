@@ -1,0 +1,75 @@
+{
+  UpdateRequest updateRequest=new UpdateRequest(request.param("index"),request.param("type"),request.param("id"));
+  updateRequest.routing(request.param("routing"));
+  updateRequest.parent(request.param("parent"));
+  updateRequest.timeout(request.paramAsTime("timeout",updateRequest.timeout()));
+  String replicationType=request.param("replication");
+  if (replicationType != null) {
+    updateRequest.replicationType(ReplicationType.fromString(replicationType));
+  }
+  String consistencyLevel=request.param("consistency");
+  if (consistencyLevel != null) {
+    updateRequest.consistencyLevel(WriteConsistencyLevel.fromString(consistencyLevel));
+  }
+  updateRequest.listenerThreaded(false);
+  updateRequest.script(request.param("script"));
+  updateRequest.scriptLang(request.param("lang"));
+  for (  Map.Entry<String,String> entry : request.params().entrySet()) {
+    if (entry.getKey().startsWith("sp_")) {
+      updateRequest.addScriptParam(entry.getKey().substring(3),entry.getValue());
+    }
+  }
+  updateRequest.retryOnConflict(request.paramAsInt("retry_on_conflict",updateRequest.retryOnConflict()));
+  if (request.hasContent()) {
+    XContentType xContentType=XContentFactory.xContentType(request.contentByteArray(),request.contentByteArrayOffset(),request.contentLength());
+    if (xContentType != null) {
+      try {
+        Map<String,Object> content=XContentFactory.xContent(xContentType).createParser(request.contentByteArray(),request.contentByteArrayOffset(),request.contentLength()).mapAndClose();
+        if (content.containsKey("script")) {
+          updateRequest.script(content.get("script").toString());
+        }
+        if (content.containsKey("lang")) {
+          updateRequest.scriptLang(content.get("lang").toString());
+        }
+        if (content.containsKey("params")) {
+          updateRequest.scriptParams((Map<String,Object>)content.get("params"));
+        }
+      }
+ catch (      Exception e) {
+        try {
+          channel.sendResponse(new XContentThrowableRestResponse(request,e));
+        }
+ catch (        IOException e1) {
+          logger.warn("Failed to send response",e1);
+        }
+        return;
+      }
+    }
+  }
+  client.update(updateRequest,new ActionListener<UpdateResponse>(){
+    @Override public void onResponse(    UpdateResponse response){
+      try {
+        XContentBuilder builder=RestXContentBuilder.restContentBuilder(request);
+        builder.startObject().field(Fields.OK,true).field(Fields._INDEX,response.index()).field(Fields._TYPE,response.type()).field(Fields._ID,response.id()).field(Fields._VERSION,response.version());
+        builder.endObject();
+        RestStatus status=OK;
+        if (response.version() == 1) {
+          status=CREATED;
+        }
+        channel.sendResponse(new XContentRestResponse(request,status,builder));
+      }
+ catch (      Exception e) {
+        onFailure(e);
+      }
+    }
+    @Override public void onFailure(    Throwable e){
+      try {
+        channel.sendResponse(new XContentThrowableRestResponse(request,e));
+      }
+ catch (      IOException e1) {
+        logger.error("Failed to send failure response",e1);
+      }
+    }
+  }
+);
+}
