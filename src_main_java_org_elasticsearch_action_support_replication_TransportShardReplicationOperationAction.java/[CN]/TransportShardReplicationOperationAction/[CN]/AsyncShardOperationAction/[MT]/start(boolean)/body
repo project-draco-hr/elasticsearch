@@ -1,11 +1,31 @@
 {
   final ClusterState clusterState=clusterService.state();
   nodes=clusterState.nodes();
-  if (!clusterState.routingTable().hasIndex(request.index())) {
-    retry(fromClusterEvent,null);
-    return false;
-  }
   try {
+    ClusterBlockException blockException=checkGlobalBlock(clusterState,request);
+    if (blockException != null) {
+      if (blockException.retryable()) {
+        retry(fromClusterEvent,blockException);
+        return false;
+      }
+ else {
+        throw blockException;
+      }
+    }
+    if (!resolveRequest(clusterState,request,listener)) {
+      return true;
+    }
+    blockException=checkRequestBlock(clusterState,request);
+    if (blockException != null) {
+      if (blockException.retryable()) {
+        retry(fromClusterEvent,blockException);
+        return false;
+      }
+ else {
+        throw blockException;
+      }
+    }
+    shardIt=shards(clusterState,request);
     shardIt=shards(clusterState,request);
   }
  catch (  Exception e) {
@@ -13,7 +33,7 @@
     return true;
   }
   if (shardIt.size() == 0) {
-    retry(fromClusterEvent,shardIt.shardId());
+    retry(fromClusterEvent,null);
     return false;
   }
   boolean foundPrimary=false;
@@ -24,7 +44,7 @@
       continue;
     }
     if (!shard.active() || !nodes.nodeExists(shard.currentNodeId())) {
-      retry(fromClusterEvent,shard.shardId());
+      retry(fromClusterEvent,null);
       return false;
     }
     if (checkWriteConsistency) {
@@ -40,7 +60,7 @@
         requiredNumber=shardIt.size();
       }
       if (shardIt.sizeActive() < requiredNumber) {
-        retry(fromClusterEvent,shard.shardId());
+        retry(fromClusterEvent,null);
         return false;
       }
     }
@@ -77,7 +97,7 @@
         @Override public void handleException(        TransportException exp){
           if (exp.unwrapCause() instanceof ConnectTransportException || exp.unwrapCause() instanceof NodeClosedException || exp.unwrapCause() instanceof IllegalIndexShardStateException) {
             primaryOperationStarted.set(false);
-            retry(false,shard.shardId());
+            retry(false,null);
           }
  else {
             listener.onFailure(exp);
@@ -89,7 +109,7 @@
     break;
   }
   if (!foundPrimary) {
-    retry(fromClusterEvent,shardIt.shardId());
+    retry(fromClusterEvent,null);
     return false;
   }
   return true;
