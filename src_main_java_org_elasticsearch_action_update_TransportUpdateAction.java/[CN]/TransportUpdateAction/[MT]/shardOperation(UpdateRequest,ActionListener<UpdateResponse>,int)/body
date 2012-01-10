@@ -1,7 +1,8 @@
 {
   IndexService indexService=indicesService.indexServiceSafe(request.index());
   IndexShard indexShard=indexService.shardSafe(request.shardId());
-  GetResult getResult=indexShard.getService().get(request.type(),request.id(),new String[]{SourceFieldMapper.NAME,RoutingFieldMapper.NAME,ParentFieldMapper.NAME,TimestampFieldMapper.NAME},true);
+  long getDate=System.currentTimeMillis();
+  GetResult getResult=indexShard.getService().get(request.type(),request.id(),new String[]{SourceFieldMapper.NAME,RoutingFieldMapper.NAME,ParentFieldMapper.NAME,TTLFieldMapper.NAME},true);
   if (!getResult.exists()) {
     listener.onFailure(new DocumentMissingException(new ShardId(request.index(),request.shardId()),request.type(),request.id()));
     return;
@@ -24,11 +25,28 @@
     throw new ElasticSearchIllegalArgumentException("failed to execute script",e);
   }
   String operation=(String)ctx.get("op");
+  String timestamp=(String)ctx.get("_timestamp");
+  Long ttl=null;
+  Object fetchedTTL=ctx.get("_ttl");
+  if (fetchedTTL != null) {
+    if (fetchedTTL instanceof Number) {
+      ttl=((Number)fetchedTTL).longValue();
+    }
+ else {
+      ttl=TimeValue.parseTimeValue((String)fetchedTTL,null).millis();
+    }
+  }
   source=(Map<String,Object>)ctx.get("_source");
   String routing=getResult.fields().containsKey(RoutingFieldMapper.NAME) ? getResult.field(RoutingFieldMapper.NAME).value().toString() : null;
   String parent=getResult.fields().containsKey(ParentFieldMapper.NAME) ? getResult.field(ParentFieldMapper.NAME).value().toString() : null;
+  if (ttl == null) {
+    ttl=getResult.fields().containsKey(TTLFieldMapper.NAME) ? (Long)getResult.field(TTLFieldMapper.NAME).value() : null;
+    if (ttl != null) {
+      ttl=ttl - (System.currentTimeMillis() - getDate);
+    }
+  }
   if (operation == null || "index".equals(operation)) {
-    IndexRequest indexRequest=Requests.indexRequest(request.index()).type(request.type()).id(request.id()).routing(routing).parent(parent).source(source,sourceAndContent.v1()).version(getResult.version()).replicationType(request.replicationType()).consistencyLevel(request.consistencyLevel());
+    IndexRequest indexRequest=Requests.indexRequest(request.index()).type(request.type()).id(request.id()).routing(routing).parent(parent).source(source,sourceAndContent.v1()).version(getResult.version()).replicationType(request.replicationType()).consistencyLevel(request.consistencyLevel()).timestamp(timestamp).ttl(ttl);
     indexRequest.operationThreaded(false);
     indexAction.execute(indexRequest,new ActionListener<IndexResponse>(){
       @Override public void onResponse(      IndexResponse response){
