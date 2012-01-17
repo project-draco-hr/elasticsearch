@@ -1,11 +1,13 @@
 {
   client.admin().indices().prepareDelete().execute().actionGet();
-  client.admin().indices().prepareCreate("test").addMapping("type1",XContentFactory.jsonBuilder().startObject().startObject("type1").startObject("_timestamp").field("enabled",true).field("store","yes").endObject().startObject("_ttl").field("enabled",true).field("store","yes").endObject().endObject().endObject()).execute().actionGet();
+  client.admin().indices().prepareCreate("test").addMapping("type1",XContentFactory.jsonBuilder().startObject().startObject("type1").startObject("_timestamp").field("enabled",true).field("store","yes").endObject().startObject("_ttl").field("enabled",true).field("store","yes").endObject().endObject().endObject()).addMapping("type2",XContentFactory.jsonBuilder().startObject().startObject("type2").startObject("_timestamp").field("enabled",true).field("store","yes").endObject().startObject("_ttl").field("enabled",true).field("store","yes").field("default","1d").endObject().endObject().endObject()).execute().actionGet();
   client.admin().cluster().prepareHealth().setWaitForGreenStatus().execute().actionGet();
   long providedTTLValue=3000;
   logger.info("--> checking ttl");
   client.prepareIndex("test","type1","1").setSource("field1","value1").setTTL(providedTTLValue).setRefresh(true).execute().actionGet();
   client.prepareIndex("test","type1","with_routing").setSource("field1","value1").setTTL(providedTTLValue).setRouting("routing").setRefresh(true).execute().actionGet();
+  client.prepareIndex("test","type1","no_ttl").setSource("field1","value1").execute().actionGet();
+  client.prepareIndex("test","type2","default_ttl").setSource("field1","value1").execute().actionGet();
   long now=System.currentTimeMillis();
   long now1=System.currentTimeMillis();
   GetResponse getResponse=client.prepareGet("test","type1","1").setFields("_ttl").setRealtime(true).execute().actionGet();
@@ -27,6 +29,11 @@
   ttl0=((Number)getResponse.field("_ttl").value()).longValue();
   assertThat(ttl0,greaterThan(0L));
   assertThat(ttl0,lessThan(providedTTLValue - (now1 - now)));
+  getResponse=client.prepareGet("test","type1","no_ttl").setFields("_ttl").setRealtime(true).execute().actionGet();
+  assertThat(getResponse.field("_ttl"),nullValue());
+  getResponse=client.prepareGet("test","type2","default_ttl").setFields("_ttl").setRealtime(true).execute().actionGet();
+  ttl0=((Number)getResponse.field("_ttl").value()).longValue();
+  assertThat(ttl0,greaterThan(0L));
   logger.info("--> checking purger");
   long shouldBeExpiredDate=now + providedTTLValue + purgeInterval+ 2000;
   now1=System.currentTimeMillis();
