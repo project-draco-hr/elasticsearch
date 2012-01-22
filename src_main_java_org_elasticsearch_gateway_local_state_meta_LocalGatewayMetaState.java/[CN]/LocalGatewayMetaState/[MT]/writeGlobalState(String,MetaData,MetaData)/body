@@ -1,0 +1,46 @@
+{
+  logger.trace("[_global] writing state, reason [{}]",reason);
+  MetaData globalMetaData=MetaData.builder().metaData(metaData).removeAllIndices().build();
+  CachedStreamOutput.Entry cachedEntry=CachedStreamOutput.popEntry();
+  try {
+    XContentBuilder builder=XContentFactory.contentBuilder(XContentType.JSON,cachedEntry.cachedBytes());
+    builder.startObject();
+    MetaData.Builder.toXContent(globalMetaData,builder,ToXContent.EMPTY_PARAMS);
+    builder.endObject();
+    builder.flush();
+    Exception lastFailure=null;
+    boolean wroteAtLeastOnce=false;
+    for (    File dataLocation : nodeEnv.nodeDataLocations()) {
+      File stateLocation=new File(dataLocation,"_state");
+      FileSystemUtils.mkdirs(stateLocation);
+      File stateFile=new File(stateLocation,"global-" + globalMetaData.version());
+      FileOutputStream fos=null;
+      try {
+        fos=new FileOutputStream(stateFile);
+        fos.write(cachedEntry.bytes().underlyingBytes(),0,cachedEntry.bytes().size());
+        fos.getChannel().force(true);
+        Closeables.closeQuietly(fos);
+        wroteAtLeastOnce=true;
+      }
+ catch (      Exception e) {
+        lastFailure=e;
+      }
+ finally {
+        Closeables.closeQuietly(fos);
+      }
+    }
+    if (!wroteAtLeastOnce) {
+      logger.warn("[_global]: failed to write global state",lastFailure);
+      throw new IOException("failed to write global state",lastFailure);
+    }
+    if (previousMetaData != null && previousMetaData.version() != currentMetaData.version()) {
+      for (      File dataLocation : nodeEnv.nodeDataLocations()) {
+        File stateFile=new File(new File(dataLocation,"_state"),"global-" + previousMetaData.version());
+        stateFile.delete();
+      }
+    }
+  }
+  finally {
+    CachedStreamOutput.pushEntry(cachedEntry);
+  }
+}

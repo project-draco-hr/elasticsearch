@@ -1,0 +1,49 @@
+{
+  if (event.state().blocks().disableStatePersistence()) {
+    return;
+  }
+  if (!event.state().nodes().localNode().masterNode()) {
+    return;
+  }
+  if (!event.metaDataChanged()) {
+    return;
+  }
+  boolean success=true;
+  if (currentMetaData == null || !MetaData.isGlobalStateEquals(currentMetaData,event.state().metaData())) {
+    try {
+      writeGlobalState("changed",event.state().metaData(),currentMetaData);
+    }
+ catch (    Exception e) {
+      success=false;
+    }
+  }
+  for (  IndexMetaData indexMetaData : event.state().metaData()) {
+    String writeReason=null;
+    IndexMetaData currentIndexMetaData=currentMetaData == null ? null : currentMetaData.index(indexMetaData.index());
+    if (currentIndexMetaData == null) {
+      writeReason="freshly created";
+    }
+ else     if (currentIndexMetaData.version() != indexMetaData.version()) {
+      writeReason="version changed from [" + currentIndexMetaData.version() + "] to ["+ indexMetaData.version()+ "]";
+    }
+    if (writeReason == null) {
+      continue;
+    }
+    try {
+      writeIndex(writeReason,indexMetaData,currentIndexMetaData);
+    }
+ catch (    Exception e) {
+      success=false;
+    }
+  }
+  if (currentMetaData != null) {
+    for (    IndexMetaData current : currentMetaData) {
+      if (event.state().metaData().index(current.index()) == null) {
+        deleteIndex(current.index());
+      }
+    }
+  }
+  if (success) {
+    currentMetaData=event.state().metaData();
+  }
+}
