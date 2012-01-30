@@ -15,8 +15,16 @@
     threadPool.executor(ThreadPool.Names.MANAGEMENT).execute(new Runnable(){
       @Override public void run(){
         try {
-          transportService.connectToNode(listedNode);
-          transportService.sendRequest(listedNode,NodesInfoAction.NAME,Requests.nodesInfoRequest("_all"),new BaseTransportResponseHandler<NodesInfoResponse>(){
+          if (!transportService.nodeConnected(listedNode)) {
+            try {
+              transportService.connectToNode(listedNode);
+            }
+ catch (            Exception e) {
+              logger.debug("failed to connect to node [{}], removed from nodes list",e,listedNode);
+              return;
+            }
+          }
+          transportService.sendRequest(listedNode,NodesInfoAction.NAME,Requests.nodesInfoRequest("_all"),TransportRequestOptions.options().withTimeout(pingTimeout),new BaseTransportResponseHandler<NodesInfoResponse>(){
             @Override public NodesInfoResponse newInstance(){
               return new NodesInfoResponse();
             }
@@ -27,15 +35,17 @@
               nodesInfoResponses.add(response);
               latch.countDown();
             }
-            @Override public void handleException(            TransportException exp){
-              logger.debug("Failed to get node info from " + listedNode + ", removed from nodes list",exp);
+            @Override public void handleException(            TransportException e){
+              logger.info("failed to get node info for {}, disconnecting...",e,listedNode);
+              transportService.disconnectFromNode(listedNode);
               latch.countDown();
             }
           }
 );
         }
  catch (        Exception e) {
-          logger.debug("Failed to get node info from " + listedNode + ", removed from nodes list",e);
+          logger.info("failed to get node info for {}, disconnecting...",e,listedNode);
+          transportService.disconnectFromNode(listedNode);
           latch.countDown();
         }
       }
@@ -52,7 +62,7 @@
   for (  NodesInfoResponse nodesInfoResponse : nodesInfoResponses) {
     for (    NodeInfo nodeInfo : nodesInfoResponse) {
       if (!clusterName.equals(nodesInfoResponse.clusterName())) {
-        logger.warn("Node {} not part of the cluster {}, ignoring...",nodeInfo.node(),clusterName);
+        logger.warn("node {} not part of the cluster {}, ignoring...",nodeInfo.node(),clusterName);
       }
  else {
         if (nodeInfo.node().dataNode()) {
@@ -68,7 +78,7 @@
     }
  catch (    Exception e) {
       it.remove();
-      logger.debug("Failed to connect to discovered node [" + node + "]",e);
+      logger.debug("failed to connect to discovered node [" + node + "]",e);
     }
   }
   nodes=new ImmutableList.Builder<DiscoveryNode>().addAll(newNodes).build();
