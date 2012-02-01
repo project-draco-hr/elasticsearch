@@ -1,10 +1,20 @@
 {
   if (commitPoint.translogFiles().isEmpty()) {
+    recoveryStatus.start().startTime(System.currentTimeMillis());
+    recoveryStatus.updateStage(RecoveryStatus.Stage.START);
     indexShard.start("post recovery from gateway, no translog");
+    recoveryStatus.start().time(System.currentTimeMillis() - recoveryStatus.start().startTime());
+    recoveryStatus.start().checkIndexTime(indexShard.checkIndexTook());
     return;
   }
   try {
+    recoveryStatus.start().startTime(System.currentTimeMillis());
+    recoveryStatus.updateStage(RecoveryStatus.Stage.START);
     indexShard.performRecoveryPrepareForTranslog();
+    recoveryStatus.start().time(System.currentTimeMillis() - recoveryStatus.start().startTime());
+    recoveryStatus.start().checkIndexTime(indexShard.checkIndexTook());
+    recoveryStatus.updateStage(RecoveryStatus.Stage.TRANSLOG);
+    recoveryStatus.translog().startTime(System.currentTimeMillis());
     final AtomicReference<Throwable> failure=new AtomicReference<Throwable>();
     final CountDownLatch latch=new CountDownLatch(1);
     final Iterator<CommitPoint.FileInfo> transIt=commitPoint.translogFiles().iterator();
@@ -78,6 +88,7 @@
       throw failure.get();
     }
     indexShard.performRecoveryFinalization(true);
+    recoveryStatus.translog().time(System.currentTimeMillis() - recoveryStatus.translog().startTime());
   }
  catch (  Throwable e) {
     throw new IndexShardGatewayRecoveryException(shardId,"Failed to recover translog",e);
