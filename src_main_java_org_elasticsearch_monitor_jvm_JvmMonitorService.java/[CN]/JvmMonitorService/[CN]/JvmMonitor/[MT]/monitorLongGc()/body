@@ -1,27 +1,48 @@
 {
+  seq++;
   JvmStats currentJvmStats=jvmStats();
   for (int i=0; i < currentJvmStats.gc().collectors().length; i++) {
     GarbageCollector gc=currentJvmStats.gc().collectors()[i];
-    if (gc.lastGc() != null && lastJvmStats.gc.collectors()[i].lastGc() != null) {
+    GarbageCollector prevGc=lastJvmStats.gc.collectors[i];
+    long collections=gc.collectionCount - prevGc.collectionCount;
+    if (collections == 0) {
+      continue;
+    }
+    long collectionTime=gc.collectionTime - prevGc.collectionTime;
+    if (collectionTime == 0) {
+      continue;
+    }
+    GcThreshold gcThreshold=gcThresholds.get(gc.name());
+    if (gcThreshold == null) {
+      gcThreshold=gcThresholds.get("default");
+    }
+    if (gc.lastGc() != null && prevGc.lastGc() != null) {
       GarbageCollector.LastGc lastGc=gc.lastGc();
-      if (lastGc.startTime == lastJvmStats.gc.collectors()[i].lastGc().startTime()) {
+      if (lastGc.startTime == prevGc.lastGc().startTime()) {
         continue;
       }
       if (lastGc.duration().hoursFrac() > 1) {
         continue;
       }
-      if (lastGc.duration().millis() > gcThreshold.millis()) {
-        logger.info("[gc][{}][{}] took [{}]/[{}], reclaimed [{}], leaving [{}] used, max [{}]",gc.name(),gc.getCollectionCount(),lastGc.duration(),gc.getCollectionTime(),lastGc.reclaimed(),lastGc.afterUsed(),lastGc.max());
+      if (lastGc.duration().millis() > gcThreshold.warnThreshold) {
+        logger.warn("[last_gc][{}][{}][{}] duration [{}], collections [{}], total [{}]/[{}], reclaimed [{}], leaving [{}][{}]/[{}]",gc.name(),seq,gc.getCollectionCount(),lastGc.duration(),collections,TimeValue.timeValueMillis(collectionTime),gc.collectionTime(),lastGc.reclaimed(),lastGc.afterUsed(),lastGc.max());
       }
- else       if (logger.isDebugEnabled()) {
-        logger.debug("[gc][{}][{}] took [{}]/[{}], reclaimed [{}], leaving [{}] used, max [{}]",gc.name(),gc.getCollectionCount(),lastGc.duration(),gc.getCollectionTime(),lastGc.reclaimed(),lastGc.afterUsed(),lastGc.max());
+ else       if (lastGc.duration().millis() > gcThreshold.infoThreshold) {
+        logger.info("[last_gc][{}][{}][{}] duration [{}], collections [{}], total [{}]/[{}], reclaimed [{}], leaving [{}]/[{}]",gc.name(),seq,gc.getCollectionCount(),lastGc.duration(),collections,TimeValue.timeValueMillis(collectionTime),gc.collectionTime(),lastGc.reclaimed(),lastGc.afterUsed(),lastGc.max());
+      }
+ else       if (lastGc.duration().millis() > gcThreshold.debugThreshold && logger.isDebugEnabled()) {
+        logger.debug("[last_gc][{}][{}][{}] duration [{}], collections [{}], total [{}]/[{}], reclaimed [{}], leaving [{}]/[{}]",gc.name(),seq,gc.getCollectionCount(),lastGc.duration(),collections,TimeValue.timeValueMillis(collectionTime),gc.collectionTime(),lastGc.reclaimed(),lastGc.afterUsed(),lastGc.max());
       }
     }
- else {
-      long collectionTime=gc.collectionTime().millis() - lastJvmStats.gc().collectors()[i].collectionTime().millis();
-      if (collectionTime > gcThreshold.millis()) {
-        logger.info("[gc][{}] collection occurred, took [{}]",gc.name(),new TimeValue(collectionTime));
-      }
+    long avgCollectionTime=collectionTime / collections;
+    if (avgCollectionTime > gcThreshold.warnThreshold) {
+      logger.warn("[gc][{}][{}][{}] duration [{}], collections [{}], total [{}]/[{}], memory [{}]->[{}]/[{}]",gc.name(),seq,gc.collectionCount(),TimeValue.timeValueMillis(collectionTime),collections,TimeValue.timeValueMillis(collectionTime),gc.collectionTime(),lastJvmStats.mem().heapUsed(),currentJvmStats.mem().heapUsed(),JvmInfo.jvmInfo().mem().heapMax());
+    }
+ else     if (avgCollectionTime > gcThreshold.infoThreshold) {
+      logger.info("[gc][{}][{}][{}] duration [{}], collections [{}], total [{}]/[{}], memory [{}]->[{}]/[{}]",gc.name(),seq,gc.collectionCount(),TimeValue.timeValueMillis(collectionTime),collections,TimeValue.timeValueMillis(collectionTime),gc.collectionTime(),lastJvmStats.mem().heapUsed(),currentJvmStats.mem().heapUsed(),JvmInfo.jvmInfo().mem().heapMax());
+    }
+ else     if (avgCollectionTime > gcThreshold.debugThreshold && logger.isDebugEnabled()) {
+      logger.debug("[gc][{}][{}][{}] duration [{}], collections [{}], total [{}]/[{}], memory [{}]->[{}]/[{}]",gc.name(),seq,gc.collectionCount(),TimeValue.timeValueMillis(collectionTime),collections,TimeValue.timeValueMillis(collectionTime),gc.collectionTime(),lastJvmStats.mem().heapUsed(),currentJvmStats.mem().heapUsed(),JvmInfo.jvmInfo().mem().heapMax());
     }
   }
   lastJvmStats=currentJvmStats;
