@@ -1,87 +1,77 @@
 {
 synchronized (dirtyLock(index.uid())) {
     UidField uidField=index.uidField();
-    if (index.origin() == Operation.Origin.RECOVERY) {
-      uidField.version(index.version());
+    final long currentVersion;
+    VersionValue versionValue=versionMap.get(index.uid().text());
+    if (versionValue == null) {
+      currentVersion=loadCurrentVersionFromIndex(index.uid());
+    }
+ else {
+      if (enableGcDeletes && versionValue.delete() && (threadPool.estimatedTimeInMillis() - versionValue.time()) > gcDeletesInMillis) {
+        currentVersion=-1;
+      }
+ else {
+        currentVersion=versionValue.version();
+      }
+    }
+    long updatedVersion;
+    if (index.origin() == Operation.Origin.PRIMARY) {
+      if (index.versionType() == VersionType.INTERNAL) {
+        long expectedVersion=index.version();
+        if (expectedVersion != 0 && currentVersion != -2) {
+          if (currentVersion == -1) {
+            throw new VersionConflictEngineException(shardId,index.type(),index.id(),-1,expectedVersion);
+          }
+ else           if (expectedVersion != currentVersion) {
+            throw new VersionConflictEngineException(shardId,index.type(),index.id(),currentVersion,expectedVersion);
+          }
+        }
+        updatedVersion=currentVersion < 0 ? 1 : currentVersion + 1;
+      }
+ else {
+        if (currentVersion >= 0) {
+          if (currentVersion >= index.version()) {
+            throw new VersionConflictEngineException(shardId,index.type(),index.id(),currentVersion,index.version());
+          }
+        }
+        updatedVersion=index.version();
+      }
+    }
+ else {
+      long expectedVersion=index.version();
+      if (currentVersion != -2) {
+        if (!(currentVersion == -1 && index.version() == 1)) {
+          if (expectedVersion <= currentVersion) {
+            if (index.origin() == Operation.Origin.RECOVERY) {
+              return;
+            }
+ else {
+              throw new VersionConflictEngineException(shardId,index.type(),index.id(),currentVersion,expectedVersion);
+            }
+          }
+        }
+      }
+      updatedVersion=index.version();
+    }
+    uidField.version(updatedVersion);
+    index.version(updatedVersion);
+    if (currentVersion == -1) {
+      if (index.docs().size() > 1) {
+        writer.addDocuments(index.docs(),index.analyzer());
+      }
+ else {
+        writer.addDocument(index.docs().get(0),index.analyzer());
+      }
+    }
+ else {
       if (index.docs().size() > 1) {
         writer.updateDocuments(index.uid(),index.docs(),index.analyzer());
       }
  else {
         writer.updateDocument(index.uid(),index.docs().get(0),index.analyzer());
       }
-      Translog.Location translogLocation=translog.add(new Translog.Index(index));
-      if (index.version() != 0) {
-        versionMap.put(index.uid().text(),new VersionValue(index.version(),false,threadPool.estimatedTimeInMillis(),translogLocation));
-      }
     }
- else {
-      long currentVersion;
-      VersionValue versionValue=versionMap.get(index.uid().text());
-      if (versionValue == null) {
-        currentVersion=loadCurrentVersionFromIndex(index.uid());
-      }
- else {
-        if (versionValue.delete() && (threadPool.estimatedTimeInMillis() - versionValue.time()) > gcDeletesInMillis) {
-          currentVersion=-1;
-        }
- else {
-          currentVersion=versionValue.version();
-        }
-      }
-      long updatedVersion;
-      if (index.origin() == Operation.Origin.PRIMARY) {
-        if (index.versionType() == VersionType.INTERNAL) {
-          long expectedVersion=index.version();
-          if (expectedVersion != 0 && currentVersion != -2) {
-            if (currentVersion == -1) {
-              throw new VersionConflictEngineException(shardId,index.type(),index.id(),-1,expectedVersion);
-            }
- else             if (expectedVersion != currentVersion) {
-              throw new VersionConflictEngineException(shardId,index.type(),index.id(),currentVersion,expectedVersion);
-            }
-          }
-          updatedVersion=currentVersion < 0 ? 1 : currentVersion + 1;
-        }
- else {
-          if (currentVersion >= 0) {
-            if (currentVersion >= index.version()) {
-              throw new VersionConflictEngineException(shardId,index.type(),index.id(),currentVersion,index.version());
-            }
-          }
-          updatedVersion=index.version();
-        }
-      }
- else {
-        long expectedVersion=index.version();
-        if (currentVersion != -2) {
-          if (!(currentVersion == -1 && index.version() == 1)) {
-            if (expectedVersion <= currentVersion) {
-              throw new VersionConflictEngineException(shardId,index.type(),index.id(),currentVersion,expectedVersion);
-            }
-          }
-        }
-        updatedVersion=index.version();
-      }
-      uidField.version(updatedVersion);
-      index.version(updatedVersion);
-      if (currentVersion == -1) {
-        if (index.docs().size() > 1) {
-          writer.addDocuments(index.docs(),index.analyzer());
-        }
- else {
-          writer.addDocument(index.docs().get(0),index.analyzer());
-        }
-      }
- else {
-        if (index.docs().size() > 1) {
-          writer.updateDocuments(index.uid(),index.docs(),index.analyzer());
-        }
- else {
-          writer.updateDocument(index.uid(),index.docs().get(0),index.analyzer());
-        }
-      }
-      Translog.Location translogLocation=translog.add(new Translog.Index(index));
-      versionMap.put(index.uid().text(),new VersionValue(updatedVersion,false,threadPool.estimatedTimeInMillis(),translogLocation));
-    }
+    Translog.Location translogLocation=translog.add(new Translog.Index(index));
+    versionMap.put(index.uid().text(),new VersionValue(updatedVersion,false,threadPool.estimatedTimeInMillis(),translogLocation));
   }
 }

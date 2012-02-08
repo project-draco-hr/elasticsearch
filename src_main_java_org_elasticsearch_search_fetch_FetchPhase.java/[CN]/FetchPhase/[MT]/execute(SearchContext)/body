@@ -1,23 +1,42 @@
 {
   ResetFieldSelector fieldSelector;
   List<String> extractFieldNames=null;
-  if (context.hasScriptFields() && !context.hasFieldNames()) {
-    fieldSelector=UidFieldSelector.INSTANCE;
-  }
- else   if (!context.hasFieldNames()) {
-    fieldSelector=new UidAndSourceFieldSelector();
+  boolean sourceRequested=false;
+  if (!context.hasFieldNames()) {
+    if (context.hasPartialFields()) {
+      fieldSelector=new UidAndSourceFieldSelector();
+      sourceRequested=false;
+    }
+ else     if (context.hasScriptFields()) {
+      fieldSelector=UidFieldSelector.INSTANCE;
+      sourceRequested=false;
+    }
+ else {
+      fieldSelector=new UidAndSourceFieldSelector();
+      sourceRequested=true;
+    }
   }
  else   if (context.fieldNames().isEmpty()) {
     fieldSelector=UidFieldSelector.INSTANCE;
-  }
- else   if (context.fieldNames().get(0).equals("*")) {
-    fieldSelector=AllButSourceFieldSelector.INSTANCE;
+    sourceRequested=false;
   }
  else {
-    FieldMappersFieldSelector fieldSelectorMapper=new FieldMappersFieldSelector();
+    boolean loadAllStored=false;
+    FieldMappersFieldSelector fieldSelectorMapper=null;
     for (    String fieldName : context.fieldNames()) {
+      if (fieldName.equals("*")) {
+        loadAllStored=true;
+        continue;
+      }
+      if (fieldName.equals(SourceFieldMapper.NAME)) {
+        sourceRequested=true;
+        continue;
+      }
       FieldMappers x=context.smartNameFieldMappers(fieldName);
       if (x != null && x.mapper().stored()) {
+        if (fieldSelectorMapper == null) {
+          fieldSelectorMapper=new FieldMappersFieldSelector();
+        }
         fieldSelectorMapper.add(x);
       }
  else {
@@ -27,8 +46,27 @@
         extractFieldNames.add(fieldName);
       }
     }
-    fieldSelectorMapper.add(UidFieldMapper.NAME);
-    fieldSelector=fieldSelectorMapper;
+    if (loadAllStored) {
+      if (sourceRequested || extractFieldNames != null) {
+        fieldSelector=null;
+      }
+ else {
+        fieldSelector=AllButSourceFieldSelector.INSTANCE;
+      }
+    }
+ else     if (fieldSelectorMapper != null) {
+      fieldSelectorMapper.add(UidFieldMapper.NAME);
+      if (extractFieldNames != null) {
+        fieldSelectorMapper.add(SourceFieldMapper.NAME);
+      }
+      fieldSelector=fieldSelectorMapper;
+    }
+ else     if (extractFieldNames != null) {
+      fieldSelector=new UidAndSourceFieldSelector();
+    }
+ else {
+      fieldSelector=UidFieldSelector.INSTANCE;
+    }
   }
   InternalSearchHit[] hits=new InternalSearchHit[context.docIdsToLoadSize()];
   for (int index=0; index < context.docIdsToLoadSize(); index++) {
@@ -40,7 +78,7 @@
       throw new TypeMissingException(new Index(context.shardTarget().index()),uid.type(),"failed to find type loaded for doc [" + uid.id() + "]");
     }
     byte[] source=extractSource(doc,documentMapper);
-    InternalSearchHit searchHit=new InternalSearchHit(docId,uid.id(),uid.type(),source,null);
+    InternalSearchHit searchHit=new InternalSearchHit(docId,uid.id(),uid.type(),sourceRequested ? source : null,null);
     hits[index]=searchHit;
     for (    Object oField : doc.getFields()) {
       Fieldable field=(Fieldable)oField;
@@ -83,6 +121,9 @@
     int subDoc=docId - context.searcher().docStarts()[readerIndex];
     context.lookup().setNextReader(subReader);
     context.lookup().setNextDocId(subDoc);
+    if (source != null) {
+      context.lookup().source().setNextSource(source,0,source.length);
+    }
     if (extractFieldNames != null) {
       for (      String extractFieldName : extractFieldNames) {
         Object value=context.lookup().source().extractValue(extractFieldName);

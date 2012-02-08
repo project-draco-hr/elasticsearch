@@ -1,7 +1,9 @@
 {
   XContentParser parser=parseContext.parser();
   MultiFieldQueryParserSettings qpSettings=new MultiFieldQueryParserSettings();
-  qpSettings.defaultField(AllFieldMapper.NAME);
+  qpSettings.defaultField(parseContext.defaultField());
+  qpSettings.analyzeWildcard(defaultAnalyzeWildcard);
+  qpSettings.allowLeadingWildcard(defaultAllowLeadingWildcard);
   String currentFieldName=null;
   XContentParser.Token token;
   while ((token=parser.nextToken()) != XContentParser.Token.END_OBJECT) {
@@ -51,6 +53,9 @@
           }
         }
       }
+ else {
+        throw new QueryParsingException(parseContext.index(),"[query_string] query does not support [" + currentFieldName + "]");
+      }
     }
  else     if (token.isValue()) {
       if ("query".equals(currentFieldName)) {
@@ -72,7 +77,11 @@
         }
       }
  else       if ("analyzer".equals(currentFieldName)) {
-        qpSettings.analyzer(parseContext.analysisService().analyzer(parser.text()));
+        NamedAnalyzer analyzer=parseContext.analysisService().analyzer(parser.text());
+        if (analyzer == null) {
+          throw new QueryParsingException(parseContext.index(),"[query_string] analyzer [" + parser.text() + "] not found");
+        }
+        qpSettings.forcedAnalyzer(analyzer);
       }
  else       if ("allow_leading_wildcard".equals(currentFieldName) || "allowLeadingWildcard".equals(currentFieldName)) {
         qpSettings.allowLeadingWildcard(parser.booleanValue());
@@ -116,14 +125,15 @@
  else       if ("minimum_should_match".equals(currentFieldName) || "minimumShouldMatch".equals(currentFieldName)) {
         qpSettings.minimumShouldMatch(parser.textOrNull());
       }
+ else {
+        throw new QueryParsingException(parseContext.index(),"[query_string] query does not support [" + currentFieldName + "]");
+      }
     }
   }
   if (qpSettings.queryString() == null) {
     throw new QueryParsingException(parseContext.index(),"query_string must be provided with a [query]");
   }
-  if (qpSettings.analyzer() == null) {
-    qpSettings.analyzer(parseContext.mapperService().searchAnalyzer());
-  }
+  qpSettings.defaultAnalyzer(parseContext.mapperService().searchAnalyzer());
   if (qpSettings.escape()) {
     qpSettings.queryString(org.apache.lucene.queryParser.QueryParser.escape(qpSettings.queryString()));
   }

@@ -1,0 +1,35 @@
+{
+  if (multicastSocket == null) {
+    return;
+  }
+synchronized (sendMutex) {
+    CachedStreamOutput.Entry cachedEntry=CachedStreamOutput.popEntry();
+    try {
+      HandlesStreamOutput out=cachedEntry.cachedHandlesBytes();
+      out.writeBytes(INTERNAL_HEADER);
+      Version.writeVersion(Version.CURRENT,out);
+      out.writeInt(id);
+      clusterName.writeTo(out);
+      nodesProvider.nodes().localNode().writeTo(out);
+      datagramPacketSend.setData(cachedEntry.bytes().copiedByteArray());
+      multicastSocket.send(datagramPacketSend);
+      if (logger.isTraceEnabled()) {
+        logger.trace("[{}] sending ping request",id);
+      }
+    }
+ catch (    Exception e) {
+      if (lifecycle.stoppedOrClosed()) {
+        return;
+      }
+      if (logger.isDebugEnabled()) {
+        logger.debug("failed to send multicast ping request",e);
+      }
+ else {
+        logger.warn("failed to send multicast ping request: {}",ExceptionsHelper.detailedMessage(e));
+      }
+    }
+ finally {
+      CachedStreamOutput.pushEntry(cachedEntry);
+    }
+  }
+}

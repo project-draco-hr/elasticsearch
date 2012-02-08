@@ -14,7 +14,13 @@
     }
  catch (    NoClassSettingsException e) {
       if (charFilterSettings.get("type") != null) {
-        type=charFiltersBindings.charFilters.get(charFilterSettings.get("type"));
+        type=charFiltersBindings.charFilters.get(Strings.toUnderscoreCase(charFilterSettings.get("type")));
+        if (type == null) {
+          type=charFiltersBindings.charFilters.get(Strings.toCamelCase(charFilterSettings.get("type")));
+        }
+      }
+      if (type == null) {
+        throw new ElasticSearchIllegalArgumentException("failed to find char filter type [" + charFilterSettings.get("type") + "] for ["+ charFilterName+ "]",e);
       }
     }
     if (type == null) {
@@ -52,10 +58,13 @@
     }
  catch (    NoClassSettingsException e) {
       if (tokenFilterSettings.get("type") != null) {
-        type=tokenFiltersBindings.tokenFilters.get(tokenFilterSettings.get("type"));
+        type=tokenFiltersBindings.tokenFilters.get(Strings.toUnderscoreCase(tokenFilterSettings.get("type")));
+        if (type == null) {
+          type=tokenFiltersBindings.tokenFilters.get(Strings.toCamelCase(tokenFilterSettings.get("type")));
+        }
       }
       if (type == null) {
-        throw new ElasticSearchIllegalArgumentException("failed to find token filter type for [" + tokenFilterName + "]",e);
+        throw new ElasticSearchIllegalArgumentException("failed to find token filter type [" + tokenFilterSettings.get("type") + "] for ["+ tokenFilterName+ "]",e);
       }
     }
     if (type == null) {
@@ -79,53 +88,104 @@
     }
   }
   MapBinder<String,TokenizerFactoryFactory> tokenizerBinder=MapBinder.newMapBinder(binder(),String.class,TokenizerFactoryFactory.class);
+  AnalysisBinderProcessor.TokenizersBindings tokenizersBindings=new AnalysisBinderProcessor.TokenizersBindings();
+  for (  AnalysisBinderProcessor processor : processors) {
+    processor.processTokenizers(tokenizersBindings);
+  }
   Map<String,Settings> tokenizersSettings=settings.getGroups("index.analysis.tokenizer");
   for (  Map.Entry<String,Settings> entry : tokenizersSettings.entrySet()) {
     String tokenizerName=entry.getKey();
     Settings tokenizerSettings=entry.getValue();
+    Class<? extends TokenizerFactory> type=null;
     try {
-      Class<? extends TokenizerFactory> type=tokenizerSettings.getAsClass("type",null,"org.elasticsearch.index.analysis.","TokenizerFactory");
-      if (type == null) {
-        throw new ElasticSearchIllegalArgumentException("Tokenizer [" + tokenizerName + "] must have a type associated with it");
-      }
-      if (tokenizerSettings.getAsMap().isEmpty() && type.getAnnotation(AnalysisSettingsRequired.class) != null) {
-        continue;
-      }
-      tokenizerBinder.addBinding(tokenizerName).toProvider(FactoryProvider.newFactory(TokenizerFactoryFactory.class,type)).in(Scopes.SINGLETON);
+      type=tokenizerSettings.getAsClass("type",null,"org.elasticsearch.index.analysis.","TokenizerFactory");
     }
  catch (    NoClassSettingsException e) {
-      throw new ElasticSearchIllegalArgumentException("failed to find tokenizer type for [" + tokenizerName + "]",e);
+      if (tokenizerSettings.get("type") != null) {
+        type=tokenizersBindings.tokenizers.get(Strings.toUnderscoreCase(tokenizerSettings.get("type")));
+        if (type == null) {
+          type=tokenizersBindings.tokenizers.get(Strings.toCamelCase(tokenizerSettings.get("type")));
+        }
+      }
+      if (type == null) {
+        throw new ElasticSearchIllegalArgumentException("failed to find tokenizer type [" + tokenizerSettings.get("type") + "] for ["+ tokenizerName+ "]",e);
+      }
+    }
+    if (type == null) {
+      throw new ElasticSearchIllegalArgumentException("token filter [" + tokenizerName + "] must have a type associated with it");
+    }
+    tokenizerBinder.addBinding(tokenizerName).toProvider(FactoryProvider.newFactory(TokenizerFactoryFactory.class,type)).in(Scopes.SINGLETON);
+  }
+  for (  Map.Entry<String,Class<? extends TokenizerFactory>> entry : tokenizersBindings.tokenizers.entrySet()) {
+    String tokenizerName=entry.getKey();
+    Class<? extends TokenizerFactory> clazz=entry.getValue();
+    if (tokenizersSettings.containsKey(tokenizerName)) {
+      continue;
+    }
+    if (clazz.getAnnotation(AnalysisSettingsRequired.class) != null) {
+      continue;
+    }
+    if (indicesAnalysisService != null && indicesAnalysisService.hasTokenizer(tokenizerName)) {
+    }
+ else {
+      tokenizerBinder.addBinding(tokenizerName).toProvider(FactoryProvider.newFactory(TokenizerFactoryFactory.class,clazz)).in(Scopes.SINGLETON);
     }
   }
-  AnalysisBinderProcessor.TokenizersBindings tokenizersBindings=new AnalysisBinderProcessor.TokenizersBindings(tokenizerBinder,tokenizersSettings,indicesAnalysisService);
-  for (  AnalysisBinderProcessor processor : processors) {
-    processor.processTokenizers(tokenizersBindings);
-  }
   MapBinder<String,AnalyzerProviderFactory> analyzerBinder=MapBinder.newMapBinder(binder(),String.class,AnalyzerProviderFactory.class);
+  AnalysisBinderProcessor.AnalyzersBindings analyzersBindings=new AnalysisBinderProcessor.AnalyzersBindings();
+  for (  AnalysisBinderProcessor processor : processors) {
+    processor.processAnalyzers(analyzersBindings);
+  }
   Map<String,Settings> analyzersSettings=settings.getGroups("index.analysis.analyzer");
   for (  Map.Entry<String,Settings> entry : analyzersSettings.entrySet()) {
     String analyzerName=entry.getKey();
     Settings analyzerSettings=entry.getValue();
+    Class<? extends AnalyzerProvider> type=null;
     try {
-      Class<? extends AnalyzerProvider> type=analyzerSettings.getAsClass("type",null,"org.elasticsearch.index.analysis.","AnalyzerProvider");
+      type=analyzerSettings.getAsClass("type",null,"org.elasticsearch.index.analysis.","AnalyzerProvider");
+    }
+ catch (    NoClassSettingsException e) {
+      if (analyzerSettings.get("type") != null) {
+        type=analyzersBindings.analyzers.get(Strings.toUnderscoreCase(analyzerSettings.get("type")));
+        if (type == null) {
+          type=analyzersBindings.analyzers.get(Strings.toCamelCase(analyzerSettings.get("type")));
+        }
+      }
       if (type == null) {
         String tokenizerName=analyzerSettings.get("tokenizer");
         if (tokenizerName != null) {
           type=CustomAnalyzerProvider.class;
         }
  else {
-          throw new ElasticSearchIllegalArgumentException("analyzer [" + analyzerName + "] must have a type associated with it or a tokenizer");
+          throw new ElasticSearchIllegalArgumentException("failed to find analyzer type [" + analyzerSettings.get("type") + "] or tokenizer for ["+ analyzerName+ "]",e);
         }
       }
-      analyzerBinder.addBinding(analyzerName).toProvider(FactoryProvider.newFactory(AnalyzerProviderFactory.class,type)).in(Scopes.SINGLETON);
     }
- catch (    NoClassSettingsException e) {
-      throw new ElasticSearchIllegalArgumentException("failed to find analyzer type for [" + analyzerName + "]",e);
+    if (type == null) {
+      String tokenizerName=analyzerSettings.get("tokenizer");
+      if (tokenizerName != null) {
+        type=CustomAnalyzerProvider.class;
+      }
+ else {
+        throw new ElasticSearchIllegalArgumentException("failed to find analyzer type [" + analyzerSettings.get("type") + "] or tokenizer for ["+ analyzerName+ "]");
+      }
     }
+    analyzerBinder.addBinding(analyzerName).toProvider(FactoryProvider.newFactory(AnalyzerProviderFactory.class,type)).in(Scopes.SINGLETON);
   }
-  AnalysisBinderProcessor.AnalyzersBindings analyzersBindings=new AnalysisBinderProcessor.AnalyzersBindings(analyzerBinder,analyzersSettings,indicesAnalysisService);
-  for (  AnalysisBinderProcessor processor : processors) {
-    processor.processAnalyzers(analyzersBindings);
+  for (  Map.Entry<String,Class<? extends AnalyzerProvider>> entry : analyzersBindings.analyzers.entrySet()) {
+    String analyzerName=entry.getKey();
+    Class<? extends AnalyzerProvider> clazz=entry.getValue();
+    if (analyzersSettings.containsKey(analyzerName)) {
+      continue;
+    }
+    if (clazz.getAnnotation(AnalysisSettingsRequired.class) != null) {
+      continue;
+    }
+    if (indicesAnalysisService != null && indicesAnalysisService.hasAnalyzer(analyzerName)) {
+    }
+ else {
+      analyzerBinder.addBinding(analyzerName).toProvider(FactoryProvider.newFactory(AnalyzerProviderFactory.class,clazz)).in(Scopes.SINGLETON);
+    }
   }
   bind(AnalysisService.class).in(Scopes.SINGLETON);
 }

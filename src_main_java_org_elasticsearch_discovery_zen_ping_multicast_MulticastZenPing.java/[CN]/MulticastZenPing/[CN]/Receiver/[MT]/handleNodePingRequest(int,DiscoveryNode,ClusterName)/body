@@ -1,0 +1,55 @@
+{
+  if (!pingEnabled) {
+    return;
+  }
+  DiscoveryNodes discoveryNodes=nodesProvider.nodes();
+  final DiscoveryNode requestingNode=requestingNodeX;
+  if (requestingNode.id().equals(discoveryNodes.localNodeId())) {
+    return;
+  }
+  if (!clusterName.equals(MulticastZenPing.this.clusterName)) {
+    if (logger.isTraceEnabled()) {
+      logger.trace("[{}] received ping_request from [{}], but wrong cluster_name [{}], expected [{}], ignoring",id,requestingNode,clusterName,MulticastZenPing.this.clusterName);
+    }
+    return;
+  }
+  if (!discoveryNodes.localNode().shouldConnectTo(requestingNode)) {
+    if (logger.isTraceEnabled()) {
+      logger.trace("[{}] received ping_request from [{}], both are client nodes, ignoring",id,requestingNode,clusterName);
+    }
+    return;
+  }
+  final MulticastPingResponse multicastPingResponse=new MulticastPingResponse();
+  multicastPingResponse.id=id;
+  multicastPingResponse.pingResponse=new PingResponse(discoveryNodes.localNode(),discoveryNodes.masterNode(),clusterName);
+  if (logger.isTraceEnabled()) {
+    logger.trace("[{}] received ping_request from [{}], sending {}",id,requestingNode,multicastPingResponse.pingResponse);
+  }
+  if (!transportService.nodeConnected(requestingNode)) {
+    threadPool.cached().execute(new Runnable(){
+      @Override public void run(){
+        try {
+          transportService.connectToNode(requestingNode);
+          transportService.sendRequest(requestingNode,MulticastPingResponseRequestHandler.ACTION,multicastPingResponse,new VoidTransportResponseHandler(ThreadPool.Names.SAME){
+            @Override public void handleException(            TransportException exp){
+              logger.warn("failed to receive confirmation on sent ping response to [{}]",exp,requestingNode);
+            }
+          }
+);
+        }
+ catch (        Exception e) {
+          logger.warn("failed to connect to requesting node {}",e,requestingNode);
+        }
+      }
+    }
+);
+  }
+ else {
+    transportService.sendRequest(requestingNode,MulticastPingResponseRequestHandler.ACTION,multicastPingResponse,new VoidTransportResponseHandler(ThreadPool.Names.SAME){
+      @Override public void handleException(      TransportException exp){
+        logger.warn("failed to receive confirmation on sent ping response to [{}]",exp,requestingNode);
+      }
+    }
+);
+  }
+}

@@ -1,43 +1,7 @@
 {
-  if (!requiresStatePersistence) {
-    return;
-  }
   if (event.state().blocks().disableStatePersistence()) {
     return;
   }
-  if (event.state().nodes().localNode().masterNode() && (event.metaDataChanged() || !metaDataPersistedAtLeastOnce)) {
-    executor.execute(new LoggingRunnable(logger,new PersistMetaData(event)));
-  }
-  if (event.state().nodes().localNode().dataNode() && event.routingTableChanged()) {
-    LocalGatewayStartedShards.Builder builder=LocalGatewayStartedShards.builder();
-    if (currentStartedShards != null) {
-      builder.state(currentStartedShards);
-    }
-    builder.version(event.state().version());
-    boolean changed=false;
-    for (    IndexRoutingTable indexRoutingTable : event.state().routingTable()) {
-      for (      IndexShardRoutingTable indexShardRoutingTable : indexRoutingTable) {
-        if (indexShardRoutingTable.countWithState(ShardRoutingState.STARTED) == indexShardRoutingTable.size()) {
-          changed|=builder.remove(indexShardRoutingTable.shardId());
-        }
-      }
-    }
-    for (    ShardId shardId : builder.build().shards().keySet()) {
-      if (!event.state().metaData().hasIndex(shardId.index().name())) {
-        changed|=builder.remove(shardId);
-      }
-    }
-    RoutingNode routingNode=event.state().readOnlyRoutingNodes().node(event.state().nodes().localNodeId());
-    if (routingNode != null) {
-      for (      MutableShardRouting shardRouting : routingNode) {
-        if (shardRouting.active()) {
-          changed|=builder.put(shardRouting.shardId(),shardRouting.version());
-        }
-      }
-    }
-    if (changed) {
-      final LocalGatewayStartedShards stateToWrite=builder.build();
-      executor.execute(new LoggingRunnable(logger,new PersistShards(event,stateToWrite)));
-    }
-  }
+  metaState.clusterChanged(event);
+  shardsState.clusterChanged(event);
 }

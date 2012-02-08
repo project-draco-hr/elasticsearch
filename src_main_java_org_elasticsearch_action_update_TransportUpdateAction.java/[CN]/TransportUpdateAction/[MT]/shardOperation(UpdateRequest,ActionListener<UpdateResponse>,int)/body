@@ -1,0 +1,108 @@
+{
+  IndexService indexService=indicesService.indexServiceSafe(request.index());
+  IndexShard indexShard=indexService.shardSafe(request.shardId());
+  long getDate=System.currentTimeMillis();
+  GetResult getResult=indexShard.getService().get(request.type(),request.id(),new String[]{SourceFieldMapper.NAME,RoutingFieldMapper.NAME,ParentFieldMapper.NAME,TTLFieldMapper.NAME},true);
+  if (!getResult.exists()) {
+    listener.onFailure(new DocumentMissingException(new ShardId(request.index(),request.shardId()),request.type(),request.id()));
+    return;
+  }
+  if (getResult.internalSourceRef() == null) {
+    listener.onFailure(new DocumentSourceMissingException(new ShardId(request.index(),request.shardId()),request.type(),request.id()));
+    return;
+  }
+  Tuple<XContentType,Map<String,Object>> sourceAndContent=XContentHelper.convertToMap(getResult.internalSourceRef().bytes(),getResult.internalSourceRef().offset(),getResult.internalSourceRef().length(),true);
+  Map<String,Object> source=sourceAndContent.v2();
+  Map<String,Object> ctx=new HashMap<String,Object>(2);
+  ctx.put("_source",source);
+  try {
+    ExecutableScript script=scriptService.executable(request.scriptLang,request.script,request.scriptParams);
+    script.setNextVar("ctx",ctx);
+    script.run();
+    ctx=(Map<String,Object>)script.unwrap(ctx);
+  }
+ catch (  Exception e) {
+    throw new ElasticSearchIllegalArgumentException("failed to execute script",e);
+  }
+  String operation=(String)ctx.get("op");
+  String timestamp=(String)ctx.get("_timestamp");
+  Long ttl=null;
+  Object fetchedTTL=ctx.get("_ttl");
+  if (fetchedTTL != null) {
+    if (fetchedTTL instanceof Number) {
+      ttl=((Number)fetchedTTL).longValue();
+    }
+ else {
+      ttl=TimeValue.parseTimeValue((String)fetchedTTL,null).millis();
+    }
+  }
+  source=(Map<String,Object>)ctx.get("_source");
+  String routing=getResult.fields().containsKey(RoutingFieldMapper.NAME) ? getResult.field(RoutingFieldMapper.NAME).value().toString() : null;
+  String parent=getResult.fields().containsKey(ParentFieldMapper.NAME) ? getResult.field(ParentFieldMapper.NAME).value().toString() : null;
+  if (ttl == null) {
+    ttl=getResult.fields().containsKey(TTLFieldMapper.NAME) ? (Long)getResult.field(TTLFieldMapper.NAME).value() : null;
+    if (ttl != null) {
+      ttl=ttl - (System.currentTimeMillis() - getDate);
+    }
+  }
+  if (operation == null || "index".equals(operation)) {
+    IndexRequest indexRequest=Requests.indexRequest(request.index()).type(request.type()).id(request.id()).routing(routing).parent(parent).source(source,sourceAndContent.v1()).version(getResult.version()).replicationType(request.replicationType()).consistencyLevel(request.consistencyLevel()).timestamp(timestamp).ttl(ttl).percolate(request.percolate());
+    indexRequest.operationThreaded(false);
+    indexAction.execute(indexRequest,new ActionListener<IndexResponse>(){
+      @Override public void onResponse(      IndexResponse response){
+        UpdateResponse update=new UpdateResponse(response.index(),response.type(),response.id(),response.version());
+        update.matches(response.matches());
+        listener.onResponse(update);
+      }
+      @Override public void onFailure(      Throwable e){
+        e=ExceptionsHelper.unwrapCause(e);
+        if (e instanceof VersionConflictEngineException) {
+          if (retryCount < request.retryOnConflict()) {
+            threadPool.executor(executor()).execute(new Runnable(){
+              @Override public void run(){
+                shardOperation(request,listener,retryCount + 1);
+              }
+            }
+);
+            return;
+          }
+        }
+        listener.onFailure(e);
+      }
+    }
+);
+  }
+ else   if ("delete".equals(operation)) {
+    DeleteRequest deleteRequest=Requests.deleteRequest(request.index()).type(request.type()).id(request.id()).routing(routing).parent(parent).version(getResult.version()).replicationType(request.replicationType()).consistencyLevel(request.consistencyLevel());
+    deleteRequest.operationThreaded(false);
+    deleteAction.execute(deleteRequest,new ActionListener<DeleteResponse>(){
+      @Override public void onResponse(      DeleteResponse response){
+        UpdateResponse update=new UpdateResponse(response.index(),response.type(),response.id(),response.version());
+        listener.onResponse(update);
+      }
+      @Override public void onFailure(      Throwable e){
+        e=ExceptionsHelper.unwrapCause(e);
+        if (e instanceof VersionConflictEngineException) {
+          if (retryCount < request.retryOnConflict()) {
+            threadPool.executor(executor()).execute(new Runnable(){
+              @Override public void run(){
+                shardOperation(request,listener,retryCount + 1);
+              }
+            }
+);
+            return;
+          }
+        }
+        listener.onFailure(e);
+      }
+    }
+);
+  }
+ else   if ("none".equals(operation)) {
+    listener.onResponse(new UpdateResponse(getResult.index(),getResult.type(),getResult.id(),getResult.version()));
+  }
+ else {
+    logger.warn("Used update operation [{}] for script [{}], doing nothing...",operation,request.script);
+    listener.onResponse(new UpdateResponse(getResult.index(),getResult.type(),getResult.id(),getResult.version()));
+  }
+}

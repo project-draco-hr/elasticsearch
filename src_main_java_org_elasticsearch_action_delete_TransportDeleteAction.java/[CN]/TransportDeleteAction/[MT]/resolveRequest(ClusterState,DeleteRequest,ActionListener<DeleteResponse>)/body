@@ -1,0 +1,31 @@
+{
+  request.routing(state.metaData().resolveIndexRouting(request.routing(),request.index()));
+  request.index(state.metaData().concreteIndex(request.index()));
+  if (state.metaData().hasIndex(request.index())) {
+    MappingMetaData mappingMd=state.metaData().index(request.index()).mapping(request.type());
+    if (mappingMd != null && mappingMd.routing().required()) {
+      if (request.routing() == null) {
+        indexDeleteAction.execute(new IndexDeleteRequest(request),new ActionListener<IndexDeleteResponse>(){
+          @Override public void onResponse(          IndexDeleteResponse indexDeleteResponse){
+            long version=0;
+            boolean found=false;
+            for (            ShardDeleteResponse deleteResponse : indexDeleteResponse.responses()) {
+              if (!deleteResponse.notFound()) {
+                found=true;
+                version=deleteResponse.version();
+                break;
+              }
+            }
+            listener.onResponse(new DeleteResponse(request.index(),request.type(),request.id(),version,!found));
+          }
+          @Override public void onFailure(          Throwable e){
+            listener.onFailure(e);
+          }
+        }
+);
+        return false;
+      }
+    }
+  }
+  return true;
+}

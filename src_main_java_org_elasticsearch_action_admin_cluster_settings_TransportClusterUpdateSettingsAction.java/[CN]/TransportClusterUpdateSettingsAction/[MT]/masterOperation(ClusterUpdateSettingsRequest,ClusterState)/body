@@ -28,10 +28,19 @@
           }
         }
         if (!changed) {
+          latch.countDown();
           return currentState;
         }
         MetaData.Builder metaData=MetaData.builder().metaData(currentState.metaData()).persistentSettings(persistentSettings.build()).transientSettings(transientSettings.build());
-        return ClusterState.builder().state(currentState).metaData(metaData).build();
+        ClusterBlocks.Builder blocks=ClusterBlocks.builder().blocks(currentState.blocks());
+        boolean updatedReadOnly=metaData.persistentSettings().getAsBoolean(MetaData.SETTING_READ_ONLY,false) || metaData.transientSettings().getAsBoolean(MetaData.SETTING_READ_ONLY,false);
+        if (updatedReadOnly) {
+          blocks.addGlobalBlock(MetaData.CLUSTER_READ_ONLY_BLOCK);
+        }
+ else {
+          blocks.removeGlobalBlock(MetaData.CLUSTER_READ_ONLY_BLOCK);
+        }
+        return ClusterState.builder().state(currentState).metaData(metaData).blocks(blocks).build();
       }
  catch (      Exception e) {
         latch.countDown();

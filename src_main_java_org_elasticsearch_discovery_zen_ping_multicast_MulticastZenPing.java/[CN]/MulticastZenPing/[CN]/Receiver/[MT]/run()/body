@@ -1,9 +1,11 @@
 {
   while (running) {
     try {
-      int id;
-      DiscoveryNode requestingNodeX;
-      ClusterName clusterName;
+      int id=-1;
+      DiscoveryNode requestingNodeX=null;
+      ClusterName clusterName=null;
+      Map<String,Object> externalPingData=null;
+      XContentType xContentType=null;
 synchronized (receiveMutex) {
         try {
           multicastSocket.receive(datagramPacketReceive);
@@ -18,65 +20,45 @@ catch (        Exception e) {
           continue;
         }
         try {
-          StreamInput input=CachedStreamInput.cachedHandles(new BytesStreamInput(datagramPacketReceive.getData(),datagramPacketReceive.getOffset(),datagramPacketReceive.getLength()));
-          id=input.readInt();
-          clusterName=ClusterName.readClusterName(input);
-          requestingNodeX=readNode(input);
+          boolean internal=false;
+          if (datagramPacketReceive.getLength() > 4) {
+            int counter=0;
+            for (; counter < INTERNAL_HEADER.length; counter++) {
+              if (datagramPacketReceive.getData()[datagramPacketReceive.getOffset() + counter] != INTERNAL_HEADER[counter]) {
+                break;
+              }
+            }
+            if (counter == INTERNAL_HEADER.length) {
+              internal=true;
+            }
+          }
+          if (internal) {
+            StreamInput input=CachedStreamInput.cachedHandles(new BytesStreamInput(datagramPacketReceive.getData(),datagramPacketReceive.getOffset() + INTERNAL_HEADER.length,datagramPacketReceive.getLength(),true));
+            Version version=Version.readVersion(input);
+            id=input.readInt();
+            clusterName=ClusterName.readClusterName(input);
+            requestingNodeX=readNode(input);
+          }
+ else {
+            xContentType=XContentFactory.xContentType(datagramPacketReceive.getData(),datagramPacketReceive.getOffset(),datagramPacketReceive.getLength());
+            if (xContentType != null) {
+              externalPingData=XContentFactory.xContent(xContentType).createParser(datagramPacketReceive.getData(),datagramPacketReceive.getOffset(),datagramPacketReceive.getLength()).mapAndClose();
+            }
+ else {
+              throw new ElasticSearchIllegalStateException("failed multicast message, probably message from previous version");
+            }
+          }
         }
  catch (        Exception e) {
-          logger.warn("failed to read requesting node from {}",e,datagramPacketReceive.getSocketAddress());
+          logger.warn("failed to read requesting data from {}",e,datagramPacketReceive.getSocketAddress());
           continue;
         }
       }
-      DiscoveryNodes discoveryNodes=nodesProvider.nodes();
-      final DiscoveryNode requestingNode=requestingNodeX;
-      if (requestingNode.id().equals(discoveryNodes.localNodeId())) {
-        continue;
-      }
-      if (!clusterName.equals(MulticastZenPing.this.clusterName)) {
-        if (logger.isTraceEnabled()) {
-          logger.trace("[{}] received ping_request from [{}], but wrong cluster_name [{}], expected [{}], ignoring",id,requestingNode,clusterName,MulticastZenPing.this.clusterName);
-        }
-        continue;
-      }
-      if (!discoveryNodes.localNode().shouldConnectTo(requestingNode)) {
-        if (logger.isTraceEnabled()) {
-          logger.trace("[{}] received ping_request from [{}], both are client nodes, ignoring",id,requestingNode,clusterName);
-        }
-        continue;
-      }
-      final MulticastPingResponse multicastPingResponse=new MulticastPingResponse();
-      multicastPingResponse.id=id;
-      multicastPingResponse.pingResponse=new PingResponse(discoveryNodes.localNode(),discoveryNodes.masterNode(),clusterName);
-      if (logger.isTraceEnabled()) {
-        logger.trace("[{}] received ping_request from [{}], sending {}",id,requestingNode,multicastPingResponse.pingResponse);
-      }
-      if (!transportService.nodeConnected(requestingNode)) {
-        threadPool.cached().execute(new Runnable(){
-          @Override public void run(){
-            try {
-              transportService.connectToNode(requestingNode);
-              transportService.sendRequest(requestingNode,MulticastPingResponseRequestHandler.ACTION,multicastPingResponse,new VoidTransportResponseHandler(ThreadPool.Names.SAME){
-                @Override public void handleException(                TransportException exp){
-                  logger.warn("failed to receive confirmation on sent ping response to [{}]",exp,requestingNode);
-                }
-              }
-);
-            }
- catch (            Exception e) {
-              logger.warn("failed to connect to requesting node {}",e,requestingNode);
-            }
-          }
-        }
-);
+      if (externalPingData != null) {
+        handleExternalPingRequest(externalPingData,xContentType,datagramPacketReceive.getSocketAddress());
       }
  else {
-        transportService.sendRequest(requestingNode,MulticastPingResponseRequestHandler.ACTION,multicastPingResponse,new VoidTransportResponseHandler(ThreadPool.Names.SAME){
-          @Override public void handleException(          TransportException exp){
-            logger.warn("failed to receive confirmation on sent ping response to [{}]",exp,requestingNode);
-          }
-        }
-);
+        handleNodePingRequest(id,requestingNodeX,clusterName);
       }
     }
  catch (    Exception e) {

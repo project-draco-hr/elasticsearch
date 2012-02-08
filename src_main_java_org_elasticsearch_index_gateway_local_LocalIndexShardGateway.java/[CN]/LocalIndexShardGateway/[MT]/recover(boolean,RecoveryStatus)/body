@@ -1,5 +1,6 @@
 {
   recoveryStatus.index().startTime(System.currentTimeMillis());
+  recoveryStatus.updateStage(RecoveryStatus.Stage.INDEX);
   long version=-1;
   long translogId=-1;
   try {
@@ -33,10 +34,12 @@
   }
  catch (  Exception e) {
   }
-  recoveryStatus.translog().startTime(System.currentTimeMillis());
+  recoveryStatus.start().startTime(System.currentTimeMillis());
+  recoveryStatus.updateStage(RecoveryStatus.Stage.START);
   if (translogId == -1) {
     indexShard.start("post recovery from gateway, no translog");
-    recoveryStatus.translog().time(System.currentTimeMillis() - recoveryStatus.index().startTime());
+    recoveryStatus.start().time(System.currentTimeMillis() - recoveryStatus.start().startTime());
+    recoveryStatus.start().checkIndexTime(indexShard.checkIndexTook());
     return;
   }
   FsTranslog translog=(FsTranslog)indexShard.translog();
@@ -63,10 +66,15 @@
   }
   if (recoveringTranslogFile == null || !recoveringTranslogFile.exists()) {
     indexShard.start("post recovery from gateway, no translog");
-    recoveryStatus.translog().time(System.currentTimeMillis() - recoveryStatus.index().startTime());
+    recoveryStatus.start().time(System.currentTimeMillis() - recoveryStatus.start().startTime());
+    recoveryStatus.start().checkIndexTime(indexShard.checkIndexTook());
     return;
   }
   indexShard.performRecoveryPrepareForTranslog();
+  recoveryStatus.start().time(System.currentTimeMillis() - recoveryStatus.start().startTime());
+  recoveryStatus.start().checkIndexTime(indexShard.checkIndexTook());
+  recoveryStatus.translog().startTime(System.currentTimeMillis());
+  recoveryStatus.updateStage(RecoveryStatus.Stage.TRANSLOG);
   try {
     InputStreamStreamInput si=new InputStreamStreamInput(new FileInputStream(recoveringTranslogFile));
     while (true) {
@@ -91,5 +99,5 @@ catch (      IOException e) {
   }
   indexShard.performRecoveryFinalization(true);
   recoveringTranslogFile.delete();
-  recoveryStatus.translog().time(System.currentTimeMillis() - recoveryStatus.index().startTime());
+  recoveryStatus.translog().time(System.currentTimeMillis() - recoveryStatus.translog().startTime());
 }

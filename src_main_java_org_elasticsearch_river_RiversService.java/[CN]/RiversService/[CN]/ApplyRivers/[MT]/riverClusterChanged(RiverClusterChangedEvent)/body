@@ -1,10 +1,35 @@
 {
   DiscoveryNode localNode=clusterService.localNode();
   RiverClusterState state=event.state();
-  for (  RiverName riverName : rivers.keySet()) {
+  for (  final RiverName riverName : rivers.keySet()) {
     RiverRouting routing=state.routing().routing(riverName);
     if (routing == null || !localNode.equals(routing.node())) {
       closeRiver(riverName);
+      try {
+        client.prepareGet(riverIndexName,riverName.name(),"_meta").setListenerThreaded(true).execute(new ActionListener<GetResponse>(){
+          @Override public void onResponse(          GetResponse getResponse){
+            if (!getResponse.exists()) {
+              client.admin().indices().prepareDeleteMapping(riverIndexName).setType(riverName.name()).execute(new ActionListener<DeleteMappingResponse>(){
+                @Override public void onResponse(                DeleteMappingResponse deleteMappingResponse){
+                }
+                @Override public void onFailure(                Throwable e){
+                  logger.debug("failed to (double) delete river [{}] content",e,riverName.name());
+                }
+              }
+);
+            }
+          }
+          @Override public void onFailure(          Throwable e){
+            logger.debug("failed to (double) delete river [{}] content",e,riverName.name());
+          }
+        }
+);
+      }
+ catch (      IndexMissingException e) {
+      }
+catch (      Exception e) {
+        logger.warn("unexpected failure when trying to verify river [{}] deleted",e,riverName.name());
+      }
     }
   }
   for (  final RiverRouting routing : state.routing()) {

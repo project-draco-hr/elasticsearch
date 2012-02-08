@@ -13,7 +13,7 @@
   int dataLength=context.sourceLength();
   boolean filtered=includes.length > 0 || excludes.length > 0;
   if (filtered) {
-    Tuple<XContentType,Map<String,Object>> mapTuple=XContentHelper.convertToMap(data,dataOffset,dataLength);
+    Tuple<XContentType,Map<String,Object>> mapTuple=XContentHelper.convertToMap(data,dataOffset,dataLength,true);
     Map<String,Object> filteredSource=XContentMapValues.filter(mapTuple.v2(),includes,excludes);
     CachedStreamOutput.Entry cachedEntry=CachedStreamOutput.popEntry();
     StreamOutput streamOutput;
@@ -23,7 +23,11 @@
  else {
       streamOutput=cachedEntry.cachedBytes();
     }
-    XContentBuilder builder=XContentFactory.contentBuilder(mapTuple.v1(),streamOutput).map(filteredSource);
+    XContentType contentType=formatContentType;
+    if (contentType == null) {
+      contentType=mapTuple.v1();
+    }
+    XContentBuilder builder=XContentFactory.contentBuilder(contentType,streamOutput).map(filteredSource);
     builder.close();
     data=cachedEntry.bytes().copiedByteArray();
     dataOffset=0;
@@ -33,14 +37,68 @@
  else   if (compress != null && compress && !LZF.isCompressed(data,dataOffset,dataLength)) {
     if (compressThreshold == -1 || dataLength > compressThreshold) {
       CachedStreamOutput.Entry cachedEntry=CachedStreamOutput.popEntry();
-      LZFStreamOutput streamOutput=cachedEntry.cachedLZFBytes();
-      streamOutput.writeBytes(data,dataOffset,dataLength);
-      streamOutput.flush();
-      data=cachedEntry.bytes().copiedByteArray();
-      dataOffset=0;
-      dataLength=data.length;
-      CachedStreamOutput.pushEntry(cachedEntry);
-      context.source(data,dataOffset,dataLength);
+      try {
+        XContentType contentType=XContentFactory.xContentType(data,dataOffset,dataLength);
+        if (formatContentType != null && formatContentType != contentType) {
+          XContentBuilder builder=XContentFactory.contentBuilder(formatContentType,cachedEntry.cachedLZFBytes());
+          builder.copyCurrentStructure(XContentFactory.xContent(contentType).createParser(data,dataOffset,dataLength));
+          builder.close();
+        }
+ else {
+          LZFStreamOutput streamOutput=cachedEntry.cachedLZFBytes();
+          streamOutput.writeBytes(data,dataOffset,dataLength);
+          streamOutput.flush();
+        }
+        data=cachedEntry.bytes().copiedByteArray();
+        dataOffset=0;
+        dataLength=data.length;
+        context.source(data,dataOffset,dataLength);
+      }
+  finally {
+        CachedStreamOutput.pushEntry(cachedEntry);
+      }
+    }
+  }
+ else   if (formatContentType != null) {
+    if (LZF.isCompressed(data,dataOffset,dataLength)) {
+      BytesStreamInput siBytes=new BytesStreamInput(data,dataOffset,dataLength,false);
+      LZFStreamInput siLzf=CachedStreamInput.cachedLzf(siBytes);
+      XContentType contentType=XContentFactory.xContentType(siLzf);
+      siLzf.resetToBufferStart();
+      if (contentType != formatContentType) {
+        CachedStreamOutput.Entry cachedEntry=CachedStreamOutput.popEntry();
+        try {
+          LZFStreamOutput streamOutput=cachedEntry.cachedLZFBytes();
+          XContentBuilder builder=XContentFactory.contentBuilder(formatContentType,streamOutput);
+          builder.copyCurrentStructure(XContentFactory.xContent(contentType).createParser(siLzf));
+          builder.close();
+          data=cachedEntry.bytes().copiedByteArray();
+          dataOffset=0;
+          dataLength=data.length;
+          context.source(data,dataOffset,dataLength);
+        }
+  finally {
+          CachedStreamOutput.pushEntry(cachedEntry);
+        }
+      }
+    }
+ else {
+      XContentType contentType=XContentFactory.xContentType(data,dataOffset,dataLength);
+      if (contentType != formatContentType) {
+        CachedStreamOutput.Entry cachedEntry=CachedStreamOutput.popEntry();
+        try {
+          XContentBuilder builder=XContentFactory.contentBuilder(formatContentType,cachedEntry.cachedBytes());
+          builder.copyCurrentStructure(XContentFactory.xContent(contentType).createParser(data,dataOffset,dataLength));
+          builder.close();
+          data=cachedEntry.bytes().copiedByteArray();
+          dataOffset=0;
+          dataLength=data.length;
+          context.source(data,dataOffset,dataLength);
+        }
+  finally {
+          CachedStreamOutput.pushEntry(cachedEntry);
+        }
+      }
     }
   }
   return new Field(names().indexName(),data,dataOffset,dataLength);

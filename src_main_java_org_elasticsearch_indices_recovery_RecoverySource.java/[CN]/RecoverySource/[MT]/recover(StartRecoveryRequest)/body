@@ -62,7 +62,8 @@
                     recoverySettings.rateLimiter().pause(toRead);
                   }
                   indexInput.readBytes(buf,0,toRead,false);
-                  transportService.submitRequest(request.targetNode(),RecoveryTarget.Actions.FILE_CHUNK,new RecoveryFileChunkRequest(request.shardId(),name,position,len,md.checksum(),buf,toRead),TransportRequestOptions.options().withCompress(recoverySettings.compress()).withLowType(),VoidTransportResponseHandler.INSTANCE_SAME).txGet();
+                  BytesHolder content=new BytesHolder(buf,0,toRead);
+                  transportService.submitRequest(request.targetNode(),RecoveryTarget.Actions.FILE_CHUNK,new RecoveryFileChunkRequest(request.shardId(),name,position,len,md.checksum(),content),TransportRequestOptions.options().withCompress(recoverySettings.compress()).withLowType(),VoidTransportResponseHandler.INSTANCE_SAME).txGet();
                   readCount+=toRead;
                 }
                 indexInput.close();
@@ -102,9 +103,14 @@
       if (shard.state() == IndexShardState.CLOSED) {
         throw new IndexShardClosedException(request.shardId());
       }
-      logger.trace("[{}][{}] recovery [phase2] to {}: sending transaction log operations",request.shardId().index().name(),request.shardId().id(),request.targetNode());
+      logger.trace("[{}][{}] recovery [phase2] to {}: start",request.shardId().index().name(),request.shardId().id(),request.targetNode());
       StopWatch stopWatch=new StopWatch().start();
       transportService.submitRequest(request.targetNode(),RecoveryTarget.Actions.PREPARE_TRANSLOG,new RecoveryPrepareForTranslogOperationsRequest(request.shardId()),VoidTransportResponseHandler.INSTANCE_SAME).txGet();
+      stopWatch.stop();
+      response.startTime=stopWatch.totalTime().millis();
+      logger.trace("[{}][{}] recovery [phase2] to {}: start took [{}]",request.shardId().index().name(),request.shardId().id(),request.targetNode(),stopWatch.totalTime());
+      logger.trace("[{}][{}] recovery [phase2] to {}: sending transaction log operations",request.shardId().index().name(),request.shardId().id(),request.targetNode());
+      stopWatch=new StopWatch().start();
       int totalOperations=sendSnapshot(snapshot);
       stopWatch.stop();
       logger.trace("[{}][{}] recovery [phase2] to {}: took [{}]",request.shardId().index().name(),request.shardId().id(),request.targetNode(),stopWatch.totalTime());

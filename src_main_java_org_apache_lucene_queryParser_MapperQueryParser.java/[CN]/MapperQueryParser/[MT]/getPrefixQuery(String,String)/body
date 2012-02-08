@@ -1,18 +1,36 @@
 {
-  String indexedNameField=field;
   currentMapper=null;
   Analyzer oldAnalyzer=analyzer;
   try {
     MapperService.SmartNameFieldMappers fieldMappers=parseContext.smartFieldMappers(field);
     if (fieldMappers != null) {
-      analyzer=fieldMappers.searchAnalyzer();
+      if (!forcedAnalyzer) {
+        analyzer=fieldMappers.searchAnalyzer();
+      }
       currentMapper=fieldMappers.fieldMappers().mapper();
       if (currentMapper != null) {
-        indexedNameField=currentMapper.names().indexName();
+        Query query=null;
+        if (currentMapper.useFieldQueryWithQueryString()) {
+          if (fieldMappers.explicitTypeInNameWithDocMapper()) {
+            String[] previousTypes=QueryParseContext.setTypesWithPrevious(new String[]{fieldMappers.docMapper().type()});
+            try {
+              query=currentMapper.prefixQuery(termStr,multiTermRewriteMethod,parseContext);
+            }
+  finally {
+              QueryParseContext.setTypes(previousTypes);
+            }
+          }
+ else {
+            query=currentMapper.prefixQuery(termStr,multiTermRewriteMethod,parseContext);
+          }
+        }
+        if (query == null) {
+          query=getPossiblyAnalyzedPrefixQuery(currentMapper.names().indexName(),termStr);
+        }
+        return wrapSmartNameQuery(query,fieldMappers,parseContext);
       }
-      return wrapSmartNameQuery(getPossiblyAnalyzedPrefixQuery(indexedNameField,termStr),fieldMappers,parseContext);
     }
-    return getPossiblyAnalyzedPrefixQuery(indexedNameField,termStr);
+    return getPossiblyAnalyzedPrefixQuery(field,termStr);
   }
   finally {
     analyzer=oldAnalyzer;

@@ -1,0 +1,24 @@
+{
+  Object filterKey=filter;
+  if (filter instanceof CacheKeyFilter) {
+    filterKey=((CacheKeyFilter)filter).cacheKey();
+  }
+  FilterCacheKey cacheKey=new FilterCacheKey(cache.index().name(),reader.getCoreCacheKey(),filterKey);
+  Cache<FilterCacheKey,FilterCacheValue<DocSet>> innerCache=cache.indicesFilterCache.cache();
+  FilterCacheValue<DocSet> cacheValue=innerCache.getIfPresent(cacheKey);
+  if (cacheValue == null) {
+    if (!cache.seenReaders.containsKey(reader.getCoreCacheKey())) {
+      Boolean previous=cache.seenReaders.putIfAbsent(reader.getCoreCacheKey(),Boolean.TRUE);
+      if (previous == null) {
+        reader.addReaderFinishedListener(cache);
+        cache.seenReadersCount.inc();
+      }
+    }
+    DocIdSet docIdSet=filter.getDocIdSet(reader);
+    DocSet docSet=FilterCacheValue.cacheable(reader,docIdSet);
+    cacheValue=new FilterCacheValue<DocSet>(docSet);
+    cache.totalMetric.inc(cacheValue.value().sizeInBytes());
+    innerCache.put(cacheKey,cacheValue);
+  }
+  return cacheValue.value() == DocSet.EMPTY_DOC_SET ? null : cacheValue.value();
+}

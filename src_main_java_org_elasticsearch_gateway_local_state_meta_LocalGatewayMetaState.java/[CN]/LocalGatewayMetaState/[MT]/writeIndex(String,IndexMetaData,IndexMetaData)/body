@@ -1,0 +1,45 @@
+{
+  logger.trace("[{}] writing state, reason [{}]",indexMetaData.index(),reason);
+  CachedStreamOutput.Entry cachedEntry=CachedStreamOutput.popEntry();
+  try {
+    XContentBuilder builder=XContentFactory.contentBuilder(format,cachedEntry.cachedBytes());
+    builder.startObject();
+    IndexMetaData.Builder.toXContent(indexMetaData,builder,formatParams);
+    builder.endObject();
+    builder.flush();
+    Exception lastFailure=null;
+    boolean wroteAtLeastOnce=false;
+    for (    File indexLocation : nodeEnv.indexLocations(new Index(indexMetaData.index()))) {
+      File stateLocation=new File(indexLocation,"_state");
+      FileSystemUtils.mkdirs(stateLocation);
+      File stateFile=new File(stateLocation,"state-" + indexMetaData.version());
+      FileOutputStream fos=null;
+      try {
+        fos=new FileOutputStream(stateFile);
+        fos.write(cachedEntry.bytes().underlyingBytes(),0,cachedEntry.bytes().size());
+        fos.getChannel().force(true);
+        Closeables.closeQuietly(fos);
+        wroteAtLeastOnce=true;
+      }
+ catch (      Exception e) {
+        lastFailure=e;
+      }
+ finally {
+        Closeables.closeQuietly(fos);
+      }
+    }
+    if (!wroteAtLeastOnce) {
+      logger.warn("[{}]: failed to state",lastFailure,indexMetaData.index());
+      throw new IOException("failed to write state for [" + indexMetaData.index() + "]",lastFailure);
+    }
+    if (previousIndexMetaData != null && previousIndexMetaData.version() != indexMetaData.version()) {
+      for (      File indexLocation : nodeEnv.indexLocations(new Index(indexMetaData.index()))) {
+        File stateFile=new File(new File(indexLocation,"_state"),"state-" + previousIndexMetaData.version());
+        stateFile.delete();
+      }
+    }
+  }
+  finally {
+    CachedStreamOutput.pushEntry(cachedEntry);
+  }
+}

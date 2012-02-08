@@ -1,7 +1,7 @@
 {
-  Map<FieldMapper,HighlightEntry> cache=(Map<FieldMapper,HighlightEntry>)hitContext.cache().get("highlight");
+  HighlighterEntry cache=(HighlighterEntry)hitContext.cache().get("highlight");
   if (cache == null) {
-    cache=Maps.newHashMap();
+    cache=new HighlighterEntry();
     hitContext.cache().put("highlight",cache);
   }
   DocumentMapper documentMapper=context.mapperService().documentMapper(hitContext.hit().type());
@@ -29,22 +29,31 @@
       }
     }
     if (mapper.termVector() != Field.TermVector.WITH_POSITIONS_OFFSETS) {
-      HighlightEntry entry=cache.get(mapper);
+      MapperHighlightEntry entry=cache.mappers.get(mapper);
       if (entry == null) {
         Query query=context.parsedQuery().query();
-        if (query instanceof FunctionScoreQuery) {
-          query=((FunctionScoreQuery)query).getSubQuery();
-        }
- else         if (query instanceof FiltersFunctionScoreQuery) {
-          query=((FiltersFunctionScoreQuery)query).getSubQuery();
-        }
- else         if (query instanceof ConstantScoreQuery) {
-          ConstantScoreQuery q=(ConstantScoreQuery)query;
-          if (q.getQuery() != null) {
-            query=q.getQuery();
+        while (true) {
+          boolean extracted=false;
+          if (query instanceof FunctionScoreQuery) {
+            query=((FunctionScoreQuery)query).getSubQuery();
+            extracted=true;
+          }
+ else           if (query instanceof FiltersFunctionScoreQuery) {
+            query=((FiltersFunctionScoreQuery)query).getSubQuery();
+            extracted=true;
+          }
+ else           if (query instanceof ConstantScoreQuery) {
+            ConstantScoreQuery q=(ConstantScoreQuery)query;
+            if (q.getQuery() != null) {
+              query=q.getQuery();
+              extracted=true;
+            }
+          }
+          if (!extracted) {
+            break;
           }
         }
-        QueryScorer queryScorer=new QueryScorer(query,null);
+        QueryScorer queryScorer=new QueryScorer(query,field.requireFieldMatch() ? mapper.names().indexName() : null);
         queryScorer.setExpandMultiTermQuery(true);
         Fragmenter fragmenter;
         if (field.numberOfFragments() == 0) {
@@ -54,10 +63,10 @@
           fragmenter=new SimpleSpanFragmenter(queryScorer,field.fragmentCharSize());
         }
         Formatter formatter=new SimpleHTMLFormatter(field.preTags()[0],field.postTags()[0]);
-        entry=new HighlightEntry();
+        entry=new MapperHighlightEntry();
         entry.highlighter=new Highlighter(formatter,encoder,queryScorer);
         entry.highlighter.setTextFragmenter(fragmenter);
-        cache.put(mapper,entry);
+        cache.mappers.put(mapper,entry);
       }
       List<Object> textsToHighlight;
       if (mapper.stored()) {
@@ -78,7 +87,7 @@
         SearchLookup lookup=context.lookup();
         lookup.setNextReader(hitContext.reader());
         lookup.setNextDocId(hitContext.docId());
-        textsToHighlight=lookup.source().extractRawValues(mapper.names().fullName());
+        textsToHighlight=lookup.source().extractRawValues(mapper.names().sourcePath());
       }
       int numberOfFragments=field.numberOfFragments() == 0 ? 1 : field.numberOfFragments();
       ArrayList<TextFragment> fragsList=new ArrayList<TextFragment>();
@@ -127,17 +136,22 @@
     }
  else {
       try {
-        HighlightEntry entry=cache.get(mapper);
+        MapperHighlightEntry entry=cache.mappers.get(mapper);
+        FieldQuery fieldQuery=null;
         if (entry == null) {
           FragListBuilder fragListBuilder;
           FragmentsBuilder fragmentsBuilder;
+          BoundaryScanner boundaryScanner=SimpleBoundaryScanner2.DEFAULT;
+          if (field.boundaryMaxScan() != SimpleBoundaryScanner2.DEFAULT_MAX_SCAN || field.boundaryChars() != SimpleBoundaryScanner2.DEFAULT_BOUNDARY_CHARS) {
+            boundaryScanner=new SimpleBoundaryScanner2(field.boundaryMaxScan(),field.boundaryChars());
+          }
           if (field.numberOfFragments() == 0) {
             fragListBuilder=new SingleFragListBuilder();
             if (mapper.stored()) {
-              fragmentsBuilder=new SimpleFragmentsBuilder(field.preTags(),field.postTags());
+              fragmentsBuilder=new SimpleFragmentsBuilder(field.preTags(),field.postTags(),boundaryScanner);
             }
  else {
-              fragmentsBuilder=new SourceSimpleFragmentsBuilder(mapper,context,field.preTags(),field.postTags());
+              fragmentsBuilder=new SourceSimpleFragmentsBuilder(mapper,context,field.preTags(),field.postTags(),boundaryScanner);
             }
           }
  else {
@@ -145,32 +159,45 @@
  else             fragListBuilder=new SimpleFragListBuilder(field.fragmentOffset());
             if (field.scoreOrdered()) {
               if (mapper.stored()) {
-                fragmentsBuilder=new ScoreOrderFragmentsBuilder(field.preTags(),field.postTags());
+                fragmentsBuilder=new ScoreOrderFragmentsBuilder(field.preTags(),field.postTags(),boundaryScanner);
               }
  else {
-                fragmentsBuilder=new SourceScoreOrderFragmentsBuilder(mapper,context,field.preTags(),field.postTags());
+                fragmentsBuilder=new SourceScoreOrderFragmentsBuilder(mapper,context,field.preTags(),field.postTags(),boundaryScanner);
               }
             }
  else {
               if (mapper.stored()) {
-                fragmentsBuilder=new SimpleFragmentsBuilder(field.preTags(),field.postTags());
+                fragmentsBuilder=new SimpleFragmentsBuilder(field.preTags(),field.postTags(),boundaryScanner);
               }
  else {
-                fragmentsBuilder=new SourceSimpleFragmentsBuilder(mapper,context,field.preTags(),field.postTags());
+                fragmentsBuilder=new SourceSimpleFragmentsBuilder(mapper,context,field.preTags(),field.postTags(),boundaryScanner);
               }
             }
           }
-          entry=new HighlightEntry();
+          entry=new MapperHighlightEntry();
           entry.fragListBuilder=fragListBuilder;
           entry.fragmentsBuilder=fragmentsBuilder;
-          entry.fvh=new FastVectorHighlighter(true,false,fragListBuilder,fragmentsBuilder);
+          if (cache.fvh == null) {
+            cache.fvh=new FastVectorHighlighter();
+          }
           CustomFieldQuery.highlightFilters.set(field.highlightFilter());
-          entry.fieldQuery=new CustomFieldQuery(context.parsedQuery().query(),hitContext.topLevelReader(),entry.fvh);
-          cache.put(mapper,entry);
+          if (field.requireFieldMatch()) {
+            if (cache.fieldMatchFieldQuery == null) {
+              cache.fieldMatchFieldQuery=new CustomFieldQuery(context.parsedQuery().query(),hitContext.topLevelReader(),true,field.requireFieldMatch());
+            }
+            fieldQuery=cache.fieldMatchFieldQuery;
+          }
+ else {
+            if (cache.noFieldMatchFieldQuery == null) {
+              cache.noFieldMatchFieldQuery=new CustomFieldQuery(context.parsedQuery().query(),hitContext.topLevelReader(),true,field.requireFieldMatch());
+            }
+            fieldQuery=cache.noFieldMatchFieldQuery;
+          }
+          cache.mappers.put(mapper,entry);
         }
         String[] fragments;
         int numberOfFragments=field.numberOfFragments() == 0 ? 1 : field.numberOfFragments();
-        fragments=entry.fvh.getBestFragments(entry.fieldQuery,hitContext.reader(),hitContext.docId(),mapper.names().indexName(),field.fragmentCharSize(),numberOfFragments,entry.fragListBuilder,entry.fragmentsBuilder,field.preTags(),field.postTags(),encoder);
+        fragments=cache.fvh.getBestFragments(fieldQuery,hitContext.reader(),hitContext.docId(),mapper.names().indexName(),field.fragmentCharSize(),numberOfFragments,entry.fragListBuilder,entry.fragmentsBuilder,field.preTags(),field.postTags(),encoder);
         if (fragments != null && fragments.length > 0) {
           HighlightField highlightField=new HighlightField(field.field(),fragments);
           highlightFields.put(highlightField.name(),highlightField);

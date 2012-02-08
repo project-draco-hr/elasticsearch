@@ -1,0 +1,49 @@
+{
+  logger.trace("[{}][{}] writing shard state, reason [{}]",shardId.index().name(),shardId.id(),reason);
+  CachedStreamOutput.Entry cachedEntry=CachedStreamOutput.popEntry();
+  try {
+    XContentBuilder builder=XContentFactory.contentBuilder(XContentType.JSON,cachedEntry.cachedBytes());
+    builder.prettyPrint();
+    builder.startObject();
+    builder.field("version",shardStateInfo.version);
+    if (shardStateInfo.primary != null) {
+      builder.field("primary",shardStateInfo.primary);
+    }
+    builder.endObject();
+    builder.flush();
+    Exception lastFailure=null;
+    boolean wroteAtLeastOnce=false;
+    for (    File shardLocation : nodeEnv.shardLocations(shardId)) {
+      File shardStateDir=new File(shardLocation,"_state");
+      FileSystemUtils.mkdirs(shardStateDir);
+      File stateFile=new File(shardStateDir,"state-" + shardStateInfo.version);
+      FileOutputStream fos=null;
+      try {
+        fos=new FileOutputStream(stateFile);
+        fos.write(cachedEntry.bytes().underlyingBytes(),0,cachedEntry.bytes().size());
+        fos.getChannel().force(true);
+        Closeables.closeQuietly(fos);
+        wroteAtLeastOnce=true;
+      }
+ catch (      Exception e) {
+        lastFailure=e;
+      }
+ finally {
+        Closeables.closeQuietly(fos);
+      }
+    }
+    if (!wroteAtLeastOnce) {
+      logger.warn("[{}][{}]: failed to write shard state",shardId.index().name(),shardId.id(),lastFailure);
+      throw new IOException("failed to write shard state for " + shardId,lastFailure);
+    }
+    if (previousStateInfo != null && previousStateInfo.version != shardStateInfo.version) {
+      for (      File shardLocation : nodeEnv.shardLocations(shardId)) {
+        File stateFile=new File(new File(shardLocation,"_state"),"state-" + previousStateInfo.version);
+        stateFile.delete();
+      }
+    }
+  }
+  finally {
+    CachedStreamOutput.pushEntry(cachedEntry);
+  }
+}

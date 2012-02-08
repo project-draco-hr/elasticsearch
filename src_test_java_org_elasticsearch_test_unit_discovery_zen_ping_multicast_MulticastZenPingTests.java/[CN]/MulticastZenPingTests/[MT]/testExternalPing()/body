@@ -1,0 +1,36 @@
+{
+  ThreadPool threadPool=new ThreadPool();
+  ClusterName clusterName=new ClusterName("test");
+  final TransportService transportServiceA=new TransportService(new LocalTransport(threadPool),threadPool).start();
+  final DiscoveryNode nodeA=new DiscoveryNode("A",transportServiceA.boundAddress().publishAddress());
+  MulticastZenPing zenPingA=new MulticastZenPing(threadPool,transportServiceA,clusterName);
+  zenPingA.setNodesProvider(new DiscoveryNodesProvider(){
+    @Override public DiscoveryNodes nodes(){
+      return DiscoveryNodes.newNodesBuilder().put(nodeA).localNodeId("A").build();
+    }
+    @Override public NodeService nodeService(){
+      return null;
+    }
+  }
+);
+  zenPingA.start();
+  MulticastSocket multicastSocket=null;
+  try {
+    Loggers.getLogger(MulticastZenPing.class).setLevel("TRACE");
+    multicastSocket=new MulticastSocket(54328);
+    multicastSocket.setReceiveBufferSize(2048);
+    multicastSocket.setSendBufferSize(2048);
+    multicastSocket.setSoTimeout(60000);
+    DatagramPacket datagramPacket=new DatagramPacket(new byte[2048],2048,InetAddress.getByName("224.2.2.4"),54328);
+    XContentBuilder builder=XContentFactory.jsonBuilder().startObject().startObject("request").field("cluster_name","test").endObject().endObject();
+    datagramPacket.setData(builder.copiedBytes());
+    multicastSocket.send(datagramPacket);
+    Thread.sleep(100);
+  }
+  finally {
+    Loggers.getLogger(MulticastZenPing.class).setLevel("INFO");
+    if (multicastSocket != null)     multicastSocket.close();
+    zenPingA.close();
+    threadPool.shutdown();
+  }
+}
