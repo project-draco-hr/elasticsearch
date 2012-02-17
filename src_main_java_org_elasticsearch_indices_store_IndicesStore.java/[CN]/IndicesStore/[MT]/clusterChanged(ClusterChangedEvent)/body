@@ -64,15 +64,35 @@
         }
       }
     }
-    for (    File indicesLocation : nodeEnv.indicesLocations()) {
-      File[] files=indicesLocation.listFiles();
-      if (files != null) {
-        for (        File file : files) {
-          if (event.state().metaData().hasIndex(file.getName())) {
-            continue;
+    if (danglingTimeout.millis() >= 0) {
+synchronized (danglingMutex) {
+        for (        String danglingIndex : danglingIndices.keySet()) {
+          if (event.state().metaData().hasIndex(danglingIndex)) {
+            logger.debug("[{}] no longer dangling (created), removing",danglingIndex);
+            DanglingIndex removed=danglingIndices.remove(danglingIndex);
+            removed.future.cancel(false);
           }
-          logger.debug("[{}] deleting index that is no longer in the cluster meta_date from [{}]",file.getName(),file);
-          FileSystemUtils.deleteRecursively(file);
+        }
+        try {
+          for (          String indexName : nodeEnv.findAllIndices()) {
+            if (event.state().metaData().hasIndex(indexName)) {
+              continue;
+            }
+            if (danglingIndices.containsKey(indexName)) {
+              continue;
+            }
+            if (danglingTimeout.millis() == 0) {
+              logger.info("[{}] dangling index, exists on local file system, but not in cluster metadata, timeout set to 0, deleting now",indexName);
+              FileSystemUtils.deleteRecursively(nodeEnv.indexLocations(new Index(indexName)));
+            }
+ else {
+              logger.info("[{}] dangling index, exists on local file system, but not in cluster metadata, scheduling to delete in [{}]",indexName,danglingTimeout);
+              danglingIndices.put(indexName,new DanglingIndex(indexName,threadPool.schedule(danglingTimeout,ThreadPool.Names.SAME,new RemoveDanglingIndex(indexName))));
+            }
+          }
+        }
+ catch (        Exception e) {
+          logger.warn("failed to find dangling indices",e);
         }
       }
     }
