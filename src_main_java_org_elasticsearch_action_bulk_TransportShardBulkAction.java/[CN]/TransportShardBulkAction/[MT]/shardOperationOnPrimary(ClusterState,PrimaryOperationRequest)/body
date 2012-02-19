@@ -2,6 +2,7 @@
   final BulkShardRequest request=shardRequest.request;
   IndexShard indexShard=indicesService.indexServiceSafe(shardRequest.request.index()).shardSafe(shardRequest.shardId);
   Engine.IndexingOperation[] ops=null;
+  Set<Tuple<String,String>> mappingsToUpdate=null;
   BulkItemResponse[] responses=new BulkItemResponse[request.items().length];
   for (int i=0; i < request.items().length; i++) {
     BulkItemRequest item=request.items()[i];
@@ -31,7 +32,10 @@
         }
         indexRequest.version(version);
         if (op.parsedDoc().mappersAdded()) {
-          updateMappingOnMaster(indexRequest);
+          if (mappingsToUpdate == null) {
+            mappingsToUpdate=Sets.newHashSet();
+          }
+          mappingsToUpdate.add(Tuple.create(indexRequest.index(),indexRequest.type()));
         }
         if (Strings.hasLength(indexRequest.percolate())) {
           if (ops == null) {
@@ -76,6 +80,11 @@
         responses[i]=new BulkItemResponse(item.id(),"delete",new BulkItemResponse.Failure(deleteRequest.index(),deleteRequest.type(),deleteRequest.id(),ExceptionsHelper.detailedMessage(e)));
         request.items()[i]=null;
       }
+    }
+  }
+  if (mappingsToUpdate != null) {
+    for (    Tuple<String,String> mappingToUpdate : mappingsToUpdate) {
+      updateMappingOnMaster(mappingToUpdate.v1(),mappingToUpdate.v2());
     }
   }
   if (request.refresh()) {
