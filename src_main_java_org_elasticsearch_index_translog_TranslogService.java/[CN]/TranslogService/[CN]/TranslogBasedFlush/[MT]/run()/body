@@ -3,24 +3,35 @@
     return;
   }
   if (disableFlush) {
+    reschedule();
     return;
   }
-  int currentNumberOfOperations=translog.estimatedNumberOfOperations();
-  if (currentNumberOfOperations > flushThresholdOperations) {
-    logger.trace("flushing translog, operations [{}], breached [{}]",currentNumberOfOperations,flushThresholdOperations);
-    asyncFlushAndReschedule();
+  if (indexShard.state() == IndexShardState.CREATED) {
+    reschedule();
     return;
   }
-  long sizeInBytes=translog.translogSizeInBytes();
-  if (sizeInBytes > flushThresholdSize.bytes()) {
-    logger.trace("flushing translog, size [{}], breached [{}]",new ByteSizeValue(sizeInBytes),flushThresholdSize);
-    asyncFlushAndReschedule();
-    return;
+  if (flushThresholdOperations > 0) {
+    int currentNumberOfOperations=translog.estimatedNumberOfOperations();
+    if (currentNumberOfOperations > flushThresholdOperations) {
+      logger.trace("flushing translog, operations [{}], breached [{}]",currentNumberOfOperations,flushThresholdOperations);
+      asyncFlushAndReschedule();
+      return;
+    }
   }
-  if ((System.currentTimeMillis() - lastFlushTime) > flushThresholdPeriod.millis()) {
-    logger.trace("flushing translog, last_flush_time [{}], breached [{}]",lastFlushTime,flushThresholdPeriod);
-    asyncFlushAndReschedule();
-    return;
+  if (flushThresholdSize.bytes() > 0) {
+    long sizeInBytes=translog.translogSizeInBytes();
+    if (sizeInBytes > flushThresholdSize.bytes()) {
+      logger.trace("flushing translog, size [{}], breached [{}]",new ByteSizeValue(sizeInBytes),flushThresholdSize);
+      asyncFlushAndReschedule();
+      return;
+    }
   }
-  future=threadPool.schedule(interval,ThreadPool.Names.SAME,this);
+  if (flushThresholdPeriod.millis() > 0) {
+    if ((threadPool.estimatedTimeInMillis() - lastFlushTime) > flushThresholdPeriod.millis()) {
+      logger.trace("flushing translog, last_flush_time [{}], breached [{}]",lastFlushTime,flushThresholdPeriod);
+      asyncFlushAndReschedule();
+      return;
+    }
+  }
+  reschedule();
 }
