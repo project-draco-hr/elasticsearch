@@ -8,8 +8,23 @@
  else {
       list=client.listObjects(bucket,path.buildAsString("/") + "/");
     }
+    int objectCount=0;
+    DeleteObjectsRequest multiObjectDeleteRequest=new DeleteObjectsRequest(list.getBucketName());
+    ArrayList<KeyVersion> keys=new ArrayList<KeyVersion>();
     for (    S3ObjectSummary summary : list.getObjectSummaries()) {
-      client.deleteObject(summary.getBucketName(),summary.getKey());
+      objectCount++;
+      keys.add(new KeyVersion(summary.getKey()));
+      if (objectCount > 500) {
+        multiObjectDeleteRequest.setKeys(keys);
+        client.deleteObjects(multiObjectDeleteRequest);
+        multiObjectDeleteRequest=new DeleteObjectsRequest(list.getBucketName());
+        keys.clear();
+        objectCount=0;
+      }
+    }
+    if (objectCount > 0) {
+      multiObjectDeleteRequest.setKeys(keys);
+      client.deleteObjects(multiObjectDeleteRequest);
     }
     if (list.isTruncated()) {
       prevListing=list;
