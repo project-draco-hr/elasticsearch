@@ -5,20 +5,22 @@
   client.admin().cluster().state(clusterStateRequest,new ActionListener<ClusterStateResponse>(){
     @Override public void onResponse(    ClusterStateResponse response){
       try {
+        boolean foundAny=false;
         MetaData metaData=response.state().metaData();
         XContentBuilder builder=RestXContentBuilder.restContentBuilder(request);
         builder.startObject();
+        if (indices.length == 1 && metaData.indices().isEmpty()) {
+          channel.sendResponse(new XContentThrowableRestResponse(request,new IndexMissingException(new Index(indices[0]))));
+          return;
+        }
         if (indices.length == 1 && types.size() == 1) {
-          if (metaData.indices().isEmpty()) {
-            channel.sendResponse(new XContentThrowableRestResponse(request,new IndexMissingException(new Index(indices[0]))));
-            return;
-          }
           boolean foundType=false;
           IndexMetaData indexMetaData=metaData.iterator().next();
           for (          MappingMetaData mappingMd : indexMetaData.mappings().values()) {
             if (!types.isEmpty() && !types.contains(mappingMd.type())) {
               continue;
             }
+            foundAny=true;
             foundType=true;
             builder.field(mappingMd.type());
             builder.map(mappingMd.sourceAsMap());
@@ -35,6 +37,7 @@
               if (!types.isEmpty() && !types.contains(mappingMd.type())) {
                 continue;
               }
+              foundAny=true;
               builder.field(mappingMd.type());
               builder.map(mappingMd.sourceAsMap());
             }
@@ -42,7 +45,7 @@
           }
         }
         builder.endObject();
-        channel.sendResponse(new XContentRestResponse(request,OK,builder));
+        channel.sendResponse(new XContentRestResponse(request,foundAny ? OK : NOT_FOUND,builder));
       }
  catch (      Exception e) {
         onFailure(e);

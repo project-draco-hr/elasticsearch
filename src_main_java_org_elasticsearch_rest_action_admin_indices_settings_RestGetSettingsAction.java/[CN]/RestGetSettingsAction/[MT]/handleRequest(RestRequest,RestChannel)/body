@@ -5,10 +5,16 @@
     @Override public void onResponse(    ClusterStateResponse response){
       try {
         MetaData metaData=response.state().metaData();
+        if (metaData.indices().isEmpty()) {
+          channel.sendResponse(new XContentThrowableRestResponse(request,new IndexMissingException(new Index(indices[0]))));
+          return;
+        }
+        boolean foundAny=false;
         XContentBuilder builder=RestXContentBuilder.restContentBuilder(request);
         builder.startObject();
         for (        IndexMetaData indexMetaData : metaData) {
           builder.startObject(indexMetaData.index(),XContentBuilder.FieldCaseConversion.NONE);
+          foundAny=true;
           builder.startObject("settings");
           Settings settings=settingsFilter.filterSettings(indexMetaData.settings());
           for (          Map.Entry<String,String> entry : settings.getAsMap().entrySet()) {
@@ -18,7 +24,7 @@
           builder.endObject();
         }
         builder.endObject();
-        channel.sendResponse(new XContentRestResponse(request,OK,builder));
+        channel.sendResponse(new XContentRestResponse(request,foundAny ? OK : NOT_FOUND,builder));
       }
  catch (      Exception e) {
         onFailure(e);
