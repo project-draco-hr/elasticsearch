@@ -2,7 +2,7 @@
   IndexService indexService=indicesService.indexServiceSafe(request.index());
   IndexShard indexShard=indexService.shardSafe(request.shardId());
   long getDate=System.currentTimeMillis();
-  GetResult getResult=indexShard.getService().get(request.type(),request.id(),new String[]{SourceFieldMapper.NAME,RoutingFieldMapper.NAME,ParentFieldMapper.NAME,TTLFieldMapper.NAME},true);
+  final GetResult getResult=indexShard.getService().get(request.type(),request.id(),new String[]{SourceFieldMapper.NAME,RoutingFieldMapper.NAME,ParentFieldMapper.NAME,TTLFieldMapper.NAME},true);
   if (!getResult.exists()) {
     listener.onFailure(new DocumentMissingException(new ShardId(request.index(),request.shardId()),request.type(),request.id()));
     return;
@@ -12,9 +12,8 @@
     return;
   }
   Tuple<XContentType,Map<String,Object>> sourceAndContent=XContentHelper.convertToMap(getResult.internalSourceRef().bytes(),getResult.internalSourceRef().offset(),getResult.internalSourceRef().length(),true);
-  Map<String,Object> source=sourceAndContent.v2();
   Map<String,Object> ctx=new HashMap<String,Object>(2);
-  ctx.put("_source",source);
+  ctx.put("_source",sourceAndContent.v2());
   try {
     ExecutableScript script=scriptService.executable(request.scriptLang,request.script,request.scriptParams);
     script.setNextVar("ctx",ctx);
@@ -36,7 +35,8 @@
       ttl=TimeValue.parseTimeValue((String)fetchedTTL,null).millis();
     }
   }
-  source=(Map<String,Object>)ctx.get("_source");
+  final Map<String,Object> updatedSourceAsMap=(Map<String,Object>)ctx.get("_source");
+  final XContentType updateSourceContentType=sourceAndContent.v1();
   String routing=getResult.fields().containsKey(RoutingFieldMapper.NAME) ? getResult.field(RoutingFieldMapper.NAME).value().toString() : null;
   String parent=getResult.fields().containsKey(ParentFieldMapper.NAME) ? getResult.field(ParentFieldMapper.NAME).value().toString() : null;
   if (ttl == null) {
@@ -45,15 +45,15 @@
       ttl=ttl - (System.currentTimeMillis() - getDate);
     }
   }
-  final Map<String,GetField> fields=extractFieldsFromSource(request,source);
   if (operation == null || "index".equals(operation)) {
-    IndexRequest indexRequest=Requests.indexRequest(request.index()).type(request.type()).id(request.id()).routing(routing).parent(parent).source(source,sourceAndContent.v1()).version(getResult.version()).replicationType(request.replicationType()).consistencyLevel(request.consistencyLevel()).timestamp(timestamp).ttl(ttl).percolate(request.percolate()).refresh(request.refresh());
+    final IndexRequest indexRequest=Requests.indexRequest(request.index()).type(request.type()).id(request.id()).routing(routing).parent(parent).source(updatedSourceAsMap,updateSourceContentType).version(getResult.version()).replicationType(request.replicationType()).consistencyLevel(request.consistencyLevel()).timestamp(timestamp).ttl(ttl).percolate(request.percolate()).refresh(request.refresh());
     indexRequest.operationThreaded(false);
+    final BytesHolder updateSourceBytes=indexRequest.underlyingSourceBytes();
     indexAction.execute(indexRequest,new ActionListener<IndexResponse>(){
       @Override public void onResponse(      IndexResponse response){
         UpdateResponse update=new UpdateResponse(response.index(),response.type(),response.id(),response.version());
         update.matches(response.matches());
-        update.fields(fields);
+        update.getResult(extractGetResult(request,response.version(),updatedSourceAsMap,updateSourceContentType,updateSourceBytes));
         listener.onResponse(update);
       }
       @Override public void onFailure(      Throwable e){
@@ -80,7 +80,7 @@
     deleteAction.execute(deleteRequest,new ActionListener<DeleteResponse>(){
       @Override public void onResponse(      DeleteResponse response){
         UpdateResponse update=new UpdateResponse(response.index(),response.type(),response.id(),response.version());
-        update.fields(fields);
+        update.getResult(extractGetResult(request,response.version(),updatedSourceAsMap,updateSourceContentType,null));
         listener.onResponse(update);
       }
       @Override public void onFailure(      Throwable e){
@@ -103,7 +103,7 @@
   }
  else   if ("none".equals(operation)) {
     UpdateResponse update=new UpdateResponse(getResult.index(),getResult.type(),getResult.id(),getResult.version());
-    update.fields(fields);
+    update.getResult(extractGetResult(request,getResult.version(),updatedSourceAsMap,updateSourceContentType,null));
     listener.onResponse(update);
   }
  else {
