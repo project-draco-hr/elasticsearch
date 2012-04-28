@@ -1,0 +1,35 @@
+{
+  IndexMetaData indexMetaData=clusterService.state().metaData().index(shardId.index().name());
+  if (indexMetaData == null) {
+    return;
+  }
+  if (!indexMetaData.settings().getAsBoolean("index.warm.enabled",true)) {
+    return;
+  }
+  IndexService indexService=indicesService.indexService(shardId.index().name());
+  if (indexService == null) {
+    return;
+  }
+  IndexShard indexShard=indexService.shard(shardId.id());
+  if (indexShard == null) {
+    return;
+  }
+  if (logger.isTraceEnabled()) {
+    logger.trace("[{}][{}] warming [{}]",shardId.index().name(),shardId.id(),searcher.reader());
+  }
+  indexShard.warmerService().onPreWarm();
+  long time=System.nanoTime();
+  for (  Listener listener : listeners) {
+    try {
+      listener.warm(shardId,indexMetaData,searcher);
+    }
+ catch (    Exception e) {
+      logger.warn("[{}][{}] failed to warm [{}]",shardId.index().name(),shardId.id(),listener);
+    }
+  }
+  long took=System.nanoTime() - time;
+  indexShard.warmerService().onPostWarm(took);
+  if (logger.isTraceEnabled()) {
+    logger.trace("[{}][{}] warming took [{}]",shardId.index().name(),shardId.id(),new TimeValue(took,TimeUnit.NANOSECONDS));
+  }
+}
