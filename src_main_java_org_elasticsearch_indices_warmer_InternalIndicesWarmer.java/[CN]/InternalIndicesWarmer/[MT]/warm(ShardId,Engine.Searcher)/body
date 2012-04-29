@@ -1,5 +1,5 @@
 {
-  IndexMetaData indexMetaData=clusterService.state().metaData().index(shardId.index().name());
+  final IndexMetaData indexMetaData=clusterService.state().metaData().index(shardId.index().name());
   if (indexMetaData == null) {
     return;
   }
@@ -19,12 +19,27 @@
   }
   indexShard.warmerService().onPreWarm();
   long time=System.nanoTime();
-  for (  Listener listener : listeners) {
-    try {
-      listener.warm(shardId,indexMetaData,searcher);
+  for (  final Listener listener : listeners) {
+    final CountDownLatch latch=new CountDownLatch(1);
+    threadPool.executor(listener.executor()).execute(new Runnable(){
+      @Override public void run(){
+        try {
+          listener.warm(shardId,indexMetaData,searcher);
+        }
+ catch (        Exception e) {
+          logger.warn("[{}][{}] failed to warm [{}]",shardId.index().name(),shardId.id(),listener);
+        }
+ finally {
+          latch.countDown();
+        }
+      }
     }
- catch (    Exception e) {
-      logger.warn("[{}][{}] failed to warm [{}]",shardId.index().name(),shardId.id(),listener);
+);
+    try {
+      latch.await();
+    }
+ catch (    InterruptedException e) {
+      return;
     }
   }
   long took=System.nanoTime() - time;
