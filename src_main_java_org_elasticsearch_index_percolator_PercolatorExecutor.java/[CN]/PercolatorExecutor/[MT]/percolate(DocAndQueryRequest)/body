@@ -36,41 +36,45 @@
   }
   final IndexSearcher searcher=memoryIndex.createSearcher();
   List<String> matches=new ArrayList<String>();
-  if (request.query() == null) {
-    Lucene.ExistsCollector collector=new Lucene.ExistsCollector();
-    for (    Map.Entry<String,Query> entry : queries.entrySet()) {
-      collector.reset();
+  try {
+    if (request.query() == null) {
+      Lucene.ExistsCollector collector=new Lucene.ExistsCollector();
+      for (      Map.Entry<String,Query> entry : queries.entrySet()) {
+        collector.reset();
+        try {
+          searcher.search(entry.getValue(),collector);
+        }
+ catch (        IOException e) {
+          logger.warn("[" + entry.getKey() + "] failed to execute query",e);
+        }
+        if (collector.exists()) {
+          matches.add(entry.getKey());
+        }
+      }
+    }
+ else {
+      IndexService percolatorIndex=indicesService.indexService(PercolatorService.INDEX_NAME);
+      if (percolatorIndex == null) {
+        throw new PercolateIndexUnavailable(new Index(PercolatorService.INDEX_NAME));
+      }
+      if (percolatorIndex.numberOfShards() == 0) {
+        throw new PercolateIndexUnavailable(new Index(PercolatorService.INDEX_NAME));
+      }
+      IndexShard percolatorShard=percolatorIndex.shard(0);
+      Engine.Searcher percolatorSearcher=percolatorShard.searcher();
       try {
-        searcher.search(entry.getValue(),collector);
+        percolatorSearcher.searcher().search(request.query(),new QueryCollector(logger,queries,searcher,percolatorIndex,matches));
       }
  catch (      IOException e) {
-        logger.warn("[" + entry.getKey() + "] failed to execute query",e);
+        logger.warn("failed to execute",e);
       }
-      if (collector.exists()) {
-        matches.add(entry.getKey());
-      }
-    }
-  }
- else {
-    IndexService percolatorIndex=indicesService.indexService(PercolatorService.INDEX_NAME);
-    if (percolatorIndex == null) {
-      throw new PercolateIndexUnavailable(new Index(PercolatorService.INDEX_NAME));
-    }
-    if (percolatorIndex.numberOfShards() == 0) {
-      throw new PercolateIndexUnavailable(new Index(PercolatorService.INDEX_NAME));
-    }
-    IndexShard percolatorShard=percolatorIndex.shard(0);
-    Engine.Searcher percolatorSearcher=percolatorShard.searcher();
-    try {
-      percolatorSearcher.searcher().search(request.query(),new QueryCollector(logger,queries,searcher,percolatorIndex,matches));
-    }
- catch (    IOException e) {
-      logger.warn("failed to execute",e);
-    }
  finally {
-      percolatorSearcher.release();
+        percolatorSearcher.release();
+      }
     }
   }
-  indexCache.clear(searcher.getIndexReader());
+  finally {
+    indexCache.clear(searcher.getIndexReader());
+  }
   return new Response(matches,request.doc().mappersAdded());
 }
