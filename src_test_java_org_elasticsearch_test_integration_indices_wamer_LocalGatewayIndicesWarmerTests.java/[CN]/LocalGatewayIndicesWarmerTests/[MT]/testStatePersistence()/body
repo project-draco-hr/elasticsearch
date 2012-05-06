@@ -1,0 +1,53 @@
+{
+  logger.info("--> cleaning nodes");
+  buildNode("node1",settingsBuilder().put("gateway.type","local"));
+  buildNode("node2",settingsBuilder().put("gateway.type","local"));
+  cleanAndCloseNodes();
+  logger.info("--> starting 1 nodes");
+  startNode("node1",settingsBuilder().put("gateway.type","local"));
+  logger.info("--> putting two templates");
+  client("node1").admin().indices().prepareCreate("test").setSettings(ImmutableSettings.settingsBuilder().put("index.number_of_shards",1)).execute().actionGet();
+  client("node1").admin().cluster().prepareHealth().setWaitForYellowStatus().execute().actionGet();
+  client("node1").admin().indices().preparePutWarmer("warmer_1").setSearchRequest(client("node1").prepareSearch("test").setQuery(QueryBuilders.termQuery("field","value1"))).execute().actionGet();
+  client("node1").admin().indices().preparePutWarmer("warmer_2").setSearchRequest(client("node1").prepareSearch("test").setQuery(QueryBuilders.termQuery("field","value2"))).execute().actionGet();
+  logger.info("--> verify warmers are registered in cluster state");
+  ClusterState clusterState=client("node1").admin().cluster().prepareState().execute().actionGet().state();
+  IndexWarmersMetaData warmersMetaData=clusterState.metaData().index("test").custom(IndexWarmersMetaData.TYPE);
+  assertThat(warmersMetaData,Matchers.notNullValue());
+  assertThat(warmersMetaData.entries().size(),equalTo(2));
+  logger.info("--> close the node");
+  closeNode("node1");
+  logger.info("--> starting the node again...");
+  startNode("node1",settingsBuilder().put("gateway.type","local"));
+  ClusterHealthResponse healthResponse=client("node1").admin().cluster().prepareHealth().setWaitForYellowStatus().execute().actionGet();
+  assertThat(healthResponse.timedOut(),equalTo(false));
+  logger.info("--> verify warmers are recovered");
+  clusterState=client("node1").admin().cluster().prepareState().execute().actionGet().state();
+  IndexWarmersMetaData recoveredWarmersMetaData=clusterState.metaData().index("test").custom(IndexWarmersMetaData.TYPE);
+  assertThat(recoveredWarmersMetaData.entries().size(),equalTo(warmersMetaData.entries().size()));
+  for (int i=0; i < warmersMetaData.entries().size(); i++) {
+    assertThat(recoveredWarmersMetaData.entries().get(i).name(),equalTo(warmersMetaData.entries().get(i).name()));
+    assertThat(recoveredWarmersMetaData.entries().get(i).source(),equalTo(warmersMetaData.entries().get(i).source()));
+  }
+  logger.info("--> delete warmer warmer_1");
+  client("node1").admin().indices().prepareDeleteWarmer().setIndices("test").setName("warmer_1").execute().actionGet();
+  logger.info("--> verify warmers (delete) are registered in cluster state");
+  clusterState=client("node1").admin().cluster().prepareState().execute().actionGet().state();
+  warmersMetaData=clusterState.metaData().index("test").custom(IndexWarmersMetaData.TYPE);
+  assertThat(warmersMetaData,Matchers.notNullValue());
+  assertThat(warmersMetaData.entries().size(),equalTo(1));
+  logger.info("--> close the node");
+  closeNode("node1");
+  logger.info("--> starting the node again...");
+  startNode("node1",settingsBuilder().put("gateway.type","local"));
+  healthResponse=client("node1").admin().cluster().prepareHealth().setWaitForYellowStatus().execute().actionGet();
+  assertThat(healthResponse.timedOut(),equalTo(false));
+  logger.info("--> verify warmers are recovered");
+  clusterState=client("node1").admin().cluster().prepareState().execute().actionGet().state();
+  recoveredWarmersMetaData=clusterState.metaData().index("test").custom(IndexWarmersMetaData.TYPE);
+  assertThat(recoveredWarmersMetaData.entries().size(),equalTo(warmersMetaData.entries().size()));
+  for (int i=0; i < warmersMetaData.entries().size(); i++) {
+    assertThat(recoveredWarmersMetaData.entries().get(i).name(),equalTo(warmersMetaData.entries().get(i).name()));
+    assertThat(recoveredWarmersMetaData.entries().get(i).source(),equalTo(warmersMetaData.entries().get(i).source()));
+  }
+}
