@@ -1,24 +1,38 @@
 {
   Map<String,Object> source=templateSource;
-  if (source.containsKey("template")) {
-    template(source.get("template").toString());
-  }
-  if (source.containsKey("order")) {
-    order(XContentMapValues.nodeIntegerValue(source.get("order"),order()));
-  }
-  if (source.containsKey("settings")) {
-    if (!(source.get("settings") instanceof Map)) {
-      throw new ElasticSearchIllegalArgumentException("Malformed settings section, should include an inner object");
+  for (  Map.Entry<String,Object> entry : source.entrySet()) {
+    String name=entry.getKey();
+    if (name.equals("template")) {
+      template(entry.getValue().toString());
     }
-    settings((Map<String,Object>)source.get("settings"));
-  }
-  if (source.containsKey("mappings")) {
-    Map<String,Object> mappings=(Map<String,Object>)source.get("mappings");
-    for (    Map.Entry<String,Object> entry : mappings.entrySet()) {
+ else     if (name.equals("order")) {
+      order(XContentMapValues.nodeIntegerValue(entry.getValue(),order()));
+    }
+ else     if (name.equals("settings")) {
       if (!(entry.getValue() instanceof Map)) {
-        throw new ElasticSearchIllegalArgumentException("Malformed mappings section for type [" + entry.getKey() + "], should include an inner object describing the mapping");
+        throw new ElasticSearchIllegalArgumentException("Malformed settings section, should include an inner object");
       }
-      mapping(entry.getKey(),(Map<String,Object>)entry.getValue());
+      settings((Map<String,Object>)entry.getValue());
+    }
+ else     if (name.equals("mappings")) {
+      Map<String,Object> mappings=(Map<String,Object>)entry.getValue();
+      for (      Map.Entry<String,Object> entry1 : mappings.entrySet()) {
+        if (!(entry1.getValue() instanceof Map)) {
+          throw new ElasticSearchIllegalArgumentException("Malformed mappings section for type [" + entry1.getKey() + "], should include an inner object describing the mapping");
+        }
+        mapping(entry1.getKey(),(Map<String,Object>)entry1.getValue());
+      }
+    }
+ else {
+      IndexMetaData.Custom.Factory factory=IndexMetaData.lookupFactory(name);
+      if (factory != null) {
+        try {
+          customs.put(name,factory.fromMap((Map<String,Object>)entry.getValue()));
+        }
+ catch (        IOException e) {
+          throw new ElasticSearchParseException("failed to parse custom metadata for [" + name + "]");
+        }
+      }
     }
   }
   return this;
