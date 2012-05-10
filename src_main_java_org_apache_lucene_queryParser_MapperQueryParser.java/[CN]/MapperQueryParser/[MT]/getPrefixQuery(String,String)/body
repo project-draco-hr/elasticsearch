@@ -1,38 +1,39 @@
 {
-  currentMapper=null;
-  Analyzer oldAnalyzer=analyzer;
-  try {
-    MapperService.SmartNameFieldMappers fieldMappers=parseContext.smartFieldMappers(field);
-    if (fieldMappers != null) {
-      if (!forcedAnalyzer) {
-        analyzer=fieldMappers.searchAnalyzer();
-      }
-      currentMapper=fieldMappers.fieldMappers().mapper();
-      if (currentMapper != null) {
-        Query query=null;
-        if (currentMapper.useFieldQueryWithQueryString()) {
-          if (fieldMappers.explicitTypeInNameWithDocMapper()) {
-            String[] previousTypes=QueryParseContext.setTypesWithPrevious(new String[]{fieldMappers.docMapper().type()});
-            try {
-              query=currentMapper.prefixQuery(termStr,multiTermRewriteMethod,parseContext);
-            }
-  finally {
-              QueryParseContext.setTypes(previousTypes);
-            }
-          }
- else {
-            query=currentMapper.prefixQuery(termStr,multiTermRewriteMethod,parseContext);
-          }
-        }
-        if (query == null) {
-          query=getPossiblyAnalyzedPrefixQuery(currentMapper.names().indexName(),termStr);
-        }
-        return wrapSmartNameQuery(query,fieldMappers,parseContext);
-      }
+  Collection<String> fields=extractMultiFields(field);
+  if (fields != null) {
+    if (fields.size() == 1) {
+      return getPrefixQuerySingle(fields.iterator().next(),termStr);
     }
-    return getPossiblyAnalyzedPrefixQuery(field,termStr);
+    if (settings.useDisMax()) {
+      DisjunctionMaxQuery disMaxQuery=new DisjunctionMaxQuery(settings.tieBreaker());
+      boolean added=false;
+      for (      String mField : fields) {
+        Query q=getPrefixQuerySingle(mField,termStr);
+        if (q != null) {
+          added=true;
+          applyBoost(mField,q);
+          disMaxQuery.add(q);
+        }
+      }
+      if (!added) {
+        return null;
+      }
+      return disMaxQuery;
+    }
+ else {
+      List<BooleanClause> clauses=new ArrayList<BooleanClause>();
+      for (      String mField : fields) {
+        Query q=getPrefixQuerySingle(mField,termStr);
+        if (q != null) {
+          applyBoost(mField,q);
+          clauses.add(new BooleanClause(q,BooleanClause.Occur.SHOULD));
+        }
+      }
+      if (clauses.size() == 0)       return null;
+      return getBooleanQuery(clauses,true);
+    }
   }
-  finally {
-    analyzer=oldAnalyzer;
+ else {
+    return getPrefixQuerySingle(field,termStr);
   }
 }

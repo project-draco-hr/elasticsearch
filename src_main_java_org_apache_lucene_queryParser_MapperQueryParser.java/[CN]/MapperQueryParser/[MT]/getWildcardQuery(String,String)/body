@@ -2,24 +2,41 @@
   if (AllFieldMapper.NAME.equals(field) && termStr.equals("*")) {
     return newMatchAllDocsQuery();
   }
-  String indexedNameField=field;
-  currentMapper=null;
-  Analyzer oldAnalyzer=analyzer;
-  try {
-    MapperService.SmartNameFieldMappers fieldMappers=parseContext.smartFieldMappers(field);
-    if (fieldMappers != null) {
-      if (!forcedAnalyzer) {
-        analyzer=fieldMappers.searchAnalyzer();
-      }
-      currentMapper=fieldMappers.fieldMappers().mapper();
-      if (currentMapper != null) {
-        indexedNameField=currentMapper.names().indexName();
-      }
-      return wrapSmartNameQuery(getPossiblyAnalyzedWildcardQuery(indexedNameField,termStr),fieldMappers,parseContext);
+  Collection<String> fields=extractMultiFields(field);
+  if (fields != null) {
+    if (fields.size() == 1) {
+      return getWildcardQuerySingle(fields.iterator().next(),termStr);
     }
-    return getPossiblyAnalyzedWildcardQuery(indexedNameField,termStr);
+    if (settings.useDisMax()) {
+      DisjunctionMaxQuery disMaxQuery=new DisjunctionMaxQuery(settings.tieBreaker());
+      boolean added=false;
+      for (      String mField : fields) {
+        Query q=getWildcardQuerySingle(mField,termStr);
+        if (q != null) {
+          added=true;
+          applyBoost(mField,q);
+          disMaxQuery.add(q);
+        }
+      }
+      if (!added) {
+        return null;
+      }
+      return disMaxQuery;
+    }
+ else {
+      List<BooleanClause> clauses=new ArrayList<BooleanClause>();
+      for (      String mField : fields) {
+        Query q=getWildcardQuerySingle(mField,termStr);
+        if (q != null) {
+          applyBoost(mField,q);
+          clauses.add(new BooleanClause(q,BooleanClause.Occur.SHOULD));
+        }
+      }
+      if (clauses.size() == 0)       return null;
+      return getBooleanQuery(clauses,true);
+    }
   }
-  finally {
-    analyzer=oldAnalyzer;
+ else {
+    return getWildcardQuerySingle(field,termStr);
   }
 }

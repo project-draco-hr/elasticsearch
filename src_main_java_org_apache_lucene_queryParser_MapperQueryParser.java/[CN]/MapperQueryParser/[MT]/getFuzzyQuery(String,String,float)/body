@@ -1,12 +1,36 @@
 {
-  currentMapper=null;
-  MapperService.SmartNameFieldMappers fieldMappers=parseContext.smartFieldMappers(field);
-  if (fieldMappers != null) {
-    currentMapper=fieldMappers.fieldMappers().mapper();
-    if (currentMapper != null) {
-      Query fuzzyQuery=currentMapper.fuzzyQuery(termStr,minSimilarity,fuzzyPrefixLength,FuzzyQuery.defaultMaxExpansions);
-      return wrapSmartNameQuery(fuzzyQuery,fieldMappers,parseContext);
+  Collection<String> fields=extractMultiFields(field);
+  if (fields != null) {
+    if (fields.size() == 1) {
+      return getFuzzyQuerySingle(fields.iterator().next(),termStr,minSimilarity);
+    }
+    if (settings.useDisMax()) {
+      DisjunctionMaxQuery disMaxQuery=new DisjunctionMaxQuery(settings.tieBreaker());
+      boolean added=false;
+      for (      String mField : fields) {
+        Query q=getFuzzyQuerySingle(mField,termStr,minSimilarity);
+        if (q != null) {
+          added=true;
+          applyBoost(mField,q);
+          disMaxQuery.add(q);
+        }
+      }
+      if (!added) {
+        return null;
+      }
+      return disMaxQuery;
+    }
+ else {
+      List<BooleanClause> clauses=new ArrayList<BooleanClause>();
+      for (      String mField : fields) {
+        Query q=getFuzzyQuerySingle(mField,termStr,minSimilarity);
+        applyBoost(mField,q);
+        clauses.add(new BooleanClause(q,BooleanClause.Occur.SHOULD));
+      }
+      return getBooleanQuery(clauses,true);
     }
   }
-  return super.getFuzzyQuery(field,termStr,minSimilarity);
+ else {
+    return getFuzzyQuerySingle(field,termStr,minSimilarity);
+  }
 }

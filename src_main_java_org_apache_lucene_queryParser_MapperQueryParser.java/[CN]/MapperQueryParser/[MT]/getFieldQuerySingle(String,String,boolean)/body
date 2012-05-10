@@ -1,0 +1,64 @@
+{
+  currentMapper=null;
+  Analyzer oldAnalyzer=analyzer;
+  try {
+    MapperService.SmartNameFieldMappers fieldMappers=null;
+    if (quoted) {
+      analyzer=quoteAnalyzer;
+      if (quoteFieldSuffix != null) {
+        fieldMappers=parseContext.smartFieldMappers(field + quoteFieldSuffix);
+      }
+    }
+    if (fieldMappers == null) {
+      fieldMappers=parseContext.smartFieldMappers(field);
+    }
+    if (fieldMappers != null) {
+      if (quoted) {
+        if (!forcedQuoteAnalyzer) {
+          analyzer=fieldMappers.searchQuoteAnalyzer();
+        }
+      }
+ else {
+        if (!forcedAnalyzer) {
+          analyzer=fieldMappers.searchAnalyzer();
+        }
+      }
+      currentMapper=fieldMappers.fieldMappers().mapper();
+      if (currentMapper != null) {
+        Query query=null;
+        if (currentMapper.useFieldQueryWithQueryString()) {
+          try {
+            if (fieldMappers.explicitTypeInNameWithDocMapper()) {
+              String[] previousTypes=QueryParseContext.setTypesWithPrevious(new String[]{fieldMappers.docMapper().type()});
+              try {
+                query=currentMapper.fieldQuery(queryText,parseContext);
+              }
+  finally {
+                QueryParseContext.setTypes(previousTypes);
+              }
+            }
+ else {
+              query=currentMapper.fieldQuery(queryText,parseContext);
+            }
+          }
+ catch (          RuntimeException e) {
+            if (settings.lenient()) {
+              return null;
+            }
+ else {
+              throw e;
+            }
+          }
+        }
+        if (query == null) {
+          query=super.getFieldQuery(currentMapper.names().indexName(),queryText,quoted);
+        }
+        return wrapSmartNameQuery(query,fieldMappers,parseContext);
+      }
+    }
+    return super.getFieldQuery(field,queryText,quoted);
+  }
+  finally {
+    analyzer=oldAnalyzer;
+  }
+}
