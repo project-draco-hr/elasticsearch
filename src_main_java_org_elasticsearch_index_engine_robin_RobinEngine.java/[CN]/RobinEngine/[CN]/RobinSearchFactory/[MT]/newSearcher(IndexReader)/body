@@ -2,7 +2,60 @@
   ExtendedIndexSearcher searcher=new ExtendedIndexSearcher(reader);
   searcher.setSimilarity(similarityService.defaultSearchSimilarity());
   if (warmer != null) {
-    warmer.warm(shardId,new SimpleSearcher(searcher));
+    Searcher currentSearcher=null;
+    ExtendedIndexSearcher newSearcher=null;
+    boolean closeNewSearcher=false;
+    try {
+      if (searcherManager == null) {
+        newSearcher=searcher;
+      }
+ else {
+        currentSearcher=searcher();
+        List<IndexReader> readers=Lists.newArrayList();
+        for (        IndexReader subReader : searcher.subReaders()) {
+          boolean found=false;
+          for (          IndexReader currentReader : currentSearcher.searcher().subReaders()) {
+            if (currentReader.getCoreCacheKey().equals(subReader.getCoreCacheKey())) {
+              found=true;
+              break;
+            }
+          }
+          if (!found) {
+            readers.add(subReader);
+          }
+        }
+        if (!readers.isEmpty()) {
+          newSearcher=new ExtendedIndexSearcher(new MultiReader(readers.toArray(new IndexReader[readers.size()]),false));
+          closeNewSearcher=true;
+        }
+      }
+      if (newSearcher != null) {
+        IndicesWarmer.WarmerContext context=new IndicesWarmer.WarmerContext(shardId,new SimpleSearcher(searcher),new SimpleSearcher(newSearcher));
+        warmer.warm(context);
+      }
+    }
+ catch (    Exception e) {
+      if (!closed) {
+        logger.warn("failed to prepare/warm",e);
+      }
+    }
+ finally {
+      if (currentSearcher != null) {
+        currentSearcher.release();
+      }
+      if (newSearcher != null && closeNewSearcher) {
+        try {
+          newSearcher.close();
+        }
+ catch (        Exception e) {
+        }
+        try {
+          newSearcher.getIndexReader().close();
+        }
+ catch (        IOException e) {
+        }
+      }
+    }
   }
   return searcher;
 }
