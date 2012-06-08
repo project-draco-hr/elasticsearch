@@ -4,7 +4,38 @@
   long getDate=System.currentTimeMillis();
   final GetResult getResult=indexShard.getService().get(request.type(),request.id(),new String[]{SourceFieldMapper.NAME,RoutingFieldMapper.NAME,ParentFieldMapper.NAME,TTLFieldMapper.NAME},true);
   if (!getResult.exists()) {
-    listener.onFailure(new DocumentMissingException(new ShardId(request.index(),request.shardId()),request.type(),request.id()));
+    if (request.indexRequest() == null) {
+      listener.onFailure(new DocumentMissingException(new ShardId(request.index(),request.shardId()),request.type(),request.id()));
+      return;
+    }
+    IndexRequest indexRequest=request.indexRequest();
+    indexRequest.index(request.index()).type(request.type()).id(request.id()).create(true).routing(request.routing()).percolate(request.percolate()).refresh(request.refresh()).replicationType(request.replicationType()).consistencyLevel(request.consistencyLevel());
+    indexRequest.operationThreaded(false);
+    final BytesHolder updateSourceBytes=indexRequest.underlyingSourceBytes();
+    indexAction.execute(indexRequest,new ActionListener<IndexResponse>(){
+      @Override public void onResponse(      IndexResponse response){
+        UpdateResponse update=new UpdateResponse(response.index(),response.type(),response.id(),response.version());
+        update.matches(response.matches());
+        update.getResult(null);
+        listener.onResponse(update);
+      }
+      @Override public void onFailure(      Throwable e){
+        e=ExceptionsHelper.unwrapCause(e);
+        if (e instanceof VersionConflictEngineException) {
+          if (retryCount < request.retryOnConflict()) {
+            threadPool.executor(executor()).execute(new Runnable(){
+              @Override public void run(){
+                shardOperation(request,listener,retryCount + 1);
+              }
+            }
+);
+            return;
+          }
+        }
+        listener.onFailure(e);
+      }
+    }
+);
     return;
   }
   if (getResult.internalSourceRef() == null) {
