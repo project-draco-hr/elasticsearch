@@ -1,0 +1,40 @@
+{
+  int s;
+  if ((s=task.status) >= 0) {
+    ForkJoinTask<?> prevJoin=joiner.currentJoin;
+    joiner.currentJoin=task;
+    long startTime=0L;
+    for (int k=0; ; ) {
+      if ((s=(joiner.isEmpty() ? tryHelpStealer(joiner,task) : joiner.tryRemoveAndExec(task))) == 0 && (s=task.status) >= 0) {
+        if (k == 0) {
+          startTime=System.nanoTime();
+          tryPollForAndExec(joiner,task);
+        }
+ else         if ((k & (MAX_HELP - 1)) == 0 && System.nanoTime() - startTime >= COMPENSATION_DELAY && tryCompensate(task,null)) {
+          if (task.trySetSignal()) {
+synchronized (task) {
+              if (task.status >= 0) {
+                try {
+                  task.wait();
+                }
+ catch (                InterruptedException ie) {
+                }
+              }
+ else               task.notifyAll();
+            }
+          }
+          long c;
+          do {
+          }
+ while (!U.compareAndSwapLong(this,CTL,c=ctl,c + AC_UNIT));
+        }
+      }
+      if (s < 0 || (s=task.status) < 0) {
+        joiner.currentJoin=prevJoin;
+        break;
+      }
+ else       if ((k++ & (MAX_HELP - 1)) == MAX_HELP >>> 1)       Thread.yield();
+    }
+  }
+  return s;
+}

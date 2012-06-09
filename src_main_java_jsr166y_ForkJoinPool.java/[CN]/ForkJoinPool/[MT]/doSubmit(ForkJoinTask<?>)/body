@@ -1,0 +1,34 @@
+{
+  Submitter s=submitters.get();
+  for (int r=s.seed, m=submitMask; ; ) {
+    WorkQueue[] ws;
+    WorkQueue q;
+    int k=r & m & SQMASK;
+    if (runState < 0 || (ws=workQueues) == null || ws.length <= k)     throw new RejectedExecutionException();
+ else     if ((q=ws[k]) == null) {
+      WorkQueue nq=new WorkQueue(this,null,SHARED_QUEUE);
+      Mutex lock=this.lock;
+      lock.lock();
+      try {
+        int rs=runState;
+        if (ws == workQueues && ws[k] == null) {
+          ws[k]=nq;
+          runState=((rs & SHUTDOWN) | ((rs + 2) & ~SHUTDOWN));
+        }
+      }
+  finally {
+        lock.unlock();
+      }
+    }
+ else     if (q.trySharedPush(task)) {
+      signalWork();
+      return;
+    }
+ else     if (m > 1) {
+      r^=r << 13;
+      r^=r >>> 17;
+      s.seed=r^=r << 5;
+    }
+ else     Thread.yield();
+  }
+}

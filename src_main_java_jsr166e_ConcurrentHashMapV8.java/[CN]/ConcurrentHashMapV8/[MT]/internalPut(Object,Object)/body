@@ -1,0 +1,82 @@
+{
+  int h=spread(k.hashCode());
+  int count=0;
+  for (Node[] tab=table; ; ) {
+    int i;
+    Node f;
+    int fh;
+    Object fk;
+    if (tab == null)     tab=initTable();
+ else     if ((f=tabAt(tab,i=(tab.length - 1) & h)) == null) {
+      if (casTabAt(tab,i,null,new Node(h,k,v,null)))       break;
+    }
+ else     if ((fh=f.hash) == MOVED) {
+      if ((fk=f.key) instanceof TreeBin) {
+        TreeBin t=(TreeBin)fk;
+        Object oldVal=null;
+        t.acquire(0);
+        try {
+          if (tabAt(tab,i) == f) {
+            count=2;
+            TreeNode p=t.putTreeNode(h,k,v);
+            if (p != null) {
+              oldVal=p.val;
+              p.val=v;
+            }
+          }
+        }
+  finally {
+          t.release(0);
+        }
+        if (count != 0) {
+          if (oldVal != null)           return oldVal;
+          break;
+        }
+      }
+ else       tab=(Node[])fk;
+    }
+ else     if ((fh & LOCKED) != 0) {
+      checkForResize();
+      f.tryAwaitLock(tab,i);
+    }
+ else     if (f.casHash(fh,fh | LOCKED)) {
+      Object oldVal=null;
+      try {
+        if (tabAt(tab,i) == f) {
+          count=1;
+          for (Node e=f; ; ++count) {
+            Object ek, ev;
+            if ((e.hash & HASH_BITS) == h && (ev=e.val) != null && ((ek=e.key) == k || k.equals(ek))) {
+              oldVal=ev;
+              e.val=v;
+              break;
+            }
+            Node last=e;
+            if ((e=e.next) == null) {
+              last.next=new Node(h,k,v,null);
+              if (count >= TREE_THRESHOLD)               replaceWithTreeBin(tab,i,k);
+              break;
+            }
+          }
+        }
+      }
+  finally {
+        if (!f.casHash(fh | LOCKED,fh)) {
+          f.hash=fh;
+synchronized (f) {
+            f.notifyAll();
+          }
+          ;
+        }
+      }
+      if (count != 0) {
+        if (oldVal != null)         return oldVal;
+        if (tab.length <= 64)         count=2;
+        break;
+      }
+    }
+  }
+  counter.add(1L);
+  if (count > 1)   checkForResize();
+  return null;
+}

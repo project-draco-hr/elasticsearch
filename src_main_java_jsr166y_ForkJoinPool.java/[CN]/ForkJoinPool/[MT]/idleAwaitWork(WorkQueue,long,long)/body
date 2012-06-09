@@ -1,0 +1,21 @@
+{
+  if (w.eventCount < 0 && !tryTerminate(false,false) && (int)prevCtl != 0 && !hasQueuedSubmissions() && ctl == currentCtl) {
+    Thread wt=Thread.currentThread();
+    Thread.yield();
+    while (ctl == currentCtl) {
+      long startTime=System.nanoTime();
+      Thread.interrupted();
+      U.putObject(wt,PARKBLOCKER,this);
+      w.parker=wt;
+      if (ctl == currentCtl)       U.park(false,SHRINK_RATE);
+      w.parker=null;
+      U.putObject(wt,PARKBLOCKER,null);
+      if (ctl != currentCtl)       break;
+      if (System.nanoTime() - startTime >= SHRINK_TIMEOUT && U.compareAndSwapLong(this,CTL,currentCtl,prevCtl)) {
+        w.eventCount=(w.eventCount + E_SEQ) | E_MASK;
+        w.runState=-1;
+        break;
+      }
+    }
+  }
+}

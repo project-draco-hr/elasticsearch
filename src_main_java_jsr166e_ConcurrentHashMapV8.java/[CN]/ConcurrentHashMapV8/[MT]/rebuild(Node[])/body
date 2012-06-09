@@ -1,0 +1,95 @@
+{
+  int n=tab.length;
+  Node[] nextTab=new Node[n << 1];
+  Node fwd=new Node(MOVED,nextTab,null,null);
+  int[] buffer=null;
+  Node rev=null;
+  int nbuffered=0;
+  int bufferIndex=0;
+  int bin=n - 1;
+  for (int i=bin; ; ) {
+    int fh;
+    Node f;
+    if ((f=tabAt(tab,i)) == null) {
+      if (bin >= 0) {
+        if (!casTabAt(tab,i,f,fwd))         continue;
+      }
+ else {
+        Node g=new Node(MOVED | LOCKED,nextTab,null,null);
+        if (!casTabAt(tab,i,f,g))         continue;
+        setTabAt(nextTab,i,null);
+        setTabAt(nextTab,i + n,null);
+        setTabAt(tab,i,fwd);
+        if (!g.casHash(MOVED | LOCKED,MOVED)) {
+          g.hash=MOVED;
+synchronized (g) {
+            g.notifyAll();
+          }
+        }
+      }
+    }
+ else     if ((fh=f.hash) == MOVED) {
+      Object fk=f.key;
+      if (fk instanceof TreeBin) {
+        TreeBin t=(TreeBin)fk;
+        boolean validated=false;
+        t.acquire(0);
+        try {
+          if (tabAt(tab,i) == f) {
+            validated=true;
+            splitTreeBin(nextTab,i,t);
+            setTabAt(tab,i,fwd);
+          }
+        }
+  finally {
+          t.release(0);
+        }
+        if (!validated)         continue;
+      }
+    }
+ else     if ((fh & LOCKED) == 0 && f.casHash(fh,fh | LOCKED)) {
+      boolean validated=false;
+      try {
+        if (tabAt(tab,i) == f) {
+          validated=true;
+          splitBin(nextTab,i,f);
+          setTabAt(tab,i,fwd);
+        }
+      }
+  finally {
+        if (!f.casHash(fh | LOCKED,fh)) {
+          f.hash=fh;
+synchronized (f) {
+            f.notifyAll();
+          }
+          ;
+        }
+      }
+      if (!validated)       continue;
+    }
+ else {
+      if (buffer == null)       buffer=new int[TRANSFER_BUFFER_SIZE];
+      if (bin < 0 && bufferIndex > 0) {
+        int j=buffer[--bufferIndex];
+        buffer[bufferIndex]=i;
+        i=j;
+        continue;
+      }
+      if (bin < 0 || nbuffered >= TRANSFER_BUFFER_SIZE) {
+        f.tryAwaitLock(tab,i);
+        continue;
+      }
+      if (rev == null)       rev=new Node(MOVED,tab,null,null);
+      if (tabAt(tab,i) != f || (f.hash & LOCKED) == 0)       continue;
+      buffer[nbuffered++]=i;
+      setTabAt(nextTab,i,rev);
+      setTabAt(nextTab,i + n,rev);
+    }
+    if (bin > 0)     i=--bin;
+ else     if (buffer != null && nbuffered > 0) {
+      bin=-1;
+      i=buffer[bufferIndex=--nbuffered];
+    }
+ else     return nextTab;
+  }
+}

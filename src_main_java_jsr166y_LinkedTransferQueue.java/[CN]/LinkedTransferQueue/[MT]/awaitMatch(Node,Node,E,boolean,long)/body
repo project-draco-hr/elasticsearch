@@ -1,0 +1,35 @@
+{
+  long lastTime=timed ? System.nanoTime() : 0L;
+  Thread w=Thread.currentThread();
+  int spins=-1;
+  ThreadLocalRandom randomYields=null;
+  for (; ; ) {
+    Object item=s.item;
+    if (item != e) {
+      s.forgetContents();
+      return LinkedTransferQueue.<E>cast(item);
+    }
+    if ((w.isInterrupted() || (timed && nanos <= 0)) && s.casItem(e,s)) {
+      unsplice(pred,s);
+      return e;
+    }
+    if (spins < 0) {
+      if ((spins=spinsFor(pred,s.isData)) > 0)       randomYields=ThreadLocalRandom.current();
+    }
+ else     if (spins > 0) {
+      --spins;
+      if (randomYields.nextInt(CHAINED_SPINS) == 0)       Thread.yield();
+    }
+ else     if (s.waiter == null) {
+      s.waiter=w;
+    }
+ else     if (timed) {
+      long now=System.nanoTime();
+      if ((nanos-=now - lastTime) > 0)       LockSupport.parkNanos(this,nanos);
+      lastTime=now;
+    }
+ else {
+      LockSupport.park(this);
+    }
+  }
+}

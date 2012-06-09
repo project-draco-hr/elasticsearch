@@ -1,0 +1,59 @@
+{
+  long delta=0L;
+  int i=0;
+  Node[] tab=table;
+  while (tab != null && i < tab.length) {
+    int fh;
+    Object fk;
+    Node f=tabAt(tab,i);
+    if (f == null)     ++i;
+ else     if ((fh=f.hash) == MOVED) {
+      if ((fk=f.key) instanceof TreeBin) {
+        TreeBin t=(TreeBin)fk;
+        t.acquire(0);
+        try {
+          if (tabAt(tab,i) == f) {
+            for (Node p=t.first; p != null; p=p.next) {
+              p.val=null;
+              --delta;
+            }
+            t.first=null;
+            t.root=null;
+            ++i;
+          }
+        }
+  finally {
+          t.release(0);
+        }
+      }
+ else       tab=(Node[])fk;
+    }
+ else     if ((fh & LOCKED) != 0) {
+      counter.add(delta);
+      delta=0L;
+      f.tryAwaitLock(tab,i);
+    }
+ else     if (f.casHash(fh,fh | LOCKED)) {
+      try {
+        if (tabAt(tab,i) == f) {
+          for (Node e=f; e != null; e=e.next) {
+            e.val=null;
+            --delta;
+          }
+          setTabAt(tab,i,null);
+          ++i;
+        }
+      }
+  finally {
+        if (!f.casHash(fh | LOCKED,fh)) {
+          f.hash=fh;
+synchronized (f) {
+            f.notifyAll();
+          }
+          ;
+        }
+      }
+    }
+  }
+  if (delta != 0)   counter.add(delta);
+}

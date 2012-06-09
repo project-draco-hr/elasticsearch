@@ -1,0 +1,69 @@
+{
+  s.defaultReadObject();
+  this.segments=null;
+  UNSAFE.putObjectVolatile(this,counterOffset,new LongAdder());
+  long size=0L;
+  Node p=null;
+  for (; ; ) {
+    K k=(K)s.readObject();
+    V v=(V)s.readObject();
+    if (k != null && v != null) {
+      int h=spread(k.hashCode());
+      p=new Node(h,k,v,p);
+      ++size;
+    }
+ else     break;
+  }
+  if (p != null) {
+    boolean init=false;
+    int n;
+    if (size >= (long)(MAXIMUM_CAPACITY >>> 1))     n=MAXIMUM_CAPACITY;
+ else {
+      int sz=(int)size;
+      n=tableSizeFor(sz + (sz >>> 1) + 1);
+    }
+    int sc=sizeCtl;
+    boolean collide=false;
+    if (n > sc && UNSAFE.compareAndSwapInt(this,sizeCtlOffset,sc,-1)) {
+      try {
+        if (table == null) {
+          init=true;
+          Node[] tab=new Node[n];
+          int mask=n - 1;
+          while (p != null) {
+            int j=p.hash & mask;
+            Node next=p.next;
+            Node q=p.next=tabAt(tab,j);
+            setTabAt(tab,j,p);
+            if (!collide && q != null && q.hash == p.hash)             collide=true;
+            p=next;
+          }
+          table=tab;
+          counter.add(size);
+          sc=n - (n >>> 2);
+        }
+      }
+  finally {
+        sizeCtl=sc;
+      }
+      if (collide) {
+        Node[] tab=table;
+        for (int i=0; i < tab.length; ++i) {
+          int c=0;
+          for (Node e=tabAt(tab,i); e != null; e=e.next) {
+            if (++c > TREE_THRESHOLD && (e.key instanceof Comparable)) {
+              replaceWithTreeBin(tab,i,e.key);
+              break;
+            }
+          }
+        }
+      }
+    }
+    if (!init) {
+      while (p != null) {
+        internalPut(p.key,p.val);
+        p=p.next;
+      }
+    }
+  }
+}
