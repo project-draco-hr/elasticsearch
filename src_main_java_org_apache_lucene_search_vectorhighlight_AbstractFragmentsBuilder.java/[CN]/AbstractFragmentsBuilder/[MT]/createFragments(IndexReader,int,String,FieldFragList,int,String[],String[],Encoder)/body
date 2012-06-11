@@ -1,0 +1,59 @@
+{
+  if (maxNumFragments < 0) {
+    throw new IllegalArgumentException("maxNumFragments(" + maxNumFragments + ") must be positive number.");
+  }
+  List<String> fragments=new ArrayList<String>(maxNumFragments);
+  List<FieldFragList.WeightedFragInfo> fragInfos=fieldFragList.getFragInfos();
+  Field[] values=getFields(reader,docId,fieldName);
+  if (values.length == 0) {
+    return null;
+  }
+  if (discreteMultiValueHighlighting && values.length > fragInfos.size()) {
+    Map<Field,List<FieldFragList.WeightedFragInfo>> fieldsWeightedFragInfo=new HashMap<Field,List<FieldFragList.WeightedFragInfo>>();
+    int startOffset=0;
+    int endOffset=0;
+    for (    Field value : values) {
+      endOffset+=value.stringValue().length();
+      List<FieldFragList.WeightedFragInfo.SubInfo> fieldToSubInfos=new ArrayList<FieldFragList.WeightedFragInfo.SubInfo>();
+      List<FieldFragList.WeightedFragInfo> fieldToWeightedFragInfos=new ArrayList<FieldFragList.WeightedFragInfo>();
+      fieldsWeightedFragInfo.put(value,fieldToWeightedFragInfos);
+      for (      FieldFragList.WeightedFragInfo fragInfo : fragInfos) {
+        int weightedFragInfoStartOffset=startOffset;
+        if (fragInfo.getStartOffset() > startOffset && fragInfo.getStartOffset() < endOffset) {
+          weightedFragInfoStartOffset=fragInfo.getStartOffset();
+        }
+        int weightedFragInfoEndOffset=endOffset;
+        if (fragInfo.getEndOffset() > startOffset && fragInfo.getEndOffset() < endOffset) {
+          weightedFragInfoEndOffset=fragInfo.getEndOffset();
+        }
+        fieldToWeightedFragInfos.add(new WeightedFragInfo(weightedFragInfoStartOffset,weightedFragInfoEndOffset,fragInfo.getTotalBoost(),fieldToSubInfos));
+        for (        FieldFragList.WeightedFragInfo.SubInfo subInfo : fragInfo.getSubInfos()) {
+          for (          FieldPhraseList.WeightedPhraseInfo.Toffs toffs : subInfo.getTermsOffsets()) {
+            if (toffs.getStartOffset() >= startOffset && toffs.getEndOffset() < endOffset) {
+              fieldToSubInfos.add(subInfo);
+            }
+          }
+        }
+      }
+      startOffset=endOffset + 1;
+    }
+    fragInfos.clear();
+    for (    Map.Entry<Field,List<FieldFragList.WeightedFragInfo>> entry : fieldsWeightedFragInfo.entrySet()) {
+      fragInfos.addAll(entry.getValue());
+    }
+    Collections.sort(fragInfos,new Comparator<FieldFragList.WeightedFragInfo>(){
+      public int compare(      FieldFragList.WeightedFragInfo info1,      FieldFragList.WeightedFragInfo info2){
+        return info1.getStartOffset() - info2.getStartOffset();
+      }
+    }
+);
+    fragInfos=getWeightedFragInfoList(fragInfos);
+  }
+  StringBuilder buffer=new StringBuilder();
+  int[] nextValueIndex={0};
+  for (int n=0; n < maxNumFragments && n < fragInfos.size(); n++) {
+    FieldFragList.WeightedFragInfo fragInfo=fragInfos.get(n);
+    fragments.add(makeFragment(buffer,nextValueIndex,values,fragInfo,preTags,postTags,encoder));
+  }
+  return fragments.toArray(new String[fragments.size()]);
+}
