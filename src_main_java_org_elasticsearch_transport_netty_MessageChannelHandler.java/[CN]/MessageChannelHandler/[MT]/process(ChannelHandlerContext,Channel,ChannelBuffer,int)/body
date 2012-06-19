@@ -6,9 +6,13 @@
   long requestId=buffer.readLong();
   byte status=buffer.readByte();
   boolean isRequest=TransportStreams.statusIsRequest(status);
-  HandlesStreamInput wrappedStream;
-  if (TransportStreams.statusIsCompress(status)) {
-    wrappedStream=CachedStreamInput.cachedHandlesLzf(streamIn);
+  StreamInput wrappedStream;
+  if (TransportStreams.statusIsCompress(status) && buffer.readable()) {
+    Compressor compressor=CompressorFactory.compressor(buffer);
+    if (compressor == null) {
+      throw new ElasticSearchIllegalStateException("stream marked as compressed, but no compressor found");
+    }
+    wrappedStream=CachedStreamInput.cachedHandlesCompressed(compressor,streamIn);
   }
  else {
     wrappedStream=CachedStreamInput.cachedHandles(streamIn);
@@ -48,5 +52,5 @@
       buffer.readerIndex(expectedIndexReader);
     }
   }
-  wrappedStream.cleanHandles();
+  wrappedStream.close();
 }

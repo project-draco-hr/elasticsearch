@@ -18,7 +18,7 @@
     CachedStreamOutput.Entry cachedEntry=CachedStreamOutput.popEntry();
     StreamOutput streamOutput;
     if (compress != null && compress && (compressThreshold == -1 || dataLength > compressThreshold)) {
-      streamOutput=cachedEntry.cachedLZFBytes();
+      streamOutput=cachedEntry.cachedBytes(CompressorFactory.defaultCompressor());
     }
  else {
       streamOutput=cachedEntry.cachedBytes();
@@ -34,20 +34,20 @@
     dataLength=data.length;
     CachedStreamOutput.pushEntry(cachedEntry);
   }
- else   if (compress != null && compress && !LZF.isCompressed(data,dataOffset,dataLength)) {
+ else   if (compress != null && compress && !CompressorFactory.isCompressed(data,dataOffset,dataLength)) {
     if (compressThreshold == -1 || dataLength > compressThreshold) {
       CachedStreamOutput.Entry cachedEntry=CachedStreamOutput.popEntry();
       try {
         XContentType contentType=XContentFactory.xContentType(data,dataOffset,dataLength);
         if (formatContentType != null && formatContentType != contentType) {
-          XContentBuilder builder=XContentFactory.contentBuilder(formatContentType,cachedEntry.cachedLZFBytes());
+          XContentBuilder builder=XContentFactory.contentBuilder(formatContentType,cachedEntry.cachedBytes(CompressorFactory.defaultCompressor()));
           builder.copyCurrentStructure(XContentFactory.xContent(contentType).createParser(data,dataOffset,dataLength));
           builder.close();
         }
  else {
-          LZFStreamOutput streamOutput=cachedEntry.cachedLZFBytes();
+          StreamOutput streamOutput=cachedEntry.cachedBytes(CompressorFactory.defaultCompressor());
           streamOutput.writeBytes(data,dataOffset,dataLength);
-          streamOutput.flush();
+          streamOutput.close();
         }
         data=cachedEntry.bytes().copiedByteArray();
         dataOffset=0;
@@ -60,17 +60,17 @@
     }
   }
  else   if (formatContentType != null) {
-    if (LZF.isCompressed(data,dataOffset,dataLength)) {
-      BytesStreamInput siBytes=new BytesStreamInput(data,dataOffset,dataLength,false);
-      LZFStreamInput siLzf=CachedStreamInput.cachedLzf(siBytes);
-      XContentType contentType=XContentFactory.xContentType(siLzf);
-      siLzf.resetToBufferStart();
+    Compressor compressor=CompressorFactory.compressor(data,dataOffset,dataLength);
+    if (compressor != null) {
+      CompressedStreamInput compressedStreamInput=compressor.streamInput(new BytesStreamInput(data,dataOffset,dataLength,false));
+      XContentType contentType=XContentFactory.xContentType(compressedStreamInput);
+      compressedStreamInput.resetToBufferStart();
       if (contentType != formatContentType) {
         CachedStreamOutput.Entry cachedEntry=CachedStreamOutput.popEntry();
         try {
-          LZFStreamOutput streamOutput=cachedEntry.cachedLZFBytes();
+          StreamOutput streamOutput=cachedEntry.cachedBytes(CompressorFactory.defaultCompressor());
           XContentBuilder builder=XContentFactory.contentBuilder(formatContentType,streamOutput);
-          builder.copyCurrentStructure(XContentFactory.xContent(contentType).createParser(siLzf));
+          builder.copyCurrentStructure(XContentFactory.xContent(contentType).createParser(compressedStreamInput));
           builder.close();
           data=cachedEntry.bytes().copiedByteArray();
           dataOffset=0;
@@ -80,6 +80,9 @@
   finally {
           CachedStreamOutput.pushEntry(cachedEntry);
         }
+      }
+ else {
+        compressedStreamInput.close();
       }
     }
  else {
