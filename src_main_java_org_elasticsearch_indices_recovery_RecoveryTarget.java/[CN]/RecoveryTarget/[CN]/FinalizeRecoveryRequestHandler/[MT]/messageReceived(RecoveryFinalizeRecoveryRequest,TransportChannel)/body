@@ -1,12 +1,16 @@
 {
   InternalIndexShard shard=(InternalIndexShard)indicesService.indexServiceSafe(request.shardId().index().name()).shardSafe(request.shardId().id());
-  RecoveryStatus peerRecoveryStatus=onGoingRecoveries.get(shard.shardId());
-  if (peerRecoveryStatus == null) {
+  RecoveryStatus onGoingRecovery=onGoingRecoveries.get(shard.shardId());
+  if (onGoingRecovery == null) {
     throw new IndexShardClosedException(shard.shardId());
   }
-  peerRecoveryStatus.stage=RecoveryStatus.Stage.FINALIZE;
-  shard.performRecoveryFinalization(false,peerRecoveryStatus);
-  peerRecoveryStatus.time=System.currentTimeMillis() - peerRecoveryStatus.startTime;
-  peerRecoveryStatus.stage=RecoveryStatus.Stage.DONE;
+  if (onGoingRecovery.canceled) {
+    onGoingRecovery.sentCanceledToSource=true;
+    throw new IndexShardClosedException(shard.shardId());
+  }
+  onGoingRecovery.stage=RecoveryStatus.Stage.FINALIZE;
+  shard.performRecoveryFinalization(false,onGoingRecovery);
+  onGoingRecovery.time=System.currentTimeMillis() - onGoingRecovery.startTime;
+  onGoingRecovery.stage=RecoveryStatus.Stage.DONE;
   channel.sendResponse(VoidStreamable.INSTANCE);
 }

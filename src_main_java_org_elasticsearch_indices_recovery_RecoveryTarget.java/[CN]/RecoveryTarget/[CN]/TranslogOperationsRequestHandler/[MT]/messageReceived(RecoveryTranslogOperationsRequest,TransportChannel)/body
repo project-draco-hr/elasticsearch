@@ -1,12 +1,28 @@
 {
+  RecoveryStatus onGoingRecovery=onGoingRecoveries.get(request.shardId());
+  if (onGoingRecovery == null) {
+    throw new IndexShardClosedException(request.shardId());
+  }
+  if (onGoingRecovery.canceled) {
+    onGoingRecovery.sentCanceledToSource=true;
+    throw new IndexShardClosedException(request.shardId());
+  }
   InternalIndexShard shard=(InternalIndexShard)indicesService.indexServiceSafe(request.shardId().index().name()).shardSafe(request.shardId().id());
   for (  Translog.Operation operation : request.operations()) {
+    if (onGoingRecovery.canceled) {
+      onGoingRecovery.sentCanceledToSource=true;
+      throw new IndexShardClosedException(request.shardId());
+    }
     shard.performRecoveryOperation(operation);
+    onGoingRecovery.currentTranslogOperations++;
   }
-  RecoveryStatus onGoingRecovery=onGoingRecoveries.get(shard.shardId());
+  onGoingRecovery=onGoingRecoveries.get(request.shardId());
   if (onGoingRecovery == null) {
-    throw new IndexShardClosedException(shard.shardId());
+    throw new IndexShardClosedException(request.shardId());
   }
-  onGoingRecovery.currentTranslogOperations+=request.operations().size();
+  if (onGoingRecovery.canceled) {
+    onGoingRecovery.sentCanceledToSource=true;
+    throw new IndexShardClosedException(request.shardId());
+  }
   channel.sendResponse(VoidStreamable.INSTANCE);
 }
