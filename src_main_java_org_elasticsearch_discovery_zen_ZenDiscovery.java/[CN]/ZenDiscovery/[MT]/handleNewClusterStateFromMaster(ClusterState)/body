@@ -1,6 +1,24 @@
 {
   if (master) {
-    logger.warn("master should not receive new cluster state from [{}]",newState.nodes().masterNode());
+    clusterService.submitStateUpdateTask("zen-disco-master_receive_cluster_state_from_another_master [" + newState.nodes().masterNode() + "]",new ClusterStateUpdateTask(){
+      @Override public ClusterState execute(      ClusterState currentState){
+        if (newState.version() > currentState.version()) {
+          logger.warn("received cluster state from [{}] which is also master but with a newer cluster_state, rejoining to cluster...",newState.nodes().masterNode());
+          return rejoin(currentState,"zen-disco-master_receive_cluster_state_from_another_master [" + newState.nodes().masterNode() + "]");
+        }
+ else {
+          logger.warn("received cluster state from [{}] which is also master but with an older cluster_state, telling [{}] to rejoin the cluster",newState.nodes().masterNode(),newState.nodes().masterNode());
+          transportService.sendRequest(newState.nodes().masterNode(),RejoinClusterRequestHandler.ACTION,new RejoinClusterRequest(currentState.nodes().localNodeId()),new VoidTransportResponseHandler(ThreadPool.Names.SAME){
+            @Override public void handleException(            TransportException exp){
+              logger.warn("failed to send rejoin request to [{}]",exp,newState.nodes().masterNode());
+            }
+          }
+);
+          return currentState;
+        }
+      }
+    }
+);
   }
  else {
     if (newState.nodes().localNode() == null) {
