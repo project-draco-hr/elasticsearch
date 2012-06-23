@@ -1,15 +1,24 @@
 {
   final AtomicReference<Throwable> failureRef=new AtomicReference<Throwable>();
   final CountDownLatch latch=new CountDownLatch(1);
-  deleteByQueryAction.execute(Requests.deleteByQueryRequest(request.indices()).query(QueryBuilders.filteredQuery(QueryBuilders.matchAllQuery(),FilterBuilders.typeFilter(request.type()))),new ActionListener<DeleteByQueryResponse>(){
-    @Override public void onResponse(    DeleteByQueryResponse deleteByQueryResponse){
-      refreshAction.execute(Requests.refreshRequest(request.indices()),new ActionListener<RefreshResponse>(){
-        @Override public void onResponse(        RefreshResponse refreshResponse){
-          metaDataMappingService.removeMapping(new MetaDataMappingService.RemoveRequest(request.indices(),request.type()));
-          latch.countDown();
+  flushAction.execute(Requests.flushRequest(request.indices()),new ActionListener<FlushResponse>(){
+    @Override public void onResponse(    FlushResponse flushResponse){
+      deleteByQueryAction.execute(Requests.deleteByQueryRequest(request.indices()).query(QueryBuilders.filteredQuery(QueryBuilders.matchAllQuery(),FilterBuilders.typeFilter(request.type()))),new ActionListener<DeleteByQueryResponse>(){
+        @Override public void onResponse(        DeleteByQueryResponse deleteByQueryResponse){
+          refreshAction.execute(Requests.refreshRequest(request.indices()),new ActionListener<RefreshResponse>(){
+            @Override public void onResponse(            RefreshResponse refreshResponse){
+              metaDataMappingService.removeMapping(new MetaDataMappingService.RemoveRequest(request.indices(),request.type()));
+              latch.countDown();
+            }
+            @Override public void onFailure(            Throwable e){
+              metaDataMappingService.removeMapping(new MetaDataMappingService.RemoveRequest(request.indices(),request.type()));
+              latch.countDown();
+            }
+          }
+);
         }
         @Override public void onFailure(        Throwable e){
-          metaDataMappingService.removeMapping(new MetaDataMappingService.RemoveRequest(request.indices(),request.type()));
+          failureRef.set(e);
           latch.countDown();
         }
       }
