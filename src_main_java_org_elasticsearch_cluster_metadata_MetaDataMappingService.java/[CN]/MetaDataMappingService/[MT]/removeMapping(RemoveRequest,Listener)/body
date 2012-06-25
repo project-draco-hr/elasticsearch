@@ -1,0 +1,35 @@
+{
+  clusterService.submitStateUpdateTask("remove-mapping [" + request.mappingType + "]",new ProcessedClusterStateUpdateTask(){
+    @Override public ClusterState execute(    ClusterState currentState){
+      if (request.indices.length == 0) {
+        listener.onFailure(new IndexMissingException(new Index("_all")));
+      }
+      try {
+        MetaData.Builder builder=newMetaDataBuilder().metaData(currentState.metaData());
+        boolean changed=false;
+        for (        String indexName : request.indices) {
+          IndexMetaData indexMetaData=currentState.metaData().index(indexName);
+          if (indexMetaData != null) {
+            if (indexMetaData.mappings().containsKey(request.mappingType)) {
+              builder.put(newIndexMetaDataBuilder(indexMetaData).removeMapping(request.mappingType));
+              changed=true;
+            }
+          }
+        }
+        if (!changed) {
+          return currentState;
+        }
+        logger.info("[{}] remove_mapping [{}]",request.indices,request.mappingType);
+        return ClusterState.builder().state(currentState).metaData(builder).build();
+      }
+ catch (      Exception e) {
+        listener.onFailure(e);
+        return currentState;
+      }
+    }
+    @Override public void clusterStateProcessed(    ClusterState clusterState){
+      listener.onResponse(new Response(true));
+    }
+  }
+);
+}
