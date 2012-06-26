@@ -1,0 +1,55 @@
+{
+  XContentParser parser=parseContext.parser();
+  String fieldName=null;
+  ShapeRelation shapeRelation=null;
+  Shape shape=null;
+  XContentParser.Token token;
+  String currentFieldName=null;
+  float boost=1f;
+  while ((token=parser.nextToken()) != XContentParser.Token.END_OBJECT) {
+    if (token == XContentParser.Token.FIELD_NAME) {
+      currentFieldName=parser.currentName();
+    }
+ else     if (token == XContentParser.Token.START_OBJECT) {
+      fieldName=currentFieldName;
+      while ((token=parser.nextToken()) != XContentParser.Token.END_OBJECT) {
+        if (token == XContentParser.Token.FIELD_NAME) {
+          currentFieldName=parser.currentName();
+          token=parser.nextToken();
+          if ("shape".equals(currentFieldName)) {
+            shape=GeoJSONShapeParser.parse(parser);
+          }
+ else           if ("relation".equals(currentFieldName)) {
+            shapeRelation=ShapeRelation.getRelationByName(parser.text());
+            if (shapeRelation == null) {
+              throw new QueryParsingException(parseContext.index(),"Unknown shape operation [" + parser.text() + " ]");
+            }
+          }
+        }
+      }
+    }
+ else     if (token.isValue()) {
+      if ("boost".equals(currentFieldName)) {
+        boost=parser.floatValue();
+      }
+    }
+  }
+  if (shape == null) {
+    throw new QueryParsingException(parseContext.index(),"No Shape defined");
+  }
+ else   if (shapeRelation == null) {
+    throw new QueryParsingException(parseContext.index(),"No Shape Relation defined");
+  }
+  MapperService.SmartNameFieldMappers smartNameFieldMappers=parseContext.smartFieldMappers(fieldName);
+  if (smartNameFieldMappers == null || !smartNameFieldMappers.hasMapper()) {
+    throw new QueryParsingException(parseContext.index(),"Failed to find geo_shape field [" + fieldName + "]");
+  }
+  FieldMapper fieldMapper=smartNameFieldMappers.mapper();
+  if (!(fieldMapper instanceof GeoShapeFieldMapper)) {
+    throw new QueryParsingException(parseContext.index(),"Field [" + fieldName + "] is not a geo_shape");
+  }
+  GeoShapeFieldMapper shapeFieldMapper=(GeoShapeFieldMapper)fieldMapper;
+  Query query=shapeFieldMapper.spatialStrategy().createQuery(shape,shapeRelation);
+  query.setBoost(boost);
+  return query;
+}
