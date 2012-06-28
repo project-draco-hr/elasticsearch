@@ -2,38 +2,34 @@
   if (event.state().blocks().disableStatePersistence()) {
     return;
   }
-  if (!event.state().nodes().localNode().masterNode()) {
-    return;
-  }
-  if (!event.metaDataChanged()) {
-    return;
-  }
   boolean success=true;
-  if (currentMetaData == null || !MetaData.isGlobalStateEquals(currentMetaData,event.state().metaData())) {
-    try {
-      writeGlobalState("changed",event.state().metaData(),currentMetaData);
+  if (event.state().nodes().localNode().masterNode()) {
+    if (currentMetaData == null || !MetaData.isGlobalStateEquals(currentMetaData,event.state().metaData())) {
+      try {
+        writeGlobalState("changed",event.state().metaData(),currentMetaData);
+      }
+ catch (      Exception e) {
+        success=false;
+      }
     }
- catch (    Exception e) {
-      success=false;
-    }
-  }
-  for (  IndexMetaData indexMetaData : event.state().metaData()) {
-    String writeReason=null;
-    IndexMetaData currentIndexMetaData=currentMetaData == null ? null : currentMetaData.index(indexMetaData.index());
-    if (currentIndexMetaData == null) {
-      writeReason="freshly created";
-    }
- else     if (currentIndexMetaData.version() != indexMetaData.version()) {
-      writeReason="version changed from [" + currentIndexMetaData.version() + "] to ["+ indexMetaData.version()+ "]";
-    }
-    if (writeReason == null) {
-      continue;
-    }
-    try {
-      writeIndex(writeReason,indexMetaData,currentIndexMetaData);
-    }
- catch (    Exception e) {
-      success=false;
+    for (    IndexMetaData indexMetaData : event.state().metaData()) {
+      String writeReason=null;
+      IndexMetaData currentIndexMetaData=currentMetaData == null ? null : currentMetaData.index(indexMetaData.index());
+      if (currentIndexMetaData == null) {
+        writeReason="freshly created";
+      }
+ else       if (currentIndexMetaData.version() != indexMetaData.version()) {
+        writeReason="version changed from [" + currentIndexMetaData.version() + "] to ["+ indexMetaData.version()+ "]";
+      }
+      if (writeReason == null) {
+        continue;
+      }
+      try {
+        writeIndex(writeReason,indexMetaData,currentIndexMetaData);
+      }
+ catch (      Exception e) {
+        success=false;
+      }
     }
   }
   if (nodeEnv.hasNodeFile()) {
@@ -59,7 +55,7 @@ synchronized (danglingMutex) {
               FileSystemUtils.deleteRecursively(nodeEnv.indexLocations(new Index(indexName)));
             }
  else {
-              logger.info("[{}] dangling index, exists on local file system, but not in cluster metadata, scheduling to delete in [{}]",indexName,danglingTimeout);
+              logger.info("[{}] dangling index, exists on local file system, but not in cluster metadata, scheduling to delete in [{}], auto import to cluster state [{}]",indexName,danglingTimeout,autoImportDangled);
               danglingIndices.put(indexName,new DanglingIndex(indexName,threadPool.schedule(danglingTimeout,ThreadPool.Names.SAME,new RemoveDanglingIndex(indexName))));
             }
           }
@@ -69,12 +65,45 @@ synchronized (danglingMutex) {
         }
       }
     }
+    if (autoImportDangled.shouldImport() && !danglingIndices.isEmpty()) {
+      final List<IndexMetaData> dangled=Lists.newArrayList();
+      for (      String indexName : danglingIndices.keySet()) {
+        IndexMetaData indexMetaData=loadIndex(indexName);
+        if (!indexMetaData.index().equals(indexName)) {
+          logger.info("dangled index directory name is [{}], state name is [{}], renaming to directory name",indexName,indexMetaData.index());
+          indexMetaData=IndexMetaData.newIndexMetaDataBuilder(indexMetaData).index(indexName).build();
+        }
+        if (autoImportDangled == AutoImportDangledState.CLOSED) {
+          indexMetaData=IndexMetaData.newIndexMetaDataBuilder(indexMetaData).state(IndexMetaData.State.CLOSE).build();
+        }
+        if (indexMetaData != null) {
+          dangled.add(indexMetaData);
+        }
+      }
+      IndexMetaData[] dangledIndices=dangled.toArray(new IndexMetaData[dangled.size()]);
+      try {
+        allocateDangledIndices.allocateDangled(dangledIndices,new LocalAllocateDangledIndices.Listener(){
+          @Override public void onResponse(          LocalAllocateDangledIndices.AllocateDangledResponse response){
+            logger.trace("allocated dangled");
+          }
+          @Override public void onFailure(          Throwable e){
+            logger.info("failed to send allocated dangled",e);
+          }
+        }
+);
+      }
+ catch (      Exception e) {
+        logger.warn("failed to send allocate dangled",e);
+      }
+    }
   }
-  if (currentMetaData != null) {
-    for (    IndexMetaData current : currentMetaData) {
-      if (event.state().metaData().index(current.index()) == null) {
-        if (!danglingIndices.containsKey(current.index())) {
-          deleteIndex(current.index());
+  if (event.state().nodes().localNode().masterNode()) {
+    if (currentMetaData != null) {
+      for (      IndexMetaData current : currentMetaData) {
+        if (event.state().metaData().index(current.index()) == null) {
+          if (!danglingIndices.containsKey(current.index())) {
+            deleteIndex(current.index());
+          }
         }
       }
     }
