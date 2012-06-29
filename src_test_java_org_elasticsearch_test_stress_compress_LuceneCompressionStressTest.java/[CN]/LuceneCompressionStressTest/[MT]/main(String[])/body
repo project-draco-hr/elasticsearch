@@ -1,0 +1,49 @@
+{
+  final boolean USE_COMPOUND=false;
+  final Compressor compressor=CompressorFactory.defaultCompressor();
+  File testFile=new File("target/bench/compress/lucene");
+  FileSystemUtils.deleteRecursively(testFile);
+  testFile.mkdirs();
+  Directory dir=new CompressedDirectory(new NIOFSDirectory(new File(testFile,"compressed")),compressor,false,"fdt","tvf");
+  TieredMergePolicy mergePolicy=new TieredMergePolicy();
+  mergePolicy.setUseCompoundFile(USE_COMPOUND);
+  IndexWriter writer=new IndexWriter(dir,new IndexWriterConfig(Lucene.VERSION,Lucene.STANDARD_ANALYZER).setMergePolicy(mergePolicy));
+  System.out.println("feeding data...");
+  TestData testData=new TestData();
+  long count=0;
+  long round=0;
+  while (true) {
+    XContentBuilder builder=XContentFactory.jsonBuilder();
+    testData.current(builder);
+    builder.close();
+    Document doc=new Document();
+    doc.add(new Field("_source",builder.underlyingBytes(),0,builder.underlyingBytesLength()));
+    if (true) {
+      Field field=new Field("text",builder.string(),Field.Store.NO,Field.Index.ANALYZED,Field.TermVector.WITH_POSITIONS_OFFSETS);
+      doc.add(field);
+    }
+    writer.addDocument(doc);
+    if ((++count % 10000) == 0) {
+      writer.commit();
+      ++round;
+      System.out.println(DateTime.now() + "[" + round+ "] closing");
+      writer.close(true);
+      System.out.println(DateTime.now() + "[" + round+ "] closed");
+      CheckIndex checkIndex=new CheckIndex(dir);
+      FastByteArrayOutputStream os=new FastByteArrayOutputStream();
+      PrintStream out=new PrintStream(os);
+      checkIndex.setInfoStream(out);
+      out.flush();
+      CheckIndex.Status status=checkIndex.checkIndex();
+      if (!status.clean) {
+        System.out.println("check index [failure]\n" + new String(os.underlyingBytes(),0,os.size()));
+      }
+ else {
+        System.out.println(DateTime.now() + "[" + round+ "] checked");
+      }
+      mergePolicy=new TieredMergePolicy();
+      mergePolicy.setUseCompoundFile(USE_COMPOUND);
+      writer=new IndexWriter(dir,new IndexWriterConfig(Lucene.VERSION,Lucene.STANDARD_ANALYZER).setMergePolicy(mergePolicy));
+    }
+  }
+}
