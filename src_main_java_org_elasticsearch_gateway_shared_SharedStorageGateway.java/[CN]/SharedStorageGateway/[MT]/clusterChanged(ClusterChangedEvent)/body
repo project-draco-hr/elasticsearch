@@ -3,14 +3,15 @@
     return;
   }
   if (event.state().blocks().disableStatePersistence()) {
+    this.currentMetaData=null;
     return;
   }
-  if (event.localNodeMaster()) {
-    if (!event.metaDataChanged()) {
-      return;
-    }
-    writeStateExecutor.execute(new Runnable(){
-      @Override public void run(){
+  if (!event.metaDataChanged()) {
+    return;
+  }
+  writeStateExecutor.execute(new Runnable(){
+    @Override public void run(){
+      if (event.localNodeMaster()) {
         logger.debug("writing to gateway {} ...",this);
         StopWatch stopWatch=new StopWatch().start();
         try {
@@ -20,8 +21,25 @@
  catch (        Exception e) {
           logger.error("failed to write to gateway",e);
         }
+        if (currentMetaData != null) {
+          for (          IndexMetaData current : currentMetaData) {
+            if (!event.state().metaData().hasIndex(current.index())) {
+              delete(current);
+            }
+          }
+        }
       }
+      if (nodeEnv != null && nodeEnv.hasNodeFile()) {
+        if (currentMetaData != null) {
+          for (          IndexMetaData current : currentMetaData) {
+            if (!event.state().metaData().hasIndex(current.index())) {
+              FileSystemUtils.deleteRecursively(nodeEnv.indexLocations(new Index(current.index())));
+            }
+          }
+        }
+      }
+      currentMetaData=event.state().metaData();
     }
-);
   }
+);
 }

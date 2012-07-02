@@ -1,20 +1,28 @@
 {
   if (event.state().blocks().disableStatePersistence()) {
+    this.currentMetaData=null;
     return;
   }
+  MetaData newMetaData=event.state().metaData();
   boolean success=true;
   if (event.state().nodes().localNode().masterNode()) {
-    if (currentMetaData == null || !MetaData.isGlobalStateEquals(currentMetaData,event.state().metaData())) {
+    if (currentMetaData == null || !MetaData.isGlobalStateEquals(currentMetaData,newMetaData)) {
       try {
-        writeGlobalState("changed",event.state().metaData(),currentMetaData);
+        writeGlobalState("changed",newMetaData,currentMetaData);
       }
  catch (      Exception e) {
         success=false;
       }
     }
-    for (    IndexMetaData indexMetaData : event.state().metaData()) {
+    for (    IndexMetaData indexMetaData : newMetaData) {
       String writeReason=null;
-      IndexMetaData currentIndexMetaData=currentMetaData == null ? null : currentMetaData.index(indexMetaData.index());
+      IndexMetaData currentIndexMetaData;
+      if (currentMetaData == null) {
+        currentIndexMetaData=loadIndex(indexMetaData.index());
+      }
+ else {
+        currentIndexMetaData=currentMetaData.index(indexMetaData.index());
+      }
       if (currentIndexMetaData == null) {
         writeReason="freshly created";
       }
@@ -33,10 +41,23 @@
     }
   }
   if (nodeEnv.hasNodeFile()) {
+    if (currentMetaData != null) {
+      for (      IndexMetaData current : currentMetaData) {
+        if (danglingIndices.containsKey(current.index())) {
+          continue;
+        }
+        if (!newMetaData.hasIndex(current.index())) {
+          logger.debug("[{}] deleting index that is no longer part of the metadata");
+          FileSystemUtils.deleteRecursively(nodeEnv.indexLocations(new Index(current.index())));
+        }
+      }
+    }
+  }
+  if (nodeEnv.hasNodeFile()) {
     if (danglingTimeout.millis() >= 0) {
 synchronized (danglingMutex) {
         for (        String danglingIndex : danglingIndices.keySet()) {
-          if (event.state().metaData().hasIndex(danglingIndex)) {
+          if (newMetaData.hasIndex(danglingIndex)) {
             logger.debug("[{}] no longer dangling (created), removing",danglingIndex);
             DanglingIndex removed=danglingIndices.remove(danglingIndex);
             removed.future.cancel(false);
@@ -44,19 +65,22 @@ synchronized (danglingMutex) {
         }
         try {
           for (          String indexName : nodeEnv.findAllIndices()) {
-            if (event.state().metaData().hasIndex(indexName)) {
+            if (newMetaData.hasIndex(indexName)) {
               continue;
             }
             if (danglingIndices.containsKey(indexName)) {
               continue;
             }
-            if (danglingTimeout.millis() == 0) {
-              logger.info("[{}] dangling index, exists on local file system, but not in cluster metadata, timeout set to 0, deleting now",indexName);
-              FileSystemUtils.deleteRecursively(nodeEnv.indexLocations(new Index(indexName)));
-            }
+            IndexMetaData indexMetaData=loadIndex(indexName);
+            if (indexMetaData != null) {
+              if (danglingTimeout.millis() == 0) {
+                logger.info("[{}] dangling index, exists on local file system, but not in cluster metadata, timeout set to 0, deleting now",indexName);
+                FileSystemUtils.deleteRecursively(nodeEnv.indexLocations(new Index(indexName)));
+              }
  else {
-              logger.info("[{}] dangling index, exists on local file system, but not in cluster metadata, scheduling to delete in [{}], auto import to cluster state [{}]",indexName,danglingTimeout,autoImportDangled);
-              danglingIndices.put(indexName,new DanglingIndex(indexName,threadPool.schedule(danglingTimeout,ThreadPool.Names.SAME,new RemoveDanglingIndex(indexName))));
+                logger.info("[{}] dangling index, exists on local file system, but not in cluster metadata, scheduling to delete in [{}], auto import to cluster state [{}]",indexName,danglingTimeout,autoImportDangled);
+                danglingIndices.put(indexName,new DanglingIndex(indexName,threadPool.schedule(danglingTimeout,ThreadPool.Names.SAME,new RemoveDanglingIndex(indexName))));
+              }
             }
           }
         }
@@ -69,6 +93,10 @@ synchronized (danglingMutex) {
       final List<IndexMetaData> dangled=Lists.newArrayList();
       for (      String indexName : danglingIndices.keySet()) {
         IndexMetaData indexMetaData=loadIndex(indexName);
+        if (indexMetaData == null) {
+          logger.debug("failed to find state for dangling index [{}]",indexName);
+          continue;
+        }
         if (!indexMetaData.index().equals(indexName)) {
           logger.info("dangled index directory name is [{}], state name is [{}], renaming to directory name",indexName,indexMetaData.index());
           indexMetaData=IndexMetaData.newIndexMetaDataBuilder(indexMetaData).index(indexName).build();
@@ -97,18 +125,7 @@ synchronized (danglingMutex) {
       }
     }
   }
-  if (event.state().nodes().localNode().masterNode()) {
-    if (currentMetaData != null) {
-      for (      IndexMetaData current : currentMetaData) {
-        if (event.state().metaData().index(current.index()) == null) {
-          if (!danglingIndices.containsKey(current.index())) {
-            deleteIndex(current.index());
-          }
-        }
-      }
-    }
-  }
   if (success) {
-    currentMetaData=event.state().metaData();
+    currentMetaData=newMetaData;
   }
 }
