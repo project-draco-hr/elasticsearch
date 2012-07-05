@@ -8,12 +8,13 @@
     MetaData.Builder.toXContent(globalMetaData,builder,formatParams);
     builder.endObject();
     builder.flush();
+    String globalFileName="global-" + globalMetaData.version();
     Exception lastFailure=null;
     boolean wroteAtLeastOnce=false;
     for (    File dataLocation : nodeEnv.nodeDataLocations()) {
       File stateLocation=new File(dataLocation,"_state");
       FileSystemUtils.mkdirs(stateLocation);
-      File stateFile=new File(stateLocation,"global-" + globalMetaData.version());
+      File stateFile=new File(stateLocation,globalFileName);
       FileOutputStream fos=null;
       try {
         fos=new FileOutputStream(stateFile);
@@ -33,10 +34,19 @@
       logger.warn("[_global]: failed to write global state",lastFailure);
       throw new IOException("failed to write global state",lastFailure);
     }
-    if (previousMetaData != null && previousMetaData.version() != metaData.version()) {
-      for (      File dataLocation : nodeEnv.nodeDataLocations()) {
-        File stateFile=new File(new File(dataLocation,"_state"),"global-" + previousMetaData.version());
-        stateFile.delete();
+    for (    File dataLocation : nodeEnv.nodeDataLocations()) {
+      File[] files=new File(dataLocation,"_state").listFiles();
+      if (files == null) {
+        continue;
+      }
+      for (      File file : files) {
+        if (!file.getName().startsWith("global-")) {
+          continue;
+        }
+        if (file.getName().equals(globalFileName)) {
+          continue;
+        }
+        file.delete();
       }
     }
   }
