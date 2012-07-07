@@ -4,27 +4,68 @@
     ctx.sendUpstream(e);
     return;
   }
-  ChannelBuffer input=(ChannelBuffer)m;
-  if (!input.readable()) {
-    return;
-  }
-  ChannelBuffer cumulation=this.cumulation;
-  if (cumulation != null && cumulation.readable()) {
-    cumulation.discardReadBytes();
-    cumulation.writeBytes(input);
-    callDecode(ctx,e.getChannel(),cumulation,true);
+  ChannelBuffer buffer=(ChannelBuffer)m;
+  int size=buffer.getInt(buffer.readerIndex() - 4);
+  transportServiceAdapter.received(size + 4);
+  int markedReaderIndex=buffer.readerIndex();
+  int expectedIndexReader=markedReaderIndex + size;
+  StreamInput streamIn=ChannelBufferStreamInputFactory.create(buffer,size);
+  long requestId=buffer.readLong();
+  byte status=buffer.readByte();
+  boolean isRequest=TransportStreams.statusIsRequest(status);
+  boolean hasBytesToRead=(size - (TransportStreams.HEADER_SIZE - 4)) != 0;
+  StreamInput wrappedStream;
+  if (TransportStreams.statusIsCompress(status) && hasBytesToRead && buffer.readable()) {
+    Compressor compressor=CompressorFactory.compressor(buffer);
+    if (compressor == null) {
+      int maxToRead=Math.min(buffer.readableBytes(),10);
+      int offset=buffer.readerIndex();
+      StringBuilder sb=new StringBuilder("stream marked as compressed, but no compressor found, first [").append(maxToRead).append("] content bytes out of [").append(buffer.readableBytes()).append("] readable bytes with message size [").append(size).append("] ").append("] are [");
+      for (int i=0; i < maxToRead; i++) {
+        sb.append(buffer.getByte(offset + i)).append(",");
+      }
+      sb.append("]");
+      throw new ElasticSearchIllegalStateException(sb.toString());
+    }
+    wrappedStream=CachedStreamInput.cachedHandlesCompressed(compressor,streamIn);
   }
  else {
-    int actualSize=callDecode(ctx,e.getChannel(),input,false);
-    if (input.readable()) {
-      if (actualSize > 0) {
-        cumulation=ChannelBuffers.dynamicBuffer(actualSize,ctx.getChannel().getConfig().getBufferFactory());
+    wrappedStream=CachedStreamInput.cachedHandles(streamIn);
+  }
+  if (isRequest) {
+    String action=handleRequest(ctx.getChannel(),wrappedStream,requestId);
+    if (buffer.readerIndex() != expectedIndexReader) {
+      if (buffer.readerIndex() < expectedIndexReader) {
+        logger.warn("Message not fully read (request) for [{}] and action [{}], resetting",requestId,action);
       }
  else {
-        cumulation=ChannelBuffers.dynamicBuffer(ctx.getChannel().getConfig().getBufferFactory());
+        logger.warn("Message read past expected size (request) for [{}] and action [{}], resetting",requestId,action);
       }
-      cumulation.writeBytes(input);
-      this.cumulation=cumulation;
+      buffer.readerIndex(expectedIndexReader);
     }
   }
+ else {
+    TransportResponseHandler handler=transportServiceAdapter.remove(requestId);
+    if (handler != null) {
+      if (TransportStreams.statusIsError(status)) {
+        handlerResponseError(wrappedStream,handler);
+      }
+ else {
+        handleResponse(wrappedStream,handler);
+      }
+    }
+ else {
+      buffer.readerIndex(markedReaderIndex + size);
+    }
+    if (buffer.readerIndex() != expectedIndexReader) {
+      if (buffer.readerIndex() < expectedIndexReader) {
+        logger.warn("Message not fully read (response) for [{}] handler {}, error [{}], resetting",requestId,handler,TransportStreams.statusIsError(status));
+      }
+ else {
+        logger.warn("Message read past expected size (response) for [{}] handler {}, error [{}], resetting",requestId,handler,TransportStreams.statusIsError(status));
+      }
+      buffer.readerIndex(expectedIndexReader);
+    }
+  }
+  wrappedStream.close();
 }
