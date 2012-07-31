@@ -18,8 +18,13 @@
   this.reuseAddress=componentSettings.getAsBoolean("reuse_address",settings.getAsBoolean(TCP_REUSE_ADDRESS,NetworkUtils.defaultReuseAddress()));
   this.tcpSendBufferSize=componentSettings.getAsBytesSize("tcp_send_buffer_size",settings.getAsBytesSize(TCP_SEND_BUFFER_SIZE,TCP_DEFAULT_SEND_BUFFER_SIZE));
   this.tcpReceiveBufferSize=componentSettings.getAsBytesSize("tcp_receive_buffer_size",settings.getAsBytesSize(TCP_RECEIVE_BUFFER_SIZE,TCP_DEFAULT_RECEIVE_BUFFER_SIZE));
-  ByteSizeValue receivePredictorMin=componentSettings.getAsBytesSize("receive_predictor_min",componentSettings.getAsBytesSize("receive_predictor_size",ByteSizeValue.parseBytesSizeValue("512k")));
-  ByteSizeValue receivePredictorMax=componentSettings.getAsBytesSize("receive_predictor_max",componentSettings.getAsBytesSize("receive_predictor_size",ByteSizeValue.parseBytesSizeValue("512k")));
+  long defaultReceiverPredictor=512 * 1024;
+  if (JvmInfo.jvmInfo().mem().directMemoryMax().bytes() > 0) {
+    long l=(long)((0.3 * JvmInfo.jvmInfo().mem().directMemoryMax().bytes()) / workerCount);
+    defaultReceiverPredictor=Math.min(defaultReceiverPredictor,Math.max(l,64 * 1024));
+  }
+  ByteSizeValue receivePredictorMin=componentSettings.getAsBytesSize("receive_predictor_min",componentSettings.getAsBytesSize("receive_predictor_size",new ByteSizeValue(defaultReceiverPredictor)));
+  ByteSizeValue receivePredictorMax=componentSettings.getAsBytesSize("receive_predictor_max",componentSettings.getAsBytesSize("receive_predictor_size",new ByteSizeValue(defaultReceiverPredictor)));
   if (receivePredictorMax.bytes() == receivePredictorMin.bytes()) {
     receiveBufferSizePredictorFactory=new FixedReceiveBufferSizePredictorFactory((int)receivePredictorMax.bytes());
   }
@@ -33,5 +38,5 @@
     maxContentLength=new ByteSizeValue(100,ByteSizeUnit.MB);
   }
   this.maxContentLength=maxContentLength;
-  logger.debug("using max_chunk_size[{}], max_header_size[{}], max_initial_line_length[{}], max_content_length[{}]",maxChunkSize,maxHeaderSize,maxInitialLineLength,this.maxContentLength);
+  logger.debug("using max_chunk_size[{}], max_header_size[{}], max_initial_line_length[{}], max_content_length[{}], receive_predictor[{}->{}]",maxChunkSize,maxHeaderSize,maxInitialLineLength,this.maxContentLength,receivePredictorMin,receivePredictorMax);
 }
