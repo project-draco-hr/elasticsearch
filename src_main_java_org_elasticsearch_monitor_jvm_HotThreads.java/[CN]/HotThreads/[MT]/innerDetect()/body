@@ -18,7 +18,14 @@
         continue;
       }
       long cpu=threadBean.getThreadCpuTime(threadId);
+      if (cpu == -1) {
+        continue;
+      }
       ThreadInfo info=threadBean.getThreadInfo(threadId,0);
+      System.out.println(info.getThreadName());
+      if (info == null) {
+        continue;
+      }
       threadInfos.put(threadId,new MyThreadInfo(cpu,info));
     }
     Thread.sleep(interval.millis());
@@ -27,10 +34,21 @@
         continue;
       }
       long cpu=threadBean.getThreadCpuTime(threadId);
+      if (cpu == -1) {
+        threadInfos.remove(threadId);
+        continue;
+      }
       ThreadInfo info=threadBean.getThreadInfo(threadId,0);
+      if (info == null) {
+        threadInfos.remove(threadId);
+        continue;
+      }
       MyThreadInfo data=threadInfos.get(threadId);
       if (data != null) {
         data.setDelta(cpu,info);
+      }
+ else {
+        threadInfos.remove(threadId);
       }
     }
     List<MyThreadInfo> hotties=new ArrayList<MyThreadInfo>(threadInfos.values());
@@ -60,17 +78,18 @@
       Thread.sleep(threadElementsSnapshotDelay.millis());
     }
     for (int t=0; t < busiestThreads; t++) {
-      double value=-1;
+      long time=0;
       if ("cpu".equals(type)) {
-        value=hotties.get(t).cpuTime / 1E7;
+        time=hotties.get(t).cpuTime;
       }
  else       if ("wait".equals(type)) {
-        value=hotties.get(t).waitedTime / 1E7;
+        time=hotties.get(t).waitedTime;
       }
  else       if ("block".equals(type)) {
-        value=hotties.get(t).blockedTime / 1E7;
+        time=hotties.get(t).blockedTime;
       }
-      sb.append(String.format("%n%4.1f%% %s usage by thread '%s'%n",value,type,allInfos[0][t].getThreadName()));
+      double percent=(((double)time) / interval.nanos()) * 100;
+      sb.append(String.format("%n%4.1f%% (%s out of %s) %s usage by thread '%s'%n",percent,TimeValue.timeValueNanos(time),interval,type,allInfos[0][t].getThreadName()));
       boolean[] done=new boolean[threadElementsSnapshotCount];
       for (int i=0; i < threadElementsSnapshotCount; i++) {
         if (done[i])         continue;
