@@ -1,0 +1,87 @@
+{
+  if (request.sourceNode() == null) {
+    listener.onIgnoreRecovery(false,"No node to recover from, retry on next cluster state update");
+    return;
+  }
+  final InternalIndexShard shard=recoveryStatus.indexShard;
+  if (shard == null) {
+    listener.onIgnoreRecovery(false,"shard missing locally, stop recovery");
+    return;
+  }
+  if (shard.state() == IndexShardState.CLOSED) {
+    listener.onIgnoreRecovery(false,"local shard closed, stop recovery");
+    return;
+  }
+  if (recoveryStatus.canceled) {
+    listener.onIgnoreRecovery(false,"canceled recovery");
+    return;
+  }
+  recoveryStatus.recoveryThread=Thread.currentThread();
+  try {
+    logger.trace("[{}][{}] starting recovery from {}",request.shardId().index().name(),request.shardId().id(),request.sourceNode());
+    StopWatch stopWatch=new StopWatch().start();
+    RecoveryResponse recoveryResponse=transportService.submitRequest(request.sourceNode(),RecoverySource.Actions.START_RECOVERY,request,new FutureTransportResponseHandler<RecoveryResponse>(){
+      @Override public RecoveryResponse newInstance(){
+        return new RecoveryResponse();
+      }
+    }
+).txGet();
+    if (shard.state() == IndexShardState.CLOSED) {
+      removeAndCleanOnGoingRecovery(recoveryStatus);
+      listener.onIgnoreRecovery(false,"local shard closed, stop recovery");
+      return;
+    }
+    stopWatch.stop();
+    if (logger.isDebugEnabled()) {
+      StringBuilder sb=new StringBuilder();
+      sb.append('[').append(request.shardId().index().name()).append(']').append('[').append(request.shardId().id()).append("] ");
+      sb.append("recovery completed from ").append(request.sourceNode()).append(", took[").append(stopWatch.totalTime()).append("]\n");
+      sb.append("   phase1: recovered_files [").append(recoveryResponse.phase1FileNames.size()).append("]").append(" with total_size of [").append(new ByteSizeValue(recoveryResponse.phase1TotalSize)).append("]").append(", took [").append(timeValueMillis(recoveryResponse.phase1Time)).append("], throttling_wait [").append(timeValueMillis(recoveryResponse.phase1ThrottlingWaitTime)).append(']').append("\n");
+      sb.append("         : reusing_files   [").append(recoveryResponse.phase1ExistingFileNames.size()).append("] with total_size of [").append(new ByteSizeValue(recoveryResponse.phase1ExistingTotalSize)).append("]\n");
+      sb.append("   phase2: start took [").append(timeValueMillis(recoveryResponse.startTime)).append("]\n");
+      sb.append("         : recovered [").append(recoveryResponse.phase2Operations).append("]").append(" transaction log operations").append(", took [").append(timeValueMillis(recoveryResponse.phase2Time)).append("]").append("\n");
+      sb.append("   phase3: recovered [").append(recoveryResponse.phase3Operations).append("]").append(" transaction log operations").append(", took [").append(timeValueMillis(recoveryResponse.phase3Time)).append("]");
+      logger.debug(sb.toString());
+    }
+    removeAndCleanOnGoingRecovery(recoveryStatus);
+    listener.onRecoveryDone();
+  }
+ catch (  Exception e) {
+    if (recoveryStatus.canceled) {
+      listener.onIgnoreRecovery(false,"canceled recovery");
+      return;
+    }
+    if (shard.state() == IndexShardState.CLOSED) {
+      removeAndCleanOnGoingRecovery(recoveryStatus);
+      listener.onIgnoreRecovery(false,"local shard closed, stop recovery");
+      return;
+    }
+    Throwable cause=ExceptionsHelper.unwrapCause(e);
+    if (cause instanceof RecoveryEngineException) {
+      cause=cause.getCause();
+    }
+    cause=ExceptionsHelper.unwrapCause(cause);
+    if (cause instanceof RecoveryEngineException) {
+      cause=cause.getCause();
+    }
+    if (cause instanceof IndexShardNotStartedException || cause instanceof IndexMissingException || cause instanceof IndexShardMissingException) {
+      listener.onRetryRecovery(TimeValue.timeValueMillis(500),recoveryStatus);
+      return;
+    }
+    removeAndCleanOnGoingRecovery(recoveryStatus);
+    if (cause instanceof ConnectTransportException) {
+      listener.onIgnoreRecovery(true,"source node disconnected (" + request.sourceNode() + ")");
+      return;
+    }
+    if (cause instanceof IndexShardClosedException) {
+      listener.onIgnoreRecovery(true,"source shard is closed (" + request.sourceNode() + ")");
+      return;
+    }
+    if (cause instanceof AlreadyClosedException) {
+      listener.onIgnoreRecovery(true,"source shard is closed (" + request.sourceNode() + ")");
+      return;
+    }
+    logger.trace("[{}][{}] recovery from [{}] failed",e,request.shardId().index().name(),request.shardId().id(),request.sourceNode());
+    listener.onRecoveryFailure(new RecoveryFailedException(request,e),true);
+  }
+}

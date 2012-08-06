@@ -1,13 +1,13 @@
 {
-  InternalIndexShard shard=(InternalIndexShard)indicesService.indexServiceSafe(request.shardId().index().name()).shardSafe(request.shardId().id());
-  RecoveryStatus onGoingRecovery=onGoingRecoveries.get(shard.shardId());
+  RecoveryStatus onGoingRecovery=onGoingRecoveries.get(request.recoveryId());
   if (onGoingRecovery == null) {
-    throw new IndexShardClosedException(shard.shardId());
+    throw new IndexShardClosedException(request.shardId());
   }
   if (onGoingRecovery.canceled) {
     onGoingRecovery.sentCanceledToSource=true;
-    throw new IndexShardClosedException(shard.shardId());
+    throw new IndexShardClosedException(request.shardId());
   }
+  Store store=onGoingRecovery.indexShard.store();
   IndexOutput indexOutput;
   if (request.position() == 0) {
     onGoingRecovery.checksums.remove(request.name());
@@ -20,17 +20,17 @@
       }
     }
     String name=request.name();
-    if (shard.store().directory().fileExists(name)) {
+    if (store.directory().fileExists(name)) {
       name="recovery." + onGoingRecovery.startTime + "."+ name;
     }
-    indexOutput=shard.store().createOutputRaw(name);
+    indexOutput=store.createOutputRaw(name);
     onGoingRecovery.openIndexOutputs.put(request.name(),indexOutput);
   }
  else {
     indexOutput=onGoingRecovery.openIndexOutputs.get(request.name());
   }
   if (indexOutput == null) {
-    throw new IndexShardClosedException(shard.shardId());
+    throw new IndexShardClosedException(request.shardId());
   }
 synchronized (indexOutput) {
     try {
@@ -48,7 +48,7 @@ synchronized (indexOutput) {
         if (request.checksum() != null) {
           onGoingRecovery.checksums.put(request.name(),request.checksum());
         }
-        shard.store().directory().sync(Collections.singleton(request.name()));
+        store.directory().sync(Collections.singleton(request.name()));
         onGoingRecovery.openIndexOutputs.remove(request.name());
       }
     }
