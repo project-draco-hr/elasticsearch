@@ -1,0 +1,43 @@
+{
+  final BulkRequest bulkRequest=this.bulkRequest;
+  final long executionId=executionIdGen.incrementAndGet();
+  this.bulkRequest=new BulkRequest();
+  if (concurrentRequests == 0) {
+    try {
+      listener.beforeBulk(executionId,bulkRequest);
+      listener.afterBulk(executionId,bulkRequest,client.bulk(bulkRequest).actionGet());
+    }
+ catch (    Exception e) {
+      listener.afterBulk(executionId,bulkRequest,e);
+    }
+  }
+ else {
+    try {
+      semaphore.acquire();
+    }
+ catch (    InterruptedException e) {
+      listener.afterBulk(executionId,bulkRequest,e);
+      return;
+    }
+    listener.beforeBulk(executionId,bulkRequest);
+    client.bulk(bulkRequest,new ActionListener<BulkResponse>(){
+      @Override public void onResponse(      BulkResponse response){
+        try {
+          listener.afterBulk(executionId,bulkRequest,response);
+        }
+  finally {
+          semaphore.release();
+        }
+      }
+      @Override public void onFailure(      Throwable e){
+        try {
+          listener.afterBulk(executionId,bulkRequest,e);
+        }
+  finally {
+          semaphore.release();
+        }
+      }
+    }
+);
+  }
+}
