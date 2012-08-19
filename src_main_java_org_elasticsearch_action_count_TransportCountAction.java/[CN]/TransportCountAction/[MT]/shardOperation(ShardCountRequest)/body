@@ -1,5 +1,33 @@
 {
-  IndexShard indexShard=indicesService.indexServiceSafe(request.index()).shardSafe(request.shardId());
-  long count=indexShard.count(request.minScore(),request.querySource(),request.filteringAliases(),request.types());
-  return new ShardCountResponse(request.index(),request.shardId(),count);
+  IndexService indexService=indicesService.indexServiceSafe(request.index());
+  IndexShard indexShard=indexService.shardSafe(request.shardId());
+  SearchContext context=new SearchContext(0,new InternalSearchRequest().types(request.types()).filteringAliases(request.filteringAliases()),null,indexShard.searcher(),indexService,indexShard,scriptService);
+  SearchContext.setCurrent(context);
+  try {
+    if (request.minScore() != -1) {
+      context.minimumScore(request.minScore());
+    }
+    BytesReference querySource=request.querySource();
+    if (querySource != null && querySource.length() > 0) {
+      try {
+        QueryParseContext.setTypes(request.types());
+        context.parsedQuery(indexService.queryParserService().parse(querySource));
+      }
+  finally {
+        QueryParseContext.removeTypes();
+      }
+    }
+    context.preProcess();
+    try {
+      long count=Lucene.count(context.searcher(),context.query());
+      return new ShardCountResponse(request.index(),request.shardId(),count);
+    }
+ catch (    Exception e) {
+      throw new QueryPhaseExecutionException(context,"failed to execute count",e);
+    }
+  }
+  finally {
+    context.release();
+    SearchContext.removeCurrent();
+  }
 }
