@@ -1,0 +1,25 @@
+{
+  IndexService indexService=indicesService.indexService(request.index());
+  IndexShard indexShard=indexService.shardSafe(shardId);
+  Term uidTerm=UidFieldMapper.TERM_FACTORY.createTerm(Uid.createUid(request.type(),request.id()));
+  Engine.GetResult result=indexShard.get(new Engine.Get(false,uidTerm));
+  if (!result.exists()) {
+    return new ExplainResponse(false);
+  }
+  SearchContext context=new SearchContext(0,new InternalSearchRequest().types(new String[]{request.type()}).filteringAliases(request.filteringAlias()),null,indexShard.searcher(),indexService,indexShard,scriptService);
+  SearchContext.setCurrent(context);
+  context.parsedQuery(retrieveParsedQuery(request,indexService));
+  context.preProcess();
+  int topLevelDocId=result.docIdAndVersion().docId + result.docIdAndVersion().docStart;
+  try {
+    Explanation explanation=context.searcher().explain(context.query(),topLevelDocId);
+    return new ExplainResponse(true,explanation);
+  }
+ catch (  IOException e) {
+    throw new ElasticSearchException("Could not explain",e);
+  }
+ finally {
+    context.release();
+    SearchContext.removeCurrent();
+  }
+}
