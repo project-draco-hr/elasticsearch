@@ -1,0 +1,92 @@
+{
+  Map<String,GetField> fields=null;
+  byte[] source=null;
+  UidField.DocIdAndVersion docIdAndVersion=get.docIdAndVersion();
+  ResetFieldSelector fieldSelector=buildFieldSelectors(docMapper,gFields);
+  if (fieldSelector != null) {
+    fieldSelector.reset();
+    Document doc;
+    try {
+      doc=docIdAndVersion.reader.document(docIdAndVersion.docId,fieldSelector);
+    }
+ catch (    IOException e) {
+      throw new ElasticSearchException("Failed to get type [" + type + "] and id ["+ id+ "]",e);
+    }
+    source=extractSource(doc,docMapper);
+    for (    Object oField : doc.getFields()) {
+      Fieldable field=(Fieldable)oField;
+      String name=field.name();
+      Object value=null;
+      FieldMappers fieldMappers=docMapper.mappers().indexName(field.name());
+      if (fieldMappers != null) {
+        FieldMapper mapper=fieldMappers.mapper();
+        if (mapper != null) {
+          name=mapper.names().fullName();
+          value=mapper.valueForSearch(field);
+        }
+      }
+      if (value == null) {
+        if (field.isBinary()) {
+          value=new BytesArray(field.getBinaryValue(),field.getBinaryOffset(),field.getBinaryLength());
+        }
+ else {
+          value=field.stringValue();
+        }
+      }
+      if (fields == null) {
+        fields=newHashMapWithExpectedSize(2);
+      }
+      GetField getField=fields.get(name);
+      if (getField == null) {
+        getField=new GetField(name,new ArrayList<Object>(2));
+        fields.put(name,getField);
+      }
+      getField.values().add(value);
+    }
+  }
+  if (gFields != null && gFields.length > 0) {
+    SearchLookup searchLookup=null;
+    for (    String field : gFields) {
+      Object value=null;
+      if (field.contains("_source.") || field.contains("doc[")) {
+        if (searchLookup == null) {
+          searchLookup=new SearchLookup(mapperService,indexCache.fieldData(),new String[]{type});
+        }
+        SearchScript searchScript=scriptService.search(searchLookup,"mvel",field,null);
+        searchScript.setNextReader(docIdAndVersion.reader);
+        searchScript.setNextDocId(docIdAndVersion.docId);
+        try {
+          value=searchScript.run();
+        }
+ catch (        RuntimeException e) {
+          if (logger.isTraceEnabled()) {
+            logger.trace("failed to execute get request script field [{}]",e,field);
+          }
+        }
+      }
+ else {
+        FieldMappers x=docMapper.mappers().smartName(field);
+        if (x == null || !x.mapper().stored()) {
+          if (searchLookup == null) {
+            searchLookup=new SearchLookup(mapperService,indexCache.fieldData(),new String[]{type});
+            searchLookup.setNextReader(docIdAndVersion.reader);
+            searchLookup.setNextDocId(docIdAndVersion.docId);
+          }
+          value=searchLookup.source().extractValue(field);
+        }
+      }
+      if (value != null) {
+        if (fields == null) {
+          fields=newHashMapWithExpectedSize(2);
+        }
+        GetField getField=fields.get(field);
+        if (getField == null) {
+          getField=new GetField(field,new ArrayList<Object>(2));
+          fields.put(field,getField);
+        }
+        getField.values().add(value);
+      }
+    }
+  }
+  return new GetResult(shardId.index().name(),type,id,get.version(),get.exists(),source == null ? null : new BytesArray(source),fields);
+}
