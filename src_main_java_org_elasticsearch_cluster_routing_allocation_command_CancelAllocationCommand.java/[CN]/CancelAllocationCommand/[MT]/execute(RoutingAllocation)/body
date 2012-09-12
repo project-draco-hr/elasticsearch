@@ -1,0 +1,53 @@
+{
+  DiscoveryNode node=allocation.nodes().resolveNode(nodeId);
+  boolean found=false;
+  for (Iterator<MutableShardRouting> it=allocation.routingNodes().node(node.id()).iterator(); it.hasNext(); ) {
+    MutableShardRouting shardRouting=it.next();
+    if (!shardRouting.shardId().equals(shardId)) {
+      continue;
+    }
+    found=true;
+    if (shardRouting.relocatingNodeId() != null) {
+      if (shardRouting.initializing()) {
+        it.remove();
+        shardRouting.deassignNode();
+        RoutingNode relocatingFromNode=allocation.routingNodes().node(shardRouting.relocatingNodeId());
+        if (relocatingFromNode != null) {
+          for (          MutableShardRouting fromShardRouting : relocatingFromNode) {
+            if (fromShardRouting.shardId().equals(shardRouting.shardId()) && shardRouting.state() == RELOCATING) {
+              fromShardRouting.cancelRelocation();
+              break;
+            }
+          }
+        }
+      }
+ else       if (shardRouting.relocating()) {
+        if (shardRouting.primary()) {
+          throw new ElasticSearchIllegalArgumentException("[cancel_allocation] can't cancel " + shardId + " on node "+ node+ ", shard is primary and initializing its state");
+        }
+        it.remove();
+        allocation.routingNodes().unassigned().add(new MutableShardRouting(shardRouting.index(),shardRouting.id(),null,shardRouting.primary(),ShardRoutingState.UNASSIGNED,shardRouting.version() + 1));
+        RoutingNode initializingNode=allocation.routingNodes().node(shardRouting.relocatingNodeId());
+        if (initializingNode != null) {
+          for (Iterator<MutableShardRouting> itX=initializingNode.iterator(); itX.hasNext(); ) {
+            MutableShardRouting initializingShardRouting=itX.next();
+            if (initializingShardRouting.shardId().equals(shardRouting.shardId()) && initializingShardRouting.state() == INITIALIZING) {
+              shardRouting.deassignNode();
+              itX.remove();
+            }
+          }
+        }
+      }
+    }
+ else {
+      if (shardRouting.primary()) {
+        throw new ElasticSearchIllegalArgumentException("[cancel_allocation] can't cancel " + shardId + " on node "+ node+ ", shard is primary and initializing its state");
+      }
+      it.remove();
+      allocation.routingNodes().unassigned().add(new MutableShardRouting(shardRouting.index(),shardRouting.id(),null,shardRouting.primary(),ShardRoutingState.UNASSIGNED,shardRouting.version() + 1));
+    }
+  }
+  if (!found) {
+    throw new ElasticSearchIllegalArgumentException("[cancel_allocation] can't cancel " + shardId + ", failed to find it on node "+ node);
+  }
+}
