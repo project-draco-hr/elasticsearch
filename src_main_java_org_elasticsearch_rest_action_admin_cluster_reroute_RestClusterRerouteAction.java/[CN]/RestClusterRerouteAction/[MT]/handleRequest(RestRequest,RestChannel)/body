@@ -1,10 +1,35 @@
 {
   final ClusterRerouteRequest clusterRerouteRequest=Requests.clusterRerouteRequest();
   clusterRerouteRequest.listenerThreaded(false);
+  clusterRerouteRequest.dryRun(request.paramAsBoolean("dry_run",clusterRerouteRequest.dryRun()));
+  if (request.hasContent()) {
+    try {
+      clusterRerouteRequest.source(request.content());
+    }
+ catch (    Exception e) {
+      try {
+        channel.sendResponse(new XContentThrowableRestResponse(request,e));
+      }
+ catch (      IOException e1) {
+        logger.warn("Failed to send response",e1);
+      }
+      return;
+    }
+  }
   client.admin().cluster().reroute(clusterRerouteRequest,new ActionListener<ClusterRerouteResponse>(){
     @Override public void onResponse(    ClusterRerouteResponse response){
       try {
-        channel.sendResponse(new StringRestResponse(RestStatus.OK));
+        XContentBuilder builder=RestXContentBuilder.restContentBuilder(request);
+        builder.startObject();
+        builder.field("ok",true);
+        builder.startObject("state");
+        if (request.param("filter_metadata") == null) {
+          request.params().put("filter_metadata","true");
+        }
+        response.state().settingsFilter(settingsFilter).toXContent(builder,request);
+        builder.endObject();
+        builder.endObject();
+        channel.sendResponse(new XContentRestResponse(request,RestStatus.OK,builder));
       }
  catch (      Exception e) {
         onFailure(e);

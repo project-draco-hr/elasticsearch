@@ -1,0 +1,24 @@
+{
+  Settings commonSettings=settingsBuilder().put("cluster.routing.allocation.disable_allocation",true).put("gateway.type","local").build();
+  logger.info("--> cleaning nodes");
+  buildNode("node1",settingsBuilder().put("gateway.type","local").build());
+  buildNode("node2",settingsBuilder().put("gateway.type","local").build());
+  cleanAndCloseNodes();
+  logger.info("--> starting 2 nodes");
+  startNode("node1",commonSettings);
+  startNode("node2",commonSettings);
+  logger.info("--> create an index with 1 shard, 1 replica, nothing should allocate");
+  client("node1").admin().indices().prepareCreate("test").setSettings(settingsBuilder().put("index.number_of_shards",1)).execute().actionGet();
+  ClusterState state=client("node1").admin().cluster().prepareState().execute().actionGet().state();
+  assertThat(state.routingNodes().unassigned().size(),equalTo(2));
+  logger.info("--> explicitly allocate shard 1, actually allocating, no dry run");
+  state=client("node1").admin().cluster().prepareReroute().add(new AllocateAllocationCommand(new ShardId("test",0),"node1",true)).execute().actionGet().state();
+  assertThat(state.routingNodes().unassigned().size(),equalTo(1));
+  assertThat(state.routingNodes().node(state.nodes().resolveNode("node1").id()).shards().get(0).state(),equalTo(ShardRoutingState.INITIALIZING));
+  ClusterHealthResponse healthResponse=client("node1").admin().cluster().prepareHealth().setWaitForYellowStatus().execute().actionGet();
+  assertThat(healthResponse.timedOut(),equalTo(false));
+  logger.info("--> get the state, verify shard 1 primary allocated");
+  state=client("node1").admin().cluster().prepareState().execute().actionGet().state();
+  assertThat(state.routingNodes().unassigned().size(),equalTo(1));
+  assertThat(state.routingNodes().node(state.nodes().resolveNode("node1").id()).shards().get(0).state(),equalTo(ShardRoutingState.STARTED));
+}
