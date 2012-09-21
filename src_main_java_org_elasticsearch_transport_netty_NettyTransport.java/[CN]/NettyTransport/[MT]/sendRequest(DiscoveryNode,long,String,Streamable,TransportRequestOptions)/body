@@ -4,8 +4,25 @@
     options.withCompress(true);
   }
   CachedStreamOutput.Entry cachedEntry=CachedStreamOutput.popEntry();
-  TransportStreams.buildRequest(cachedEntry,requestId,action,message,options);
+  byte status=0;
+  status=TransportStatus.setRequest(status);
+  if (options.compress()) {
+    status=TransportStatus.setCompress(status);
+    cachedEntry.bytes().skip(NettyHeader.HEADER_SIZE);
+    StreamOutput stream=cachedEntry.handles(CompressorFactory.defaultCompressor());
+    stream.writeString(action);
+    message.writeTo(stream);
+    stream.close();
+  }
+ else {
+    StreamOutput stream=cachedEntry.handles();
+    cachedEntry.bytes().skip(NettyHeader.HEADER_SIZE);
+    stream.writeString(action);
+    message.writeTo(stream);
+    stream.close();
+  }
   ChannelBuffer buffer=cachedEntry.bytes().bytes().toChannelBuffer();
+  NettyHeader.writeHeader(buffer,requestId,status);
   ChannelFuture future=targetChannel.write(buffer);
   future.addListener(new CacheFutureListener(cachedEntry));
 }

@@ -3,7 +3,7 @@
   BytesStreamOutput stream;
   try {
     stream=cachedEntry.bytes();
-    writeResponseExceptionHeader(stream);
+    cachedEntry.bytes().skip(NettyHeader.HEADER_SIZE);
     RemoteTransportException tx=new RemoteTransportException(transport.nodeName(),transport.wrapAddress(channel.getLocalAddress()),action,error);
     ThrowableObjectOutputStream too=new ThrowableObjectOutputStream(stream);
     too.writeObject(tx);
@@ -12,14 +12,17 @@
  catch (  NotSerializableException e) {
     cachedEntry.reset();
     stream=cachedEntry.bytes();
-    writeResponseExceptionHeader(stream);
+    cachedEntry.bytes().skip(NettyHeader.HEADER_SIZE);
     RemoteTransportException tx=new RemoteTransportException(transport.nodeName(),transport.wrapAddress(channel.getLocalAddress()),action,new NotSerializableTransportException(error));
     ThrowableObjectOutputStream too=new ThrowableObjectOutputStream(stream);
     too.writeObject(tx);
     too.close();
   }
-  ChannelBuffer buffer=stream.bytes().toChannelBuffer();
-  buffer.setInt(0,buffer.writerIndex() - 4);
+  byte status=0;
+  status=TransportStatus.setResponse(status);
+  status=TransportStatus.setError(status);
+  ChannelBuffer buffer=cachedEntry.bytes().bytes().toChannelBuffer();
+  NettyHeader.writeHeader(buffer,requestId,status);
   ChannelFuture future=channel.write(buffer);
   future.addListener(new NettyTransport.CacheFutureListener(cachedEntry));
 }

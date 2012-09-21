@@ -3,8 +3,23 @@
     options.withCompress(true);
   }
   CachedStreamOutput.Entry cachedEntry=CachedStreamOutput.popEntry();
-  TransportStreams.buildResponse(cachedEntry,requestId,message,options);
+  byte status=0;
+  status=TransportStatus.setResponse(status);
+  if (options.compress()) {
+    status=TransportStatus.setCompress(status);
+    cachedEntry.bytes().skip(NettyHeader.HEADER_SIZE);
+    StreamOutput stream=cachedEntry.handles(CompressorFactory.defaultCompressor());
+    message.writeTo(stream);
+    stream.close();
+  }
+ else {
+    StreamOutput stream=cachedEntry.handles();
+    cachedEntry.bytes().skip(NettyHeader.HEADER_SIZE);
+    message.writeTo(stream);
+    stream.close();
+  }
   ChannelBuffer buffer=cachedEntry.bytes().bytes().toChannelBuffer();
+  NettyHeader.writeHeader(buffer,requestId,status);
   ChannelFuture future=channel.write(buffer);
   future.addListener(new NettyTransport.CacheFutureListener(cachedEntry));
 }

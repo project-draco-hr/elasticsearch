@@ -6,16 +6,16 @@
   }
   ChannelBuffer buffer=(ChannelBuffer)m;
   int size=buffer.getInt(buffer.readerIndex() - 4);
-  transportServiceAdapter.received(size + 4);
+  transportServiceAdapter.received(size + 6);
+  boolean hasMessageBytesToRead=(size - (NettyHeader.HEADER_SIZE - 6)) != 0;
   int markedReaderIndex=buffer.readerIndex();
   int expectedIndexReader=markedReaderIndex + size;
   StreamInput streamIn=ChannelBufferStreamInputFactory.create(buffer,size);
   long requestId=buffer.readLong();
   byte status=buffer.readByte();
-  boolean isRequest=TransportStreams.statusIsRequest(status);
-  boolean hasBytesToRead=(size - (TransportStreams.HEADER_SIZE - 4)) != 0;
+  boolean isRequest=TransportStatus.isRequest(status);
   StreamInput wrappedStream;
-  if (TransportStreams.statusIsCompress(status) && hasBytesToRead && buffer.readable()) {
+  if (TransportStatus.isCompress(status) && hasMessageBytesToRead && buffer.readable()) {
     Compressor compressor=CompressorFactory.compressor(buffer);
     if (compressor == null) {
       int maxToRead=Math.min(buffer.readableBytes(),10);
@@ -47,7 +47,7 @@
  else {
     TransportResponseHandler handler=transportServiceAdapter.remove(requestId);
     if (handler != null) {
-      if (TransportStreams.statusIsError(status)) {
+      if (TransportStatus.isError(status)) {
         handlerResponseError(wrappedStream,handler);
       }
  else {
@@ -59,10 +59,10 @@
     }
     if (buffer.readerIndex() != expectedIndexReader) {
       if (buffer.readerIndex() < expectedIndexReader) {
-        logger.warn("Message not fully read (response) for [{}] handler {}, error [{}], resetting",requestId,handler,TransportStreams.statusIsError(status));
+        logger.warn("Message not fully read (response) for [{}] handler {}, error [{}], resetting",requestId,handler,TransportStatus.isError(status));
       }
  else {
-        logger.warn("Message read past expected size (response) for [{}] handler {}, error [{}], resetting",requestId,handler,TransportStreams.statusIsError(status));
+        logger.warn("Message read past expected size (response) for [{}] handler {}, error [{}], resetting",requestId,handler,TransportStatus.isError(status));
       }
       buffer.readerIndex(expectedIndexReader);
     }
