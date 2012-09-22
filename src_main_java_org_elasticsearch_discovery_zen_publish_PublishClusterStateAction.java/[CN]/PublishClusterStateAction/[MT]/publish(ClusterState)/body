@@ -1,29 +1,37 @@
 {
   DiscoveryNode localNode=nodesProvider.nodes().localNode();
-  CachedStreamOutput.Entry cachedEntry=CachedStreamOutput.popEntry();
-  byte[] clusterStateInBytes;
+  Map<Version,CachedStreamOutput.Entry> serializedStates=Maps.newHashMap();
   try {
-    StreamOutput stream=cachedEntry.handles(CompressorFactory.defaultCompressor());
-    ClusterState.Builder.writeTo(clusterState,stream);
-    stream.close();
-    clusterStateInBytes=cachedEntry.bytes().bytes().copyBytesArray().toBytes();
-  }
- catch (  Exception e) {
-    logger.warn("failed to serialize cluster_state before publishing it to nodes",e);
-    return;
-  }
- finally {
-    CachedStreamOutput.pushEntry(cachedEntry);
-  }
-  for (  final DiscoveryNode node : clusterState.nodes()) {
-    if (node.equals(localNode)) {
-      continue;
-    }
-    transportService.sendRequest(node,PublishClusterStateRequestHandler.ACTION,new PublishClusterStateRequest(clusterStateInBytes),TransportRequestOptions.options().withHighType().withCompress(false),new VoidTransportResponseHandler(ThreadPool.Names.SAME){
-      @Override public void handleException(      TransportException exp){
-        logger.debug("failed to send cluster state to [{}], should be detected as failed soon...",exp,node);
+    for (    final DiscoveryNode node : clusterState.nodes()) {
+      if (node.equals(localNode)) {
+        continue;
       }
-    }
+      CachedStreamOutput.Entry entry=serializedStates.get(node.version());
+      if (entry == null) {
+        try {
+          entry=CachedStreamOutput.popEntry();
+          StreamOutput stream=entry.handles(CompressorFactory.defaultCompressor());
+          stream.setVersion(node.version());
+          ClusterState.Builder.writeTo(clusterState,stream);
+          stream.close();
+          serializedStates.put(node.version(),entry);
+        }
+ catch (        Exception e) {
+          logger.warn("failed to serialize cluster_state before publishing it to nodes",e);
+          return;
+        }
+      }
+      transportService.sendRequest(node,PublishClusterStateRequestHandler.ACTION,new PublishClusterStateRequest(entry.bytes().bytes()),TransportRequestOptions.options().withHighType().withCompress(false),new VoidTransportResponseHandler(ThreadPool.Names.SAME){
+        @Override public void handleException(        TransportException exp){
+          logger.debug("failed to send cluster state to [{}], should be detected as failed soon...",exp,node);
+        }
+      }
 );
+    }
+  }
+  finally {
+    for (    CachedStreamOutput.Entry entry : serializedStates.values()) {
+      CachedStreamOutput.pushEntry(entry);
+    }
   }
 }
