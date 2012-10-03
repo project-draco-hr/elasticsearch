@@ -2,21 +2,25 @@
   if (indexWriter == null) {
     throw new EngineClosedException(shardId,failedEngine);
   }
-  if (disableFlushCounter > 0) {
-    throw new FlushNotAllowedEngineException(shardId,"Recovery is in progress, flush is not allowed");
+  if (flush.type() == Flush.Type.NEW_WRITER || flush.type() == Flush.Type.COMMIT_TRANSLOG) {
+    if (onGoingRecoveries > 0) {
+      throw new FlushNotAllowedEngineException(shardId,"recovery is in progress, flush [" + flush.type() + "] is not allowed");
+    }
   }
-  if (!flushing.compareAndSet(false,true)) {
-    throw new FlushNotAllowedEngineException(shardId,"Already flushing...");
+  int currentFlushing=flushing.incrementAndGet();
+  if (currentFlushing > 1 && !flush.waitIfOngoing()) {
+    flushing.decrementAndGet();
+    throw new FlushNotAllowedEngineException(shardId,"already flushing...");
   }
+  flushLock.lock();
   try {
-    boolean makeTransientCurrent=false;
-    if (flush.full()) {
+    if (flush.type() == Flush.Type.NEW_WRITER) {
       rwl.writeLock().lock();
       try {
         if (indexWriter == null) {
           throw new EngineClosedException(shardId,failedEngine);
         }
-        if (disableFlushCounter > 0) {
+        if (onGoingRecoveries > 0) {
           throw new FlushNotAllowedEngineException(shardId,"Recovery is in progress, flush is not allowed");
         }
         dirty=false;
@@ -52,13 +56,14 @@ catch (        Exception e) {
         rwl.writeLock().unlock();
       }
     }
- else {
+ else     if (flush.type() == Flush.Type.COMMIT_TRANSLOG) {
+      boolean makeTransientCurrent=false;
       rwl.readLock().lock();
       try {
         if (indexWriter == null) {
           throw new EngineClosedException(shardId,failedEngine);
         }
-        if (disableFlushCounter > 0) {
+        if (onGoingRecoveries > 0) {
           throw new FlushNotAllowedEngineException(shardId,"Recovery is in progress, flush is not allowed");
         }
         if (flushNeeded || flush.force()) {
@@ -106,6 +111,38 @@ catch (          Exception e) {
         rwl.readLock().unlock();
       }
     }
+ else     if (flush.type() == Flush.Type.COMMIT) {
+      rwl.readLock().lock();
+      try {
+        if (indexWriter == null) {
+          throw new EngineClosedException(shardId,failedEngine);
+        }
+        try {
+          long translogId=translog.currentId();
+          indexWriter.commit(MapBuilder.<String,String>newMapBuilder().put(Translog.TRANSLOG_ID_KEY,Long.toString(translogId)).map());
+        }
+ catch (        OutOfMemoryError e) {
+          translog.revertTransient();
+          failEngine(e);
+          throw new FlushFailedEngineException(shardId,e);
+        }
+catch (        IllegalStateException e) {
+          if (e.getMessage().contains("OutOfMemoryError")) {
+            failEngine(e);
+          }
+          throw new FlushFailedEngineException(shardId,e);
+        }
+catch (        Exception e) {
+          throw new FlushFailedEngineException(shardId,e);
+        }
+      }
+  finally {
+        rwl.readLock().unlock();
+      }
+    }
+ else {
+      throw new ElasticSearchIllegalStateException("flush type [" + flush.type() + "] not supported");
+    }
     try {
       SegmentInfos infos=new SegmentInfos();
       infos.read(store.directory());
@@ -118,6 +155,7 @@ catch (          Exception e) {
     }
   }
   finally {
-    flushing.set(false);
+    flushLock.unlock();
+    flushing.decrementAndGet();
   }
 }
