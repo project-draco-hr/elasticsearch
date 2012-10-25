@@ -1,0 +1,42 @@
+{
+  super(facetName);
+  this.fieldDataCache=context.fieldDataCache();
+  this.size=size;
+  this.comparatorType=comparatorType;
+  this.numberOfShards=context.numberOfShards();
+  MapperService.SmartNameFieldMappers smartMappers=context.smartFieldMappers(fieldName);
+  if (smartMappers == null || !smartMappers.hasMapper()) {
+    throw new ElasticSearchIllegalArgumentException("Field [" + fieldName + "] doesn't have a type, can't run terms double facet collector on it");
+  }
+  if (smartMappers.explicitTypeInNameWithDocMapper()) {
+    setFilter(context.filterCache().cache(smartMappers.docMapper().typeFilter()));
+  }
+  if (smartMappers.mapper().fieldDataType() != FieldDataType.DefaultTypes.DOUBLE) {
+    throw new ElasticSearchIllegalArgumentException("Field [" + fieldName + "] is not of double type, can't run terms double facet collector on it");
+  }
+  this.indexFieldName=smartMappers.mapper().names().indexName();
+  this.fieldDataType=smartMappers.mapper().fieldDataType();
+  if (script != null) {
+    this.script=context.scriptService().search(context.lookup(),scriptLang,script,params);
+  }
+ else {
+    this.script=null;
+  }
+  if (this.script == null && excluded.isEmpty()) {
+    aggregator=new StaticAggregatorValueProc(CacheRecycler.popDoubleIntMap());
+  }
+ else {
+    aggregator=new AggregatorValueProc(CacheRecycler.popDoubleIntMap(),excluded,this.script);
+  }
+  if (allTerms) {
+    try {
+      for (      AtomicReaderContext readerContext : context.searcher().getTopReaderContext().leaves()) {
+        DoubleFieldData fieldData=(DoubleFieldData)fieldDataCache.cache(fieldDataType,readerContext.reader(),indexFieldName);
+        fieldData.forEachValue(aggregator);
+      }
+    }
+ catch (    Exception e) {
+      throw new FacetPhaseExecutionException(facetName,"failed to load all terms",e);
+    }
+  }
+}
