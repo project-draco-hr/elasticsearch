@@ -1,16 +1,17 @@
 {
   Map<Object,TIntObjectHashMap<ParentDoc>> parentDocsPerReader=new HashMap<Object,TIntObjectHashMap<ParentDoc>>();
   for (  ScoreDoc scoreDoc : topDocs.scoreDocs) {
-    int readerIndex=context.searcher().readerIndex(scoreDoc.doc);
-    IndexReader subReader=context.searcher().subReaders()[readerIndex];
-    int subDoc=scoreDoc.doc - context.searcher().docStarts()[readerIndex];
-    HashedBytesArray parentId=context.idCache().reader(subReader).parentIdByDoc(parentType,subDoc);
+    int readerIndex=ReaderUtil.subIndex(scoreDoc.doc,context.searcher().getIndexReader().leaves());
+    AtomicReaderContext subContext=context.searcher().getIndexReader().leaves().get(readerIndex);
+    int subDoc=scoreDoc.doc - subContext.docBase;
+    HashedBytesArray parentId=context.idCache().reader(subContext.reader()).parentIdByDoc(parentType,subDoc);
     if (parentId == null) {
       continue;
     }
-    for (    IndexReader indexReader : context.searcher().subReaders()) {
+    for (    AtomicReaderContext atomicReaderContext : context.searcher().getIndexReader().leaves()) {
+      AtomicReader indexReader=atomicReaderContext.reader();
       int parentDocId=context.idCache().reader(indexReader).docById(parentType,parentId);
-      if (parentDocId != -1 && !indexReader.isDeleted(parentDocId)) {
+      if (parentDocId != -1 && !indexReader.getLiveDocs().get(parentDocId)) {
         TIntObjectHashMap<ParentDoc> readerParentDocs=parentDocsPerReader.get(indexReader.getCoreCacheKey());
         if (readerParentDocs == null) {
           readerParentDocs=new TIntObjectHashMap<ParentDoc>();

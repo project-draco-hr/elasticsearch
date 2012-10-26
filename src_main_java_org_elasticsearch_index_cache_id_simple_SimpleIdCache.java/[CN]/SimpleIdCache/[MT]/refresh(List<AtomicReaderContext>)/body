@@ -4,7 +4,7 @@ synchronized (idReaders) {
       if (!refreshNeeded(atomicReaderContexts)) {
         return;
       }
-      Map<Object,Map<BytesReference,TypeBuilder>> builders=new HashMap<Object,Map<BytesReference,TypeBuilder>>();
+      Map<Object,Map<String,TypeBuilder>> builders=new HashMap<Object,Map<String,TypeBuilder>>();
       for (      AtomicReaderContext context : atomicReaderContexts) {
         AtomicReader reader=context.reader();
         if (idReaders.containsKey(reader.getCoreCacheKey())) {
@@ -13,7 +13,7 @@ synchronized (idReaders) {
         if (reader instanceof SegmentReader) {
           ((SegmentReader)reader).addCoreClosedListener(this);
         }
-        Map<BytesReference,TypeBuilder> readerBuilder=new HashMap<BytesReference,TypeBuilder>();
+        Map<String,TypeBuilder> readerBuilder=new HashMap<String,TypeBuilder>();
         builders.put(reader.getCoreCacheKey(),readerBuilder);
         Terms terms=reader.terms(UidFieldMapper.NAME);
         if (terms == null) {
@@ -23,10 +23,10 @@ synchronized (idReaders) {
         DocsEnum docsEnum=null;
         for (BytesRef term=termsEnum.next(); term != null; term=termsEnum.term()) {
           HashedBytesArray[] typeAndId=splitUidIntoTypeAndId(term);
-          TypeBuilder typeBuilder=readerBuilder.get(typeAndId[0]);
+          TypeBuilder typeBuilder=readerBuilder.get(typeAndId[0].toUtf8());
           if (typeBuilder == null) {
             typeBuilder=new TypeBuilder(reader);
-            readerBuilder.put(typeAndId[0],typeBuilder);
+            readerBuilder.put(typeAndId[0].toUtf8(),typeBuilder);
           }
           HashedBytesArray idAsBytes=checkIfCanReuse(builders,typeAndId[1]);
           docsEnum=termsEnum.docs(reader.getLiveDocs(),docsEnum,0);
@@ -41,7 +41,7 @@ synchronized (idReaders) {
         if (idReaders.containsKey(reader.getCoreCacheKey())) {
           continue;
         }
-        Map<BytesReference,TypeBuilder> readerBuilder=builders.get(reader.getCoreCacheKey());
+        Map<String,TypeBuilder> readerBuilder=builders.get(reader.getCoreCacheKey());
         Terms terms=reader.terms(ParentFieldMapper.NAME);
         if (terms == null) {
           throw new ElasticSearchIllegalArgumentException("Id cache needs _parent field");
@@ -50,10 +50,10 @@ synchronized (idReaders) {
         DocsEnum docsEnum=null;
         for (BytesRef term=termsEnum.next(); term != null; term=termsEnum.term()) {
           HashedBytesArray[] typeAndId=splitUidIntoTypeAndId(term);
-          TypeBuilder typeBuilder=readerBuilder.get(typeAndId[0]);
+          TypeBuilder typeBuilder=readerBuilder.get(typeAndId[0].toUtf8());
           if (typeBuilder == null) {
             typeBuilder=new TypeBuilder(reader);
-            readerBuilder.put(typeAndId[0],typeBuilder);
+            readerBuilder.put(typeAndId[0].toUtf8(),typeBuilder);
           }
           HashedBytesArray idAsBytes=checkIfCanReuse(builders,typeAndId[1]);
           boolean added=false;
@@ -70,9 +70,9 @@ synchronized (idReaders) {
           }
         }
       }
-      for (      Map.Entry<Object,Map<BytesReference,TypeBuilder>> entry : builders.entrySet()) {
-        MapBuilder<BytesReference,SimpleIdReaderTypeCache> types=MapBuilder.newMapBuilder();
-        for (        Map.Entry<BytesReference,TypeBuilder> typeBuilderEntry : entry.getValue().entrySet()) {
+      for (      Map.Entry<Object,Map<String,TypeBuilder>> entry : builders.entrySet()) {
+        MapBuilder<String,SimpleIdReaderTypeCache> types=MapBuilder.newMapBuilder();
+        for (        Map.Entry<String,TypeBuilder> typeBuilderEntry : entry.getValue().entrySet()) {
           types.put(typeBuilderEntry.getKey(),new SimpleIdReaderTypeCache(typeBuilderEntry.getKey(),typeBuilderEntry.getValue().idToDoc,typeBuilderEntry.getValue().docToId,typeBuilderEntry.getValue().parentIdsValues.toArray(new HashedBytesArray[typeBuilderEntry.getValue().parentIdsValues.size()]),typeBuilderEntry.getValue().parentIdsOrdinals));
         }
         SimpleIdReaderCache readerCache=new SimpleIdReaderCache(entry.getKey(),types.immutableMap());
