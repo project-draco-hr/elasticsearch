@@ -1,28 +1,28 @@
 {
-  ResetFieldSelector fieldSelector;
+  BaseFieldVisitor fieldVisitor;
   List<String> extractFieldNames=null;
   boolean sourceRequested=false;
   if (!context.hasFieldNames()) {
     if (context.hasPartialFields()) {
-      fieldSelector=new UidAndSourceFieldSelector();
+      fieldVisitor=new UidAndSourceFieldVisitor();
       sourceRequested=false;
     }
  else     if (context.hasScriptFields()) {
-      fieldSelector=UidFieldSelector.INSTANCE;
+      fieldVisitor=UidFieldVisitor.INSTANCE;
       sourceRequested=false;
     }
  else {
-      fieldSelector=new UidAndSourceFieldSelector();
+      fieldVisitor=new UidAndSourceFieldVisitor();
       sourceRequested=true;
     }
   }
  else   if (context.fieldNames().isEmpty()) {
-    fieldSelector=UidFieldSelector.INSTANCE;
+    fieldVisitor=UidFieldVisitor.INSTANCE;
     sourceRequested=false;
   }
  else {
     boolean loadAllStored=false;
-    FieldMappersFieldSelector fieldSelectorMapper=null;
+    FieldMappersFieldVisitor fieldVisitorMapper=null;
     for (    String fieldName : context.fieldNames()) {
       if (fieldName.equals("*")) {
         loadAllStored=true;
@@ -34,10 +34,10 @@
       }
       FieldMappers x=context.smartNameFieldMappers(fieldName);
       if (x != null && x.mapper().stored()) {
-        if (fieldSelectorMapper == null) {
-          fieldSelectorMapper=new FieldMappersFieldSelector();
+        if (fieldVisitorMapper == null) {
+          fieldVisitorMapper=new FieldMappersFieldVisitor();
         }
-        fieldSelectorMapper.add(x);
+        fieldVisitorMapper.add(x);
       }
  else {
         if (extractFieldNames == null) {
@@ -48,31 +48,31 @@
     }
     if (loadAllStored) {
       if (sourceRequested || extractFieldNames != null) {
-        fieldSelector=null;
+        fieldVisitor=null;
       }
  else {
-        fieldSelector=AllButSourceFieldSelector.INSTANCE;
+        fieldVisitor=new AllButSourceFieldVisitor();
       }
     }
- else     if (fieldSelectorMapper != null) {
-      fieldSelectorMapper.add(UidFieldMapper.NAME);
+ else     if (fieldVisitorMapper != null) {
+      fieldVisitorMapper.add(UidFieldMapper.NAME);
       if (extractFieldNames != null || sourceRequested) {
-        fieldSelectorMapper.add(SourceFieldMapper.NAME);
+        fieldVisitorMapper.add(SourceFieldMapper.NAME);
       }
-      fieldSelector=fieldSelectorMapper;
+      fieldVisitor=fieldVisitorMapper;
     }
  else     if (extractFieldNames != null || sourceRequested) {
-      fieldSelector=new UidAndSourceFieldSelector();
+      fieldVisitor=new UidAndSourceFieldVisitor();
     }
  else {
-      fieldSelector=UidFieldSelector.INSTANCE;
+      fieldVisitor=UidFieldVisitor.INSTANCE;
     }
   }
   InternalSearchHit[] hits=new InternalSearchHit[context.docIdsToLoadSize()];
   for (int index=0; index < context.docIdsToLoadSize(); index++) {
     int docId=context.docIdsToLoad()[context.docIdsToLoadFrom() + index];
-    Document doc=loadDocument(context,fieldSelector,docId);
-    Uid uid=extractUid(context,doc,fieldSelector);
+    Document doc=loadDocument(context,fieldVisitor,docId);
+    Uid uid=extractUid(context,doc,fieldVisitor);
     DocumentMapper documentMapper=context.mapperService().documentMapper(uid.type());
     if (documentMapper == null) {
       throw new TypeMissingException(new Index(context.shardTarget().index()),uid.type(),"failed to find type loaded for doc [" + uid.id() + "]");
@@ -81,7 +81,7 @@
     InternalSearchHit searchHit=new InternalSearchHit(docId,uid.id(),uid.type(),sourceRequested ? source : null,null);
     hits[index]=searchHit;
     for (    Object oField : doc.getFields()) {
-      Fieldable field=(Fieldable)oField;
+      IndexableField field=(IndexableField)oField;
       String name=field.name();
       if (name.equals(UidFieldMapper.NAME)) {
         continue;
@@ -95,12 +95,12 @@
         FieldMapper mapper=fieldMappers.mapper();
         if (mapper != null) {
           name=mapper.names().fullName();
-          value=mapper.valueForSearch(field);
+          value=mapper.valueForSearch((Field)field);
         }
       }
       if (value == null) {
-        if (field.isBinary()) {
-          value=new BytesArray(field.getBinaryValue(),field.getBinaryOffset(),field.getBinaryLength());
+        if (field.binaryValue() != null) {
+          value=new BytesArray(field.binaryValue());
         }
  else {
           value=field.stringValue();
@@ -116,10 +116,10 @@
       }
       hitField.values().add(value);
     }
-    int readerIndex=context.searcher().readerIndex(docId);
-    IndexReader subReader=context.searcher().subReaders()[readerIndex];
-    int subDoc=docId - context.searcher().docStarts()[readerIndex];
-    context.lookup().setNextReader(subReader);
+    int readerIndex=ReaderUtil.subIndex(docId,context.searcher().getIndexReader().leaves());
+    AtomicReaderContext subReaderContext=context.searcher().getIndexReader().leaves().get(readerIndex);
+    int subDoc=docId - subReaderContext.docBase;
+    context.lookup().setNextReader(subReaderContext);
     context.lookup().setNextDocId(subDoc);
     if (source != null) {
       context.lookup().source().setNextSource(new BytesArray(source));
@@ -143,7 +143,7 @@
     for (    FetchSubPhase fetchSubPhase : fetchSubPhases) {
       FetchSubPhase.HitContext hitContext=new FetchSubPhase.HitContext();
       if (fetchSubPhase.hitExecutionNeeded(context)) {
-        hitContext.reset(searchHit,subReader,subDoc,context.searcher().getIndexReader(),docId,doc);
+        hitContext.reset(searchHit,subReaderContext,subDoc,context.searcher().getIndexReader(),docId,doc);
         fetchSubPhase.hitExecute(context,hitContext);
       }
     }

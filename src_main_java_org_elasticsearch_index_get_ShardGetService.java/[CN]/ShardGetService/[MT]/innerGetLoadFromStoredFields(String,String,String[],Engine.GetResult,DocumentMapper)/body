@@ -2,19 +2,20 @@
   Map<String,GetField> fields=null;
   byte[] source=null;
   UidField.DocIdAndVersion docIdAndVersion=get.docIdAndVersion();
-  ResetFieldSelector fieldSelector=buildFieldSelectors(docMapper,gFields);
-  if (fieldSelector != null) {
-    fieldSelector.reset();
+  BaseFieldVisitor fieldVisitor=buildFieldSelectors(docMapper,gFields);
+  if (fieldVisitor != null) {
+    fieldVisitor.reset();
     Document doc;
     try {
-      doc=docIdAndVersion.reader.document(docIdAndVersion.docId,fieldSelector);
+      docIdAndVersion.reader.reader().document(docIdAndVersion.docId,fieldVisitor);
+      doc=fieldVisitor.createDocument();
     }
  catch (    IOException e) {
       throw new ElasticSearchException("Failed to get type [" + type + "] and id ["+ id+ "]",e);
     }
     source=extractSource(doc,docMapper);
     for (    Object oField : doc.getFields()) {
-      Fieldable field=(Fieldable)oField;
+      Field field=(Field)oField;
       String name=field.name();
       Object value=null;
       FieldMappers fieldMappers=docMapper.mappers().indexName(field.name());
@@ -26,8 +27,8 @@
         }
       }
       if (value == null) {
-        if (field.isBinary()) {
-          value=new BytesArray(field.getBinaryValue(),field.getBinaryOffset(),field.getBinaryLength());
+        if (field.binaryValue() != null) {
+          value=new BytesArray(field.binaryValue());
         }
  else {
           value=field.stringValue();
