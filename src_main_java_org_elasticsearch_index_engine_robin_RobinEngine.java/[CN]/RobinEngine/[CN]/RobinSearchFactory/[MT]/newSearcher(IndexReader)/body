@@ -1,9 +1,9 @@
 {
-  ExtendedIndexSearcher searcher=new ExtendedIndexSearcher(reader);
+  IndexSearcher searcher=new IndexSearcher(reader);
   searcher.setSimilarity(similarityService.defaultSearchSimilarity());
   if (warmer != null) {
     Searcher currentSearcher=null;
-    ExtendedIndexSearcher newSearcher=null;
+    IndexSearcher newSearcher=null;
     boolean closeNewSearcher=false;
     try {
       if (searcherManager == null) {
@@ -12,20 +12,20 @@
  else {
         currentSearcher=searcher();
         List<IndexReader> readers=Lists.newArrayList();
-        for (        IndexReader subReader : searcher.subReaders()) {
+        for (        AtomicReaderContext newReaderContext : searcher.getIndexReader().leaves()) {
           boolean found=false;
-          for (          IndexReader currentReader : currentSearcher.searcher().subReaders()) {
-            if (currentReader.getCoreCacheKey().equals(subReader.getCoreCacheKey())) {
+          for (          AtomicReaderContext currentReaderContext : currentSearcher.reader().leaves()) {
+            if (currentReaderContext.reader().getCoreCacheKey().equals(newReaderContext.reader().getCoreCacheKey())) {
               found=true;
               break;
             }
           }
           if (!found) {
-            readers.add(subReader);
+            readers.add(newReaderContext.reader());
           }
         }
         if (!readers.isEmpty()) {
-          newSearcher=new ExtendedIndexSearcher(new MultiReader(readers.toArray(new IndexReader[readers.size()]),false));
+          newSearcher=new IndexSearcher(new MultiReader(readers.toArray(new IndexReader[readers.size()]),false));
           closeNewSearcher=true;
         }
       }
@@ -44,11 +44,6 @@
         currentSearcher.release();
       }
       if (newSearcher != null && closeNewSearcher) {
-        try {
-          newSearcher.close();
-        }
- catch (        Exception e) {
-        }
         try {
           newSearcher.getIndexReader().close();
         }

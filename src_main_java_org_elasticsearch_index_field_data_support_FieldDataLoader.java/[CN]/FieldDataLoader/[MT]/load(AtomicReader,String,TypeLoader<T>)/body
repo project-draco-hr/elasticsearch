@@ -1,0 +1,49 @@
+{
+  loader.init();
+  ArrayList<int[]> ordinals=new ArrayList<int[]>();
+  int[] idx=new int[reader.maxDoc()];
+  ordinals.add(new int[reader.maxDoc()]);
+  int t=1;
+  Terms terms=reader.terms(field);
+  if (terms == null) {
+    return loader.buildSingleValue(field,ordinals.get(0));
+  }
+  TermsEnum termsEnum=terms.iterator(null);
+  try {
+    DocsEnum docsEnum=null;
+    for (BytesRef term=termsEnum.next(); term != null; term=termsEnum.next()) {
+      loader.collectTerm(BytesRef.deepCopyOf(term));
+      docsEnum=termsEnum.docs(reader.getLiveDocs(),docsEnum,0);
+      for (int docId=docsEnum.nextDoc(); docId != DocsEnum.NO_MORE_DOCS; docId=docsEnum.nextDoc()) {
+        int[] ordinal;
+        if (idx[docId] >= ordinals.size()) {
+          ordinal=new int[reader.maxDoc()];
+          ordinals.add(ordinal);
+        }
+ else {
+          ordinal=ordinals.get(idx[docId]);
+        }
+        ordinal[docId]=t;
+        idx[docId]++;
+      }
+      t++;
+    }
+  }
+ catch (  RuntimeException e) {
+    if (e.getClass().getName().endsWith("StopFillCacheException")) {
+    }
+ else {
+      throw e;
+    }
+  }
+  if (ordinals.size() == 1) {
+    return loader.buildSingleValue(field,ordinals.get(0));
+  }
+ else {
+    int[][] nativeOrdinals=new int[ordinals.size()][];
+    for (int i=0; i < nativeOrdinals.length; i++) {
+      nativeOrdinals[i]=ordinals.get(i);
+    }
+    return loader.buildMultiValue(field,nativeOrdinals);
+  }
+}
