@@ -1,14 +1,24 @@
 {
-  MapBinder<String,SimilarityProviderFactory> similarityBinder=MapBinder.newMapBinder(binder(),String.class,SimilarityProviderFactory.class);
-  Map<String,Settings> similarityProvidersSettings=settings.getGroups("index.similarity");
-  for (  Map.Entry<String,Settings> entry : similarityProvidersSettings.entrySet()) {
+  Map<String,Class<? extends SimilarityProvider>> providers=Maps.newHashMap(similarities);
+  Map<String,Settings> similaritySettings=settings.getGroups(SIMILARITY_SETTINGS_PREFIX);
+  for (  Map.Entry<String,Settings> entry : similaritySettings.entrySet()) {
     String name=entry.getKey();
     Settings settings=entry.getValue();
     Class<? extends SimilarityProvider> type=settings.getAsClass("type",null,"org.elasticsearch.index.similarity.","SimilarityProvider");
     if (type == null) {
-      throw new IllegalArgumentException("Similarity [" + name + "] must have a type associated with it");
+      throw new ElasticSearchIllegalArgumentException("SimilarityProvider [" + name + "] must have an associated type");
     }
-    similarityBinder.addBinding(name).toProvider(FactoryProvider.newFactory(SimilarityProviderFactory.class,type)).in(Scopes.SINGLETON);
+    providers.put(name,type);
   }
-  bind(SimilarityService.class).in(Scopes.SINGLETON);
+  MapBinder<String,SimilarityProvider.Factory> similarityBinder=MapBinder.newMapBinder(binder(),String.class,SimilarityProvider.Factory.class);
+  for (  Map.Entry<String,Class<? extends SimilarityProvider>> entry : providers.entrySet()) {
+    similarityBinder.addBinding(entry.getKey()).toProvider(FactoryProvider.newFactory(SimilarityProvider.Factory.class,entry.getValue())).in(Scopes.SINGLETON);
+  }
+  for (  PreBuiltSimilarityProvider.Factory factory : Similarities.listFactories()) {
+    if (!providers.containsKey(factory.name())) {
+      similarityBinder.addBinding(factory.name()).toInstance(factory);
+    }
+  }
+  bind(SimilarityLookupService.class).asEagerSingleton();
+  bind(SimilarityService.class).asEagerSingleton();
 }
