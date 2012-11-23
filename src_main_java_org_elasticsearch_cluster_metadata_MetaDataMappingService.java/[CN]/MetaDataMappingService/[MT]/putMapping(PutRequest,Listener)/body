@@ -20,7 +20,7 @@
           IndexService indexService=indicesService.createIndex(indexMetaData.index(),indexMetaData.settings(),currentState.nodes().localNode().id());
           indicesToClose.add(indexMetaData.index());
           if (indexMetaData.mappings().containsKey(request.mappingType)) {
-            indexService.mapperService().add(request.mappingType,indexMetaData.mappings().get(request.mappingType).source().string(),false);
+            indexService.mapperService().merge(request.mappingType,indexMetaData.mappings().get(request.mappingType).source().string(),false);
           }
         }
         Map<String,DocumentMapper> newMappers=newHashMap();
@@ -57,30 +57,30 @@
         for (        Map.Entry<String,DocumentMapper> entry : newMappers.entrySet()) {
           String index=entry.getKey();
           DocumentMapper newMapper=entry.getValue();
+          IndexService indexService=indicesService.indexService(index);
+          CompressedString existingSource=null;
           if (existingMappers.containsKey(entry.getKey())) {
-            DocumentMapper existingMapper=existingMappers.get(entry.getKey());
-            CompressedString existingSource=existingMapper.mappingSource();
-            existingMapper.merge(newMapper,mergeFlags().simulate(false));
-            CompressedString updatedSource=existingMapper.mappingSource();
+            existingSource=existingMappers.get(entry.getKey()).mappingSource();
+          }
+          DocumentMapper mergedMapper=indexService.mapperService().merge(newMapper.type(),newMapper.mappingSource().string(),false);
+          CompressedString updatedSource=mergedMapper.mappingSource();
+          if (existingSource != null) {
             if (existingSource.equals(updatedSource)) {
             }
  else {
-              mappings.put(index,new MappingMetaData(existingMapper));
+              mappings.put(index,new MappingMetaData(mergedMapper));
               if (logger.isDebugEnabled()) {
-                logger.debug("[{}] update_mapping [{}] with source [{}]",index,existingMapper.type(),updatedSource);
+                logger.debug("[{}] update_mapping [{}] with source [{}]",index,mergedMapper.type(),updatedSource);
               }
  else               if (logger.isInfoEnabled()) {
-                logger.info("[{}] update_mapping [{}]",index,existingMapper.type());
+                logger.info("[{}] update_mapping [{}]",index,mergedMapper.type());
               }
             }
           }
  else {
-            CompressedString newSource=newMapper.mappingSource();
-            mappings.put(index,new MappingMetaData(newMapper));
-            IndexService indexService=indicesService.indexService(index);
-            indexService.mapperService().add(newMapper.type(),newMapper.mappingSource().string(),false);
+            mappings.put(index,new MappingMetaData(mergedMapper));
             if (logger.isDebugEnabled()) {
-              logger.debug("[{}] create_mapping [{}] with source [{}]",index,newMapper.type(),newSource);
+              logger.debug("[{}] create_mapping [{}] with source [{}]",index,newMapper.type(),updatedSource);
             }
  else             if (logger.isInfoEnabled()) {
               logger.info("[{}] create_mapping [{}]",index,newMapper.type());

@@ -1,0 +1,41 @@
+{
+synchronized (mutex) {
+    if (mapper.type().length() == 0) {
+      throw new InvalidTypeNameException("mapping type name is empty");
+    }
+    if (mapper.type().charAt(0) == '_') {
+      throw new InvalidTypeNameException("mapping type name [" + mapper.type() + "] can't start with '_'");
+    }
+    if (mapper.type().contains("#")) {
+      throw new InvalidTypeNameException("mapping type name [" + mapper.type() + "] should not include '#' in it");
+    }
+    if (mapper.type().contains(",")) {
+      throw new InvalidTypeNameException("mapping type name [" + mapper.type() + "] should not include ',' in it");
+    }
+    if (mapper.type().contains(".")) {
+      logger.warn("Type [{}] contains a '.', it is recommended not to include it within a type name",mapper.type());
+    }
+    DocumentMapper oldMapper=mappers.get(mapper.type());
+    if (oldMapper != null) {
+      DocumentMapper.MergeResult result=oldMapper.merge(mapper,mergeFlags().simulate(false));
+      if (result.hasConflicts()) {
+        if (logger.isDebugEnabled()) {
+          logger.debug("merging mapping for type [{}] resulted in conflicts: [{}]",mapper.type(),Arrays.toString(result.conflicts()));
+        }
+      }
+      return oldMapper;
+    }
+ else {
+      FieldMapperListener.Aggregator fieldMappersAgg=new FieldMapperListener.Aggregator();
+      mapper.traverse(fieldMappersAgg);
+      addFieldMappers(fieldMappersAgg.mappers.toArray(new FieldMapper[fieldMappersAgg.mappers.size()]));
+      mapper.addFieldMapperListener(fieldMapperListener,false);
+      ObjectMapperListener.Aggregator objectMappersAgg=new ObjectMapperListener.Aggregator();
+      mapper.traverse(objectMappersAgg);
+      addObjectMappers(objectMappersAgg.mappers.toArray(new ObjectMapper[objectMappersAgg.mappers.size()]));
+      mapper.addObjectMapperListener(objectMapperListener,false);
+      mappers=newMapBuilder(mappers).put(mapper.type(),mapper).map();
+      return mapper;
+    }
+  }
+}
