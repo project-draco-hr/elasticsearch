@@ -1,0 +1,55 @@
+{
+  if (this.nodes.isEmpty()) {
+    return false;
+  }
+  if (logger.isTraceEnabled()) {
+    logger.trace("Start balancing cluster");
+  }
+  boolean changed=initialize(allocation.routingNodes());
+  NodeSorter sorter=newNodeSorter();
+  if (nodes.size() > 1) {
+    for (    String index : buildWeightOrderedIndidces(sorter)) {
+      sorter.reset(index);
+      final float[] weights=sorter.weights;
+      final ModelNode[] modelNodes=sorter.modelNodes;
+      int lowIdx=0;
+      int highIdx=weights.length - 1;
+      while (true) {
+        final ModelNode minNode=modelNodes[lowIdx];
+        final ModelNode maxNode=modelNodes[highIdx];
+        if (maxNode.numShards(index) > 0) {
+          float delta=weights[highIdx] - weights[lowIdx];
+          if (delta <= threshold) {
+            if (logger.isTraceEnabled()) {
+              logger.trace("Stop balancing index [{}]  min_node [{}] weight: [{}]  max_node [{}] weight: [{}]  delta: [{}]",index,maxNode.getNodeId(),weights[highIdx],minNode.getNodeId(),weights[lowIdx],delta);
+            }
+            break;
+          }
+          if (logger.isTraceEnabled()) {
+            logger.trace("Balancing from node [{}] weight: [{}] to node [{}] weight: [{}]  delta: [{}]",maxNode.getNodeId(),weights[highIdx],minNode.getNodeId(),weights[lowIdx],delta);
+          }
+          if (tryRelocateShard(minNode,maxNode,index,delta)) {
+            weights[lowIdx]=sorter.weight(modelNodes[lowIdx]);
+            weights[highIdx]=sorter.weight(modelNodes[highIdx]);
+            sorter.quickSort(0,weights.length - 1);
+            lowIdx=0;
+            highIdx=weights.length - 1;
+            changed=true;
+            continue;
+          }
+        }
+        if (lowIdx < highIdx - 1) {
+          lowIdx++;
+        }
+ else         if (lowIdx > 0) {
+          lowIdx=0;
+          highIdx--;
+        }
+ else {
+          break;
+        }
+      }
+    }
+  }
+  return changed;
+}
