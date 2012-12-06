@@ -1,28 +1,25 @@
 {
-  BaseFieldVisitor fieldVisitor;
+  FieldsVisitor fieldsVisitor;
   List<String> extractFieldNames=null;
   boolean sourceRequested=false;
   if (!context.hasFieldNames()) {
     if (context.hasPartialFields()) {
-      fieldVisitor=new UidAndSourceFieldVisitor();
-      sourceRequested=false;
+      fieldsVisitor=new UidAndSourceFieldsVisitor();
     }
  else     if (context.hasScriptFields()) {
-      fieldVisitor=new UidFieldVisitor();
-      sourceRequested=false;
+      fieldsVisitor=new JustUidFieldsVisitor();
     }
  else {
-      fieldVisitor=new UidAndSourceFieldVisitor();
       sourceRequested=true;
+      fieldsVisitor=new UidAndSourceFieldsVisitor();
     }
   }
  else   if (context.fieldNames().isEmpty()) {
-    fieldVisitor=new UidFieldVisitor();
-    sourceRequested=false;
+    fieldsVisitor=new JustUidFieldsVisitor();
   }
  else {
     boolean loadAllStored=false;
-    FieldMappersFieldVisitor fieldVisitorMapper=null;
+    Set<String> fieldNames=null;
     for (    String fieldName : context.fieldNames()) {
       if (fieldName.equals("*")) {
         loadAllStored=true;
@@ -34,95 +31,58 @@
       }
       FieldMappers x=context.smartNameFieldMappers(fieldName);
       if (x != null && x.mapper().stored()) {
-        if (fieldVisitorMapper == null) {
-          fieldVisitorMapper=new FieldMappersFieldVisitor();
+        if (fieldNames == null) {
+          fieldNames=new HashSet<String>();
         }
-        fieldVisitorMapper.add(x);
+        fieldNames.add(x.mapper().names().indexName());
       }
  else {
         if (extractFieldNames == null) {
-          extractFieldNames=Lists.newArrayList();
+          extractFieldNames=newArrayList();
         }
         extractFieldNames.add(fieldName);
       }
     }
     if (loadAllStored) {
       if (sourceRequested || extractFieldNames != null) {
-        fieldVisitor=null;
+        fieldsVisitor=new CustomFieldsVisitor(true,true);
       }
  else {
-        fieldVisitor=new AllButSourceFieldVisitor();
+        fieldsVisitor=new CustomFieldsVisitor(true,false);
       }
     }
- else     if (fieldVisitorMapper != null) {
-      fieldVisitorMapper.add(UidFieldMapper.NAME);
-      if (extractFieldNames != null || sourceRequested) {
-        fieldVisitorMapper.add(SourceFieldMapper.NAME);
-      }
-      fieldVisitor=fieldVisitorMapper;
+ else     if (fieldNames != null) {
+      boolean loadSource=extractFieldNames != null || sourceRequested;
+      fieldsVisitor=new CustomFieldsVisitor(fieldNames,loadSource);
     }
  else     if (extractFieldNames != null || sourceRequested) {
-      fieldVisitor=new UidAndSourceFieldVisitor();
+      fieldsVisitor=new UidAndSourceFieldsVisitor();
     }
  else {
-      fieldVisitor=new UidFieldVisitor();
+      fieldsVisitor=new JustUidFieldsVisitor();
     }
   }
   InternalSearchHit[] hits=new InternalSearchHit[context.docIdsToLoadSize()];
   for (int index=0; index < context.docIdsToLoadSize(); index++) {
     int docId=context.docIdsToLoad()[context.docIdsToLoadFrom() + index];
-    Document doc=loadDocument(context,fieldVisitor,docId);
-    Uid uid=extractUid(context,doc,fieldVisitor);
-    DocumentMapper documentMapper=context.mapperService().documentMapper(uid.type());
-    if (documentMapper == null) {
-      throw new TypeMissingException(new Index(context.shardTarget().index()),uid.type(),"failed to find type loaded for doc [" + uid.id() + "]");
+    loadStoredFields(context,fieldsVisitor,docId);
+    fieldsVisitor.postProcess(context.mapperService());
+    Map<String,SearchHitField> searchFields=null;
+    if (fieldsVisitor.fields() != null) {
+      searchFields=new HashMap<String,SearchHitField>(fieldsVisitor.fields().size());
+      for (      Map.Entry<String,List<Object>> entry : fieldsVisitor.fields().entrySet()) {
+        searchFields.put(entry.getKey(),new InternalSearchHitField(entry.getKey(),entry.getValue()));
+      }
     }
-    byte[] source=extractSource(doc,documentMapper);
-    InternalSearchHit searchHit=new InternalSearchHit(docId,uid.id(),uid.type(),sourceRequested ? source : null,null);
+    InternalSearchHit searchHit=new InternalSearchHit(docId,fieldsVisitor.uid().id(),fieldsVisitor.uid().type(),sourceRequested ? fieldsVisitor.source() : null,searchFields);
     hits[index]=searchHit;
-    for (    Object oField : doc.getFields()) {
-      IndexableField field=(IndexableField)oField;
-      String name=field.name();
-      if (name.equals(UidFieldMapper.NAME)) {
-        continue;
-      }
-      if (name.equals(SourceFieldMapper.NAME)) {
-        continue;
-      }
-      Object value=null;
-      FieldMappers fieldMappers=documentMapper.mappers().indexName(field.name());
-      if (fieldMappers != null) {
-        FieldMapper mapper=fieldMappers.mapper();
-        if (mapper != null) {
-          name=mapper.names().fullName();
-          value=mapper.valueForSearch((Field)field);
-        }
-      }
-      if (value == null) {
-        if (field.binaryValue() != null) {
-          value=new BytesArray(field.binaryValue());
-        }
- else {
-          value=field.stringValue();
-        }
-      }
-      if (searchHit.fieldsOrNull() == null) {
-        searchHit.fields(new HashMap<String,SearchHitField>(2));
-      }
-      SearchHitField hitField=searchHit.fields().get(name);
-      if (hitField == null) {
-        hitField=new InternalSearchHitField(name,new ArrayList<Object>(2));
-        searchHit.fields().put(name,hitField);
-      }
-      hitField.values().add(value);
-    }
     int readerIndex=ReaderUtil.subIndex(docId,context.searcher().getIndexReader().leaves());
     AtomicReaderContext subReaderContext=context.searcher().getIndexReader().leaves().get(readerIndex);
     int subDoc=docId - subReaderContext.docBase;
     context.lookup().setNextReader(subReaderContext);
     context.lookup().setNextDocId(subDoc);
-    if (source != null) {
-      context.lookup().source().setNextSource(new BytesArray(source));
+    if (searchHit.source() != null) {
+      context.lookup().source().setNextSource(new BytesArray(searchHit.source()));
     }
     if (extractFieldNames != null) {
       for (      String extractFieldName : extractFieldNames) {
@@ -143,7 +103,7 @@
     for (    FetchSubPhase fetchSubPhase : fetchSubPhases) {
       FetchSubPhase.HitContext hitContext=new FetchSubPhase.HitContext();
       if (fetchSubPhase.hitExecutionNeeded(context)) {
-        hitContext.reset(searchHit,subReaderContext,subDoc,context.searcher().getIndexReader(),docId,doc);
+        hitContext.reset(searchHit,subReaderContext,subDoc,context.searcher().getIndexReader(),docId,fieldsVisitor);
         fetchSubPhase.hitExecute(context,hitContext);
       }
     }

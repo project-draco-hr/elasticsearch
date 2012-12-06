@@ -1,47 +1,22 @@
 {
   Map<String,GetField> fields=null;
-  byte[] source=null;
+  BytesReference source=null;
   UidField.DocIdAndVersion docIdAndVersion=get.docIdAndVersion();
-  BaseFieldVisitor fieldVisitor=buildFieldSelectors(docMapper,gFields);
+  FieldsVisitor fieldVisitor=buildFieldsVisitors(gFields);
   if (fieldVisitor != null) {
-    Document doc;
     try {
       docIdAndVersion.reader.reader().document(docIdAndVersion.docId,fieldVisitor);
-      doc=fieldVisitor.createDocument();
     }
  catch (    IOException e) {
       throw new ElasticSearchException("Failed to get type [" + type + "] and id ["+ id+ "]",e);
     }
-    source=extractSource(doc,docMapper);
-    for (    Object oField : doc.getFields()) {
-      Field field=(Field)oField;
-      String name=field.name();
-      Object value=null;
-      FieldMappers fieldMappers=docMapper.mappers().indexName(field.name());
-      if (fieldMappers != null) {
-        FieldMapper mapper=fieldMappers.mapper();
-        if (mapper != null) {
-          name=mapper.names().fullName();
-          value=mapper.valueForSearch(field);
-        }
+    source=fieldVisitor.source();
+    if (fieldVisitor.fields() != null) {
+      fieldVisitor.postProcess(docMapper);
+      fields=new HashMap<String,GetField>(fieldVisitor.fields().size());
+      for (      Map.Entry<String,List<Object>> entry : fieldVisitor.fields().entrySet()) {
+        fields.put(entry.getKey(),new GetField(entry.getKey(),entry.getValue()));
       }
-      if (value == null) {
-        if (field.binaryValue() != null) {
-          value=new BytesArray(field.binaryValue());
-        }
- else {
-          value=field.stringValue();
-        }
-      }
-      if (fields == null) {
-        fields=newHashMapWithExpectedSize(2);
-      }
-      GetField getField=fields.get(name);
-      if (getField == null) {
-        getField=new GetField(name,new ArrayList<Object>(2));
-        fields.put(name,getField);
-      }
-      getField.values().add(value);
     }
   }
   if (gFields != null && gFields.length > 0) {
@@ -88,5 +63,5 @@
       }
     }
   }
-  return new GetResult(shardId.index().name(),type,id,get.version(),get.exists(),source == null ? null : new BytesArray(source),fields);
+  return new GetResult(shardId.index().name(),type,id,get.version(),get.exists(),source,fields);
 }
