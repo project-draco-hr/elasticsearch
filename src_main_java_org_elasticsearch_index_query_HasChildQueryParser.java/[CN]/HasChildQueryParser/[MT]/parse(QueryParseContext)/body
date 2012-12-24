@@ -1,10 +1,11 @@
 {
   XContentParser parser=parseContext.parser();
-  Query query=null;
+  Query innerQuery=null;
   boolean queryFound=false;
   float boost=1.0f;
   String childType=null;
   String scope=null;
+  ScoreType scoreType=null;
   String executionType="uid";
   String currentFieldName=null;
   XContentParser.Token token;
@@ -16,7 +17,7 @@
       if ("query".equals(currentFieldName)) {
         String[] origTypes=QueryParseContext.setTypesWithPrevious(childType == null ? null : new String[]{childType});
         try {
-          query=parseContext.parseInnerQuery();
+          innerQuery=parseContext.parseInnerQuery();
           queryFound=true;
         }
   finally {
@@ -34,11 +35,17 @@
  else       if ("_scope".equals(currentFieldName)) {
         scope=parser.text();
       }
+ else       if ("execution_type".equals(currentFieldName) || "executionType".equals(currentFieldName)) {
+        scoreType=ScoreType.fromString(parser.text());
+      }
+ else       if ("score_type".equals(currentFieldName) || "scoreType".equals(currentFieldName)) {
+        String scoreTypeValue=parser.text();
+        if (!"none".equals(scoreTypeValue)) {
+          scoreType=ScoreType.fromString(scoreTypeValue);
+        }
+      }
  else       if ("boost".equals(currentFieldName)) {
         boost=parser.floatValue();
-      }
- else       if ("execution_type".equals(currentFieldName) || "executionType".equals(currentFieldName)) {
-        executionType=parser.text();
       }
  else {
         throw new QueryParsingException(parseContext.index(),"[has_child] query does not support [" + currentFieldName + "]");
@@ -48,12 +55,13 @@
   if (!queryFound) {
     throw new QueryParsingException(parseContext.index(),"[has_child] requires 'query' field");
   }
-  if (query == null) {
+  if (innerQuery == null) {
     return null;
   }
   if (childType == null) {
     throw new QueryParsingException(parseContext.index(),"[has_child] requires 'type' field");
   }
+  innerQuery.setBoost(boost);
   DocumentMapper childDocMapper=parseContext.mapperService().documentMapper(childType);
   if (childDocMapper == null) {
     throw new QueryParsingException(parseContext.index(),"[has_child] No mapping for for type [" + childType + "]");
@@ -62,12 +70,20 @@
     throw new QueryParsingException(parseContext.index(),"[has_child]  Type [" + childType + "] does not have parent mapping");
   }
   String parentType=childDocMapper.parentFieldMapper().type();
-  query.setBoost(boost);
-  query=new XFilteredQuery(query,parseContext.cacheFilter(childDocMapper.typeFilter(),null));
+  DocumentMapper parentDocMapper=parseContext.mapperService().documentMapper(parentType);
   SearchContext searchContext=SearchContext.current();
-  HasChildFilter childFilter=HasChildFilter.create(query,scope,parentType,childType,searchContext,executionType);
-  ConstantScoreQuery childQuery=new ConstantScoreQuery(childFilter);
-  childQuery.setBoost(boost);
-  searchContext.addScopePhase(childFilter);
-  return childQuery;
+  Query query;
+  if (scoreType != null) {
+    Filter parentFilter=parseContext.cacheFilter(parentDocMapper.typeFilter(),null);
+    ChildrenQuery childrenQuery=new ChildrenQuery(searchContext,parentType,childType,parentFilter,scope,innerQuery,scoreType);
+    searchContext.addScopePhase(childrenQuery);
+    query=childrenQuery;
+  }
+ else {
+    HasChildFilter hasChildFilter=HasChildFilter.create(innerQuery,scope,parentType,childType,searchContext,executionType);
+    searchContext.addScopePhase(hasChildFilter);
+    query=new ConstantScoreQuery(hasChildFilter);
+  }
+  query.setBoost(boost);
+  return query;
 }
