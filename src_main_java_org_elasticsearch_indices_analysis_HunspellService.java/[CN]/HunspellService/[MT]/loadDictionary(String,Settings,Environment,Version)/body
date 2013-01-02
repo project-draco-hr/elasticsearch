@@ -1,0 +1,49 @@
+{
+  if (logger.isDebugEnabled()) {
+    logger.debug("Loading huspell dictionary [{}]...",locale);
+  }
+  File hunspellConfDir=new File(env.configFile(),"hunspell");
+  File dicDir=new File(hunspellConfDir,locale);
+  if (!dicDir.exists() || !dicDir.isDirectory()) {
+    throw new ElasticSearchException(String.format("Could not find hunspell dictionary [%s]",locale));
+  }
+  nodeSettings=loadDictionarySettings(dicDir,nodeSettings.getByPrefix("indices.analysis.hunspell.dictionary." + locale + "."));
+  boolean ignoreCase=nodeSettings.getAsBoolean("ignore_case",defaultIgnoreCase);
+  boolean strictAffixParsing=nodeSettings.getAsBoolean("strict_affix_parsing",defaultStrictAffixParsing);
+  File[] affixFiles=dicDir.listFiles(AFFIX_FILE_FILTER);
+  if (affixFiles.length != 1) {
+    throw new ElasticSearchException(String.format("Missing affix file for hunspell dictionary [%s]",locale));
+  }
+  InputStream affixStream=null;
+  File[] dicFiles=dicDir.listFiles(DIC_FILE_FILTER);
+  List<InputStream> dicStreams=new ArrayList<InputStream>(dicFiles.length);
+  try {
+    for (int i=0; i < dicFiles.length; i++) {
+      dicStreams.add(new FileInputStream(dicFiles[i]));
+    }
+    affixStream=new FileInputStream(affixFiles[0]);
+    return new HunspellDictionary(affixStream,dicStreams,version,ignoreCase,strictAffixParsing);
+  }
+ catch (  Exception e) {
+    logger.error("Could not load hunspell dictionary [{}]",e,locale);
+    throw e;
+  }
+ finally {
+    if (affixStream != null) {
+      try {
+        affixStream.close();
+      }
+ catch (      IOException e) {
+      }
+    }
+    for (    InputStream in : dicStreams) {
+      if (in != null) {
+        try {
+          in.close();
+        }
+ catch (        IOException e) {
+        }
+      }
+    }
+  }
+}
