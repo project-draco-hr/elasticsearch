@@ -1,0 +1,39 @@
+{
+  IndexFieldData fieldData=loadedFieldData.get(type.getType());
+  if (fieldData == null) {
+synchronized (loadedFieldData) {
+      fieldData=loadedFieldData.get(type.getType());
+      if (fieldData == null) {
+        IndexFieldData.Builder builder=null;
+        if (type.getFormat() != null) {
+          builder=buildersByTypeAndFormat.get(Tuple.tuple(type.getType(),type.getFormat()));
+        }
+        if (builder == null) {
+          builder=buildersByType.get(type.getType());
+        }
+        if (builder == null) {
+          throw new ElasticSearchIllegalArgumentException("failed to find field data builder for field " + fieldName + ", and type "+ type);
+        }
+        IndexFieldDataCache cache;
+        if (type.getOptions().containsKey("cache")) {
+          String cacheType=type.getOptions().get("cache");
+          if ("resident".equals(cacheType)) {
+            cache=new IndexFieldDataCache.Resident();
+          }
+ else           if ("soft".equals(cacheType)) {
+            cache=new IndexFieldDataCache.Soft();
+          }
+ else {
+            throw new ElasticSearchIllegalArgumentException("cache type not supported [" + cacheType + "] for field ["+ fieldName+ "]");
+          }
+        }
+ else {
+          cache=new IndexFieldDataCache.Resident();
+        }
+        fieldData=builder.build(index,indexSettings,fieldName,type,cache);
+        loadedFieldData.put(fieldName,fieldData);
+      }
+    }
+  }
+  return (IFD)fieldData;
+}
