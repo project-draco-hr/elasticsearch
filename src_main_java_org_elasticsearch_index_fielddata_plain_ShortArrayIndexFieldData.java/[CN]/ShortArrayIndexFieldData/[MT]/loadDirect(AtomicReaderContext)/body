@@ -1,0 +1,70 @@
+{
+  AtomicReader reader=context.reader();
+  Terms terms=reader.terms(getFieldNames().indexName());
+  if (terms == null) {
+    return new ShortArrayAtomicFieldData.Single(new short[0],0);
+  }
+  final TShortArrayList values=new TShortArrayList();
+  ArrayList<int[]> ordinals=new ArrayList<int[]>();
+  int[] idx=new int[reader.maxDoc()];
+  ordinals.add(new int[reader.maxDoc()]);
+  values.add((short)0);
+  int termOrd=1;
+  TermsEnum termsEnum=terms.iterator(null);
+  try {
+    DocsEnum docsEnum=null;
+    for (BytesRef term=termsEnum.next(); term != null; term=termsEnum.next()) {
+      values.add((short)FieldCache.NUMERIC_UTILS_INT_PARSER.parseInt(term));
+      docsEnum=termsEnum.docs(reader.getLiveDocs(),docsEnum,0);
+      for (int docId=docsEnum.nextDoc(); docId != DocsEnum.NO_MORE_DOCS; docId=docsEnum.nextDoc()) {
+        int[] ordinal;
+        if (idx[docId] >= ordinals.size()) {
+          ordinal=new int[reader.maxDoc()];
+          ordinals.add(ordinal);
+        }
+ else {
+          ordinal=ordinals.get(idx[docId]);
+        }
+        ordinal[docId]=termOrd;
+        idx[docId]++;
+      }
+      termOrd++;
+    }
+  }
+ catch (  RuntimeException e) {
+    if (e.getClass().getName().endsWith("StopFillCacheException")) {
+    }
+ else {
+      throw e;
+    }
+  }
+  if (ordinals.size() == 1) {
+    int[] nativeOrdinals=ordinals.get(0);
+    FixedBitSet set=new FixedBitSet(reader.maxDoc());
+    short[] sValues=new short[reader.maxDoc()];
+    boolean allHaveValue=true;
+    for (int i=0; i < nativeOrdinals.length; i++) {
+      int nativeOrdinal=nativeOrdinals[i];
+      if (nativeOrdinal == 0) {
+        allHaveValue=false;
+      }
+ else {
+        set.set(i);
+        sValues[i]=values.get(nativeOrdinal);
+      }
+    }
+    if (allHaveValue) {
+      return new ShortArrayAtomicFieldData.Single(sValues,reader.maxDoc());
+    }
+ else {
+      return new ShortArrayAtomicFieldData.SingleFixedSet(sValues,reader.maxDoc(),set);
+    }
+  }
+ else {
+    int[][] nativeOrdinals=new int[ordinals.size()][];
+    for (int i=0; i < nativeOrdinals.length; i++) {
+      nativeOrdinals[i]=ordinals.get(i);
+    }
+    return new ShortArrayAtomicFieldData.WithOrdinals(values.toArray(new short[values.size()]),reader.maxDoc(),new MultiFlatArrayOrdinals(nativeOrdinals,termOrd));
+  }
+}
