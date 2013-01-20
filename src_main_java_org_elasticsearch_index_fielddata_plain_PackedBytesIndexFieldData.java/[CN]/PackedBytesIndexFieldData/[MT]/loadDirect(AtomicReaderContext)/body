@@ -1,0 +1,86 @@
+{
+  AtomicReader reader=context.reader();
+  Terms terms=reader.terms(getFieldNames().indexName());
+  if (terms == null) {
+    final PagedBytes bytes=new PagedBytes(1);
+    bytes.copyUsingLengthPrefix(new BytesRef());
+    GrowableWriter termOrdToBytesOffset=new GrowableWriter(1,2,PackedInts.FASTEST);
+    return new PackedBytesAtomicFieldData(bytes.freeze(true),termOrdToBytesOffset.getMutable(),new EmptyOrdinals(reader.maxDoc()));
+  }
+  final PagedBytes bytes=new PagedBytes(15);
+  int startBytesBPV;
+  int startTermsBPV;
+  int startNumUniqueTerms;
+  int maxDoc=reader.maxDoc();
+  final int termCountHardLimit;
+  if (maxDoc == Integer.MAX_VALUE) {
+    termCountHardLimit=Integer.MAX_VALUE;
+  }
+ else {
+    termCountHardLimit=maxDoc + 1;
+  }
+  long numUniqueTerms=terms.size();
+  if (numUniqueTerms != -1L) {
+    if (numUniqueTerms > termCountHardLimit) {
+      numUniqueTerms=termCountHardLimit;
+    }
+    startBytesBPV=PackedInts.bitsRequired(numUniqueTerms * 4);
+    startTermsBPV=PackedInts.bitsRequired(numUniqueTerms);
+    startNumUniqueTerms=(int)numUniqueTerms;
+  }
+ else {
+    startBytesBPV=1;
+    startTermsBPV=1;
+    startNumUniqueTerms=1;
+  }
+  float acceptableOverheadRatio=PackedInts.FAST;
+  GrowableWriter termOrdToBytesOffset=new GrowableWriter(startBytesBPV,1 + startNumUniqueTerms,acceptableOverheadRatio);
+  ArrayList<int[]> ordinals=new ArrayList<int[]>();
+  int[] idx=new int[reader.maxDoc()];
+  ordinals.add(new int[reader.maxDoc()]);
+  bytes.copyUsingLengthPrefix(new BytesRef());
+  int termOrd=1;
+  TermsEnum termsEnum=terms.iterator(null);
+  try {
+    DocsEnum docsEnum=null;
+    for (BytesRef term=termsEnum.next(); term != null; term=termsEnum.next()) {
+      if (termOrd == termOrdToBytesOffset.size()) {
+        termOrdToBytesOffset=termOrdToBytesOffset.resize(ArrayUtil.oversize(1 + termOrd,1));
+      }
+      termOrdToBytesOffset.set(termOrd,bytes.copyUsingLengthPrefix(term));
+      docsEnum=termsEnum.docs(reader.getLiveDocs(),docsEnum,0);
+      for (int docId=docsEnum.nextDoc(); docId != DocsEnum.NO_MORE_DOCS; docId=docsEnum.nextDoc()) {
+        int[] ordinal;
+        if (idx[docId] >= ordinals.size()) {
+          ordinal=new int[reader.maxDoc()];
+          ordinals.add(ordinal);
+        }
+ else {
+          ordinal=ordinals.get(idx[docId]);
+        }
+        ordinal[docId]=termOrd;
+        idx[docId]++;
+      }
+      termOrd++;
+    }
+  }
+ catch (  RuntimeException e) {
+    if (e.getClass().getName().endsWith("StopFillCacheException")) {
+    }
+ else {
+      throw e;
+    }
+  }
+  PagedBytes.Reader bytesReader=bytes.freeze(true);
+  PackedInts.Reader termOrdToBytesOffsetReader=termOrdToBytesOffset.getMutable();
+  if (ordinals.size() == 1) {
+    return new PackedBytesAtomicFieldData(bytesReader,termOrdToBytesOffsetReader,new SingleArrayOrdinals(ordinals.get(0),termOrd));
+  }
+ else {
+    int[][] nativeOrdinals=new int[ordinals.size()][];
+    for (int i=0; i < nativeOrdinals.length; i++) {
+      nativeOrdinals[i]=ordinals.get(i);
+    }
+    return new PackedBytesAtomicFieldData(bytesReader,termOrdToBytesOffsetReader,new MultiFlatArrayOrdinals(nativeOrdinals,termOrd));
+  }
+}
