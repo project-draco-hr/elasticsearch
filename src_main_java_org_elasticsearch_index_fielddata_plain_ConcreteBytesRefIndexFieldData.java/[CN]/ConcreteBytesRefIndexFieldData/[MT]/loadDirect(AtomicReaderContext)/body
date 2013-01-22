@@ -1,0 +1,55 @@
+{
+  AtomicReader reader=context.reader();
+  Terms terms=reader.terms(getFieldNames().indexName());
+  if (terms == null) {
+    return ConcreteBytesRefAtomicFieldData.empty(reader.maxDoc());
+  }
+  long size=terms.size();
+  if (size == -1) {
+    size=1024;
+  }
+  final ArrayList<BytesRef> values=new ArrayList<BytesRef>((int)size);
+  ArrayList<int[]> ordinals=new ArrayList<int[]>();
+  int[] idx=new int[reader.maxDoc()];
+  ordinals.add(new int[reader.maxDoc()]);
+  values.add(null);
+  int termOrd=1;
+  TermsEnum termsEnum=terms.iterator(null);
+  try {
+    DocsEnum docsEnum=null;
+    for (BytesRef term=termsEnum.next(); term != null; term=termsEnum.next()) {
+      values.add(BytesRef.deepCopyOf(term));
+      docsEnum=termsEnum.docs(reader.getLiveDocs(),docsEnum,0);
+      for (int docId=docsEnum.nextDoc(); docId != DocsEnum.NO_MORE_DOCS; docId=docsEnum.nextDoc()) {
+        int[] ordinal;
+        if (idx[docId] >= ordinals.size()) {
+          ordinal=new int[reader.maxDoc()];
+          ordinals.add(ordinal);
+        }
+ else {
+          ordinal=ordinals.get(idx[docId]);
+        }
+        ordinal[docId]=termOrd;
+        idx[docId]++;
+      }
+      termOrd++;
+    }
+  }
+ catch (  RuntimeException e) {
+    if (e.getClass().getName().endsWith("StopFillCacheException")) {
+    }
+ else {
+      throw e;
+    }
+  }
+  if (ordinals.size() == 1) {
+    return new ConcreteBytesRefAtomicFieldData(values.toArray(new BytesRef[values.size()]),new SingleArrayOrdinals(ordinals.get(0),termOrd));
+  }
+ else {
+    int[][] nativeOrdinals=new int[ordinals.size()][];
+    for (int i=0; i < nativeOrdinals.length; i++) {
+      nativeOrdinals[i]=ordinals.get(i);
+    }
+    return new ConcreteBytesRefAtomicFieldData(values.toArray(new BytesRef[values.size()]),new MultiFlatArrayOrdinals(nativeOrdinals,termOrd));
+  }
+}

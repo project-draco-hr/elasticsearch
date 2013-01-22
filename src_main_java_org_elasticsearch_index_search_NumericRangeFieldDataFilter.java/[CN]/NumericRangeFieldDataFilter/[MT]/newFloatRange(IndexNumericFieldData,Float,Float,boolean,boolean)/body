@@ -1,0 +1,44 @@
+{
+  return new NumericRangeFieldDataFilter<Float>(indexFieldData,lowerVal,upperVal,includeLower,includeUpper){
+    @Override public DocIdSet getDocIdSet(    AtomicReaderContext ctx,    Bits acceptedDocs) throws IOException {
+      final float inclusiveLowerPoint, inclusiveUpperPoint;
+      if (lowerVal != null) {
+        float f=lowerVal.floatValue();
+        if (!includeUpper && f > 0.0f && Float.isInfinite(f))         return null;
+        int i=NumericUtils.floatToSortableInt(f);
+        inclusiveLowerPoint=NumericUtils.sortableIntToFloat(includeLower ? i : (i + 1));
+      }
+ else {
+        inclusiveLowerPoint=Float.NEGATIVE_INFINITY;
+      }
+      if (upperVal != null) {
+        float f=upperVal.floatValue();
+        if (!includeUpper && f < 0.0f && Float.isInfinite(f))         return null;
+        int i=NumericUtils.floatToSortableInt(f);
+        inclusiveUpperPoint=NumericUtils.sortableIntToFloat(includeUpper ? i : (i - 1));
+      }
+ else {
+        inclusiveUpperPoint=Float.POSITIVE_INFINITY;
+      }
+      if (inclusiveLowerPoint > inclusiveUpperPoint)       return null;
+      final FloatValues values=indexFieldData.load(ctx).getFloatValues();
+      return new MatchDocIdSet(ctx.reader().maxDoc(),acceptedDocs){
+        @Override public boolean isCacheable(){
+          return true;
+        }
+        @Override protected boolean matchDoc(        int doc){
+          FloatValues.Iter iter=values.getIter(doc);
+          while (iter.hasNext()) {
+            float value=iter.next();
+            if (value >= inclusiveLowerPoint && value <= inclusiveUpperPoint) {
+              return true;
+            }
+          }
+          return false;
+        }
+      }
+;
+    }
+  }
+;
+}
