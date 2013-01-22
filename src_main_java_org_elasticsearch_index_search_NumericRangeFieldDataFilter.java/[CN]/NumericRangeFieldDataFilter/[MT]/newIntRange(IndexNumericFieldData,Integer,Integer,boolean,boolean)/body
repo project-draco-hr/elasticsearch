@@ -1,0 +1,42 @@
+{
+  return new NumericRangeFieldDataFilter<Integer>(indexFieldData,lowerVal,upperVal,includeLower,includeUpper){
+    @Override public DocIdSet getDocIdSet(    AtomicReaderContext ctx,    Bits acceptedDocs) throws IOException {
+      final int inclusiveLowerPoint, inclusiveUpperPoint;
+      if (lowerVal != null) {
+        int i=lowerVal.intValue();
+        if (!includeLower && i == Integer.MAX_VALUE)         return null;
+        inclusiveLowerPoint=includeLower ? i : (i + 1);
+      }
+ else {
+        inclusiveLowerPoint=Integer.MIN_VALUE;
+      }
+      if (upperVal != null) {
+        int i=upperVal.intValue();
+        if (!includeUpper && i == Integer.MIN_VALUE)         return null;
+        inclusiveUpperPoint=includeUpper ? i : (i - 1);
+      }
+ else {
+        inclusiveUpperPoint=Integer.MAX_VALUE;
+      }
+      if (inclusiveLowerPoint > inclusiveUpperPoint)       return null;
+      final IntValues values=indexFieldData.load(ctx).getIntValues();
+      return new MatchDocIdSet(ctx.reader().maxDoc(),acceptedDocs){
+        @Override public boolean isCacheable(){
+          return true;
+        }
+        @Override protected boolean matchDoc(        int doc){
+          IntValues.Iter iter=values.getIter(doc);
+          while (iter.hasNext()) {
+            int value=iter.next();
+            if (value >= inclusiveLowerPoint && value <= inclusiveUpperPoint) {
+              return true;
+            }
+          }
+          return false;
+        }
+      }
+;
+    }
+  }
+;
+}
