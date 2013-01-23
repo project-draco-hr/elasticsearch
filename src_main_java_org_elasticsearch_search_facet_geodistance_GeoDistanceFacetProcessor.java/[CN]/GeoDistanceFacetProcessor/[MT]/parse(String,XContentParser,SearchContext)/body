@@ -4,8 +4,7 @@
   String valueScript=null;
   String scriptLang=null;
   Map<String,Object> params=null;
-  double lat=Double.NaN;
-  double lon=Double.NaN;
+  GeoPoint point=new GeoPoint();
   DistanceUnit unit=DistanceUnit.KILOMETERS;
   GeoDistance geoDistance=GeoDistance.ARC;
   List<GeoDistanceFacet.Entry> entries=Lists.newArrayList();
@@ -40,9 +39,9 @@
       }
  else {
         token=parser.nextToken();
-        lon=parser.doubleValue();
+        point.resetLon(parser.doubleValue());
         token=parser.nextToken();
-        lat=parser.doubleValue();
+        point.resetLat(parser.doubleValue());
         while ((token=parser.nextToken()) != XContentParser.Token.END_ARRAY) {
         }
         fieldName=currentName;
@@ -60,15 +59,13 @@
           }
  else           if (token.isValue()) {
             if (currentName.equals(GeoPointFieldMapper.Names.LAT)) {
-              lat=parser.doubleValue();
+              point.resetLat(parser.doubleValue());
             }
  else             if (currentName.equals(GeoPointFieldMapper.Names.LON)) {
-              lon=parser.doubleValue();
+              point.resetLon(parser.doubleValue());
             }
  else             if (currentName.equals(GeoPointFieldMapper.Names.GEOHASH)) {
-              double[] values=GeoHashUtils.decode(parser.text());
-              lat=values[0];
-              lon=values[1];
+              GeoHashUtils.decode(parser.text(),point);
             }
           }
         }
@@ -95,32 +92,16 @@
         normalizeLon=parser.booleanValue();
       }
  else {
-        String value=parser.text();
-        int comma=value.indexOf(',');
-        if (comma != -1) {
-          lat=Double.parseDouble(value.substring(0,comma).trim());
-          lon=Double.parseDouble(value.substring(comma + 1).trim());
-        }
- else {
-          double[] values=GeoHashUtils.decode(value);
-          lat=values[0];
-          lon=values[1];
-        }
+        point.resetFromString(parser.text());
         fieldName=currentName;
       }
     }
-  }
-  if (Double.isNaN(lat) || Double.isNaN(lon)) {
-    throw new FacetPhaseExecutionException(facetName,"lat/lon not set for geo_distance facet");
   }
   if (entries.isEmpty()) {
     throw new FacetPhaseExecutionException(facetName,"no ranges defined for geo_distance facet");
   }
   if (normalizeLat || normalizeLon) {
-    Point point=new Point(lat,lon);
     GeoUtils.normalizePoint(point,normalizeLat,normalizeLon);
-    lat=point.lat;
-    lon=point.lon;
   }
   FieldMapper keyFieldMapper=context.smartNameFieldMapper(fieldName);
   if (keyFieldMapper == null) {
@@ -133,10 +114,10 @@
       throw new FacetPhaseExecutionException(facetName,"failed to find mapping for [" + valueFieldName + "]");
     }
     IndexNumericFieldData valueIndexFieldData=context.fieldData().getForField(valueFieldMapper);
-    return new ValueGeoDistanceFacetCollector(facetName,keyIndexFieldData,lat,lon,unit,geoDistance,entries.toArray(new GeoDistanceFacet.Entry[entries.size()]),context,valueIndexFieldData);
+    return new ValueGeoDistanceFacetCollector(facetName,keyIndexFieldData,point.lat(),point.lon(),unit,geoDistance,entries.toArray(new GeoDistanceFacet.Entry[entries.size()]),context,valueIndexFieldData);
   }
   if (valueScript != null) {
-    return new ScriptGeoDistanceFacetCollector(facetName,keyIndexFieldData,lat,lon,unit,geoDistance,entries.toArray(new GeoDistanceFacet.Entry[entries.size()]),context,scriptLang,valueScript,params);
+    return new ScriptGeoDistanceFacetCollector(facetName,keyIndexFieldData,point.lat(),point.lon(),unit,geoDistance,entries.toArray(new GeoDistanceFacet.Entry[entries.size()]),context,scriptLang,valueScript,params);
   }
-  return new GeoDistanceFacetCollector(facetName,keyIndexFieldData,lat,lon,unit,geoDistance,entries.toArray(new GeoDistanceFacet.Entry[entries.size()]),context);
+  return new GeoDistanceFacetCollector(facetName,keyIndexFieldData,point.lat(),point.lon(),unit,geoDistance,entries.toArray(new GeoDistanceFacet.Entry[entries.size()]),context);
 }

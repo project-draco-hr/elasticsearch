@@ -1,7 +1,6 @@
 {
   String fieldName=null;
-  double lat=Double.NaN;
-  double lon=Double.NaN;
+  GeoPoint point=new GeoPoint();
   DistanceUnit unit=DistanceUnit.KILOMETERS;
   GeoDistance geoDistance=GeoDistance.ARC;
   boolean reverse=false;
@@ -15,9 +14,9 @@
     }
  else     if (token == XContentParser.Token.START_ARRAY) {
       token=parser.nextToken();
-      lon=parser.doubleValue();
+      point.resetLon(parser.doubleValue());
       token=parser.nextToken();
-      lat=parser.doubleValue();
+      point.resetLat(parser.doubleValue());
       while ((token=parser.nextToken()) != XContentParser.Token.END_ARRAY) {
       }
       fieldName=currentName;
@@ -30,15 +29,13 @@
         }
  else         if (token.isValue()) {
           if (currentName.equals(GeoPointFieldMapper.Names.LAT)) {
-            lat=parser.doubleValue();
+            point.resetLat(parser.doubleValue());
           }
  else           if (currentName.equals(GeoPointFieldMapper.Names.LON)) {
-            lon=parser.doubleValue();
+            point.resetLon(parser.doubleValue());
           }
  else           if (currentName.equals(GeoPointFieldMapper.Names.GEOHASH)) {
-            double[] values=GeoHashUtils.decode(parser.text());
-            lat=values[0];
-            lon=values[1];
+            GeoHashUtils.decode(parser.text(),point);
           }
         }
       }
@@ -61,31 +58,18 @@
         normalizeLon=parser.booleanValue();
       }
  else {
-        String value=parser.text();
-        int comma=value.indexOf(',');
-        if (comma != -1) {
-          lat=Double.parseDouble(value.substring(0,comma).trim());
-          lon=Double.parseDouble(value.substring(comma + 1).trim());
-        }
- else {
-          double[] values=GeoHashUtils.decode(value);
-          lat=values[0];
-          lon=values[1];
-        }
+        point.resetFromString(parser.text());
         fieldName=currentName;
       }
     }
   }
   if (normalizeLat || normalizeLon) {
-    Point point=new Point(lat,lon);
     GeoUtils.normalizePoint(point,normalizeLat,normalizeLon);
-    lat=point.lat;
-    lon=point.lon;
   }
   FieldMapper mapper=context.smartNameFieldMapper(fieldName);
   if (mapper == null) {
     throw new ElasticSearchIllegalArgumentException("failed to find mapper for [" + fieldName + "] for geo distance based sort");
   }
   IndexGeoPointFieldData indexFieldData=context.fieldData().getForField(mapper);
-  return new SortField(fieldName,new GeoDistanceComparatorSource(indexFieldData,lat,lon,unit,geoDistance),reverse);
+  return new SortField(fieldName,new GeoDistanceComparatorSource(indexFieldData,point.lat(),point.lon(),unit,geoDistance),reverse);
 }

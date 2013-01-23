@@ -5,8 +5,7 @@
   CacheKeyFilter.Key cacheKey=null;
   String filterName=null;
   String currentFieldName=null;
-  double lat=0;
-  double lon=0;
+  GeoPoint point=new GeoPoint();
   String fieldName=null;
   double distance=0;
   Object vDistance=null;
@@ -21,9 +20,9 @@
     }
  else     if (token == XContentParser.Token.START_ARRAY) {
       token=parser.nextToken();
-      lon=parser.doubleValue();
+      point.resetLon(parser.doubleValue());
       token=parser.nextToken();
-      lat=parser.doubleValue();
+      point.resetLat(parser.doubleValue());
       while ((token=parser.nextToken()) != XContentParser.Token.END_ARRAY) {
       }
       fieldName=currentFieldName;
@@ -37,15 +36,13 @@
         }
  else         if (token.isValue()) {
           if (currentName.equals(GeoPointFieldMapper.Names.LAT)) {
-            lat=parser.doubleValue();
+            point.resetLat(parser.doubleValue());
           }
  else           if (currentName.equals(GeoPointFieldMapper.Names.LON)) {
-            lon=parser.doubleValue();
+            point.resetLon(parser.doubleValue());
           }
  else           if (currentName.equals(GeoPointFieldMapper.Names.GEOHASH)) {
-            double[] values=GeoHashUtils.decode(parser.text());
-            lat=values[0];
-            lon=values[1];
+            GeoHashUtils.decode(parser.text(),point);
           }
  else {
             throw new QueryParsingException(parseContext.index(),"[geo_distance] filter does not support [" + currentFieldName + "]");
@@ -69,17 +66,15 @@
         geoDistance=GeoDistance.fromString(parser.text());
       }
  else       if (currentFieldName.endsWith(GeoPointFieldMapper.Names.LAT_SUFFIX)) {
-        lat=parser.doubleValue();
+        point.resetLat(parser.doubleValue());
         fieldName=currentFieldName.substring(0,currentFieldName.length() - GeoPointFieldMapper.Names.LAT_SUFFIX.length());
       }
  else       if (currentFieldName.endsWith(GeoPointFieldMapper.Names.LON_SUFFIX)) {
-        lon=parser.doubleValue();
+        point.resetLon(parser.doubleValue());
         fieldName=currentFieldName.substring(0,currentFieldName.length() - GeoPointFieldMapper.Names.LON_SUFFIX.length());
       }
  else       if (currentFieldName.endsWith(GeoPointFieldMapper.Names.GEOHASH_SUFFIX)) {
-        double[] values=GeoHashUtils.decode(parser.text());
-        lat=values[0];
-        lon=values[1];
+        GeoHashUtils.decode(parser.text(),point);
         fieldName=currentFieldName.substring(0,currentFieldName.length() - GeoPointFieldMapper.Names.GEOHASH_SUFFIX.length());
       }
  else       if ("_name".equals(currentFieldName)) {
@@ -99,17 +94,7 @@
         normalizeLon=parser.booleanValue();
       }
  else {
-        String value=parser.text();
-        int comma=value.indexOf(',');
-        if (comma != -1) {
-          lat=Double.parseDouble(value.substring(0,comma).trim());
-          lon=Double.parseDouble(value.substring(comma + 1).trim());
-        }
- else {
-          double[] values=GeoHashUtils.decode(value);
-          lat=values[0];
-          lon=values[1];
-        }
+        point.resetFromString(parser.text());
         fieldName=currentFieldName;
       }
     }
@@ -122,10 +107,7 @@
   }
   distance=geoDistance.normalize(distance,DistanceUnit.MILES);
   if (normalizeLat || normalizeLon) {
-    Point point=new Point(lat,lon);
     GeoUtils.normalizePoint(point,normalizeLat,normalizeLon);
-    lat=point.lat;
-    lon=point.lon;
   }
   MapperService.SmartNameFieldMappers smartMappers=parseContext.smartFieldMappers(fieldName);
   if (smartMappers == null || !smartMappers.hasMapper()) {
@@ -137,7 +119,7 @@
   }
   GeoPointFieldMapper geoMapper=((GeoPointFieldMapper.GeoStringFieldMapper)mapper).geoMapper();
   IndexGeoPointFieldData indexFieldData=parseContext.fieldData().getForField(mapper);
-  Filter filter=new GeoDistanceFilter(lat,lon,distance,geoDistance,indexFieldData,geoMapper,optimizeBbox);
+  Filter filter=new GeoDistanceFilter(point.lat(),point.lon(),distance,geoDistance,indexFieldData,geoMapper,optimizeBbox);
   if (cache) {
     filter=parseContext.cacheFilter(filter,cacheKey);
   }
