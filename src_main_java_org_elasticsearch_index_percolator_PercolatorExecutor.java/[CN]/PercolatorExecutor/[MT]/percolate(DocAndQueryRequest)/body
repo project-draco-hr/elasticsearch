@@ -1,63 +1,68 @@
 {
-  final MemoryIndex memoryIndex=new MemoryIndex();
-  for (  IndexableField field : request.doc().rootDoc().getFields()) {
-    if (!field.fieldType().indexed()) {
-      continue;
-    }
-    if (field.name().equals(UidFieldMapper.NAME)) {
-      continue;
-    }
-    TokenStream tokenStream;
-    try {
-      tokenStream=field.tokenStream(request.doc().analyzer());
-      if (tokenStream != null) {
-        tokenStream.reset();
-        memoryIndex.addField(field.name(),tokenStream,field.boost());
-      }
-    }
- catch (    IOException e) {
-      throw new ElasticSearchException("Failed to create token stream",e);
-    }
-  }
-  final IndexSearcher searcher=memoryIndex.createSearcher();
-  List<String> matches=new ArrayList<String>();
+  final ReusableMemoryIndex memoryIndex=memIndexPool.acquire();
   try {
-    if (request.query() == null) {
-      Lucene.ExistsCollector collector=new Lucene.ExistsCollector();
-      for (      Map.Entry<String,Query> entry : queries.entrySet()) {
-        collector.reset();
-        try {
-          searcher.search(entry.getValue(),collector);
-        }
- catch (        IOException e) {
-          logger.warn("[" + entry.getKey() + "] failed to execute query",e);
-        }
-        if (collector.exists()) {
-          matches.add(entry.getKey());
-        }
+    for (    IndexableField field : request.doc().rootDoc().getFields()) {
+      if (!field.fieldType().indexed()) {
+        continue;
       }
-    }
- else {
-      IndexService percolatorIndex=percolatorIndexServiceSafe();
-      if (percolatorIndex.numberOfShards() == 0) {
-        throw new PercolateIndexUnavailable(new Index(PercolatorService.INDEX_NAME));
+      if (field.name().equals(UidFieldMapper.NAME)) {
+        continue;
       }
-      IndexShard percolatorShard=percolatorIndex.shard(0);
-      Engine.Searcher percolatorSearcher=percolatorShard.searcher();
+      TokenStream tokenStream;
       try {
-        percolatorSearcher.searcher().search(request.query(),new QueryCollector(logger,queries,searcher,percolatorIndex,matches));
+        tokenStream=field.tokenStream(request.doc().analyzer());
+        if (tokenStream != null) {
+          tokenStream.reset();
+          memoryIndex.addField(field.name(),tokenStream,field.boost());
+        }
       }
  catch (      IOException e) {
-        logger.warn("failed to execute",e);
-      }
- finally {
-        percolatorSearcher.release();
+        throw new ElasticSearchException("Failed to create token stream",e);
       }
     }
+    final IndexSearcher searcher=memoryIndex.createSearcher();
+    List<String> matches=new ArrayList<String>();
+    try {
+      if (request.query() == null) {
+        Lucene.ExistsCollector collector=new Lucene.ExistsCollector();
+        for (        Map.Entry<String,Query> entry : queries.entrySet()) {
+          collector.reset();
+          try {
+            searcher.search(entry.getValue(),collector);
+          }
+ catch (          IOException e) {
+            logger.warn("[" + entry.getKey() + "] failed to execute query",e);
+          }
+          if (collector.exists()) {
+            matches.add(entry.getKey());
+          }
+        }
+      }
+ else {
+        IndexService percolatorIndex=percolatorIndexServiceSafe();
+        if (percolatorIndex.numberOfShards() == 0) {
+          throw new PercolateIndexUnavailable(new Index(PercolatorService.INDEX_NAME));
+        }
+        IndexShard percolatorShard=percolatorIndex.shard(0);
+        Engine.Searcher percolatorSearcher=percolatorShard.searcher();
+        try {
+          percolatorSearcher.searcher().search(request.query(),new QueryCollector(logger,queries,searcher,percolatorIndex,matches));
+        }
+ catch (        IOException e) {
+          logger.warn("failed to execute",e);
+        }
+ finally {
+          percolatorSearcher.release();
+        }
+      }
+    }
+  finally {
+      indexCache.clear(searcher.getIndexReader());
+      fieldDataService.clear(searcher.getIndexReader());
+    }
+    return new Response(matches,request.doc().mappingsModified());
   }
   finally {
-    indexCache.clear(searcher.getIndexReader());
-    fieldDataService.clear(searcher.getIndexReader());
+    memIndexPool.release(memoryIndex);
   }
-  return new Response(matches,request.doc().mappingsModified());
 }
