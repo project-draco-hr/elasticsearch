@@ -1,0 +1,61 @@
+{
+  int maxDoc=loadedOrds[0].length;
+  if (loadedOrds.length * loadedOrds[0].length < maxSize) {
+    maxSize=loadedOrds.length * loadedOrds[0].length + 1;
+  }
+  int tempMaxSize=maxSize;
+  int storageShift=0;
+  while (tempMaxSize > 0) {
+    storageShift++;
+    tempMaxSize=tempMaxSize >> 1;
+  }
+  this.storageShift=storageShift;
+  this.lookup=new int[maxDoc];
+  this.numDocs=loadedOrds[0].length;
+  this.numOrds=numOrds;
+  List<TIntArrayList> allStorageArrays=new ArrayList<TIntArrayList>();
+  TIntArrayList currentStorageArray=new TIntArrayList(maxSize);
+  currentStorageArray.add(Integer.MIN_VALUE);
+  TIntArrayList currentDocOrs=new TIntArrayList();
+  for (int doc=0; doc < maxDoc; doc++) {
+    currentDocOrs.clear();
+    for (    int[] currentOrds : loadedOrds) {
+      int currentOrd=currentOrds[doc];
+      if (currentOrd == 0) {
+        break;
+      }
+      currentDocOrs.add(currentOrd);
+    }
+    int currentStorageArrayOffset=currentStorageArray.size();
+    if (currentStorageArrayOffset + currentDocOrs.size() >= maxSize) {
+      if (currentDocOrs.size() >= maxSize) {
+        throw new ElasticSearchException("Doc[" + doc + "] has "+ currentDocOrs.size()+ " ordinals, but it surpasses the limit of "+ maxSize);
+      }
+      allStorageArrays.add(currentStorageArray);
+      currentStorageArray=new TIntArrayList(maxSize);
+      currentStorageArray.add(Integer.MIN_VALUE);
+      currentStorageArrayOffset=1;
+    }
+    int size=currentDocOrs.size();
+    if (size == 0) {
+      lookup[doc]=0;
+    }
+ else     if (size == 1) {
+      lookup[doc]=currentDocOrs.get(0);
+    }
+ else {
+      currentDocOrs.set(currentDocOrs.size() - 1,-currentDocOrs.get(currentDocOrs.size() - 1));
+      currentStorageArray.addAll(currentDocOrs);
+      lookup[doc]=allStorageArrays.size() << storageShift;
+      lookup[doc]|=(currentStorageArrayOffset & ((1 << storageShift) - 1));
+      lookup[doc]=-lookup[doc];
+    }
+  }
+  if (!currentStorageArray.isEmpty()) {
+    allStorageArrays.add(currentStorageArray);
+  }
+  this.storageOrdinals=new int[allStorageArrays.size()][];
+  for (int i=0; i < this.storageOrdinals.length; i++) {
+    this.storageOrdinals[i]=allStorageArrays.get(i).toArray();
+  }
+}
