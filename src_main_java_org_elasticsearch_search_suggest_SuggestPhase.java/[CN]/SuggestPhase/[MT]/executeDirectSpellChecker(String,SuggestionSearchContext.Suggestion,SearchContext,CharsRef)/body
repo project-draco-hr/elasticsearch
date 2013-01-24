@@ -1,0 +1,38 @@
+{
+  DirectSpellChecker directSpellChecker=new DirectSpellChecker();
+  directSpellChecker.setAccuracy(suggestion.accuracy());
+  Comparator<SuggestWord> comparator;
+switch (suggestion.sort()) {
+case SCORE:
+    comparator=SuggestWordQueue.DEFAULT_COMPARATOR;
+  break;
+case FREQUENCY:
+comparator=LUCENE_FREQUENCY;
+break;
+default :
+throw new ElasticSearchIllegalArgumentException("Illegal suggest sort: " + suggestion.sort());
+}
+directSpellChecker.setComparator(comparator);
+directSpellChecker.setDistance(suggestion.stringDistance());
+directSpellChecker.setLowerCaseTerms(suggestion.lowerCaseTerms());
+directSpellChecker.setMaxEdits(suggestion.maxEdits());
+directSpellChecker.setMaxInspections(suggestion.factor());
+directSpellChecker.setMaxQueryFrequency(suggestion.maxTermFreq());
+directSpellChecker.setMinPrefix(suggestion.prefixLength());
+directSpellChecker.setMinQueryLength(suggestion.minWordLength());
+directSpellChecker.setThresholdFrequency(suggestion.minDocFreq());
+Suggestion response=new Suggestion(name,suggestion.size(),suggestion.sort());
+List<Token> tokens=queryTerms(suggestion,spare);
+for (Token token : tokens) {
+IndexReader indexReader=context.searcher().getIndexReader();
+SuggestWord[] suggestedWords=directSpellChecker.suggestSimilar(token.term,suggestion.shardSize(),indexReader,suggestion.suggestMode());
+Text key=new BytesText(new BytesArray(token.term.bytes()));
+Suggestion.Term resultTerm=new Suggestion.Term(key,token.startOffset,token.endOffset);
+for (SuggestWord suggestWord : suggestedWords) {
+Text word=new StringText(suggestWord.string);
+resultTerm.addSuggested(new Suggestion.Term.SuggestedTerm(word,suggestWord.freq,suggestWord.score));
+}
+response.addTerm(resultTerm);
+}
+return response;
+}

@@ -1,0 +1,34 @@
+{
+  try {
+    client.admin().indices().prepareDelete("test").execute().actionGet();
+  }
+ catch (  Exception e) {
+  }
+  client.admin().indices().prepareCreate("test").execute().actionGet();
+  client.prepareIndex("test","type1").setSource(XContentFactory.jsonBuilder().startObject().field("text","abcd").endObject()).execute().actionGet();
+  client.prepareIndex("test","type1").setSource(XContentFactory.jsonBuilder().startObject().field("text","aacd").endObject()).execute().actionGet();
+  client.prepareIndex("test","type1").setSource(XContentFactory.jsonBuilder().startObject().field("text","abbd").endObject()).execute().actionGet();
+  client.prepareIndex("test","type1").setSource(XContentFactory.jsonBuilder().startObject().field("text","abcc").endObject()).execute().actionGet();
+  client.admin().indices().prepareRefresh().execute().actionGet();
+  SearchResponse search=client.prepareSearch().setQuery(matchQuery("text","spellcecker")).addSuggestion(fuzzySuggestion("test").setSuggestMode("always").setText("abcd").setField("text")).execute().actionGet();
+  assertThat(Arrays.toString(search.shardFailures()),search.failedShards(),equalTo(0));
+  assertThat(search.suggest(),notNullValue());
+  assertThat(search.suggest().getSuggestions().size(),equalTo(1));
+  assertThat(search.suggest().getSuggestions().get(0).getName(),equalTo("test"));
+  assertThat(search.suggest().getSuggestions().get(0).getTerms().size(),equalTo(1));
+  assertThat(search.suggest().getSuggestions().get(0).getTerms().get(0).getTerm(),equalTo("abcd"));
+  assertThat(search.suggest().getSuggestions().get(0).getTerms().get(0).getSuggested().size(),equalTo(3));
+  assertThat(search.suggest().getSuggestions().get(0).getTerms().get(0).getSuggested().get(0).getTerm().string(),equalTo("aacd"));
+  assertThat(search.suggest().getSuggestions().get(0).getTerms().get(0).getSuggested().get(1).getTerm().string(),equalTo("abbd"));
+  assertThat(search.suggest().getSuggestions().get(0).getTerms().get(0).getSuggested().get(2).getTerm().string(),equalTo("abcc"));
+  client.prepareSearch().addSuggestion(fuzzySuggestion("test").setSuggestMode("always").setText("abcd").setField("text")).execute().actionGet();
+  assertThat(Arrays.toString(search.shardFailures()),search.failedShards(),equalTo(0));
+  assertThat(search.suggest(),notNullValue());
+  assertThat(search.suggest().getSuggestions().size(),equalTo(1));
+  assertThat(search.suggest().getSuggestions().get(0).getName(),equalTo("test"));
+  assertThat(search.suggest().getSuggestions().get(0).getTerms().size(),equalTo(1));
+  assertThat(search.suggest().getSuggestions().get(0).getTerms().get(0).getSuggested().size(),equalTo(3));
+  assertThat(search.suggest().getSuggestions().get(0).getTerms().get(0).getSuggested().get(0).getTerm().string(),equalTo("aacd"));
+  assertThat(search.suggest().getSuggestions().get(0).getTerms().get(0).getSuggested().get(1).getTerm().string(),equalTo("abbd"));
+  assertThat(search.suggest().getSuggestions().get(0).getTerms().get(0).getSuggested().get(2).getTerm().string(),equalTo("abcc"));
+}

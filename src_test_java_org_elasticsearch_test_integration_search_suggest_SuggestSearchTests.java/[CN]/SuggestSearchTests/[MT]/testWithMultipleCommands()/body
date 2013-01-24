@@ -1,0 +1,30 @@
+{
+  try {
+    client.admin().indices().prepareDelete("test").execute().actionGet();
+  }
+ catch (  Exception e) {
+  }
+  client.admin().indices().prepareCreate("test").execute().actionGet();
+  client.prepareIndex("test","type1").setSource(XContentFactory.jsonBuilder().startObject().field("field1","prefix_abcd").field("field2","prefix_efgh").endObject()).execute().actionGet();
+  client.prepareIndex("test","type1").setSource(XContentFactory.jsonBuilder().startObject().field("field1","prefix_aacd").field("field2","prefix_eeeh").endObject()).execute().actionGet();
+  client.prepareIndex("test","type1").setSource(XContentFactory.jsonBuilder().startObject().field("field1","prefix_abbd").field("field2","prefix_efff").endObject()).execute().actionGet();
+  client.prepareIndex("test","type1").setSource(XContentFactory.jsonBuilder().startObject().field("field1","prefix_abcc").field("field2","prefix_eggg").endObject()).execute().actionGet();
+  client.admin().indices().prepareRefresh().execute().actionGet();
+  SearchResponse search=client.prepareSearch().addSuggestion(fuzzySuggestion("size1").setSize(1).setText("prefix_abcd").setMaxTermFreq(10).setMinDocFreq(0).setField("field1").setSuggestMode("always")).addSuggestion(fuzzySuggestion("field2").setField("field2").setText("prefix_eeeh prefix_efgh").setMaxTermFreq(10).setMinDocFreq(0).setSuggestMode("always")).addSuggestion(fuzzySuggestion("accuracy").setField("field2").setText("prefix_efgh").setAccuracy(1f).setMaxTermFreq(10).setMinDocFreq(0).setSuggestMode("always")).execute().actionGet();
+  assertThat(Arrays.toString(search.shardFailures()),search.failedShards(),equalTo(0));
+  assertThat(search.suggest(),notNullValue());
+  assertThat(search.suggest().getSuggestions().size(),equalTo(3));
+  assertThat(search.suggest().getSuggestions().get(0).getName(),equalTo("size1"));
+  assertThat(search.suggest().getSuggestions().get(0).getTerms().size(),equalTo(1));
+  assertThat(search.suggest().getSuggestions().get(0).getTerms().get(0).getSuggested().size(),equalTo(1));
+  assertThat(search.suggest().getSuggestions().get(0).getTerms().get(0).getSuggested().get(0).getTerm().string(),equalTo("prefix_aacd"));
+  assertThat(search.suggest().getSuggestions().get(1).getName(),equalTo("field2"));
+  assertThat(search.suggest().getSuggestions().get(1).getTerms().size(),equalTo(2));
+  assertThat(search.suggest().getSuggestions().get(1).getTerms().get(0).getSuggested().size(),equalTo(1));
+  assertThat(search.suggest().getSuggestions().get(1).getTerms().get(1).getSuggested().size(),equalTo(3));
+  assertThat(search.suggest().getSuggestions().get(1).getTerms().get(1).getSuggested().get(0).getTerm().string(),equalTo("prefix_eeeh"));
+  assertThat(search.suggest().getSuggestions().get(1).getTerms().get(1).getSuggested().get(1).getTerm().string(),equalTo("prefix_efff"));
+  assertThat(search.suggest().getSuggestions().get(1).getTerms().get(1).getSuggested().get(2).getTerm().string(),equalTo("prefix_eggg"));
+  assertThat(search.suggest().getSuggestions().get(2).getName(),equalTo("accuracy"));
+  assertThat(search.suggest().getSuggestions().get(2).getTerms().get(0).getSuggested().isEmpty(),equalTo(true));
+}

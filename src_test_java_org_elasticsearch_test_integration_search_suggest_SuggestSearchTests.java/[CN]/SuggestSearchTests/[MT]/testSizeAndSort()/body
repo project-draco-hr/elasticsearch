@@ -1,0 +1,62 @@
+{
+  try {
+    client.admin().indices().prepareDelete("test").execute().actionGet();
+  }
+ catch (  Exception e) {
+  }
+  client.admin().indices().prepareCreate("test").execute().actionGet();
+  Map<String,Integer> termsAndDocCount=new HashMap<String,Integer>();
+  termsAndDocCount.put("prefix_aaad",20);
+  termsAndDocCount.put("prefix_abbb",18);
+  termsAndDocCount.put("prefix_aaca",16);
+  termsAndDocCount.put("prefix_abba",14);
+  termsAndDocCount.put("prefix_accc",12);
+  termsAndDocCount.put("prefix_addd",10);
+  termsAndDocCount.put("prefix_abaa",8);
+  termsAndDocCount.put("prefix_dbca",6);
+  termsAndDocCount.put("prefix_cbad",4);
+  termsAndDocCount.put("prefix_aacd",1);
+  termsAndDocCount.put("prefix_abcc",1);
+  termsAndDocCount.put("prefix_accd",1);
+  for (  Map.Entry<String,Integer> entry : termsAndDocCount.entrySet()) {
+    for (int i=0; i < entry.getValue(); i++) {
+      client.prepareIndex("test","type1").setSource(XContentFactory.jsonBuilder().startObject().field("field1",entry.getKey()).endObject()).execute().actionGet();
+    }
+  }
+  client.admin().indices().prepareRefresh().execute().actionGet();
+  SearchResponse search=client.prepareSearch().setSuggestText("prefix_abcd").addSuggestion(fuzzySuggestion("size3SortScoreFirst").setSize(3).setMinDocFreq(0).setField("field1").setSuggestMode("always")).addSuggestion(fuzzySuggestion("size10SortScoreFirst").setSize(10).setMinDocFreq(0).setField("field1").setSuggestMode("always")).addSuggestion(fuzzySuggestion("size3SortScoreFirstMaxEdits1").setMaxEdits(1).setSize(10).setMinDocFreq(0).setField("field1").setSuggestMode("always")).addSuggestion(fuzzySuggestion("size10SortFrequencyFirst").setSize(10).setSort("frequency").setShardSize(1000).setMinDocFreq(0).setField("field1").setSuggestMode("always")).execute().actionGet();
+  assertThat(Arrays.toString(search.shardFailures()),search.failedShards(),equalTo(0));
+  assertThat(search.suggest(),notNullValue());
+  assertThat(search.suggest().getSuggestions().size(),equalTo(4));
+  assertThat(search.suggest().getSuggestions().get(0).getName(),equalTo("size3SortScoreFirst"));
+  assertThat(search.suggest().getSuggestions().get(0).getTerms().size(),equalTo(1));
+  assertThat(search.suggest().getSuggestions().get(0).getTerms().get(0).getSuggested().size(),equalTo(3));
+  assertThat(search.suggest().getSuggestions().get(0).getTerms().get(0).getSuggested().get(0).getTerm().string(),equalTo("prefix_aacd"));
+  assertThat(search.suggest().getSuggestions().get(0).getTerms().get(0).getSuggested().get(1).getTerm().string(),equalTo("prefix_abcc"));
+  assertThat(search.suggest().getSuggestions().get(0).getTerms().get(0).getSuggested().get(2).getTerm().string(),equalTo("prefix_accd"));
+  assertThat(search.suggest().getSuggestions().get(1).getName(),equalTo("size10SortScoreFirst"));
+  assertThat(search.suggest().getSuggestions().get(1).getTerms().size(),equalTo(1));
+  assertThat(search.suggest().getSuggestions().get(1).getTerms().get(0).getSuggested().size(),equalTo(10));
+  assertThat(search.suggest().getSuggestions().get(1).getTerms().get(0).getSuggested().get(0).getTerm().string(),equalTo("prefix_aacd"));
+  assertThat(search.suggest().getSuggestions().get(1).getTerms().get(0).getSuggested().get(1).getTerm().string(),equalTo("prefix_abcc"));
+  assertThat(search.suggest().getSuggestions().get(1).getTerms().get(0).getSuggested().get(2).getTerm().string(),equalTo("prefix_accd"));
+  assertThat(search.suggest().getSuggestions().get(2).getName(),equalTo("size3SortScoreFirstMaxEdits1"));
+  assertThat(search.suggest().getSuggestions().get(2).getTerms().size(),equalTo(1));
+  assertThat(search.suggest().getSuggestions().get(2).getTerms().get(0).getSuggested().size(),equalTo(3));
+  assertThat(search.suggest().getSuggestions().get(2).getTerms().get(0).getSuggested().get(0).getTerm().string(),equalTo("prefix_aacd"));
+  assertThat(search.suggest().getSuggestions().get(2).getTerms().get(0).getSuggested().get(1).getTerm().string(),equalTo("prefix_abcc"));
+  assertThat(search.suggest().getSuggestions().get(2).getTerms().get(0).getSuggested().get(2).getTerm().string(),equalTo("prefix_accd"));
+  assertThat(search.suggest().getSuggestions().get(3).getName(),equalTo("size10SortFrequencyFirst"));
+  assertThat(search.suggest().getSuggestions().get(3).getTerms().size(),equalTo(1));
+  assertThat(search.suggest().getSuggestions().get(3).getTerms().get(0).getSuggested().size(),equalTo(10));
+  assertThat(search.suggest().getSuggestions().get(3).getTerms().get(0).getSuggested().get(0).getTerm().string(),equalTo("prefix_aaad"));
+  assertThat(search.suggest().getSuggestions().get(3).getTerms().get(0).getSuggested().get(1).getTerm().string(),equalTo("prefix_abbb"));
+  assertThat(search.suggest().getSuggestions().get(3).getTerms().get(0).getSuggested().get(2).getTerm().string(),equalTo("prefix_aaca"));
+  assertThat(search.suggest().getSuggestions().get(3).getTerms().get(0).getSuggested().get(3).getTerm().string(),equalTo("prefix_abba"));
+  assertThat(search.suggest().getSuggestions().get(3).getTerms().get(0).getSuggested().get(4).getTerm().string(),equalTo("prefix_accc"));
+  assertThat(search.suggest().getSuggestions().get(3).getTerms().get(0).getSuggested().get(5).getTerm().string(),equalTo("prefix_addd"));
+  assertThat(search.suggest().getSuggestions().get(3).getTerms().get(0).getSuggested().get(6).getTerm().string(),equalTo("prefix_abaa"));
+  assertThat(search.suggest().getSuggestions().get(3).getTerms().get(0).getSuggested().get(7).getTerm().string(),equalTo("prefix_dbca"));
+  assertThat(search.suggest().getSuggestions().get(3).getTerms().get(0).getSuggested().get(8).getTerm().string(),equalTo("prefix_cbad"));
+  assertThat(search.suggest().getSuggestions().get(3).getTerms().get(0).getSuggested().get(9).getTerm().string(),equalTo("prefix_aacd"));
+}
