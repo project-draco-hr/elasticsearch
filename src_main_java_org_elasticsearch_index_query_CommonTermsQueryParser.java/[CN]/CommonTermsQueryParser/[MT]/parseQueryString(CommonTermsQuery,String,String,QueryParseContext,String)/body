@@ -1,0 +1,41 @@
+{
+  FieldMapper<?> mapper=null;
+  String field;
+  MapperService.SmartNameFieldMappers smartNameFieldMappers=parseContext.smartFieldMappers(fieldName);
+  if (smartNameFieldMappers != null && smartNameFieldMappers.hasMapper()) {
+    mapper=smartNameFieldMappers.mapper();
+    field=mapper.names().indexName();
+  }
+ else {
+    field=fieldName;
+  }
+  Analyzer analyzer=null;
+  if (queryAnalyzer == null) {
+    if (mapper != null) {
+      analyzer=mapper.searchAnalyzer();
+    }
+    if (analyzer == null && smartNameFieldMappers != null) {
+      analyzer=smartNameFieldMappers.searchAnalyzer();
+    }
+    if (analyzer == null) {
+      analyzer=parseContext.mapperService().searchAnalyzer();
+    }
+  }
+ else {
+    analyzer=parseContext.mapperService().analysisService().analyzer(queryAnalyzer);
+    if (analyzer == null) {
+      throw new ElasticSearchIllegalArgumentException("No analyzer found for [" + queryAnalyzer + "]");
+    }
+  }
+  TokenStream source=analyzer.tokenStream(field,new FastStringReader(queryString.toString()));
+  source.reset();
+  CharTermAttribute termAtt=source.addAttribute(CharTermAttribute.class);
+  int count=0;
+  while (source.incrementToken()) {
+    BytesRef ref=new BytesRef(termAtt.length() * 4);
+    UnicodeUtil.UTF16toUTF8(termAtt.buffer(),0,termAtt.length(),ref);
+    query.add(new Term(field,ref));
+    count++;
+  }
+  return count;
+}
