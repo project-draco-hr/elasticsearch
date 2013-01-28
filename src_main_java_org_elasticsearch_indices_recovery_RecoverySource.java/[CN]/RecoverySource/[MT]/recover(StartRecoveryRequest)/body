@@ -1,5 +1,22 @@
 {
   final InternalIndexShard shard=(InternalIndexShard)indicesService.indexServiceSafe(request.shardId().index().name()).shardSafe(request.shardId().id());
+  RoutingNode node=clusterService.state().readOnlyRoutingNodes().node(request.targetNode().id());
+  if (node == null) {
+    throw new DelayRecoveryException("source node does not have the node [" + request.targetNode() + "] in its state yet..");
+  }
+  ShardRouting targetShardRouting=null;
+  for (  ShardRouting shardRouting : node) {
+    if (shardRouting.shardId().equals(request.shardId())) {
+      targetShardRouting=shardRouting;
+      break;
+    }
+  }
+  if (targetShardRouting == null) {
+    throw new DelayRecoveryException("source node does not have the shard listed in its state as allocated on the node");
+  }
+  if (!targetShardRouting.initializing()) {
+    throw new DelayRecoveryException("source node has the state of the target shard to be [" + targetShardRouting.state() + "], expecting to be [initializing]");
+  }
   logger.trace("[{}][{}] starting recovery to {}, mark_as_relocated {}",request.shardId().index().name(),request.shardId().id(),request.targetNode(),request.markAsRelocated());
   final RecoveryResponse response=new RecoveryResponse();
   shard.recover(new Engine.RecoveryHandler(){
