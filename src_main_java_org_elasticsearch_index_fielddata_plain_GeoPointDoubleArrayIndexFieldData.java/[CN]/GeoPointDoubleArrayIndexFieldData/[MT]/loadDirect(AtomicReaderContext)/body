@@ -6,72 +6,49 @@
   }
   final TDoubleArrayList lat=new TDoubleArrayList();
   final TDoubleArrayList lon=new TDoubleArrayList();
-  ArrayList<int[]> ordinals=new ArrayList<int[]>();
-  int[] idx=new int[reader.maxDoc()];
-  ordinals.add(new int[reader.maxDoc()]);
   lat.add(0);
   lon.add(0);
-  int termOrd=1;
-  TermsEnum termsEnum=terms.iterator(null);
+  OrdinalsBuilder builder=new OrdinalsBuilder(terms,reader.maxDoc());
+  final CharsRef spare=new CharsRef();
   try {
-    DocsEnum docsEnum=null;
-    for (BytesRef term=termsEnum.next(); term != null; term=termsEnum.next()) {
-      String location=term.utf8ToString();
-      int comma=location.indexOf(',');
-      lat.add(Double.parseDouble(location.substring(0,comma)));
-      lon.add(Double.parseDouble(location.substring(comma + 1)));
-      docsEnum=termsEnum.docs(reader.getLiveDocs(),docsEnum,0);
-      for (int docId=docsEnum.nextDoc(); docId != DocsEnum.NO_MORE_DOCS; docId=docsEnum.nextDoc()) {
-        int[] ordinal;
-        if (idx[docId] >= ordinals.size()) {
-          ordinal=new int[reader.maxDoc()];
-          ordinals.add(ordinal);
+    BytesRefIterator iter=builder.buildFromTerms(terms.iterator(null),reader.getLiveDocs());
+    BytesRef term;
+    while ((term=iter.next()) != null) {
+      UnicodeUtil.UTF8toUTF16(term,spare);
+      boolean parsed=false;
+      for (int i=spare.offset; i < spare.length; i++) {
+        if (spare.chars[i] == ',') {
+          lat.add(Double.parseDouble(new String(spare.chars,spare.offset,(i - spare.offset))));
+          lon.add(Double.parseDouble(new String(spare.chars,(spare.offset + (i + 1)),spare.length - ((i + 1) - spare.offset))));
+          parsed=true;
+          break;
         }
- else {
-          ordinal=ordinals.get(idx[docId]);
-        }
-        ordinal[docId]=termOrd;
-        idx[docId]++;
       }
-      termOrd++;
+      assert parsed;
     }
-  }
- catch (  RuntimeException e) {
-    if (e.getClass().getName().endsWith("StopFillCacheException")) {
-    }
- else {
-      throw e;
-    }
-  }
-  if (ordinals.size() == 1) {
-    int[] nativeOrdinals=ordinals.get(0);
-    FixedBitSet set=new FixedBitSet(reader.maxDoc());
-    double[] sLat=new double[reader.maxDoc()];
-    double[] sLon=new double[reader.maxDoc()];
-    boolean allHaveValue=true;
-    for (int i=0; i < nativeOrdinals.length; i++) {
-      int nativeOrdinal=nativeOrdinals[i];
-      if (nativeOrdinal == 0) {
-        allHaveValue=false;
-      }
- else {
-        set.set(i);
+    Ordinals build=builder.build(fieldDataType.getSettings());
+    if (!build.isMultiValued()) {
+      Docs ordinals=build.ordinals();
+      double[] sLat=new double[reader.maxDoc()];
+      double[] sLon=new double[reader.maxDoc()];
+      for (int i=0; i < sLat.length; i++) {
+        int nativeOrdinal=ordinals.getOrd(i);
         sLat[i]=lat.get(nativeOrdinal);
         sLon[i]=lon.get(nativeOrdinal);
       }
-    }
-    if (allHaveValue) {
-      return new GeoPointDoubleArrayAtomicFieldData.Single(sLon,sLat,reader.maxDoc());
+      FixedBitSet set=builder.buildDocsWithValuesSet();
+      if (set == null) {
+        return new GeoPointDoubleArrayAtomicFieldData.Single(sLon,sLat,reader.maxDoc());
+      }
+ else {
+        return new GeoPointDoubleArrayAtomicFieldData.SingleFixedSet(sLon,sLat,reader.maxDoc(),set);
+      }
     }
  else {
-      return new GeoPointDoubleArrayAtomicFieldData.SingleFixedSet(sLon,sLat,reader.maxDoc(),set);
+      return new GeoPointDoubleArrayAtomicFieldData.WithOrdinals(lon.toArray(new double[lon.size()]),lat.toArray(new double[lat.size()]),reader.maxDoc(),build);
     }
   }
- else {
-    int[][] nativeOrdinals=new int[ordinals.size()][];
-    for (int i=0; i < nativeOrdinals.length; i++) {
-      nativeOrdinals[i]=ordinals.get(i);
-    }
-    return new GeoPointDoubleArrayAtomicFieldData.WithOrdinals(lon.toArray(new double[lon.size()]),lat.toArray(new double[lat.size()]),reader.maxDoc(),Ordinals.Factories.createFromFlatOrdinals(nativeOrdinals,termOrd,fieldDataType.getSettings()));
+  finally {
+    builder.close();
   }
 }

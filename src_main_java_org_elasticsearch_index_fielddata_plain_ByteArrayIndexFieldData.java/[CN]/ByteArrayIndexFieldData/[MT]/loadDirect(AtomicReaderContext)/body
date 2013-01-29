@@ -5,66 +5,35 @@
     return ByteArrayAtomicFieldData.EMPTY;
   }
   final TByteArrayList values=new TByteArrayList();
-  ArrayList<int[]> ordinals=new ArrayList<int[]>();
-  int[] idx=new int[reader.maxDoc()];
-  ordinals.add(new int[reader.maxDoc()]);
   values.add((byte)0);
-  int termOrd=1;
-  TermsEnum termsEnum=terms.iterator(null);
+  OrdinalsBuilder builder=new OrdinalsBuilder(terms,reader.maxDoc());
+  BytesRefIterator iter=builder.buildFromTerms(builder.wrapNumeric32Bit(terms.iterator(null)),reader.getLiveDocs());
+  BytesRef term;
+  while ((term=iter.next()) != null) {
+    values.add((byte)NumericUtils.prefixCodedToInt(term));
+  }
   try {
-    DocsEnum docsEnum=null;
-    for (BytesRef term=termsEnum.next(); term != null; term=termsEnum.next()) {
-      values.add((byte)FieldCache.NUMERIC_UTILS_INT_PARSER.parseInt(term));
-      docsEnum=termsEnum.docs(reader.getLiveDocs(),docsEnum,0);
-      for (int docId=docsEnum.nextDoc(); docId != DocsEnum.NO_MORE_DOCS; docId=docsEnum.nextDoc()) {
-        int[] ordinal;
-        if (idx[docId] >= ordinals.size()) {
-          ordinal=new int[reader.maxDoc()];
-          ordinals.add(ordinal);
-        }
- else {
-          ordinal=ordinals.get(idx[docId]);
-        }
-        ordinal[docId]=termOrd;
-        idx[docId]++;
+    Ordinals build=builder.build(fieldDataType.getSettings());
+    if (!build.isMultiValued()) {
+      Docs ordinals=build.ordinals();
+      byte[] sValues=new byte[reader.maxDoc()];
+      int maxDoc=reader.maxDoc();
+      for (int i=0; i < maxDoc; i++) {
+        sValues[i]=values.get(ordinals.getOrd(i));
       }
-      termOrd++;
-    }
-  }
- catch (  RuntimeException e) {
-    if (e.getClass().getName().endsWith("StopFillCacheException")) {
-    }
- else {
-      throw e;
-    }
-  }
-  if (ordinals.size() == 1) {
-    int[] nativeOrdinals=ordinals.get(0);
-    FixedBitSet set=new FixedBitSet(reader.maxDoc());
-    byte[] sValues=new byte[reader.maxDoc()];
-    boolean allHaveValue=true;
-    for (int i=0; i < nativeOrdinals.length; i++) {
-      int nativeOrdinal=nativeOrdinals[i];
-      if (nativeOrdinal == 0) {
-        allHaveValue=false;
+      final FixedBitSet set=builder.buildDocsWithValuesSet();
+      if (set == null) {
+        return new ByteArrayAtomicFieldData.Single(sValues,reader.maxDoc());
       }
  else {
-        set.set(i);
-        sValues[i]=values.get(nativeOrdinal);
+        return new ByteArrayAtomicFieldData.SingleFixedSet(sValues,reader.maxDoc(),set);
       }
     }
-    if (allHaveValue) {
-      return new ByteArrayAtomicFieldData.Single(sValues,reader.maxDoc());
-    }
  else {
-      return new ByteArrayAtomicFieldData.SingleFixedSet(sValues,reader.maxDoc(),set);
+      return new ByteArrayAtomicFieldData.WithOrdinals(values.toArray(new byte[values.size()]),reader.maxDoc(),build);
     }
   }
- else {
-    int[][] nativeOrdinals=new int[ordinals.size()][];
-    for (int i=0; i < nativeOrdinals.length; i++) {
-      nativeOrdinals[i]=ordinals.get(i);
-    }
-    return new ByteArrayAtomicFieldData.WithOrdinals(values.toArray(new byte[values.size()]),reader.maxDoc(),Ordinals.Factories.createFromFlatOrdinals(nativeOrdinals,termOrd,fieldDataType.getSettings()));
+  finally {
+    builder.close();
   }
 }
