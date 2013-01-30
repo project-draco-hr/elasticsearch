@@ -20,6 +20,8 @@
   final CreateIndexListener listener=new CreateIndexListener(mdLock,request,userListener);
   clusterService.submitStateUpdateTask("create-index [" + request.index + "], cause ["+ request.cause+ "]",new ProcessedClusterStateUpdateTask(){
     @Override public ClusterState execute(    ClusterState currentState){
+      boolean indexCreated=false;
+      String failureReason=null;
       try {
         try {
           validate(request,currentState);
@@ -111,6 +113,7 @@
         indexSettingsBuilder.put(SETTING_VERSION_CREATED,Version.CURRENT);
         Settings actualIndexSettings=indexSettingsBuilder.build();
         indicesService.createIndex(request.index,actualIndexSettings,clusterService.state().nodes().localNode().id());
+        indexCreated=true;
         IndexService indexService=indicesService.indexServiceSafe(request.index);
         MapperService mapperService=indexService.mapperService();
         if (mappings.containsKey(MapperService.DEFAULT_MAPPING)) {
@@ -118,7 +121,7 @@
             mapperService.merge(MapperService.DEFAULT_MAPPING,XContentFactory.jsonBuilder().map(mappings.get(MapperService.DEFAULT_MAPPING)).string(),false);
           }
  catch (          Exception e) {
-            indicesService.deleteIndex(request.index,"failed on parsing default mapping on index creation");
+            failureReason="failed on parsing default mapping on index creation";
             throw new MapperParsingException("mapping [" + MapperService.DEFAULT_MAPPING + "]",e);
           }
         }
@@ -130,7 +133,7 @@
             mapperService.merge(entry.getKey(),XContentFactory.jsonBuilder().map(entry.getValue()).string(),true);
           }
  catch (          Exception e) {
-            indicesService.deleteIndex(request.index,"failed on parsing mappings on index creation");
+            failureReason="failed on parsing mappings on index creation";
             throw new MapperParsingException("mapping [" + entry.getKey() + "]",e);
           }
         }
@@ -147,7 +150,14 @@
           indexMetaDataBuilder.putCustom(customEntry.getKey(),customEntry.getValue());
         }
         indexMetaDataBuilder.state(request.state);
-        final IndexMetaData indexMetaData=indexMetaDataBuilder.build();
+        final IndexMetaData indexMetaData;
+        try {
+          indexMetaData=indexMetaDataBuilder.build();
+        }
+ catch (        Exception e) {
+          failureReason="failed to build index metadata";
+          throw e;
+        }
         MetaData newMetaData=newMetaDataBuilder().metaData(currentState.metaData()).put(indexMetaData,false).build();
         logger.info("[{}] creating index, cause [{}], shards [{}]/[{}], mappings {}",request.index,request.cause,indexMetaData.numberOfShards(),indexMetaData.numberOfReplicas(),mappings.keySet());
         ClusterBlocks.Builder blocks=ClusterBlocks.builder().blocks(currentState.blocks());
@@ -189,6 +199,9 @@
       }
  catch (      Throwable e) {
         logger.warn("[{}] failed to create",e,request.index);
+        if (indexCreated) {
+          indicesService.deleteIndex(request.index,failureReason != null ? failureReason : "failed to create index");
+        }
         listener.onFailure(e);
         return currentState;
       }
