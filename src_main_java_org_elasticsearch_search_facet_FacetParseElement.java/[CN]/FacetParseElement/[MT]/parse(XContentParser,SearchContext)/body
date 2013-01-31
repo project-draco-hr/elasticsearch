@@ -1,6 +1,7 @@
 {
   XContentParser.Token token;
-  List<FacetCollector> facetCollectors=null;
+  List<FacetCollector> queryCollectors=null;
+  List<FacetCollector> globalCollectors=null;
   String topLevelFieldName=null;
   while ((token=parser.nextToken()) != XContentParser.Token.END_OBJECT) {
     if (token == XContentParser.Token.FIELD_NAME) {
@@ -8,7 +9,7 @@
     }
  else     if (token == XContentParser.Token.START_OBJECT) {
       FacetCollector facet=null;
-      String scope=ContextIndexSearcher.Scopes.MAIN;
+      boolean global=false;
       String facetFieldName=null;
       Filter filter=null;
       boolean cacheFilter=true;
@@ -31,9 +32,7 @@
         }
  else         if (token.isValue()) {
           if ("global".equals(facetFieldName)) {
-            if (parser.booleanValue()) {
-              scope=ContextIndexSearcher.Scopes.GLOBAL;
-            }
+            global=parser.booleanValue();
           }
  else           if ("scope".equals(facetFieldName) || "_scope".equals(facetFieldName)) {
             throw new SearchParseException(context,"the [scope] support in facets have been removed");
@@ -69,12 +68,19 @@
       if (facet == null) {
         throw new SearchParseException(context,"no facet type found for facet named [" + topLevelFieldName + "]");
       }
-      if (facetCollectors == null) {
-        facetCollectors=Lists.newArrayList();
+      if (global) {
+        if (globalCollectors == null) {
+          globalCollectors=new ArrayList<FacetCollector>();
+        }
+        globalCollectors.add(facet);
       }
-      facetCollectors.add(facet);
-      context.searcher().addCollector(scope,facet);
+ else {
+        if (queryCollectors == null) {
+          queryCollectors=new ArrayList<FacetCollector>();
+        }
+        queryCollectors.add(facet);
+      }
     }
   }
-  context.facets(new SearchContextFacets(facetCollectors));
+  context.facets(new SearchContextFacets(queryCollectors,globalCollectors));
 }
