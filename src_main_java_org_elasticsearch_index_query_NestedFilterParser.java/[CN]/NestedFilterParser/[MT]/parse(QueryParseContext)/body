@@ -5,7 +5,7 @@
   Filter filter=null;
   boolean filterFound=false;
   float boost=1.0f;
-  String scope=null;
+  boolean join=true;
   String path=null;
   boolean cache=false;
   CacheKeyFilter.Key cacheKey=null;
@@ -34,14 +34,17 @@
         }
       }
  else       if (token.isValue()) {
-        if ("path".equals(currentFieldName)) {
+        if ("join".equals(currentFieldName)) {
+          join=parser.booleanValue();
+        }
+ else         if ("path".equals(currentFieldName)) {
           path=parser.text();
         }
  else         if ("boost".equals(currentFieldName)) {
           boost=parser.floatValue();
         }
  else         if ("_scope".equals(currentFieldName)) {
-          scope=parser.text();
+          throw new QueryParsingException(parseContext.index(),"the [_scope] support in [nested] filter has been removed, use nested filter as a facet_filter in the relevant facet");
         }
  else         if ("_name".equals(currentFieldName)) {
           filterName=parser.text();
@@ -89,18 +92,21 @@
       parentFilter=NonNestedDocsFilter.INSTANCE;
       parentFilter=parseContext.cacheFilter(parentFilter,null);
     }
-    BlockJoinQuery joinQuery=new BlockJoinQuery(query,parentFilter,BlockJoinQuery.ScoreMode.None);
-    if (scope != null) {
-      SearchContext.current().addNestedQuery(scope,joinQuery);
+    Filter nestedFilter;
+    if (join) {
+      ToParentBlockJoinQuery joinQuery=new ToParentBlockJoinQuery(query,parentFilter,ScoreMode.None);
+      nestedFilter=new QueryWrapperFilter(joinQuery);
     }
-    Filter joinFilter=new QueryWrapperFilter(joinQuery);
+ else {
+      nestedFilter=new QueryWrapperFilter(query);
+    }
     if (cache) {
-      joinFilter=parseContext.cacheFilter(joinFilter,cacheKey);
+      nestedFilter=parseContext.cacheFilter(nestedFilter,cacheKey);
     }
     if (filterName != null) {
-      parseContext.addNamedFilter(filterName,joinFilter);
+      parseContext.addNamedFilter(filterName,nestedFilter);
     }
-    return joinFilter;
+    return nestedFilter;
   }
   finally {
     NestedQueryParser.parentFilterContext.set(currentParentFilterContext);
