@@ -1,0 +1,70 @@
+{
+  RAMDirectory dir=new RAMDirectory();
+  Map<String,Analyzer> mapping=new HashMap<String,Analyzer>();
+  mapping.put("body_ngram",new Analyzer(){
+    @Override protected TokenStreamComponents createComponents(    String fieldName,    Reader reader){
+      Tokenizer t=new StandardTokenizer(Version.LUCENE_41,reader);
+      ShingleFilter tf=new ShingleFilter(t,2,3);
+      tf.setOutputUnigrams(false);
+      return new TokenStreamComponents(t,new LowerCaseFilter(Version.LUCENE_41,tf));
+    }
+  }
+);
+  mapping.put("body",new Analyzer(){
+    @Override protected TokenStreamComponents createComponents(    String fieldName,    Reader reader){
+      Tokenizer t=new StandardTokenizer(Version.LUCENE_41,reader);
+      return new TokenStreamComponents(t,new LowerCaseFilter(Version.LUCENE_41,t));
+    }
+  }
+);
+  mapping.put("body_reverse",new Analyzer(){
+    @Override protected TokenStreamComponents createComponents(    String fieldName,    Reader reader){
+      Tokenizer t=new StandardTokenizer(Version.LUCENE_41,reader);
+      return new TokenStreamComponents(t,new ReverseStringFilter(Version.LUCENE_41,new LowerCaseFilter(Version.LUCENE_41,t)));
+    }
+  }
+);
+  PerFieldAnalyzerWrapper wrapper=new PerFieldAnalyzerWrapper(new WhitespaceAnalyzer(Version.LUCENE_41),mapping);
+  IndexWriterConfig conf=new IndexWriterConfig(Version.LUCENE_41,wrapper);
+  IndexWriter writer=new IndexWriter(dir,conf);
+  BufferedReader reader=new BufferedReader(new InputStreamReader(NoisyChannelSpellCheckerTests.class.getResourceAsStream("/config/names.txt")));
+  String line=null;
+  while ((line=reader.readLine()) != null) {
+    Document doc=new Document();
+    doc.add(new Field("body",line,TextField.TYPE_NOT_STORED));
+    doc.add(new Field("body_reverse",line,TextField.TYPE_NOT_STORED));
+    doc.add(new Field("body_ngram",line,TextField.TYPE_NOT_STORED));
+    writer.addDocument(doc);
+  }
+  DirectoryReader ir=DirectoryReader.open(writer,false);
+  LaplaceScorer wordScorer=new LaplaceScorer(ir,"body_ngram",0.95d,new BytesRef(" "),0.5f);
+  NoisyChannelSpellChecker suggester=new NoisyChannelSpellChecker();
+  DirectSpellChecker spellchecker=new DirectSpellChecker();
+  spellchecker.setMinQueryLength(1);
+  DirectCandidateGenerator forward=new DirectCandidateGenerator(spellchecker,"body",SuggestMode.SUGGEST_MORE_POPULAR,ir,0.95);
+  DirectCandidateGenerator reverse=new DirectCandidateGenerator(spellchecker,"body_reverse",SuggestMode.SUGGEST_MORE_POPULAR,ir,0.95,wrapper,wrapper);
+  CandidateGenerator generator=new MultiCandidateGeneratorWrapper(forward,reverse);
+  Correction[] corrections=suggester.getCorrections(wrapper,new BytesRef("american cae"),generator,5,1,1,ir,"body",wordScorer,1,2);
+  assertThat(corrections.length,equalTo(1));
+  assertThat(corrections[0].join(new BytesRef(" ")).utf8ToString(),equalTo("american ace"));
+  corrections=suggester.getCorrections(wrapper,new BytesRef("american ame"),generator,5,1,1,ir,"body",wordScorer,1,2);
+  assertThat(corrections.length,equalTo(1));
+  assertThat(corrections[0].join(new BytesRef(" ")).utf8ToString(),equalTo("american ace"));
+  corrections=suggester.getCorrections(wrapper,new BytesRef("american cae"),forward,5,1,1,ir,"body",wordScorer,1,2);
+  assertThat(corrections.length,equalTo(0));
+  corrections=suggester.getCorrections(wrapper,new BytesRef("america cae"),generator,5,2,1,ir,"body",wordScorer,1,2);
+  assertThat(corrections.length,equalTo(1));
+  assertThat(corrections[0].join(new BytesRef(" ")).utf8ToString(),equalTo("american ace"));
+  corrections=suggester.getCorrections(wrapper,new BytesRef("Zorr the Got-Jewel"),generator,5,0.5f,4,ir,"body",wordScorer,0,2);
+  assertThat(corrections.length,equalTo(4));
+  assertThat(corrections[0].join(new BytesRef(" ")).utf8ToString(),equalTo("xorr the god jewel"));
+  assertThat(corrections[1].join(new BytesRef(" ")).utf8ToString(),equalTo("xorr the got jewel"));
+  assertThat(corrections[2].join(new BytesRef(" ")).utf8ToString(),equalTo("zorr the god jewel"));
+  assertThat(corrections[3].join(new BytesRef(" ")).utf8ToString(),equalTo("gorr the god jewel"));
+  corrections=suggester.getCorrections(wrapper,new BytesRef("Zorr the Got-Jewel"),generator,5,0.5f,1,ir,"body",wordScorer,1.5f,2);
+  assertThat(corrections.length,equalTo(1));
+  assertThat(corrections[0].join(new BytesRef(" ")).utf8ToString(),equalTo("xorr the god jewel"));
+  corrections=suggester.getCorrections(wrapper,new BytesRef("Xor the Got-Jewel"),generator,5,0.5f,1,ir,"body",wordScorer,1.5f,2);
+  assertThat(corrections.length,equalTo(1));
+  assertThat(corrections[0].join(new BytesRef(" ")).utf8ToString(),equalTo("xorr the god jewel"));
+}
