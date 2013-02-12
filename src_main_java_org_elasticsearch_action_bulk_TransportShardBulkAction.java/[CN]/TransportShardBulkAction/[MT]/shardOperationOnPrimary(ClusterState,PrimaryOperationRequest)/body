@@ -4,6 +4,7 @@
   Engine.IndexingOperation[] ops=null;
   Set<Tuple<String,String>> mappingsToUpdate=null;
   BulkItemResponse[] responses=new BulkItemResponse[request.items().length];
+  long[] versions=new long[request.items().length];
   for (int i=0; i < request.items().length; i++) {
     BulkItemRequest item=request.items()[i];
     if (item.request() instanceof IndexRequest) {
@@ -30,6 +31,7 @@
           version=create.version();
           op=create;
         }
+        versions[i]=indexRequest.version();
         indexRequest.version(version);
         if (op.parsedDoc().mappingsModified()) {
           if (mappingsToUpdate == null) {
@@ -47,6 +49,9 @@
       }
  catch (      Exception e) {
         if (retryPrimaryException(e)) {
+          for (int j=0; j < i; j++) {
+            applyVersion(request.items()[j],versions[j]);
+          }
           throw (ElasticSearchException)e;
         }
         if (e instanceof ElasticSearchException && ((ElasticSearchException)e).status() == RestStatus.CONFLICT) {
@@ -69,6 +74,9 @@
       }
  catch (      Exception e) {
         if (retryPrimaryException(e)) {
+          for (int j=0; j < i; j++) {
+            applyVersion(request.items()[j],versions[j]);
+          }
           throw (ElasticSearchException)e;
         }
         if (e instanceof ElasticSearchException && ((ElasticSearchException)e).status() == RestStatus.CONFLICT) {
