@@ -1,15 +1,42 @@
 {
-  if (ignoreReplicas() || shardIt.size() == 1) {
+  if (ignoreReplicas()) {
     postPrimaryOperation(request,response);
     listener.onResponse(response.response());
     return;
   }
+  ShardRouting shard;
   ClusterState newState=clusterService.state();
+  ShardRouting newPrimaryShard=null;
   if (clusterState != newState) {
+    shardIt.reset();
+    ShardRouting originalPrimaryShard=null;
+    while ((shard=shardIt.nextOrNull()) != null) {
+      if (shard.primary()) {
+        originalPrimaryShard=shard;
+        break;
+      }
+    }
+    if (originalPrimaryShard == null || !originalPrimaryShard.active()) {
+      throw new ElasticSearchIllegalStateException("unexpected state, failed to find primary shard on an index operation that succeeded");
+    }
     clusterState=newState;
     shardIt=shards(newState,request);
+    while ((shard=shardIt.nextOrNull()) != null) {
+      if (shard.primary()) {
+        if (originalPrimaryShard.currentNodeId().equals(shard.currentNodeId())) {
+          newPrimaryShard=null;
+        }
+ else {
+          newPrimaryShard=shard;
+        }
+        break;
+      }
+    }
   }
   int replicaCounter=shardIt.assignedReplicasIncludingRelocating();
+  if (newPrimaryShard != null) {
+    replicaCounter++;
+  }
   if (replicaCounter == 0) {
     postPrimaryOperation(request,response);
     listener.onResponse(response.response());
@@ -22,8 +49,10 @@
   }
   replicaCounter++;
   AtomicInteger counter=new AtomicInteger(replicaCounter);
+  if (newPrimaryShard != null) {
+    performOnReplica(response,counter,newPrimaryShard,newPrimaryShard.currentNodeId());
+  }
   shardIt.reset();
-  ShardRouting shard;
   while ((shard=shardIt.nextOrNull()) != null) {
     if (shard.unassigned()) {
       continue;
