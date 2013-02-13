@@ -3,7 +3,7 @@
     logger.debug("received shard started for {}, reason [{}]",shardRouting,reason);
   }
   startedShardsQueue.add(shardRouting);
-  clusterService.submitStateUpdateTask("shard-started (" + shardRouting + "), reason ["+ reason+ "]",Priority.HIGH,new ClusterStateUpdateTask(){
+  clusterService.submitStateUpdateTask("shard-started (" + shardRouting + "), reason ["+ reason+ "]",Priority.HIGH,new ProcessedClusterStateUpdateTask(){
     @Override public ClusterState execute(    ClusterState currentState){
       List<ShardRouting> shards=new ArrayList<ShardRouting>();
       startedShardsQueue.drainTo(shards);
@@ -34,11 +34,29 @@
       if (logger.isDebugEnabled()) {
         logger.debug("applying started shards {}, reason [{}]",shards,reason);
       }
-      RoutingAllocation.Result routingResult=allocationService.applyStartedShards(currentState,shards);
+      RoutingAllocation.Result routingResult=allocationService.applyStartedShards(currentState,shards,false);
       if (!routingResult.changed()) {
         return currentState;
       }
       return newClusterStateBuilder().state(currentState).routingResult(routingResult).build();
+    }
+    @Override public void clusterStateProcessed(    ClusterState clusterState){
+      rerouteRequired.set(true);
+      clusterService.submitStateUpdateTask("reroute post shard-started (" + shardRouting + "), reason ["+ reason+ "]",new ClusterStateUpdateTask(){
+        @Override public ClusterState execute(        ClusterState currentState){
+          if (rerouteRequired.compareAndSet(true,false)) {
+            RoutingAllocation.Result routingResult=allocationService.reroute(currentState);
+            if (!routingResult.changed()) {
+              return currentState;
+            }
+            return newClusterStateBuilder().state(currentState).routingResult(routingResult).build();
+          }
+ else {
+            return currentState;
+          }
+        }
+      }
+);
     }
   }
 );
