@@ -1,0 +1,36 @@
+{
+  try {
+    client.admin().indices().prepareDelete("test").execute().actionGet();
+  }
+ catch (  Exception ex) {
+  }
+  client.admin().indices().prepareCreate("test").execute().actionGet();
+  client.prepareIndex("test","type1","1").setSource(jsonBuilder().startObject().field("test","1").field("num",1.0f).endObject()).execute().actionGet();
+  client.admin().indices().prepareFlush().execute().actionGet();
+  client.prepareIndex("test","type1","2").setSource(jsonBuilder().startObject().field("test","2").field("num",2.0f).endObject()).execute().actionGet();
+  client.admin().indices().prepareFlush().execute().actionGet();
+  client.prepareIndex("test","type1","3").setSource(jsonBuilder().startObject().field("test","3").field("num",3.0f).endObject()).execute().actionGet();
+  client.admin().indices().prepareFlush().execute().actionGet();
+  client.admin().indices().refresh(refreshRequest()).actionGet();
+  String script="org.elasticsearch.test.integration.search.scriptfilter.ScriptFilterSearchTests.incrementScriptCounter() > 0";
+  scriptCounter.set(0);
+  logger.info("running script filter the first time");
+  SearchResponse response=client.prepareSearch().setQuery(filteredQuery(termQuery("test","1"),scriptFilter(script).cache(true))).execute().actionGet();
+  assertThat(response.hits().totalHits(),equalTo(1l));
+  assertThat(scriptCounter.get(),equalTo(3));
+  scriptCounter.set(0);
+  logger.info("running script filter the second time");
+  response=client.prepareSearch().setQuery(filteredQuery(termQuery("test","2"),scriptFilter(script).cache(true))).execute().actionGet();
+  assertThat(response.hits().totalHits(),equalTo(1l));
+  assertThat(scriptCounter.get(),equalTo(0));
+  scriptCounter.set(0);
+  logger.info("running script filter with new parameters");
+  response=client.prepareSearch().setQuery(filteredQuery(termQuery("test","1"),scriptFilter(script).addParam("param1","1").cache(true))).execute().actionGet();
+  assertThat(response.hits().totalHits(),equalTo(1l));
+  assertThat(scriptCounter.get(),equalTo(3));
+  scriptCounter.set(0);
+  logger.info("running script filter with same parameters");
+  response=client.prepareSearch().setQuery(filteredQuery(matchAllQuery(),scriptFilter(script).addParam("param1","1").cache(true))).execute().actionGet();
+  assertThat(response.hits().totalHits(),equalTo(3l));
+  assertThat(scriptCounter.get(),equalTo(0));
+}
