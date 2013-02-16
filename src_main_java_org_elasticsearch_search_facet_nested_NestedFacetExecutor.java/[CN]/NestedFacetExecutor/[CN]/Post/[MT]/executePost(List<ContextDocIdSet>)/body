@@ -1,0 +1,36 @@
+{
+  List<ContextDocIdSet> nestedEntries=new ArrayList<ContextDocIdSet>(docSets.size());
+  for (int i=0; i < docSets.size(); i++) {
+    ContextDocIdSet entry=docSets.get(i);
+    AtomicReaderContext context=entry.context;
+    DocIdSet docIdSet=parentFilter.getDocIdSet(context,null);
+    if (DocIdSets.isEmpty(docIdSet)) {
+      continue;
+    }
+    Bits childDocs=DocIdSets.toSafeBits(context.reader(),childFilter.getDocIdSet(context,null));
+    FixedBitSet parentDocs=(FixedBitSet)docIdSet;
+    DocIdSetIterator iter=entry.docSet.iterator();
+    int parentDoc=iter.nextDoc();
+    if (parentDoc == DocIdSetIterator.NO_MORE_DOCS) {
+      continue;
+    }
+    if (parentDoc == 0) {
+      parentDoc=iter.nextDoc();
+    }
+    if (parentDoc == DocIdSetIterator.NO_MORE_DOCS) {
+      continue;
+    }
+    FixedBitSet childSet=new FixedBitSet(context.reader().maxDoc());
+    do {
+      int prevParentDoc=parentDocs.prevSetBit(parentDoc - 1);
+      for (int childDocId=(parentDoc - 1); childDocId > prevParentDoc; childDocId--) {
+        if (childDocs.get(childDocId)) {
+          childSet.set(childDocId);
+        }
+      }
+    }
+ while ((parentDoc=iter.nextDoc()) != DocIdSetIterator.NO_MORE_DOCS);
+    nestedEntries.add(new ContextDocIdSet(entry.context,childSet));
+  }
+  post.executePost(nestedEntries);
+}

@@ -1,11 +1,14 @@
 {
-  if (searchContext.parsedFilter() != null && currentState == Stage.MAIN_QUERY) {
-    collector=new FilteredCollector(collector,searchContext.parsedFilter());
-  }
   if (searchContext.timeoutInMillis() != -1) {
     collector=new TimeLimitingCollector(collector,TimeLimitingCollector.getGlobalCounter(),searchContext.timeoutInMillis());
   }
   if (currentState == Stage.MAIN_QUERY) {
+    if (enableMainDocIdSetCollector) {
+      collector=this.mainDocIdSetCollector=new DocIdSetCollector(searchContext.docSetCache(),collector);
+    }
+    if (searchContext.parsedFilter() != null) {
+      collector=new FilteredCollector(collector,searchContext.parsedFilter());
+    }
     if (queryCollectors != null && !queryCollectors.isEmpty()) {
       collector=new MultiCollector(collector,queryCollectors.toArray(new Collector[queryCollectors.size()]));
     }
@@ -23,5 +26,18 @@
   }
  else {
     super.search(leaves,weight,collector);
+  }
+  if (currentState == Stage.MAIN_QUERY) {
+    if (enableMainDocIdSetCollector) {
+      enableMainDocIdSetCollector=false;
+      mainDocIdSetCollector.postCollection();
+    }
+    if (queryCollectors != null && !queryCollectors.isEmpty()) {
+      for (      Collector queryCollector : queryCollectors) {
+        if (queryCollector instanceof XCollector) {
+          ((XCollector)queryCollector).postCollection();
+        }
+      }
+    }
   }
 }
