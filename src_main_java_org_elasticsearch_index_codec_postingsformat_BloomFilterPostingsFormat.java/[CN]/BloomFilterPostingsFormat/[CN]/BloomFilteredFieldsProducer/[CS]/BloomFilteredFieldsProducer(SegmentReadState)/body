@@ -1,0 +1,25 @@
+{
+  String bloomFileName=IndexFileNames.segmentFileName(state.segmentInfo.name,state.segmentSuffix,BLOOM_EXTENSION);
+  IndexInput bloomIn=null;
+  boolean success=false;
+  try {
+    bloomIn=state.dir.openInput(bloomFileName,state.context);
+    CodecUtil.checkHeader(bloomIn,BLOOM_CODEC_NAME,BLOOM_CODEC_VERSION,BLOOM_CODEC_VERSION);
+    PostingsFormat delegatePostingsFormat=PostingsFormat.forName(bloomIn.readString());
+    this.delegateFieldsProducer=delegatePostingsFormat.fieldsProducer(state);
+    int numBlooms=bloomIn.readInt();
+    for (int i=0; i < numBlooms; i++) {
+      int fieldNum=bloomIn.readInt();
+      BloomFilter bloom=BloomFilter.deserialize(bloomIn);
+      FieldInfo fieldInfo=state.fieldInfos.fieldInfo(fieldNum);
+      bloomsByFieldName.put(fieldInfo.name,bloom);
+    }
+    IOUtils.close(bloomIn);
+    success=true;
+  }
+  finally {
+    if (!success) {
+      IOUtils.closeWhileHandlingException(bloomIn,delegateFieldsProducer);
+    }
+  }
+}
