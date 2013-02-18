@@ -1,34 +1,34 @@
 {
-  IndexService indexService=indicesService.indexServiceSafe(request.index());
-  IndexShard indexShard=indexService.shardSafe(request.shardId());
+  IndexService indexService=indicesService.indexServiceSafe(request.getIndex());
+  IndexShard indexShard=indexService.shardSafe(request.getShardId());
   long getDate=System.currentTimeMillis();
-  final GetResult getResult=indexShard.getService().get(request.type(),request.id(),new String[]{SourceFieldMapper.NAME,RoutingFieldMapper.NAME,ParentFieldMapper.NAME,TTLFieldMapper.NAME},true);
-  if (!getResult.exists()) {
-    if (request.upsertRequest() == null) {
-      listener.onFailure(new DocumentMissingException(new ShardId(request.index(),request.shardId()),request.type(),request.id()));
+  final GetResult getResult=indexShard.getService().get(request.getType(),request.getId(),new String[]{SourceFieldMapper.NAME,RoutingFieldMapper.NAME,ParentFieldMapper.NAME,TTLFieldMapper.NAME},true);
+  if (!getResult.isExists()) {
+    if (request.getUpsertRequest() == null) {
+      listener.onFailure(new DocumentMissingException(new ShardId(request.getIndex(),request.getShardId()),request.getType(),request.getId()));
       return;
     }
-    final IndexRequest indexRequest=request.upsertRequest();
-    indexRequest.index(request.index()).type(request.type()).id(request.id()).create(true).routing(request.routing()).percolate(request.percolate()).refresh(request.refresh()).replicationType(request.replicationType()).consistencyLevel(request.consistencyLevel());
-    indexRequest.operationThreaded(false);
-    final BytesReference updateSourceBytes=indexRequest.source();
+    final IndexRequest indexRequest=request.getUpsertRequest();
+    indexRequest.setIndex(request.getIndex()).setType(request.getType()).setId(request.getId()).setCreate(true).setRouting(request.getRouting()).setPercolate(request.getPercolate()).setRefresh(request.isRefresh()).setReplicationType(request.setReplicationType()).setConsistencyLevel(request.getConsistencyLevel());
+    indexRequest.setOperationThreaded(false);
+    final BytesReference updateSourceBytes=indexRequest.getSource();
     indexAction.execute(indexRequest,new ActionListener<IndexResponse>(){
       @Override public void onResponse(      IndexResponse response){
-        UpdateResponse update=new UpdateResponse(response.index(),response.type(),response.id(),response.version());
-        update.matches(response.matches());
-        if (request.fields() != null && request.fields().length > 0) {
+        UpdateResponse update=new UpdateResponse(response.getIndex(),response.getType(),response.getId(),response.getVersion());
+        update.setMatches(response.getMatches());
+        if (request.getFields() != null && request.getFields().length > 0) {
           Tuple<XContentType,Map<String,Object>> sourceAndContent=XContentHelper.convertToMap(updateSourceBytes,true);
-          update.getResult(extractGetResult(request,response.version(),sourceAndContent.v2(),sourceAndContent.v1(),updateSourceBytes));
+          update.setGetResult(extractGetResult(request,response.getVersion(),sourceAndContent.v2(),sourceAndContent.v1(),updateSourceBytes));
         }
  else {
-          update.getResult(null);
+          update.setGetResult(null);
         }
         listener.onResponse(update);
       }
       @Override public void onFailure(      Throwable e){
         e=ExceptionsHelper.unwrapCause(e);
         if (e instanceof VersionConflictEngineException || e instanceof DocumentAlreadyExistsException) {
-          if (retryCount < request.retryOnConflict()) {
+          if (retryCount < request.getRetryOnConflict()) {
             threadPool.executor(executor()).execute(new Runnable(){
               @Override public void run(){
                 shardOperation(request,listener,retryCount + 1);
@@ -45,7 +45,7 @@
     return;
   }
   if (getResult.internalSourceRef() == null) {
-    listener.onFailure(new DocumentSourceMissingException(new ShardId(request.index(),request.shardId()),request.type(),request.id()));
+    listener.onFailure(new DocumentSourceMissingException(new ShardId(request.getIndex(),request.getShardId()),request.getType(),request.getId()));
     return;
   }
   Tuple<XContentType,Map<String,Object>> sourceAndContent=XContentHelper.convertToMap(getResult.internalSourceRef(),true);
@@ -55,22 +55,22 @@
   Object fetchedTTL=null;
   final Map<String,Object> updatedSourceAsMap;
   final XContentType updateSourceContentType=sourceAndContent.v1();
-  String routing=getResult.fields().containsKey(RoutingFieldMapper.NAME) ? getResult.field(RoutingFieldMapper.NAME).value().toString() : null;
-  String parent=getResult.fields().containsKey(ParentFieldMapper.NAME) ? getResult.field(ParentFieldMapper.NAME).value().toString() : null;
-  if (request.script() == null && request.doc() != null) {
-    IndexRequest indexRequest=request.doc();
+  String routing=getResult.getFields().containsKey(RoutingFieldMapper.NAME) ? getResult.field(RoutingFieldMapper.NAME).getValue().toString() : null;
+  String parent=getResult.getFields().containsKey(ParentFieldMapper.NAME) ? getResult.field(ParentFieldMapper.NAME).getValue().toString() : null;
+  if (request.getScript() == null && request.getDoc() != null) {
+    IndexRequest indexRequest=request.getDoc();
     updatedSourceAsMap=sourceAndContent.v2();
-    if (indexRequest.ttl() > 0) {
-      ttl=indexRequest.ttl();
+    if (indexRequest.getTtl() > 0) {
+      ttl=indexRequest.getTtl();
     }
-    timestamp=indexRequest.timestamp();
-    if (indexRequest.routing() != null) {
-      routing=indexRequest.routing();
+    timestamp=indexRequest.getTimestamp();
+    if (indexRequest.getRouting() != null) {
+      routing=indexRequest.getRouting();
     }
-    if (indexRequest.parent() != null) {
-      parent=indexRequest.parent();
+    if (indexRequest.getParent() != null) {
+      parent=indexRequest.getParent();
     }
-    XContentHelper.update(updatedSourceAsMap,indexRequest.sourceAsMap());
+    XContentHelper.update(updatedSourceAsMap,indexRequest.getSourceAsMap());
   }
  else {
     Map<String,Object> ctx=new HashMap<String,Object>(2);
@@ -98,26 +98,26 @@
     updatedSourceAsMap=(Map<String,Object>)ctx.get("_source");
   }
   if (ttl == null) {
-    ttl=getResult.fields().containsKey(TTLFieldMapper.NAME) ? (Long)getResult.field(TTLFieldMapper.NAME).value() : null;
+    ttl=getResult.getFields().containsKey(TTLFieldMapper.NAME) ? (Long)getResult.field(TTLFieldMapper.NAME).getValue() : null;
     if (ttl != null) {
       ttl=ttl - (System.currentTimeMillis() - getDate);
     }
   }
   if (operation == null || "index".equals(operation)) {
-    final IndexRequest indexRequest=Requests.indexRequest(request.index()).type(request.type()).id(request.id()).routing(routing).parent(parent).source(updatedSourceAsMap,updateSourceContentType).version(getResult.version()).replicationType(request.replicationType()).consistencyLevel(request.consistencyLevel()).timestamp(timestamp).ttl(ttl).percolate(request.percolate()).refresh(request.refresh());
-    indexRequest.operationThreaded(false);
-    final BytesReference updateSourceBytes=indexRequest.source();
+    final IndexRequest indexRequest=Requests.indexRequest(request.getIndex()).setType(request.getType()).setId(request.getId()).setRouting(routing).setParent(parent).setSource(updatedSourceAsMap,updateSourceContentType).setVersion(getResult.getVersion()).setReplicationType(request.setReplicationType()).setConsistencyLevel(request.getConsistencyLevel()).setTimestamp(timestamp).setTtl(ttl).setPercolate(request.getPercolate()).setRefresh(request.isRefresh());
+    indexRequest.setOperationThreaded(false);
+    final BytesReference updateSourceBytes=indexRequest.getSource();
     indexAction.execute(indexRequest,new ActionListener<IndexResponse>(){
       @Override public void onResponse(      IndexResponse response){
-        UpdateResponse update=new UpdateResponse(response.index(),response.type(),response.id(),response.version());
-        update.matches(response.matches());
-        update.getResult(extractGetResult(request,response.version(),updatedSourceAsMap,updateSourceContentType,updateSourceBytes));
+        UpdateResponse update=new UpdateResponse(response.getIndex(),response.getType(),response.getId(),response.getVersion());
+        update.setMatches(response.getMatches());
+        update.setGetResult(extractGetResult(request,response.getVersion(),updatedSourceAsMap,updateSourceContentType,updateSourceBytes));
         listener.onResponse(update);
       }
       @Override public void onFailure(      Throwable e){
         e=ExceptionsHelper.unwrapCause(e);
         if (e instanceof VersionConflictEngineException) {
-          if (retryCount < request.retryOnConflict()) {
+          if (retryCount < request.getRetryOnConflict()) {
             threadPool.executor(executor()).execute(new Runnable(){
               @Override public void run(){
                 shardOperation(request,listener,retryCount + 1);
@@ -133,18 +133,18 @@
 );
   }
  else   if ("delete".equals(operation)) {
-    DeleteRequest deleteRequest=Requests.deleteRequest(request.index()).type(request.type()).id(request.id()).routing(routing).parent(parent).version(getResult.version()).replicationType(request.replicationType()).consistencyLevel(request.consistencyLevel());
-    deleteRequest.operationThreaded(false);
+    DeleteRequest deleteRequest=Requests.deleteRequest(request.getIndex()).setType(request.getType()).setId(request.getId()).setRouting(routing).setParent(parent).setVersion(getResult.getVersion()).setReplicationType(request.setReplicationType()).setConsistencyLevel(request.getConsistencyLevel());
+    deleteRequest.setOperationThreaded(false);
     deleteAction.execute(deleteRequest,new ActionListener<DeleteResponse>(){
       @Override public void onResponse(      DeleteResponse response){
-        UpdateResponse update=new UpdateResponse(response.index(),response.type(),response.id(),response.version());
-        update.getResult(extractGetResult(request,response.version(),updatedSourceAsMap,updateSourceContentType,null));
+        UpdateResponse update=new UpdateResponse(response.getIndex(),response.getType(),response.getId(),response.getVersion());
+        update.setGetResult(extractGetResult(request,response.getVersion(),updatedSourceAsMap,updateSourceContentType,null));
         listener.onResponse(update);
       }
       @Override public void onFailure(      Throwable e){
         e=ExceptionsHelper.unwrapCause(e);
         if (e instanceof VersionConflictEngineException) {
-          if (retryCount < request.retryOnConflict()) {
+          if (retryCount < request.getRetryOnConflict()) {
             threadPool.executor(executor()).execute(new Runnable(){
               @Override public void run(){
                 shardOperation(request,listener,retryCount + 1);
@@ -160,12 +160,12 @@
 );
   }
  else   if ("none".equals(operation)) {
-    UpdateResponse update=new UpdateResponse(getResult.index(),getResult.type(),getResult.id(),getResult.version());
-    update.getResult(extractGetResult(request,getResult.version(),updatedSourceAsMap,updateSourceContentType,null));
+    UpdateResponse update=new UpdateResponse(getResult.getIndex(),getResult.getType(),getResult.getId(),getResult.getVersion());
+    update.setGetResult(extractGetResult(request,getResult.getVersion(),updatedSourceAsMap,updateSourceContentType,null));
     listener.onResponse(update);
   }
  else {
     logger.warn("Used update operation [{}] for script [{}], doing nothing...",operation,request.script);
-    listener.onResponse(new UpdateResponse(getResult.index(),getResult.type(),getResult.id(),getResult.version()));
+    listener.onResponse(new UpdateResponse(getResult.getIndex(),getResult.getType(),getResult.getId(),getResult.getVersion()));
   }
 }
