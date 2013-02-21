@@ -1,0 +1,53 @@
+{
+  if (node != null && group != null) {
+    Thread w;
+    node.status=CANCELLED;
+    node.thread=null;
+    for (WNode p=group, q; (q=p.cowait) != null; ) {
+      if (q.status == CANCELLED)       U.compareAndSwapObject(p,WNEXT,q,q.next);
+ else       p=q;
+    }
+    if (group == node) {
+      WNode r;
+      while ((r=node.cowait) != null) {
+        if (U.compareAndSwapObject(node,WCOWAIT,r,r.cowait) && (w=r.thread) != null) {
+          r.thread=null;
+          U.unpark(w);
+        }
+      }
+      for (WNode pred=node.prev; pred != null; ) {
+        WNode succ, pp;
+        while ((succ=node.next) == null || succ.status == CANCELLED) {
+          WNode q=null;
+          for (WNode t=wtail; t != null && t != node; t=t.prev)           if (t.status != CANCELLED)           q=t;
+          if (succ == q || U.compareAndSwapObject(node,WNEXT,succ,succ=q)) {
+            if (succ == null && node == wtail)             U.compareAndSwapObject(this,WTAIL,node,pred);
+            break;
+          }
+        }
+        if (pred.next == node)         U.compareAndSwapObject(pred,WNEXT,node,succ);
+        if (succ != null && (w=succ.thread) != null) {
+          succ.thread=null;
+          U.unpark(w);
+        }
+        if (pred.status != CANCELLED || (pp=pred.prev) == null)         break;
+        node.prev=pp;
+        U.compareAndSwapObject(pp,WNEXT,pred,succ);
+        pred=pp;
+      }
+    }
+  }
+  WNode h;
+  while ((h=whead) != null) {
+    long s;
+    WNode q;
+    if ((q=h.next) == null || q.status == CANCELLED) {
+      for (WNode t=wtail; t != null && t != h; t=t.prev)       if (t.status <= 0)       q=t;
+    }
+    if (h == whead) {
+      if (q != null && h.status == 0 && ((s=state) & ABITS) != WBIT && (s == 0L || q.mode == RMODE))       release(h);
+      break;
+    }
+  }
+  return (interrupted || Thread.interrupted()) ? INTERRUPTED : 0L;
+}

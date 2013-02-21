@@ -1,0 +1,33 @@
+{
+  if (fn == null)   throw new NullPointerException();
+  CompletableFuture<T> dst=new CompletableFuture<T>();
+  ExceptionCompletion<T> d=null;
+  Object r;
+  if ((r=result) == null) {
+    CompletionNode p=new CompletionNode(d=new ExceptionCompletion<T>(this,fn,dst));
+    while ((r=result) == null) {
+      if (UNSAFE.compareAndSwapObject(this,COMPLETIONS,p.next=completions,p))       break;
+    }
+  }
+  if (r != null && (d == null || d.compareAndSet(0,1))) {
+    T t=null;
+    Throwable ex, dx=null;
+    if (r instanceof AltResult) {
+      if ((ex=((AltResult)r).ex) != null) {
+        try {
+          t=fn.apply(ex);
+        }
+ catch (        Throwable rex) {
+          dx=rex;
+        }
+      }
+    }
+ else {
+      @SuppressWarnings("unchecked") T tr=(T)r;
+      t=tr;
+    }
+    dst.internalComplete(t,dx);
+  }
+  helpPostComplete();
+  return dst;
+}

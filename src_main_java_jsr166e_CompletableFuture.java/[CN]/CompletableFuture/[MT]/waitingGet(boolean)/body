@@ -1,0 +1,44 @@
+{
+  WaitNode q=null;
+  boolean queued=false;
+  int h=0, spins=0;
+  for (Object r; ; ) {
+    if ((r=result) != null) {
+      if (q != null) {
+        q.thread=null;
+        if (q.interruptControl < 0) {
+          if (interruptible) {
+            removeWaiter(q);
+            return null;
+          }
+          Thread.currentThread().interrupt();
+        }
+      }
+      postComplete();
+      return r;
+    }
+ else     if (h == 0) {
+      h=ThreadLocalRandom.current().nextInt();
+      if (Runtime.getRuntime().availableProcessors() > 1)       spins=WAITING_GET_SPINS;
+    }
+ else     if (spins > 0) {
+      h^=h << 1;
+      h^=h >>> 3;
+      if ((h^=h << 10) >= 0)       --spins;
+    }
+ else     if (q == null)     q=new WaitNode(interruptible,0L,0L);
+ else     if (!queued)     queued=UNSAFE.compareAndSwapObject(this,WAITERS,q.next=waiters,q);
+ else     if (interruptible && q.interruptControl < 0) {
+      removeWaiter(q);
+      return null;
+    }
+ else     if (q.thread != null && result == null) {
+      try {
+        ForkJoinPool.managedBlock(q);
+      }
+ catch (      InterruptedException ex) {
+        q.interruptControl=-1;
+      }
+    }
+  }
+}

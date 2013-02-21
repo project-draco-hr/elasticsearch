@@ -1,0 +1,59 @@
+{
+  WNode node=null, p;
+  for (int spins=-1; ; ) {
+    long s, ns;
+    if (((s=state) & ABITS) == 0L) {
+      if (U.compareAndSwapLong(this,STATE,s,ns=s + WBIT))       return ns;
+    }
+ else     if (spins > 0) {
+      if (ThreadLocalRandom.current().nextInt() >= 0)       --spins;
+    }
+ else     if ((p=wtail) == null) {
+      WNode h=new WNode(WMODE,null);
+      if (U.compareAndSwapObject(this,WHEAD,null,h))       wtail=h;
+    }
+ else     if (spins < 0)     spins=(p == whead) ? SPINS : 0;
+ else     if (node == null)     node=new WNode(WMODE,p);
+ else     if (node.prev != p)     node.prev=p;
+ else     if (U.compareAndSwapObject(this,WTAIL,p,node)) {
+      p.next=node;
+      break;
+    }
+  }
+  for (int spins=SPINS; ; ) {
+    WNode np, pp;
+    int ps;
+    long s, ns;
+    Thread w;
+    while ((np=node.prev) != p && np != null)     (p=np).next=node;
+    if (whead == p) {
+      for (int k=spins; ; ) {
+        if (((s=state) & ABITS) == 0L) {
+          if (U.compareAndSwapLong(this,STATE,s,ns=s + WBIT)) {
+            whead=node;
+            node.prev=null;
+            return ns;
+          }
+        }
+ else         if (ThreadLocalRandom.current().nextInt() >= 0 && --k <= 0)         break;
+      }
+      if (spins < MAX_HEAD_SPINS)       spins<<=1;
+    }
+    if ((ps=p.status) == 0)     U.compareAndSwapInt(p,WSTATUS,0,WAITING);
+ else     if (ps == CANCELLED) {
+      if ((pp=p.prev) != null) {
+        node.prev=pp;
+        pp.next=node;
+      }
+    }
+ else {
+      long time;
+      if (deadline == 0L)       time=0L;
+ else       if ((time=deadline - System.nanoTime()) <= 0L)       return cancelWaiter(node,node,false);
+      node.thread=Thread.currentThread();
+      if (node.prev == p && p.status == WAITING && (p != whead || (state & ABITS) != 0L))       U.park(false,time);
+      node.thread=null;
+      if (interruptible && Thread.interrupted())       return cancelWaiter(node,node,true);
+    }
+  }
+}

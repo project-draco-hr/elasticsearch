@@ -1,0 +1,55 @@
+{
+  if (other == null || fn == null)   throw new NullPointerException();
+  CompletableFuture<Void> dst=new CompletableFuture<Void>();
+  BiAcceptCompletion<T,U> d=null;
+  Object r, s=null;
+  if ((r=result) == null || (s=other.result) == null) {
+    d=new BiAcceptCompletion<T,U>(this,other,fn,dst,e);
+    CompletionNode q=null, p=new CompletionNode(d);
+    while ((r == null && (r=result) == null) || (s == null && (s=other.result) == null)) {
+      if (q != null) {
+        if (s != null || UNSAFE.compareAndSwapObject(other,COMPLETIONS,q.next=other.completions,q))         break;
+      }
+ else       if (r != null || UNSAFE.compareAndSwapObject(this,COMPLETIONS,p.next=completions,p)) {
+        if (s != null)         break;
+        q=new CompletionNode(d);
+      }
+    }
+  }
+  if (r != null && s != null && (d == null || d.compareAndSet(0,1))) {
+    T t;
+    U u;
+    Throwable ex;
+    if (r instanceof AltResult) {
+      ex=((AltResult)r).ex;
+      t=null;
+    }
+ else {
+      ex=null;
+      @SuppressWarnings("unchecked") T tr=(T)r;
+      t=tr;
+    }
+    if (ex != null)     u=null;
+ else     if (s instanceof AltResult) {
+      ex=((AltResult)s).ex;
+      u=null;
+    }
+ else {
+      @SuppressWarnings("unchecked") U us=(U)s;
+      u=us;
+    }
+    if (ex == null) {
+      try {
+        if (e != null)         e.execute(new AsyncBiAccept<T,U>(t,u,fn,dst));
+ else         fn.accept(t,u);
+      }
+ catch (      Throwable rex) {
+        ex=rex;
+      }
+    }
+    if (e == null || ex != null)     dst.internalComplete(null,ex);
+  }
+  helpPostComplete();
+  other.helpPostComplete();
+  return dst;
+}

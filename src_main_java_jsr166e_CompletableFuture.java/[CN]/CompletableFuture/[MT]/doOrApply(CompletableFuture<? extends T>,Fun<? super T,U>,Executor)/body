@@ -1,0 +1,43 @@
+{
+  if (other == null || fn == null)   throw new NullPointerException();
+  CompletableFuture<U> dst=new CompletableFuture<U>();
+  OrApplyCompletion<T,U> d=null;
+  Object r;
+  if ((r=result) == null && (r=other.result) == null) {
+    d=new OrApplyCompletion<T,U>(this,other,fn,dst,e);
+    CompletionNode q=null, p=new CompletionNode(d);
+    while ((r=result) == null && (r=other.result) == null) {
+      if (q != null) {
+        if (UNSAFE.compareAndSwapObject(other,COMPLETIONS,q.next=other.completions,q))         break;
+      }
+ else       if (UNSAFE.compareAndSwapObject(this,COMPLETIONS,p.next=completions,p))       q=new CompletionNode(d);
+    }
+  }
+  if (r != null && (d == null || d.compareAndSet(0,1))) {
+    T t;
+    Throwable ex;
+    if (r instanceof AltResult) {
+      ex=((AltResult)r).ex;
+      t=null;
+    }
+ else {
+      ex=null;
+      @SuppressWarnings("unchecked") T tr=(T)r;
+      t=tr;
+    }
+    U u=null;
+    if (ex == null) {
+      try {
+        if (e != null)         e.execute(new AsyncApply<T,U>(t,fn,dst));
+ else         u=fn.apply(t);
+      }
+ catch (      Throwable rex) {
+        ex=rex;
+      }
+    }
+    if (e == null || ex != null)     dst.internalComplete(u,ex);
+  }
+  helpPostComplete();
+  other.helpPostComplete();
+  return dst;
+}

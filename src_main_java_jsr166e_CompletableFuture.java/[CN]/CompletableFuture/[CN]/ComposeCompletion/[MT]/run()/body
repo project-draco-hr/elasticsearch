@@ -1,0 +1,56 @@
+{
+  final CompletableFuture<? extends T> a;
+  final Fun<? super T,CompletableFuture<U>> fn;
+  final CompletableFuture<U> dst;
+  Object r;
+  T t;
+  Throwable ex;
+  if ((dst=this.dst) != null && (fn=this.fn) != null && (a=this.src) != null && (r=a.result) != null && compareAndSet(0,1)) {
+    if (r instanceof AltResult) {
+      ex=((AltResult)r).ex;
+      t=null;
+    }
+ else {
+      ex=null;
+      @SuppressWarnings("unchecked") T tr=(T)r;
+      t=tr;
+    }
+    CompletableFuture<U> c=null;
+    U u=null;
+    boolean complete=false;
+    if (ex == null) {
+      try {
+        c=fn.apply(t);
+      }
+ catch (      Throwable rex) {
+        ex=rex;
+      }
+    }
+    if (ex != null || c == null) {
+      if (ex == null)       ex=new NullPointerException();
+    }
+ else {
+      ThenCopy<U> d=null;
+      Object s;
+      if ((s=c.result) == null) {
+        CompletionNode p=new CompletionNode(d=new ThenCopy<U>(c,dst));
+        while ((s=c.result) == null) {
+          if (UNSAFE.compareAndSwapObject(c,COMPLETIONS,p.next=c.completions,p))           break;
+        }
+      }
+      if (s != null && (d == null || d.compareAndSet(0,1))) {
+        complete=true;
+        if (s instanceof AltResult) {
+          ex=((AltResult)s).ex;
+          u=null;
+        }
+ else {
+          @SuppressWarnings("unchecked") U us=(U)s;
+          u=us;
+        }
+      }
+    }
+    if (complete || ex != null)     dst.internalComplete(u,ex);
+    if (c != null)     c.helpPostComplete();
+  }
+}

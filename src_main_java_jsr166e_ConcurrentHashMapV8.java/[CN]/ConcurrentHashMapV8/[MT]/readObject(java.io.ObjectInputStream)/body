@@ -1,15 +1,14 @@
 {
   s.defaultReadObject();
   this.segments=null;
-  UNSAFE.putObjectVolatile(this,counterOffset,new LongAdder());
   long size=0L;
-  Node p=null;
+  Node<V> p=null;
   for (; ; ) {
     K k=(K)s.readObject();
     V v=(V)s.readObject();
     if (k != null && v != null) {
       int h=spread(k.hashCode());
-      p=new Node(h,k,v,p);
+      p=new Node<V>(h,k,v,p);
       ++size;
     }
  else     break;
@@ -24,22 +23,23 @@
     }
     int sc=sizeCtl;
     boolean collide=false;
-    if (n > sc && UNSAFE.compareAndSwapInt(this,sizeCtlOffset,sc,-1)) {
+    if (n > sc && U.compareAndSwapInt(this,SIZECTL,sc,-1)) {
       try {
         if (table == null) {
           init=true;
-          Node[] tab=new Node[n];
+          @SuppressWarnings("rawtypes") Node[] rt=new Node[n];
+          Node<V>[] tab=(Node<V>[])rt;
           int mask=n - 1;
           while (p != null) {
             int j=p.hash & mask;
-            Node next=p.next;
-            Node q=p.next=tabAt(tab,j);
+            Node<V> next=p.next;
+            Node<V> q=p.next=tabAt(tab,j);
             setTabAt(tab,j,p);
             if (!collide && q != null && q.hash == p.hash)             collide=true;
             p=next;
           }
           table=tab;
-          counter.add(size);
+          addCount(size,-1);
           sc=n - (n >>> 2);
         }
       }
@@ -47,10 +47,10 @@
         sizeCtl=sc;
       }
       if (collide) {
-        Node[] tab=table;
+        Node<V>[] tab=table;
         for (int i=0; i < tab.length; ++i) {
           int c=0;
-          for (Node e=tabAt(tab,i); e != null; e=e.next) {
+          for (Node<V> e=tabAt(tab,i); e != null; e=e.next) {
             if (++c > TREE_THRESHOLD && (e.key instanceof Comparable)) {
               replaceWithTreeBin(tab,i,e.key);
               break;
@@ -61,7 +61,7 @@
     }
     if (!init) {
       while (p != null) {
-        internalPut(p.key,p.val);
+        internalPut((K)p.key,p.val,false);
         p=p.next;
       }
     }

@@ -1,0 +1,42 @@
+{
+  if (fn == null)   throw new NullPointerException();
+  CompletableFuture<U> dst=null;
+  ComposeCompletion<T,U> d=null;
+  Object r;
+  if ((r=result) == null) {
+    dst=new CompletableFuture<U>();
+    CompletionNode p=new CompletionNode(d=new ComposeCompletion<T,U>(this,fn,dst));
+    while ((r=result) == null) {
+      if (UNSAFE.compareAndSwapObject(this,COMPLETIONS,p.next=completions,p))       break;
+    }
+  }
+  if (r != null && (d == null || d.compareAndSet(0,1))) {
+    T t;
+    Throwable ex;
+    if (r instanceof AltResult) {
+      ex=((AltResult)r).ex;
+      t=null;
+    }
+ else {
+      ex=null;
+      @SuppressWarnings("unchecked") T tr=(T)r;
+      t=tr;
+    }
+    if (ex == null) {
+      try {
+        dst=fn.apply(t);
+      }
+ catch (      Throwable rex) {
+        ex=rex;
+      }
+    }
+    if (dst == null) {
+      dst=new CompletableFuture<U>();
+      if (ex == null)       ex=new NullPointerException();
+    }
+    if (ex != null)     dst.internalComplete(null,ex);
+  }
+  helpPostComplete();
+  dst.helpPostComplete();
+  return dst;
+}

@@ -1,0 +1,34 @@
+{
+  if (other == null || action == null)   throw new NullPointerException();
+  CompletableFuture<Void> dst=new CompletableFuture<Void>();
+  OrRunCompletion<T> d=null;
+  Object r;
+  if ((r=result) == null && (r=other.result) == null) {
+    d=new OrRunCompletion<T>(this,other,action,dst,e);
+    CompletionNode q=null, p=new CompletionNode(d);
+    while ((r=result) == null && (r=other.result) == null) {
+      if (q != null) {
+        if (UNSAFE.compareAndSwapObject(other,COMPLETIONS,q.next=other.completions,q))         break;
+      }
+ else       if (UNSAFE.compareAndSwapObject(this,COMPLETIONS,p.next=completions,p))       q=new CompletionNode(d);
+    }
+  }
+  if (r != null && (d == null || d.compareAndSet(0,1))) {
+    Throwable ex;
+    if (r instanceof AltResult)     ex=((AltResult)r).ex;
+ else     ex=null;
+    if (ex == null) {
+      try {
+        if (e != null)         e.execute(new AsyncRun(action,dst));
+ else         action.run();
+      }
+ catch (      Throwable rex) {
+        ex=rex;
+      }
+    }
+    if (e == null || ex != null)     dst.internalComplete(null,ex);
+  }
+  helpPostComplete();
+  other.helpPostComplete();
+  return dst;
+}

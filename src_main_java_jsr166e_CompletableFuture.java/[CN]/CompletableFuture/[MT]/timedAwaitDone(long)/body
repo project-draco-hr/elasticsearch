@@ -1,0 +1,41 @@
+{
+  WaitNode q=null;
+  boolean queued=false;
+  for (Object r; ; ) {
+    if ((r=result) != null) {
+      if (q != null) {
+        q.thread=null;
+        if (q.interruptControl < 0) {
+          removeWaiter(q);
+          throw new InterruptedException();
+        }
+      }
+      postComplete();
+      return r;
+    }
+ else     if (q == null) {
+      if (nanos <= 0L)       throw new TimeoutException();
+      long d=System.nanoTime() + nanos;
+      q=new WaitNode(true,nanos,d == 0L ? 1L : d);
+    }
+ else     if (!queued)     queued=UNSAFE.compareAndSwapObject(this,WAITERS,q.next=waiters,q);
+ else     if (q.interruptControl < 0) {
+      removeWaiter(q);
+      throw new InterruptedException();
+    }
+ else     if (q.nanos <= 0L) {
+      if (result == null) {
+        removeWaiter(q);
+        throw new TimeoutException();
+      }
+    }
+ else     if (q.thread != null && result == null) {
+      try {
+        ForkJoinPool.managedBlock(q);
+      }
+ catch (      InterruptedException ex) {
+        q.interruptControl=-1;
+      }
+    }
+  }
+}
