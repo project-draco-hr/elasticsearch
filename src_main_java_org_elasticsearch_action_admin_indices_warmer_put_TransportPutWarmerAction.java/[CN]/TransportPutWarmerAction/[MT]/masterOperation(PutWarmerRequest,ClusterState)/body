@@ -1,20 +1,20 @@
 {
-  SearchResponse searchResponse=searchAction.execute(request.getSearchRequest()).actionGet();
+  SearchResponse searchResponse=searchAction.execute(request.searchRequest()).actionGet();
   if (searchResponse.getFailedShards() > 0) {
     throw new ElasticSearchException("search failed with failed shards: " + Arrays.toString(searchResponse.getShardFailures()));
   }
   final AtomicReference<Throwable> failureRef=new AtomicReference<Throwable>();
   final CountDownLatch latch=new CountDownLatch(1);
-  clusterService.submitStateUpdateTask("put_warmer [" + request.getName() + "]",new ProcessedClusterStateUpdateTask(){
+  clusterService.submitStateUpdateTask("put_warmer [" + request.name() + "]",new ProcessedClusterStateUpdateTask(){
     @Override public ClusterState execute(    ClusterState currentState){
       MetaData metaData=currentState.metaData();
-      String[] concreteIndices=metaData.concreteIndices(request.getSearchRequest().getIndices());
+      String[] concreteIndices=metaData.concreteIndices(request.searchRequest().indices());
       BytesReference source=null;
-      if (request.getSearchRequest().getSource() != null && request.getSearchRequest().getSource().length() > 0) {
-        source=request.getSearchRequest().getSource();
+      if (request.searchRequest().source() != null && request.searchRequest().source().length() > 0) {
+        source=request.searchRequest().source();
       }
- else       if (request.getSearchRequest().getExtraSource() != null && request.getSearchRequest().getExtraSource().length() > 0) {
-        source=request.getSearchRequest().getExtraSource();
+ else       if (request.searchRequest().extraSource() != null && request.searchRequest().extraSource().length() > 0) {
+        source=request.searchRequest().extraSource();
       }
       MetaData.Builder mdBuilder=MetaData.builder().metaData(currentState.metaData());
       for (      String index : concreteIndices) {
@@ -24,27 +24,27 @@
         }
         IndexWarmersMetaData warmers=indexMetaData.custom(IndexWarmersMetaData.TYPE);
         if (warmers == null) {
-          logger.info("[{}] putting warmer [{}]",index,request.getName());
-          warmers=new IndexWarmersMetaData(new IndexWarmersMetaData.Entry(request.getName(),request.getSearchRequest().getTypes(),source));
+          logger.info("[{}] putting warmer [{}]",index,request.name());
+          warmers=new IndexWarmersMetaData(new IndexWarmersMetaData.Entry(request.name(),request.searchRequest().types(),source));
         }
  else {
           boolean found=false;
           List<IndexWarmersMetaData.Entry> entries=new ArrayList<IndexWarmersMetaData.Entry>(warmers.entries().size() + 1);
           for (          IndexWarmersMetaData.Entry entry : warmers.entries()) {
-            if (entry.name().equals(request.getName())) {
+            if (entry.name().equals(request.name())) {
               found=true;
-              entries.add(new IndexWarmersMetaData.Entry(request.getName(),request.getSearchRequest().getTypes(),source));
+              entries.add(new IndexWarmersMetaData.Entry(request.name(),request.searchRequest().types(),source));
             }
  else {
               entries.add(entry);
             }
           }
           if (!found) {
-            logger.info("[{}] put warmer [{}]",index,request.getName());
-            entries.add(new IndexWarmersMetaData.Entry(request.getName(),request.getSearchRequest().getTypes(),source));
+            logger.info("[{}] put warmer [{}]",index,request.name());
+            entries.add(new IndexWarmersMetaData.Entry(request.name(),request.searchRequest().types(),source));
           }
  else {
-            logger.info("[{}] update warmer [{}]",index,request.getName());
+            logger.info("[{}] update warmer [{}]",index,request.name());
           }
           warmers=new IndexWarmersMetaData(entries.toArray(new IndexWarmersMetaData.Entry[entries.size()]));
         }
