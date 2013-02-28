@@ -9,8 +9,22 @@
   logger.info("--> start first 2 nodes");
   startNode("node1",settings);
   startNode("node2",settings);
-  Thread.sleep(500);
-  ClusterState state=client("node1").admin().cluster().prepareState().setLocal(true).execute().actionGet().getState();
+  ClusterState state;
+  long time=System.currentTimeMillis();
+  while ((System.currentTimeMillis() - time) < TimeValue.timeValueSeconds(5).millis()) {
+    state=client("node1").admin().cluster().prepareState().setLocal(true).execute().actionGet().getState();
+    if (state.blocks().hasGlobalBlock(Discovery.NO_MASTER_BLOCK)) {
+      break;
+    }
+  }
+  time=System.currentTimeMillis();
+  while ((System.currentTimeMillis() - time) < TimeValue.timeValueSeconds(5).millis()) {
+    state=client("node2").admin().cluster().prepareState().setLocal(true).execute().actionGet().getState();
+    if (state.blocks().hasGlobalBlock(Discovery.NO_MASTER_BLOCK)) {
+      break;
+    }
+  }
+  state=client("node1").admin().cluster().prepareState().setLocal(true).execute().actionGet().getState();
   assertThat(state.blocks().hasGlobalBlock(Discovery.NO_MASTER_BLOCK),equalTo(true));
   state=client("node2").admin().cluster().prepareState().setLocal(true).execute().actionGet().getState();
   assertThat(state.blocks().hasGlobalBlock(Discovery.NO_MASTER_BLOCK),equalTo(true));
@@ -45,9 +59,18 @@
   for (  String nodeToShutdown : nodesToShutdown) {
     closeNode(nodeToShutdown);
   }
-  Thread.sleep(1000);
   String lastNonMasterNodeUp=nonMasterNodes.removeLast();
   logger.info("--> verify that there is no master anymore on remaining nodes");
+  time=System.currentTimeMillis();
+  while ((System.currentTimeMillis() - time) < TimeValue.timeValueSeconds(20).millis()) {
+    state=client(masterNode).admin().cluster().prepareState().setLocal(true).execute().actionGet().getState();
+    boolean firstNoMasterLock=state.blocks().hasGlobalBlock(Discovery.NO_MASTER_BLOCK);
+    state=client(lastNonMasterNodeUp).admin().cluster().prepareState().setLocal(true).execute().actionGet().getState();
+    boolean secondNoMasterLock=state.blocks().hasGlobalBlock(Discovery.NO_MASTER_BLOCK);
+    if (firstNoMasterLock && secondNoMasterLock) {
+      break;
+    }
+  }
   state=client(masterNode).admin().cluster().prepareState().setLocal(true).execute().actionGet().getState();
   assertThat(state.blocks().hasGlobalBlock(Discovery.NO_MASTER_BLOCK),equalTo(true));
   state=client(lastNonMasterNodeUp).admin().cluster().prepareState().setLocal(true).execute().actionGet().getState();

@@ -35,7 +35,13 @@
   String nonMasterNodeName=masterNodeName.equals("node1") ? "node2" : "node1";
   logger.info("--> closing master node {}",masterNodeName);
   closeNode(masterNodeName);
-  Thread.sleep(200);
+  long time=System.currentTimeMillis();
+  while ((System.currentTimeMillis() - time) < TimeValue.timeValueSeconds(5).millis()) {
+    state=client(nonMasterNodeName).admin().cluster().prepareState().setLocal(true).execute().actionGet().getState();
+    if (state.blocks().hasGlobalBlock(Discovery.NO_MASTER_BLOCK)) {
+      break;
+    }
+  }
   state=client(nonMasterNodeName).admin().cluster().prepareState().setLocal(true).execute().actionGet().getState();
   assertThat(state.blocks().hasGlobalBlock(Discovery.NO_MASTER_BLOCK),equalTo(true));
   logger.info("--> starting the previous master node again...");
@@ -62,12 +68,17 @@
   nonMasterNodeName=masterNodeName.equals("node1") ? "node2" : "node1";
   logger.info("--> closing non master node {}",nonMasterNodeName);
   closeNode(nonMasterNodeName);
-  Thread.sleep(200);
+  time=System.currentTimeMillis();
+  while ((System.currentTimeMillis() - time) < TimeValue.timeValueSeconds(5).millis()) {
+    state=client(masterNodeName).admin().cluster().prepareState().setLocal(true).execute().actionGet().getState();
+    if (state.blocks().hasGlobalBlock(Discovery.NO_MASTER_BLOCK)) {
+      break;
+    }
+  }
   state=client(masterNodeName).admin().cluster().prepareState().setLocal(true).execute().actionGet().getState();
   assertThat(state.blocks().hasGlobalBlock(Discovery.NO_MASTER_BLOCK),equalTo(true));
   logger.info("--> starting the previous master node again...");
   startNode(nonMasterNodeName,settings);
-  Thread.sleep(200);
   clusterHealthResponse=client("node1").admin().cluster().prepareHealth().setWaitForNodes("2").setWaitForGreenStatus().execute().actionGet();
   assertThat(clusterHealthResponse.isTimedOut(),equalTo(false));
   state=client("node1").admin().cluster().prepareState().setLocal(true).execute().actionGet().getState();
