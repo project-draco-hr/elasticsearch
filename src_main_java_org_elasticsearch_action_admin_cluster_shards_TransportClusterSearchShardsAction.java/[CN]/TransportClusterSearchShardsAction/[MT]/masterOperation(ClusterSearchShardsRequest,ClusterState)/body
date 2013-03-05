@@ -1,0 +1,28 @@
+{
+  ClusterState clusterState=clusterService.state();
+  String[] concreteIndices=clusterState.metaData().concreteIndices(request.indices(),request.ignoreIndices(),true);
+  Map<String,Set<String>> routingMap=clusterState.metaData().resolveSearchRouting(request.routing(),request.indices());
+  Set<String> nodeIds=newHashSet();
+  GroupShardsIterator groupShardsIterator=clusterService.operationRouting().searchShards(clusterState,request.indices(),concreteIndices,routingMap,request.preference());
+  ShardRouting shard;
+  ClusterSearchShardsGroup[] groupResponses=new ClusterSearchShardsGroup[groupShardsIterator.size()];
+  int currentGroup=0;
+  for (  ShardIterator shardIt : groupShardsIterator) {
+    String index=shardIt.shardId().getIndex();
+    int shardId=shardIt.shardId().getId();
+    ShardRouting[] shardRoutings=new ShardRouting[shardIt.size()];
+    int currentShard=0;
+    shardIt.reset();
+    while ((shard=shardIt.nextOrNull()) != null) {
+      shardRoutings[currentShard++]=shard;
+      nodeIds.add(shard.currentNodeId());
+    }
+    groupResponses[currentGroup++]=new ClusterSearchShardsGroup(index,shardId,shardRoutings);
+  }
+  DiscoveryNode[] nodes=new DiscoveryNode[nodeIds.size()];
+  int currentNode=0;
+  for (  String nodeId : nodeIds) {
+    nodes[currentNode++]=clusterState.getNodes().get(nodeId);
+  }
+  return new ClusterSearchShardsResponse(groupResponses,nodes);
+}
