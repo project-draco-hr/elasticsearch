@@ -1,0 +1,29 @@
+{
+  Injector indexInjector;
+  IndexService indexService;
+synchronized (this) {
+    indexInjector=indicesInjectors.remove(index);
+    if (indexInjector == null) {
+      return;
+    }
+    Map<String,IndexService> tmpMap=newHashMap(indices);
+    indexService=tmpMap.remove(index);
+    indices=ImmutableMap.copyOf(tmpMap);
+  }
+  indicesLifecycle.beforeIndexClosed(indexService);
+  for (  Class<? extends CloseableIndexComponent> closeable : pluginsService.indexServices()) {
+    indexInjector.getInstance(closeable).close();
+  }
+  ((InternalIndexService)indexService).close(reason,executor);
+  indexInjector.getInstance(PercolatorService.class).close();
+  indexInjector.getInstance(IndexCache.class).close();
+  indexInjector.getInstance(IndexFieldDataService.class).clear();
+  indexInjector.getInstance(AnalysisService.class).close();
+  indexInjector.getInstance(IndexEngine.class).close();
+  indexInjector.getInstance(IndexGateway.class).close();
+  indexInjector.getInstance(MapperService.class).close();
+  indexInjector.getInstance(IndexQueryParserService.class).close();
+  indexInjector.getInstance(IndexStore.class).close();
+  Injectors.close(injector);
+  indicesLifecycle.afterIndexClosed(indexService.index());
+}

@@ -1,3 +1,78 @@
 {
-  deleteShard(shardId,false,false,false,reason);
+  Injector shardInjector;
+  IndexShard indexShard;
+synchronized (this) {
+    Map<Integer,Injector> tmpShardInjectors=newHashMap(shardsInjectors);
+    shardInjector=tmpShardInjectors.remove(shardId);
+    if (shardInjector == null) {
+      return;
+    }
+    shardsInjectors=ImmutableMap.copyOf(tmpShardInjectors);
+    Map<Integer,IndexShard> tmpShardsMap=newHashMap(shards);
+    indexShard=tmpShardsMap.remove(shardId);
+    shards=ImmutableMap.copyOf(tmpShardsMap);
+  }
+  ShardId sId=new ShardId(index,shardId);
+  indicesLifecycle.beforeIndexShardClosed(sId,indexShard);
+  for (  Class<? extends CloseableIndexComponent> closeable : pluginsService.shardServices()) {
+    try {
+      shardInjector.getInstance(closeable).close();
+    }
+ catch (    Exception e) {
+      logger.debug("failed to clean plugin shard service [{}]",e,closeable);
+    }
+  }
+  try {
+    shardInjector.getInstance(TranslogService.class).close();
+  }
+ catch (  Exception e) {
+    logger.debug("failed to close translog service",e);
+  }
+  if (indexShard != null) {
+    try {
+      ((InternalIndexShard)indexShard).close(reason);
+    }
+ catch (    Exception e) {
+      logger.debug("failed to close index shard",e);
+    }
+  }
+  try {
+    shardInjector.getInstance(Engine.class).close();
+  }
+ catch (  Exception e) {
+    logger.debug("failed to close engine",e);
+  }
+  try {
+    shardInjector.getInstance(MergePolicyProvider.class).close();
+  }
+ catch (  Exception e) {
+    logger.debug("failed to close merge policy provider",e);
+  }
+  try {
+    shardInjector.getInstance(IndexShardGatewayService.class).snapshotOnClose();
+  }
+ catch (  Exception e) {
+    logger.debug("failed to snapshot index shard gateway on close",e);
+  }
+  try {
+    shardInjector.getInstance(IndexShardGatewayService.class).close();
+  }
+ catch (  Exception e) {
+    logger.debug("failed to close index shard gateway",e);
+  }
+  try {
+    shardInjector.getInstance(Translog.class).close();
+  }
+ catch (  Exception e) {
+    logger.debug("failed to close translog",e);
+  }
+  indicesLifecycle.afterIndexShardClosed(sId);
+  Store store=shardInjector.getInstance(Store.class);
+  try {
+    store.close();
+  }
+ catch (  Exception e) {
+    logger.warn("failed to close store on shard deletion",e);
+  }
+  Injectors.close(injector);
 }
