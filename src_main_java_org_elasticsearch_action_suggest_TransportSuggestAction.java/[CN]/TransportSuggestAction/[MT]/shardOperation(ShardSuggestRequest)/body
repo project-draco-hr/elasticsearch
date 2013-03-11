@@ -1,0 +1,25 @@
+{
+  IndexService indexService=indicesService.indexServiceSafe(request.index());
+  IndexShard indexShard=indexService.shardSafe(request.shardId());
+  final Engine.Searcher searcher=indexShard.searcher();
+  try {
+    BytesReference suggest=request.suggest();
+    if (suggest != null && suggest.length() > 0) {
+      final SuggestParseElement element=new SuggestParseElement();
+      final XContentParser parser=XContentFactory.xContent(suggest).createParser(suggest);
+      if (parser.nextToken() != XContentParser.Token.START_OBJECT) {
+        throw new ElasticSearchIllegalArgumentException("Object expected");
+      }
+      final SuggestionSearchContext context=element.parseInternal(parser,indexService.mapperService());
+      final Suggest result=suggestPhase.execute(context,searcher.reader());
+      return new ShardSuggestResponse(request.index(),request.shardId(),result);
+    }
+    return new ShardSuggestResponse(request.index(),request.shardId(),new Suggest());
+  }
+ catch (  Throwable ex) {
+    throw new ElasticSearchException("Failed to execute suggest",ex);
+  }
+ finally {
+    searcher.release();
+  }
+}
