@@ -1,0 +1,63 @@
+{
+  if (refreshInterval.millis() != 0) {
+    if (cachedPluginsInfo != null && (refreshInterval.millis() < 0 || (System.currentTimeMillis() - lastRefresh) < refreshInterval.millis())) {
+      if (logger.isTraceEnabled())       logger.trace("using cache to retrieve plugins info");
+      return cachedPluginsInfo;
+    }
+    lastRefresh=System.currentTimeMillis();
+  }
+  if (logger.isTraceEnabled())   logger.trace("starting to fetch info on plugins");
+  cachedPluginsInfo=new PluginsInfo();
+  Set<String> plugins=new HashSet<String>();
+  for (  Plugin plugin : plugins().values()) {
+    File siteFile=new File(new File(environment.pluginsFile(),plugin.name()),"_site");
+    boolean isSite=siteFile.exists() && siteFile.isDirectory();
+    if (logger.isTraceEnabled())     logger.trace("found a jvm plugin [{}], [{}]{}",plugin.name(),plugin.description(),isSite ? ": with _site structure" : "");
+    cachedPluginsInfo.add(new PluginInfo(plugin.name(),plugin.description(),isSite,true));
+    plugins.add(plugin.name());
+  }
+  File pluginsFile=environment.pluginsFile();
+  if (!pluginsFile.exists()) {
+    return cachedPluginsInfo;
+  }
+  if (!pluginsFile.isDirectory()) {
+    return cachedPluginsInfo;
+  }
+  File[] pluginsFiles=pluginsFile.listFiles();
+  if (pluginsFiles != null) {
+    for (    File plugin : pluginsFiles) {
+      if (!plugins.contains(plugin.getName())) {
+        File sitePluginDir=new File(plugin,"_site");
+        if (sitePluginDir.exists()) {
+          String name=plugin.getName();
+          String description="No description found for " + name + ".";
+          File pluginPropFile=new File(sitePluginDir,ES_PLUGIN_PROPERTIES);
+          if (pluginPropFile.exists()) {
+            Properties pluginProps=new Properties();
+            InputStream is=null;
+            try {
+              is=new FileInputStream(pluginPropFile.getAbsolutePath());
+              pluginProps.load(is);
+              description=pluginProps.getProperty("description");
+            }
+ catch (            Exception e) {
+              logger.warn("failed to load plugin description from [" + pluginPropFile.getAbsolutePath() + "]",e);
+            }
+ finally {
+              if (is != null) {
+                try {
+                  is.close();
+                }
+ catch (                IOException e) {
+                }
+              }
+            }
+          }
+          if (logger.isTraceEnabled())           logger.trace("found a site plugin [{}], [{}]",name,description);
+          cachedPluginsInfo.add(new PluginInfo(name,description,true,false));
+        }
+      }
+    }
+  }
+  return cachedPluginsInfo;
+}
