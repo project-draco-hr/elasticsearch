@@ -1,20 +1,36 @@
 {
   super(settings);
   this.environment=environment;
-  Map<String,Plugin> plugins=Maps.newHashMap();
+  ImmutableList.Builder<Tuple<PluginInfo,Plugin>> tupleBuilder=ImmutableList.builder();
   String[] defaultPluginsClasses=settings.getAsArray("plugin.types");
   for (  String pluginClass : defaultPluginsClasses) {
     Plugin plugin=loadPlugin(pluginClass,settings);
-    plugins.put(plugin.name(),plugin);
+    PluginInfo pluginInfo=new PluginInfo(plugin.name(),plugin.description(),hasSite(plugin.name()),true,PluginInfo.VERSION_NOT_AVAILABLE);
+    if (logger.isTraceEnabled()) {
+      logger.trace("plugin loaded from settings [{}]",pluginInfo);
+    }
+    tupleBuilder.add(new Tuple<PluginInfo,Plugin>(pluginInfo,plugin));
   }
   loadPluginsIntoClassLoader();
-  plugins.putAll(loadPluginsFromClasspath(settings));
-  Set<String> sitePlugins=PluginsHelper.sitePlugins(this.environment);
+  tupleBuilder.addAll(loadPluginsFromClasspath(settings));
+  this.plugins=tupleBuilder.build();
+  Map<String,Plugin> jvmPlugins=Maps.newHashMap();
+  List<String> sitePlugins=Lists.newArrayList();
+  for (  Tuple<PluginInfo,Plugin> tuple : this.plugins) {
+    jvmPlugins.put(tuple.v2().name(),tuple.v2());
+    if (tuple.v1().isSite()) {
+      sitePlugins.add(tuple.v1().getName());
+    }
+  }
+  ImmutableList<Tuple<PluginInfo,Plugin>> tuples=loadSitePlugins();
+  for (  Tuple<PluginInfo,Plugin> tuple : tuples) {
+    sitePlugins.add(tuple.v1().getName());
+  }
   String[] mandatoryPlugins=settings.getAsArray("plugin.mandatory",null);
   if (mandatoryPlugins != null) {
     Set<String> missingPlugins=Sets.newHashSet();
     for (    String mandatoryPlugin : mandatoryPlugins) {
-      if (!plugins.containsKey(mandatoryPlugin) && !sitePlugins.contains(mandatoryPlugin) && !missingPlugins.contains(mandatoryPlugin)) {
+      if (!jvmPlugins.containsKey(mandatoryPlugin) && !sitePlugins.contains(mandatoryPlugin) && !missingPlugins.contains(mandatoryPlugin)) {
         missingPlugins.add(mandatoryPlugin);
       }
     }
@@ -22,10 +38,9 @@
       throw new ElasticsearchException("Missing mandatory plugins [" + Strings.collectionToDelimitedString(missingPlugins,", ") + "]");
     }
   }
-  logger.info("loaded {}, sites {}",plugins.keySet(),sitePlugins);
-  this.plugins=ImmutableMap.copyOf(plugins);
+  logger.info("loaded {}, sites {}",jvmPlugins.keySet(),sitePlugins);
   MapBuilder<Plugin,List<OnModuleReference>> onModuleReferences=MapBuilder.newMapBuilder();
-  for (  Plugin plugin : plugins.values()) {
+  for (  Plugin plugin : jvmPlugins.values()) {
     List<OnModuleReference> list=Lists.newArrayList();
     for (    Method method : plugin.getClass().getDeclaredMethods()) {
       if (!method.getName().equals("onModule")) {
