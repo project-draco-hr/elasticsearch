@@ -1,0 +1,30 @@
+{
+  AtomicReader reader=context.reader();
+  Terms terms=reader.terms(getFieldNames().indexName());
+  if (terms == null) {
+    return FSTPackedBytesAtomicFieldData.empty(reader.maxDoc());
+  }
+  PositiveIntOutputs outputs=PositiveIntOutputs.getSingleton(true);
+  org.apache.lucene.util.fst.Builder<Long> fstBuilder=new org.apache.lucene.util.fst.Builder<Long>(INPUT_TYPE.BYTE1,outputs);
+  final IntsRef scratch=new IntsRef();
+  OrdinalsBuilder builder=new OrdinalsBuilder(terms,reader.maxDoc());
+  try {
+    fstBuilder.add(Util.toIntsRef(new BytesRef(),scratch),0l);
+    TermsEnum termsEnum=terms.iterator(null);
+    DocsEnum docsEnum=null;
+    for (BytesRef term=termsEnum.next(); term != null; term=termsEnum.next()) {
+      final int termOrd=builder.nextOrdinal();
+      fstBuilder.add(Util.toIntsRef(term,scratch),(long)termOrd);
+      docsEnum=termsEnum.docs(reader.getLiveDocs(),docsEnum,DocsEnum.FLAG_NONE);
+      for (int docId=docsEnum.nextDoc(); docId != DocsEnum.NO_MORE_DOCS; docId=docsEnum.nextDoc()) {
+        builder.addDoc(docId);
+      }
+    }
+    FST<Long> fst=fstBuilder.finish();
+    final Ordinals ordinals=builder.build(fieldDataType.getSettings());
+    return new FSTPackedBytesAtomicFieldData(fst,ordinals);
+  }
+  finally {
+    builder.close();
+  }
+}
