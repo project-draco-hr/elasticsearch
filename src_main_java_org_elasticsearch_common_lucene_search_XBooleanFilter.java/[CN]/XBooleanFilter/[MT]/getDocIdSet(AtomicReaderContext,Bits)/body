@@ -20,10 +20,13 @@
   List<ResultClause> results=new ArrayList<ResultClause>(clauses.size());
   boolean hasShouldClauses=false;
   boolean hasNonEmptyShouldClause=false;
+  boolean hasMustClauses=false;
+  boolean hasMustNotClauses=false;
   for (int i=0; i < clauses.size(); i++) {
     FilterClause clause=clauses.get(i);
     DocIdSet set=clause.getFilter().getDocIdSet(context,acceptDocs);
     if (clause.getOccur() == Occur.MUST) {
+      hasMustClauses=true;
       if (DocIdSets.isEmpty(set)) {
         return null;
       }
@@ -36,6 +39,7 @@
       hasNonEmptyShouldClause=true;
     }
  else     if (clause.getOccur() == Occur.MUST_NOT) {
+      hasMustNotClauses=true;
       if (DocIdSets.isEmpty(set)) {
         results.add(new ResultClause(null,null,clause));
         continue;
@@ -50,6 +54,7 @@
   if (hasShouldClauses && !hasNonEmptyShouldClause) {
     return null;
   }
+  hasNonEmptyShouldClause=false;
   boolean hasBits=false;
   for (int i=0; i < results.size(); i++) {
     ResultClause clause=results.get(i);
@@ -62,6 +67,7 @@
       if (it == null) {
         continue;
       }
+      hasNonEmptyShouldClause=true;
       if (res == null) {
         res=new FixedBitSet(reader.maxDoc());
       }
@@ -94,36 +100,40 @@
     }
   }
   if (!hasBits) {
-    return res;
+    if (hasShouldClauses && !hasNonEmptyShouldClause) {
+      return null;
+    }
+ else {
+      return res;
+    }
   }
+  List<ResultClause> orClauses=new ArrayList<ResultClause>();
   for (int i=0; i < results.size(); i++) {
     ResultClause clause=results.get(i);
     if (clause.bits == null) {
       continue;
     }
     if (clause.clause.getOccur() == Occur.SHOULD) {
-      if (res == null) {
-        DocIdSetIterator it=clause.docIdSet.iterator();
-        if (it == null) {
-          continue;
-        }
-        res=new FixedBitSet(reader.maxDoc());
-        res.or(it);
+      if (hasMustClauses || hasMustNotClauses) {
+        orClauses.add(clause);
       }
  else {
-        Bits bits=clause.bits;
-        int lastSetDoc=res.nextSetBit(0);
-        DocIdSetIterator it=res.iterator();
-        for (int setDoc=it.nextDoc(); setDoc != DocIdSetIterator.NO_MORE_DOCS; setDoc=it.nextDoc()) {
-          int diff=setDoc - lastSetDoc;
-          if (diff > 1) {
-            for (int unsetDoc=lastSetDoc + 1; unsetDoc < setDoc; unsetDoc++) {
-              if (bits.get(unsetDoc)) {
-                res.set(unsetDoc);
-              }
+        if (res == null) {
+          DocIdSetIterator it=clause.docIdSet.iterator();
+          if (it == null) {
+            continue;
+          }
+          hasNonEmptyShouldClause=true;
+          res=new FixedBitSet(reader.maxDoc());
+          res.or(it);
+        }
+ else         if (!hasMustNotClauses && !hasMustClauses) {
+          for (int doc=0; doc < reader.maxDoc(); doc++) {
+            if (!res.get(doc) && clause.bits.get(doc)) {
+              hasNonEmptyShouldClause=true;
+              res.set(doc);
             }
           }
-          lastSetDoc=setDoc;
         }
       }
     }
@@ -166,5 +176,25 @@
       }
     }
   }
-  return res;
+  if (!orClauses.isEmpty()) {
+    DocIdSetIterator it=res.iterator();
+    for (int setDoc=it.nextDoc(); setDoc != DocIdSetIterator.NO_MORE_DOCS; setDoc=it.nextDoc()) {
+      boolean match=false;
+      for (      ResultClause orClause : orClauses) {
+        if (orClause.bits.get(setDoc)) {
+          match=true;
+          hasNonEmptyShouldClause=true;
+        }
+      }
+      if (!match) {
+        res.clear(setDoc);
+      }
+    }
+  }
+  if (hasShouldClauses && !hasNonEmptyShouldClause) {
+    return null;
+  }
+ else {
+    return res;
+  }
 }
