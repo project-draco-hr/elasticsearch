@@ -1,0 +1,40 @@
+{
+  List<DiscoveryNode> discoNodes=Lists.newArrayList();
+  String ipAddress=null;
+  try {
+    InetAddress inetAddress=networkService.resolvePublishHostAddress(null);
+    if (inetAddress != null) {
+      ipAddress=inetAddress.getHostAddress();
+    }
+  }
+ catch (  IOException e) {
+  }
+  Set<HostedServiceWithDetailedProperties> response=client.getApi().getHostedServiceApi().list();
+  for (  HostedServiceWithDetailedProperties hostedService : response) {
+    Deployment deployment=client.getApi().getHostedServiceApi().getDeployment(hostedService.getName(),hostedService.getName());
+    if (deployment != null) {
+      try {
+        if (deployment.getPrivateIpAddress().equals(ipAddress) || deployment.getPublicIpAddress().equals(ipAddress)) {
+          String publishHost=settings.get("transport.publish_host",settings.get("transport.host"));
+          if (!Strings.hasText(publishHost) || !deployment.getPublicIpAddress().equals(publishHost)) {
+            logger.info("you should define publish_host with {}",deployment.getPublicIpAddress());
+          }
+        }
+ else {
+          TransportAddress[] addresses=transportService.addressesFromString(deployment.getPublicIpAddress());
+          for (int i=0; (i < addresses.length && i < UnicastZenPing.LIMIT_PORTS_COUNT); i++) {
+            logger.trace("adding {}, address {}, transport_address {}",hostedService.getName(),deployment.getPublicIpAddress(),addresses[i]);
+            discoNodes.add(new DiscoveryNode("#cloud-" + hostedService.getName() + "-"+ i,addresses[i],Version.CURRENT));
+          }
+        }
+      }
+ catch (      Exception e) {
+        logger.warn("failed to add {}, address {}",e,hostedService.getName(),deployment.getPublicIpAddress());
+      }
+    }
+ else {
+      logger.trace("ignoring {}",hostedService.getName());
+    }
+  }
+  return discoNodes;
+}

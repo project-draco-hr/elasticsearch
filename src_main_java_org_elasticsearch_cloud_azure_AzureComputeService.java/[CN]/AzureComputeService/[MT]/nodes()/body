@@ -1,0 +1,42 @@
+{
+  if (this.discoNodes != null) {
+    return this.discoNodes;
+  }
+  String PK8_PATH=componentSettings.get(Fields.PRIVATE_KEY,settings.get("cloud." + Fields.PRIVATE_KEY));
+  String CERTIFICATE_PATH=componentSettings.get(Fields.CERTIFICATE,settings.get("cloud." + Fields.CERTIFICATE));
+  String PASSWORD=componentSettings.get(Fields.PASSWORD,settings.get("cloud" + Fields.PASSWORD,""));
+  String SUBSCRIPTION_ID=componentSettings.get(Fields.SUBSCRIPTION_ID,settings.get("cloud." + Fields.SUBSCRIPTION_ID));
+  if (!checkProperty(Fields.SUBSCRIPTION_ID,SUBSCRIPTION_ID))   return null;
+  if (!checkProperty(Fields.CERTIFICATE,CERTIFICATE_PATH))   return null;
+  if (!checkProperty(Fields.PRIVATE_KEY,PK8_PATH))   return null;
+  String pk8=readFromFile(cleanPath(PK8_PATH));
+  String cert=readFromFile(cleanPath(CERTIFICATE_PATH));
+  if (!checkProperty(Fields.CERTIFICATE,cert))   return null;
+  if (!checkProperty(Fields.PRIVATE_KEY,pk8))   return null;
+  String IDENTITY=pk8 + cert;
+  Properties overrides=new Properties();
+  overrides.setProperty(Constants.PROPERTY_TRUST_ALL_CERTS,"true");
+  overrides.setProperty(Constants.PROPERTY_RELAX_HOSTNAME,"true");
+  overrides.setProperty("azure-management.identity",IDENTITY);
+  overrides.setProperty("azure-management.credential",PASSWORD);
+  overrides.setProperty("azure-management.endpoint",Fields.ENDPOINT + SUBSCRIPTION_ID);
+  overrides.setProperty("azure-management.api-version",Fields.VERSION);
+  overrides.setProperty("azure-management.build-version","");
+  overrides.setProperty(AzureManagementProperties.SUBSCRIPTION_ID,SUBSCRIPTION_ID);
+  RestContext<AzureManagementApi,AzureManagementAsyncApi> client=null;
+  try {
+    client=ContextBuilder.newBuilder("azure-management").modules(ImmutableSet.<Module>of(LoggingModules.firstOrJDKLoggingModule())).overrides(overrides).build(AzureManagementApiMetadata.CONTEXT_TOKEN);
+    logger.debug("starting Azure discovery service for [{}]",SUBSCRIPTION_ID);
+    this.discoNodes=buildNodes(client);
+  }
+ catch (  Throwable t) {
+    logger.warn("error while trying to find nodes for azure service [{}]: {}",SUBSCRIPTION_ID,t.getMessage());
+    logger.debug("error found is: ",t);
+    this.discoNodes=Lists.newArrayList();
+  }
+ finally {
+    if (client != null)     client.close();
+  }
+  logger.debug("using dynamic discovery nodes {}",discoNodes);
+  return this.discoNodes;
+}
