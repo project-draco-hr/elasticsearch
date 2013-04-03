@@ -1,0 +1,51 @@
+{
+  long seed=System.currentTimeMillis();
+  System.out.println("SEED[testDuellIntegers]: " + seed);
+  Random random=new Random(seed);
+  int atLeast=atLeast(random,1000);
+  for (int i=0; i < atLeast; i++) {
+    Document d=new Document();
+    d.add(new StringField("_id","" + i,Field.Store.NO));
+    if (random.nextInt(15) != 0) {
+      int[] numbers=getNumbers(random,Byte.MAX_VALUE);
+      for (      int j : numbers) {
+        d.add(new LongField("long",j,Field.Store.NO));
+        d.add(new IntField("integer",j,Field.Store.NO));
+      }
+    }
+    writer.addDocument(d);
+    if (random.nextInt(10) == 0) {
+      refreshReader();
+    }
+  }
+  AtomicReaderContext context=refreshReader();
+  Map<FieldDataType,Type> typeMap=new HashMap<FieldDataType,DuellFieldDataTest.Type>();
+  typeMap.put(new FieldDataType("byte"),Type.Integer);
+  typeMap.put(new FieldDataType("short"),Type.Integer);
+  typeMap.put(new FieldDataType("int"),Type.Integer);
+  typeMap.put(new FieldDataType("long"),Type.Long);
+  ArrayList<Entry<FieldDataType,Type>> list=new ArrayList<Entry<FieldDataType,Type>>(typeMap.entrySet());
+  while (!list.isEmpty()) {
+    Entry<FieldDataType,Type> left;
+    Entry<FieldDataType,Type> right;
+    if (list.size() > 1) {
+      left=list.remove(random.nextInt(list.size()));
+      right=list.remove(random.nextInt(list.size()));
+    }
+ else {
+      right=left=list.remove(0);
+    }
+    ifdService.clear();
+    IndexNumericFieldData leftFieldData=ifdService.getForField(new FieldMapper.Names(left.getValue().name().toLowerCase()),left.getKey());
+    ifdService.clear();
+    IndexNumericFieldData rightFieldData=ifdService.getForField(new FieldMapper.Names(right.getValue().name().toLowerCase()),right.getKey());
+    duellFieldDataLong(random,context,leftFieldData,rightFieldData);
+    duellFieldDataLong(random,context,rightFieldData,leftFieldData);
+    DirectoryReader perSegment=DirectoryReader.open(writer,true);
+    CompositeReaderContext composite=perSegment.getContext();
+    List<AtomicReaderContext> leaves=composite.leaves();
+    for (    AtomicReaderContext atomicReaderContext : leaves) {
+      duellFieldDataLong(random,atomicReaderContext,leftFieldData,rightFieldData);
+    }
+  }
+}

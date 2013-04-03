@@ -1,0 +1,58 @@
+{
+  long seed=System.currentTimeMillis();
+  System.out.println("SEED[testDuellAllTypesSingleValue]: " + seed);
+  Random random=new Random(seed);
+  int atLeast=atLeast(random,1000);
+  for (int i=0; i < atLeast; i++) {
+    int v=(random.nextBoolean() ? -1 * random.nextInt(Byte.MAX_VALUE) : random.nextInt(Byte.MAX_VALUE));
+    Document d=new Document();
+    d.add(new StringField("_id","" + i,Field.Store.NO));
+    if (random.nextInt(15) != 0) {
+      d.add(new LongField("long",v,Field.Store.NO));
+      d.add(new IntField("integer",v,Field.Store.NO));
+      d.add(new DoubleField("double",v,Field.Store.NO));
+      d.add(new FloatField("float",v,Field.Store.NO));
+      d.add(new StringField("bytes","" + v,Field.Store.NO));
+    }
+    writer.addDocument(d);
+    if (random.nextInt(10) == 0) {
+      refreshReader();
+    }
+  }
+  AtomicReaderContext context=refreshReader();
+  Map<FieldDataType,Type> typeMap=new HashMap<FieldDataType,DuellFieldDataTest.Type>();
+  typeMap.put(new FieldDataType("string",ImmutableSettings.builder().put("format","fst")),Type.Bytes);
+  typeMap.put(new FieldDataType("string",ImmutableSettings.builder().put("format","paged_bytes")),Type.Bytes);
+  typeMap.put(new FieldDataType("string",ImmutableSettings.builder().put("format","concrete_bytes")),Type.Bytes);
+  typeMap.put(new FieldDataType("byte"),Type.Integer);
+  typeMap.put(new FieldDataType("short"),Type.Integer);
+  typeMap.put(new FieldDataType("int"),Type.Integer);
+  typeMap.put(new FieldDataType("long"),Type.Long);
+  typeMap.put(new FieldDataType("double"),Type.Double);
+  typeMap.put(new FieldDataType("float"),Type.Float);
+  ArrayList<Entry<FieldDataType,Type>> list=new ArrayList<Entry<FieldDataType,Type>>(typeMap.entrySet());
+  Preprocessor pre=new ToDoublePreprocessor();
+  while (!list.isEmpty()) {
+    Entry<FieldDataType,Type> left;
+    Entry<FieldDataType,Type> right;
+    if (list.size() > 1) {
+      left=list.remove(random.nextInt(list.size()));
+      right=list.remove(random.nextInt(list.size()));
+    }
+ else {
+      right=left=list.remove(0);
+    }
+    ifdService.clear();
+    IndexFieldData leftFieldData=ifdService.getForField(new FieldMapper.Names(left.getValue().name().toLowerCase()),left.getKey());
+    ifdService.clear();
+    IndexFieldData rightFieldData=ifdService.getForField(new FieldMapper.Names(right.getValue().name().toLowerCase()),right.getKey());
+    duellFieldDataBytes(random,context,leftFieldData,rightFieldData,pre);
+    duellFieldDataBytes(random,context,rightFieldData,leftFieldData,pre);
+    DirectoryReader perSegment=DirectoryReader.open(writer,true);
+    CompositeReaderContext composite=perSegment.getContext();
+    List<AtomicReaderContext> leaves=composite.leaves();
+    for (    AtomicReaderContext atomicReaderContext : leaves) {
+      duellFieldDataBytes(random,atomicReaderContext,leftFieldData,rightFieldData,pre);
+    }
+  }
+}
