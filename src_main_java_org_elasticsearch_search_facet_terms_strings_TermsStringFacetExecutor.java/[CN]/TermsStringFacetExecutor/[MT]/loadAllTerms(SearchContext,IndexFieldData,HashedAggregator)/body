@@ -1,0 +1,37 @@
+{
+  for (  AtomicReaderContext readerContext : context.searcher().getTopReaderContext().leaves()) {
+    int maxDoc=readerContext.reader().maxDoc();
+    if (indexFieldData instanceof IndexFieldData.WithOrdinals) {
+      BytesValues.WithOrdinals values=((IndexFieldData.WithOrdinals)indexFieldData).load(readerContext).getBytesValues();
+      Ordinals.Docs ordinals=values.ordinals();
+      for (int ord=1; ord < ordinals.getMaxOrd(); ord++) {
+        BytesRef value=values.getValueByOrd(ord);
+        aggregator.addValue(value,value.hashCode());
+      }
+    }
+ else {
+      BytesValues values=indexFieldData.load(readerContext).getBytesValues();
+      if (values.isMultiValued()) {
+        for (int docId=0; docId < maxDoc; docId++) {
+          if (!values.hasValue(docId)) {
+            continue;
+          }
+          BytesValues.Iter iter=values.getIter(docId);
+          while (iter.hasNext()) {
+            aggregator.addValue(iter.next(),iter.hash());
+          }
+        }
+      }
+ else {
+        BytesRef spare=new BytesRef();
+        for (int docId=0; docId < maxDoc; docId++) {
+          if (!values.hasValue(docId)) {
+            continue;
+          }
+          int hash=values.getValueHashed(docId,spare);
+          aggregator.addValue(spare,hash);
+        }
+      }
+    }
+  }
+}

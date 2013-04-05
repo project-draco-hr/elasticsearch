@@ -5,4 +5,39 @@
   this.script=script;
   this.excluded=excluded;
   this.facets=CacheRecycler.popLongIntMap();
+  if (allTerms) {
+    for (    AtomicReaderContext readerContext : context.searcher().getTopReaderContext().leaves()) {
+      int maxDoc=readerContext.reader().maxDoc();
+      LongValues values=indexFieldData.load(readerContext).getLongValues();
+      if (values instanceof LongValues.WithOrdinals) {
+        LongValues.WithOrdinals valuesWithOrds=(LongValues.WithOrdinals)values;
+        Ordinals.Docs ordinals=valuesWithOrds.ordinals();
+        for (int ord=1; ord < ordinals.getMaxOrd(); ord++) {
+          facets.putIfAbsent(valuesWithOrds.getValueByOrd(ord),0);
+        }
+      }
+ else {
+        if (values.isMultiValued()) {
+          for (int docId=0; docId < maxDoc; docId++) {
+            if (!values.hasValue(docId)) {
+              continue;
+            }
+            LongValues.Iter iter=values.getIter(docId);
+            while (iter.hasNext()) {
+              facets.putIfAbsent(iter.next(),0);
+            }
+          }
+        }
+ else {
+          for (int docId=0; docId < maxDoc; docId++) {
+            if (!values.hasValue(docId)) {
+              continue;
+            }
+            long value=values.getValue(docId);
+            facets.putIfAbsent(value,0);
+          }
+        }
+      }
+    }
+  }
 }
