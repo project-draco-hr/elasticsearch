@@ -7,48 +7,84 @@
   client.admin().indices().prepareCreate("test").addMapping("type",jsonBuilder().startObject().startObject("type").startObject("properties").startObject("byte").field("type","byte").endObject().startObject("short").field("type","short").endObject().startObject("integer").field("type","integer").endObject().startObject("long").field("type","long").endObject().startObject("float").field("type","float").endObject().startObject("double").field("type","double").endObject().endObject().endObject().endObject()).execute().actionGet();
   client.admin().cluster().prepareHealth().setWaitForEvents(Priority.LANGUID).setWaitForGreenStatus().execute().actionGet();
   for (int i=0; i < 100; i++) {
-    client.prepareIndex("test","type","" + i).setSource(jsonBuilder().startObject().field("name","" + i).field("byte",i).field("short",i + Byte.MAX_VALUE).field("integer",i + Short.MAX_VALUE).field("long",i + Integer.MAX_VALUE).field("float",(float)i).field("double",(double)i).endObject()).execute().actionGet();
+    client.prepareIndex("test","type","" + i).setSource(jsonBuilder().startObject().field("name","" + i).field("multiValued","" + i,"" + (90 + i % 10)).field("byte",i).field("short",i + Byte.MAX_VALUE).field("integer",i + Short.MAX_VALUE).field("long",i + Integer.MAX_VALUE).field("float",(float)i).field("double",(double)i).endObject()).execute().actionGet();
   }
   for (int i=0; i < 10; i++) {
     client.prepareIndex("test","type","" + (i + 100)).setSource(jsonBuilder().startObject().field("foo","" + i).endObject()).execute().actionGet();
   }
-  client.admin().indices().prepareFlush().setRefresh(true).execute().actionGet();
-  SearchResponse searchResponse=client.prepareSearch().setQuery(matchAllQuery()).addFacet(termsFacet("double").field("double").size(10)).addFacet(termsFacet("float").field("float").size(10)).addFacet(termsFacet("integer").field("integer").size(10)).addFacet(termsFacet("long").field("long").size(10)).addFacet(termsFacet("short").field("short").size(10)).addFacet(termsFacet("byte").field("byte").size(10)).addFacet(termsFacet("termFacet").field("name").size(10)).execute().actionGet();
-  assertThat(searchResponse.getHits().getTotalHits(),equalTo(110l));
-  TermsFacet facet=searchResponse.getFacets().facet("termFacet");
-  assertThat(facet.getName(),equalTo("termFacet"));
-  assertThat(facet.getEntries().size(),equalTo(10));
-  assertThat(facet.getTotalCount(),equalTo(100l));
-  assertThat(facet.getOtherCount(),equalTo(90l));
-  assertThat(facet.getMissingCount(),equalTo(10l));
-  facet=searchResponse.getFacets().facet("double");
-  assertThat(facet.getName(),equalTo("double"));
-  assertThat(facet.getEntries().size(),equalTo(10));
-  assertThat(facet.getTotalCount(),equalTo(100l));
-  assertThat(facet.getOtherCount(),equalTo(90l));
-  assertThat(facet.getMissingCount(),equalTo(10l));
-  facet=searchResponse.getFacets().facet("float");
-  assertThat(facet.getName(),equalTo("float"));
-  assertThat(facet.getEntries().size(),equalTo(10));
-  assertThat(facet.getTotalCount(),equalTo(100l));
-  assertThat(facet.getOtherCount(),equalTo(90l));
-  assertThat(facet.getMissingCount(),equalTo(10l));
-  facet=searchResponse.getFacets().facet("long");
-  assertThat(facet.getName(),equalTo("long"));
-  assertThat(facet.getEntries().size(),equalTo(10));
-  assertThat(facet.getTotalCount(),equalTo(100l));
-  assertThat(facet.getOtherCount(),equalTo(90l));
-  assertThat(facet.getMissingCount(),equalTo(10l));
-  facet=searchResponse.getFacets().facet("integer");
-  assertThat(facet.getName(),equalTo("integer"));
-  assertThat(facet.getEntries().size(),equalTo(10));
-  assertThat(facet.getTotalCount(),equalTo(100l));
-  assertThat(facet.getOtherCount(),equalTo(90l));
-  assertThat(facet.getMissingCount(),equalTo(10l));
-  facet=searchResponse.getFacets().facet("short");
-  assertThat(facet.getName(),equalTo("short"));
-  assertThat(facet.getEntries().size(),equalTo(10));
-  assertThat(facet.getTotalCount(),equalTo(100l));
-  assertThat(facet.getOtherCount(),equalTo(90l));
-  assertThat(facet.getMissingCount(),equalTo(10l));
+  String[] execHint=new String[]{"map",null};
+  for (  String hint : execHint) {
+    client.admin().indices().prepareFlush().setRefresh(true).execute().actionGet();
+    SearchResponse searchResponse=client.prepareSearch().setQuery(matchAllQuery()).addFacet(termsFacet("double").executionHint(hint).field("double").size(10)).addFacet(termsFacet("float").executionHint(hint).field("float").size(10)).addFacet(termsFacet("integer").executionHint(hint).field("integer").size(10)).addFacet(termsFacet("long").executionHint(hint).field("long").size(10)).addFacet(termsFacet("short").executionHint(hint).field("short").size(10)).addFacet(termsFacet("byte").executionHint(hint).field("byte").size(10)).addFacet(termsFacet("termFacet").executionHint(hint).field("name").size(10)).addFacet(termsFacet("termFacetRegex").executionHint(hint).field("multiValued").regex("9\\d").size(20)).addFacet(termsFacet("termFacetScript").executionHint(hint).field("multiValued").script("Integer.toHexString(Integer.parseInt(term))").size(10)).addFacet(termsFacet("termFacetScriptRegex").executionHint(hint).field("multiValued").script("Integer.toHexString(Integer.parseInt(term))").regex("9\\d").size(20)).execute().actionGet();
+    assertThat(searchResponse.getHits().getTotalHits(),equalTo(110l));
+    TermsFacet facet=searchResponse.getFacets().facet("termFacet");
+    assertThat(facet.getName(),equalTo("termFacet"));
+    assertThat(facet.getEntries().size(),equalTo(10));
+    assertThat(facet.getTotalCount(),equalTo(100l));
+    assertThat(facet.getOtherCount(),equalTo(90l));
+    assertThat(facet.getMissingCount(),equalTo(10l));
+    facet=searchResponse.getFacets().facet("termFacetRegex");
+    assertThat(facet.getName(),equalTo("termFacetRegex"));
+    assertThat(facet.getEntries().size(),equalTo(10));
+    assertThat(facet.getTotalCount(),equalTo(190l));
+    assertThat(facet.getOtherCount(),equalTo(90l));
+    assertThat(facet.getMissingCount(),equalTo(10l));
+    int count=99;
+    for (    Entry entry : facet) {
+      assertThat(Integer.parseInt(entry.getTerm().string()),equalTo(count--));
+      assertThat(entry.getCount(),equalTo(10));
+    }
+    facet=searchResponse.getFacets().facet("termFacetScriptRegex");
+    assertThat(facet.getName(),equalTo("termFacetScriptRegex"));
+    assertThat(facet.getEntries().size(),equalTo(10));
+    assertThat(facet.getTotalCount(),equalTo(190l));
+    assertThat(facet.getOtherCount(),equalTo(90l));
+    assertThat(facet.getMissingCount(),equalTo(10l));
+    count=99;
+    for (    Entry entry : facet) {
+      assertThat(entry.getTerm().string(),equalTo(Integer.toHexString(count--)));
+      assertThat(entry.getCount(),equalTo(10));
+    }
+    facet=searchResponse.getFacets().facet("termFacetScript");
+    assertThat(facet.getName(),equalTo("termFacetScript"));
+    assertThat(facet.getEntries().size(),equalTo(10));
+    assertThat(facet.getTotalCount(),equalTo(190l));
+    assertThat(facet.getOtherCount(),equalTo(90l));
+    assertThat(facet.getMissingCount(),equalTo(10l));
+    count=99;
+    for (    Entry entry : facet) {
+      assertThat(entry.getTerm().string(),equalTo(Integer.toHexString(count--)));
+      assertThat(entry.getCount(),equalTo(10));
+    }
+    facet=searchResponse.getFacets().facet("double");
+    assertThat(facet.getName(),equalTo("double"));
+    assertThat(facet.getEntries().size(),equalTo(10));
+    assertThat(facet.getTotalCount(),equalTo(100l));
+    assertThat(facet.getOtherCount(),equalTo(90l));
+    assertThat(facet.getMissingCount(),equalTo(10l));
+    facet=searchResponse.getFacets().facet("float");
+    assertThat(facet.getName(),equalTo("float"));
+    assertThat(facet.getEntries().size(),equalTo(10));
+    assertThat(facet.getTotalCount(),equalTo(100l));
+    assertThat(facet.getOtherCount(),equalTo(90l));
+    assertThat(facet.getMissingCount(),equalTo(10l));
+    facet=searchResponse.getFacets().facet("long");
+    assertThat(facet.getName(),equalTo("long"));
+    assertThat(facet.getEntries().size(),equalTo(10));
+    assertThat(facet.getTotalCount(),equalTo(100l));
+    assertThat(facet.getOtherCount(),equalTo(90l));
+    assertThat(facet.getMissingCount(),equalTo(10l));
+    facet=searchResponse.getFacets().facet("integer");
+    assertThat(facet.getName(),equalTo("integer"));
+    assertThat(facet.getEntries().size(),equalTo(10));
+    assertThat(facet.getTotalCount(),equalTo(100l));
+    assertThat(facet.getOtherCount(),equalTo(90l));
+    assertThat(facet.getMissingCount(),equalTo(10l));
+    facet=searchResponse.getFacets().facet("short");
+    assertThat(facet.getName(),equalTo("short"));
+    assertThat(facet.getEntries().size(),equalTo(10));
+    assertThat(facet.getTotalCount(),equalTo(100l));
+    assertThat(facet.getOtherCount(),equalTo(90l));
+    assertThat(facet.getMissingCount(),equalTo(10l));
+  }
 }
