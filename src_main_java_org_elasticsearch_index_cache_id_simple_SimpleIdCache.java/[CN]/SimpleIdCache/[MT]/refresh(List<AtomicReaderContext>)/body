@@ -5,6 +5,7 @@ synchronized (idReaders) {
         return;
       }
       Map<Object,Map<String,TypeBuilder>> builders=new HashMap<Object,Map<String,TypeBuilder>>();
+      Map<Object,IndexReader> cacheToReader=new HashMap<Object,IndexReader>();
       for (      AtomicReaderContext context : atomicReaderContexts) {
         AtomicReader reader=context.reader();
         if (idReaders.containsKey(reader.getCoreCacheKey())) {
@@ -15,6 +16,7 @@ synchronized (idReaders) {
         }
         Map<String,TypeBuilder> readerBuilder=new HashMap<String,TypeBuilder>();
         builders.put(reader.getCoreCacheKey(),readerBuilder);
+        cacheToReader.put(reader.getCoreCacheKey(),context.reader());
         Terms terms=reader.terms(UidFieldMapper.NAME);
         if (terms != null) {
           TermsEnum termsEnum=terms.iterator(null);
@@ -73,8 +75,9 @@ synchronized (idReaders) {
         for (        Map.Entry<String,TypeBuilder> typeBuilderEntry : entry.getValue().entrySet()) {
           types.put(typeBuilderEntry.getKey(),new SimpleIdReaderTypeCache(typeBuilderEntry.getKey(),typeBuilderEntry.getValue().idToDoc,typeBuilderEntry.getValue().docToId,typeBuilderEntry.getValue().parentIdsValues.toArray(new HashedBytesArray[typeBuilderEntry.getValue().parentIdsValues.size()]),typeBuilderEntry.getValue().parentIdsOrdinals));
         }
-        SimpleIdReaderCache readerCache=new SimpleIdReaderCache(entry.getKey(),types.immutableMap());
+        SimpleIdReaderCache readerCache=new SimpleIdReaderCache(cacheToReader.get(entry.getKey()),types.immutableMap());
         idReaders.put(readerCache.readerCacheKey(),readerCache);
+        onCached(readerCache);
       }
     }
   }
