@@ -1,0 +1,85 @@
+{
+  client.admin().indices().prepareDelete().execute().actionGet();
+  client.admin().indices().prepareCreate("test").addMapping("type1",jsonBuilder().startObject().startObject("type1").startObject("properties").startObject("field1_concrete").field("type","string").field("index","not_analyzed").startObject("fielddata").field("format","concrete_bytes").endObject().endObject().startObject("field1_paged").field("type","string").field("index","not_analyzed").startObject("fielddata").field("format","paged_bytes").endObject().endObject().startObject("field1_fst").field("type","string").field("index","not_analyzed").startObject("fielddata").field("format","fst").endObject().endObject().startObject("field2").field("type","string").field("index","not_analyzed").endObject().endObject().endObject().endObject()).execute().actionGet();
+  long seed=System.currentTimeMillis();
+  try {
+    Random random=new Random(seed);
+    int numOfValuesField1=200;
+    String[] field1Values=new String[numOfValuesField1];
+    for (int i=0; i < numOfValuesField1; i++) {
+      field1Values[i]=RandomStringGenerator.random(10,0,0,true,true,null,random);
+    }
+    int numOfQueryValues=50;
+    String[] queryValues=new String[numOfQueryValues];
+    for (int i=0; i < numOfQueryValues; i++) {
+      queryValues[i]=RandomStringGenerator.random(5,0,0,true,true,null,random);
+    }
+    Map<String,Map<String,Integer>> controlDataSet=new HashMap<String,Map<String,Integer>>();
+    for (int i=1; i <= numDocs(); i++) {
+      String field1Val=field1Values[random.nextInt(numOfValuesField1)];
+      String queryVal=queryValues[random.nextInt(numOfQueryValues)];
+      client.prepareIndex("test","type1",Integer.toString(i)).setSource(jsonBuilder().startObject().field("field1_concrete",field1Val).field("field1_paged",field1Val).field("field1_fst",field1Val).field("field2",queryVal).endObject()).execute().actionGet();
+      Map<String,Integer> controlField1Facets=controlDataSet.get(queryVal);
+      if (controlField1Facets == null) {
+        controlField1Facets=new HashMap<String,Integer>();
+        controlDataSet.put(queryVal,controlField1Facets);
+      }
+      Integer controlCount=controlField1Facets.get(field1Val);
+      if (controlCount == null) {
+        controlCount=0;
+      }
+      controlField1Facets.put(field1Val,++controlCount);
+    }
+    client.admin().indices().prepareRefresh().execute().actionGet();
+    String[] facetFields=new String[]{"field1_concrete","field1_paged","field1_fst"};
+    TermsFacet.ComparatorType[] compTypes=TermsFacet.ComparatorType.values();
+    for (    String facetField : facetFields) {
+      for (      String queryVal : controlDataSet.keySet()) {
+        TermsFacet.ComparatorType compType=compTypes[random.nextInt(compTypes.length)];
+        int size;
+        if (compType == TermsFacet.ComparatorType.COUNT || compType == TermsFacet.ComparatorType.REVERSE_COUNT) {
+          size=numOfValuesField1;
+        }
+ else {
+          size=random.nextInt(numOfValuesField1);
+        }
+        Map<String,Integer> controlFacets=controlDataSet.get(queryVal);
+        TermsFacetBuilder termsFacetBuilder=FacetBuilders.termsFacet("facet1").field(facetField).order(compType).size(size);
+        if (random.nextBoolean()) {
+          termsFacetBuilder.executionHint("map");
+        }
+        List<String> excludes=new ArrayList<String>();
+        if (random.nextBoolean()) {
+          int numExludes=random.nextInt(5) + 1;
+          List<String> facetValues=new ArrayList<String>(controlFacets.keySet());
+          for (int i=0; i < numExludes; i++) {
+            excludes.add(facetValues.get(random.nextInt(facetValues.size())));
+          }
+          termsFacetBuilder.exclude(excludes.toArray());
+        }
+        String regex=null;
+        if (random.nextBoolean()) {
+          List<String> facetValues=new ArrayList<String>(controlFacets.keySet());
+          regex=facetValues.get(random.nextInt(facetValues.size()));
+          regex="^" + regex.substring(0,regex.length() / 2) + ".*";
+          termsFacetBuilder.regex(regex);
+        }
+        boolean allTerms=random.nextInt(10) == 3;
+        termsFacetBuilder.allTerms(allTerms);
+        SearchResponse response=client.prepareSearch("test").setQuery(QueryBuilders.termQuery("field2",queryVal)).addFacet(termsFacetBuilder).execute().actionGet();
+        TermsFacet termsFacet=response.getFacets().facet("facet1");
+        List<Tuple<Text,Integer>> controlFacetEntries=getControlFacetEntries(field1Values,controlFacets,size,compType,excludes,regex,allTerms);
+        String reason=String.format("query: %s field: %s size: %d order: %s all_terms: %s regex: %s excludes: %s",queryVal,facetField,size,compType,allTerms,regex,excludes);
+        assertThat(reason,termsFacet.getEntries().size(),equalTo(controlFacetEntries.size()));
+        for (int i=0; i < controlFacetEntries.size(); i++) {
+          assertThat(reason,termsFacet.getEntries().get(i).getTerm(),equalTo(controlFacetEntries.get(i).v1()));
+          assertThat(reason,termsFacet.getEntries().get(i).getCount(),equalTo(controlFacetEntries.get(i).v2()));
+        }
+      }
+    }
+  }
+ catch (  Throwable t) {
+    logger.error("Failed with seed:" + seed);
+    throw t;
+  }
+}
