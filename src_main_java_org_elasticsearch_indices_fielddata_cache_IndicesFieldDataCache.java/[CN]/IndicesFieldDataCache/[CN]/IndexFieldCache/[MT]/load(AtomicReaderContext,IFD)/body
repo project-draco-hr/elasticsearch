@@ -1,12 +1,23 @@
 {
-  Key key=new Key(this,context.reader().getCoreCacheKey());
+  final Key key=new Key(this,context.reader().getCoreCacheKey());
   return (FD)cache.get(key,new Callable<AtomicFieldData>(){
     @Override public AtomicFieldData call() throws Exception {
       if (context.reader() instanceof SegmentReader) {
         ((SegmentReader)context.reader()).addCoreClosedListener(IndexFieldCache.this);
       }
       AtomicFieldData fieldData=indexFieldData.loadDirect(context);
-      listener.onLoad(index,indexFieldData.getFieldNames(),fieldDataType,fieldData);
+      if (indexService != null) {
+        ShardId shardId=ShardUtils.extractShardId(context.reader());
+        if (shardId != null) {
+          IndexShard shard=indexService.shard(shardId.id());
+          if (shard != null) {
+            key.listener=shard.fieldData();
+          }
+        }
+      }
+      if (key.listener != null) {
+        key.listener.onLoad(fieldNames,fieldDataType,fieldData);
+      }
       return fieldData;
     }
   }
