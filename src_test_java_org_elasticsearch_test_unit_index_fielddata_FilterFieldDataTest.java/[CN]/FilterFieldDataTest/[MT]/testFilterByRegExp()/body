@@ -1,0 +1,51 @@
+{
+  int hundred=0;
+  int ten=0;
+  int five=0;
+  for (int i=0; i < 1000; i++) {
+    Document d=new Document();
+    d.add(new StringField("id","" + i,Field.Store.NO));
+    if (i % 100 == 0) {
+      hundred++;
+      d.add(new StringField("high_freq","100",Field.Store.NO));
+    }
+    if (i % 10 == 0) {
+      ten++;
+      d.add(new StringField("high_freq","10",Field.Store.NO));
+    }
+    if (i % 5 == 0) {
+      five++;
+      d.add(new StringField("high_freq","5",Field.Store.NO));
+    }
+    writer.addDocument(d);
+  }
+  System.out.println(hundred + " " + ten+ " "+ five);
+  writer.forceMerge(1);
+  AtomicReaderContext context=refreshReader();
+  String[] formats=new String[]{"fst","paged_bytes","concrete_bytes"};
+  for (  String format : formats) {
+{
+      ifdService.clear();
+      FieldDataType fieldDataType=new FieldDataType("string",ImmutableSettings.builder().put("format",format).put("filter.regex.pattern","\\d"));
+      IndexFieldData fieldData=ifdService.getForField(new FieldMapper.Names("high_freq"),fieldDataType);
+      AtomicFieldData.WithOrdinals<ScriptDocValues.Strings> loadDirect=(WithOrdinals<Strings>)fieldData.loadDirect(context);
+      BytesValues.WithOrdinals bytesValues=loadDirect.getBytesValues();
+      Docs ordinals=bytesValues.ordinals();
+      assertThat(1,equalTo(ordinals.getNumOrds()));
+      assertThat(1000,equalTo(ordinals.getNumDocs()));
+      assertThat(bytesValues.getValueByOrd(1).utf8ToString(),equalTo("5"));
+    }
+{
+      ifdService.clear();
+      FieldDataType fieldDataType=new FieldDataType("string",ImmutableSettings.builder().put("format",format).put("filter.regex.pattern","\\d{1,2}"));
+      IndexFieldData fieldData=ifdService.getForField(new FieldMapper.Names("high_freq"),fieldDataType);
+      AtomicFieldData.WithOrdinals<ScriptDocValues.Strings> loadDirect=(WithOrdinals<Strings>)fieldData.loadDirect(context);
+      BytesValues.WithOrdinals bytesValues=loadDirect.getBytesValues();
+      Docs ordinals=bytesValues.ordinals();
+      assertThat(2,equalTo(ordinals.getNumOrds()));
+      assertThat(1000,equalTo(ordinals.getNumDocs()));
+      assertThat(bytesValues.getValueByOrd(1).utf8ToString(),equalTo("10"));
+      assertThat(bytesValues.getValueByOrd(2).utf8ToString(),equalTo("5"));
+    }
+  }
+}
