@@ -1,0 +1,23 @@
+{
+  try {
+    client.admin().indices().prepareDelete("test").execute().actionGet();
+  }
+ catch (  Exception e) {
+  }
+  client.admin().indices().prepareCreate("test").setSettings(ImmutableSettings.settingsBuilder().put("index.number_of_shards",2)).addMapping("type1",jsonBuilder().startObject().startObject("type1").startObject("properties").startObject("no_long_term").field("type","string").field("store","no").field("term_vector","with_positions_offsets").endObject().startObject("long_term").field("type","string").field("store","no").field("term_vector","with_positions_offsets").endObject().endObject().endObject().endObject()).execute().actionGet();
+  client.prepareIndex("test","type1","1").setSource(XContentFactory.jsonBuilder().startObject().startArray("no_long_term").value("This is a test where foo is highlighed and should be highlighted").endArray().startArray("long_term").value("This is a test thisisaverylongwordandmakessurethisfails where foo is highlighed and should be highlighted").endArray().endObject()).setRefresh(true).execute().actionGet();
+  SearchResponse search=client.prepareSearch().setQuery(matchQuery("long_term","thisisaverylongwordandmakessurethisfails foo highlighed")).addHighlightedField("long_term",18,1).execute().actionGet();
+  assertThat(search.getHits().totalHits(),equalTo(1l));
+  assertThat(search.getHits().hits().length,equalTo(1));
+  assertThat(search.getHits().hits()[0].highlightFields().get("long_term").fragments().length,equalTo(1));
+  assertThat(search.getHits().hits()[0].highlightFields().get("long_term").fragments()[0].string(),equalTo("<em>thisisaverylongwordandmakessurethisfails</em>"));
+  search=client.prepareSearch().setQuery(matchQuery("no_long_term","test foo highlighed").type(Type.PHRASE).slop(3)).addHighlightedField("no_long_term",18,1).setHighlighterPostTags("</b>").setHighlighterPreTags("<b>").execute().actionGet();
+  assertThat(search.getHits().totalHits(),equalTo(1l));
+  assertThat(search.getHits().hits().length,equalTo(1));
+  assertThat(search.getHits().hits()[0].highlightFields().size(),equalTo(0));
+  search=client.prepareSearch().setQuery(matchQuery("no_long_term","test foo highlighed").type(Type.PHRASE).slop(3)).addHighlightedField("no_long_term",30,1).setHighlighterPostTags("</b>").setHighlighterPreTags("<b>").execute().actionGet();
+  assertThat(search.getHits().totalHits(),equalTo(1l));
+  assertThat(search.getHits().hits().length,equalTo(1));
+  assertThat(search.getHits().hits()[0].highlightFields().get("no_long_term").fragments().length,equalTo(1));
+  assertThat(search.getHits().hits()[0].highlightFields().get("no_long_term").fragments()[0].string(),equalTo("a <b>test</b> where <b>foo</b> is <b>highlighed</b> and"));
+}
