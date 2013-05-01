@@ -1,0 +1,37 @@
+{
+  MappingMetaData mappingMd=clusterState.metaData().index(request.index()).mappingOrDefault(indexRequest.type());
+  if (mappingMd != null && mappingMd.routing().required()) {
+    if (indexRequest.routing() == null) {
+      throw new RoutingMissingException(indexRequest.index(),indexRequest.type(),indexRequest.id());
+    }
+  }
+  if (!processed) {
+    indexRequest.process(clusterState.metaData(),indexRequest.index(),mappingMd,allowIdGeneration);
+  }
+  SourceToParse sourceToParse=SourceToParse.source(indexRequest.source()).type(indexRequest.type()).id(indexRequest.id()).routing(indexRequest.routing()).parent(indexRequest.parent()).timestamp(indexRequest.timestamp()).ttl(indexRequest.ttl());
+  long version;
+  Engine.IndexingOperation op;
+  if (indexRequest.opType() == IndexRequest.OpType.INDEX) {
+    Engine.Index index=indexShard.prepareIndex(sourceToParse).version(indexRequest.version()).versionType(indexRequest.versionType()).origin(Engine.Operation.Origin.PRIMARY);
+    indexShard.index(index);
+    version=index.version();
+    op=index;
+  }
+ else {
+    Engine.Create create=indexShard.prepareCreate(sourceToParse).version(indexRequest.version()).versionType(indexRequest.versionType()).origin(Engine.Operation.Origin.PRIMARY);
+    indexShard.create(create);
+    version=create.version();
+    op=create;
+  }
+  long preVersion=indexRequest.version();
+  indexRequest.version(version);
+  Tuple<String,String> mappingsToUpdate=null;
+  if (op.parsedDoc().mappingsModified()) {
+    mappingsToUpdate=Tuple.tuple(indexRequest.index(),indexRequest.type());
+  }
+  if (!Strings.hasLength(indexRequest.percolate())) {
+    op=null;
+  }
+  IndexResponse indexResponse=new IndexResponse(indexRequest.index(),indexRequest.type(),indexRequest.id(),version);
+  return new WriteResult(indexResponse,preVersion,mappingsToUpdate,op);
+}

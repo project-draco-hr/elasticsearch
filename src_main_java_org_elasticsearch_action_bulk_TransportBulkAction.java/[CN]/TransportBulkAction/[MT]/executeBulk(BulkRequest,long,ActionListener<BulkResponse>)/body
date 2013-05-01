@@ -18,6 +18,11 @@
       deleteRequest.routing(clusterState.metaData().resolveIndexRouting(deleteRequest.routing(),deleteRequest.index()));
       deleteRequest.index(clusterState.metaData().concreteIndex(deleteRequest.index()));
     }
+ else     if (request instanceof UpdateRequest) {
+      UpdateRequest updateRequest=(UpdateRequest)request;
+      updateRequest.routing(clusterState.metaData().resolveIndexRouting(updateRequest.routing(),updateRequest.index()));
+      updateRequest.index(clusterState.metaData().concreteIndex(updateRequest.index()));
+    }
   }
   final BulkItemResponse[] responses=new BulkItemResponse[bulkRequest.requests.size()];
   Map<ShardId,List<BulkItemRequest>> requestsByShard=Maps.newHashMap();
@@ -57,6 +62,20 @@
         list.add(new BulkItemRequest(i,request));
       }
     }
+ else     if (request instanceof UpdateRequest) {
+      UpdateRequest updateRequest=(UpdateRequest)request;
+      MappingMetaData mappingMd=clusterState.metaData().index(updateRequest.index()).mappingOrDefault(updateRequest.type());
+      if (mappingMd != null && mappingMd.routing().required() && updateRequest.routing() == null) {
+        continue;
+      }
+      ShardId shardId=clusterService.operationRouting().indexShards(clusterState,updateRequest.index(),updateRequest.type(),updateRequest.id(),updateRequest.routing()).shardId();
+      List<BulkItemRequest> list=requestsByShard.get(shardId);
+      if (list == null) {
+        list=Lists.newArrayList();
+        requestsByShard.put(shardId,list);
+      }
+      list.add(new BulkItemRequest(i,request));
+    }
   }
   if (requestsByShard.isEmpty()) {
     listener.onResponse(new BulkResponse(responses,System.currentTimeMillis() - startTime));
@@ -91,6 +110,10 @@ synchronized (responses) {
  else             if (request.request() instanceof DeleteRequest) {
               DeleteRequest deleteRequest=(DeleteRequest)request.request();
               responses[request.id()]=new BulkItemResponse(request.id(),"delete",new BulkItemResponse.Failure(deleteRequest.index(),deleteRequest.type(),deleteRequest.id(),message));
+            }
+ else             if (request.request() instanceof UpdateRequest) {
+              UpdateRequest updateRequest=(UpdateRequest)request.request();
+              responses[request.id()]=new BulkItemResponse(request.id(),"update",new BulkItemResponse.Failure(updateRequest.index(),updateRequest.type(),updateRequest.id(),message));
             }
           }
         }

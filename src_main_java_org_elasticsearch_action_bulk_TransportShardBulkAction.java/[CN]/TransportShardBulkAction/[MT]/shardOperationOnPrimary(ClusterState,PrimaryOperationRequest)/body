@@ -4,53 +4,33 @@
   Engine.IndexingOperation[] ops=null;
   Set<Tuple<String,String>> mappingsToUpdate=null;
   BulkItemResponse[] responses=new BulkItemResponse[request.items().length];
-  long[] versions=new long[request.items().length];
+  long[] preVersions=new long[request.items().length];
   for (int i=0; i < request.items().length; i++) {
     BulkItemRequest item=request.items()[i];
     if (item.request() instanceof IndexRequest) {
       IndexRequest indexRequest=(IndexRequest)item.request();
       try {
-        MappingMetaData mappingMd=clusterState.metaData().index(request.index()).mappingOrDefault(indexRequest.type());
-        if (mappingMd != null && mappingMd.routing().required()) {
-          if (indexRequest.routing() == null) {
-            throw new RoutingMissingException(indexRequest.index(),indexRequest.type(),indexRequest.id());
-          }
-        }
-        SourceToParse sourceToParse=SourceToParse.source(indexRequest.source()).type(indexRequest.type()).id(indexRequest.id()).routing(indexRequest.routing()).parent(indexRequest.parent()).timestamp(indexRequest.timestamp()).ttl(indexRequest.ttl());
-        long version;
-        Engine.IndexingOperation op;
-        if (indexRequest.opType() == IndexRequest.OpType.INDEX) {
-          Engine.Index index=indexShard.prepareIndex(sourceToParse).version(indexRequest.version()).versionType(indexRequest.versionType()).origin(Engine.Operation.Origin.PRIMARY);
-          indexShard.index(index);
-          version=index.version();
-          op=index;
-        }
- else {
-          Engine.Create create=indexShard.prepareCreate(sourceToParse).version(indexRequest.version()).versionType(indexRequest.versionType()).origin(Engine.Operation.Origin.PRIMARY);
-          indexShard.create(create);
-          version=create.version();
-          op=create;
-        }
-        versions[i]=indexRequest.version();
-        indexRequest.version(version);
-        if (op.parsedDoc().mappingsModified()) {
+        WriteResult result=shardIndexOperation(request,indexRequest,clusterState,indexShard,true);
+        IndexResponse indexResponse=result.response();
+        responses[i]=new BulkItemResponse(item.id(),indexRequest.opType().lowercase(),indexResponse);
+        preVersions[i]=result.preVersion;
+        if (result.mappingToUpdate != null) {
           if (mappingsToUpdate == null) {
             mappingsToUpdate=Sets.newHashSet();
           }
-          mappingsToUpdate.add(Tuple.tuple(indexRequest.index(),indexRequest.type()));
+          mappingsToUpdate.add(result.mappingToUpdate);
         }
-        if (Strings.hasLength(indexRequest.percolate())) {
+        if (result.op != null) {
           if (ops == null) {
             ops=new Engine.IndexingOperation[request.items().length];
           }
-          ops[i]=op;
+          ops[i]=result.op;
         }
-        responses[i]=new BulkItemResponse(item.id(),indexRequest.opType().lowercase(),new IndexResponse(indexRequest.index(),indexRequest.type(),indexRequest.id(),version));
       }
  catch (      Exception e) {
         if (retryPrimaryException(e)) {
           for (int j=0; j < i; j++) {
-            applyVersion(request.items()[j],versions[j]);
+            applyVersion(request.items()[j],preVersions[j]);
           }
           throw (ElasticSearchException)e;
         }
@@ -67,15 +47,13 @@
  else     if (item.request() instanceof DeleteRequest) {
       DeleteRequest deleteRequest=(DeleteRequest)item.request();
       try {
-        Engine.Delete delete=indexShard.prepareDelete(deleteRequest.type(),deleteRequest.id(),deleteRequest.version()).versionType(deleteRequest.versionType()).origin(Engine.Operation.Origin.PRIMARY);
-        indexShard.delete(delete);
-        deleteRequest.version(delete.version());
-        responses[i]=new BulkItemResponse(item.id(),"delete",new DeleteResponse(deleteRequest.index(),deleteRequest.type(),deleteRequest.id(),delete.version(),delete.notFound()));
+        DeleteResponse deleteResponse=shardDeleteOperation(deleteRequest,indexShard).response();
+        responses[i]=new BulkItemResponse(item.id(),"delete",deleteResponse);
       }
  catch (      Exception e) {
         if (retryPrimaryException(e)) {
           for (int j=0; j < i; j++) {
-            applyVersion(request.items()[j],versions[j]);
+            applyVersion(request.items()[j],preVersions[j]);
           }
           throw (ElasticSearchException)e;
         }
@@ -89,19 +67,119 @@
         request.items()[i]=null;
       }
     }
-  }
-  if (mappingsToUpdate != null) {
-    for (    Tuple<String,String> mappingToUpdate : mappingsToUpdate) {
-      updateMappingOnMaster(mappingToUpdate.v1(),mappingToUpdate.v2());
-    }
-  }
-  if (request.refresh()) {
-    try {
-      indexShard.refresh(new Engine.Refresh(false));
-    }
- catch (    Exception e) {
-    }
-  }
-  BulkShardResponse response=new BulkShardResponse(new ShardId(request.index(),request.shardId()),responses);
-  return new PrimaryResponse<BulkShardResponse,BulkShardRequest>(shardRequest.request,response,ops);
+ else     if (item.request() instanceof UpdateRequest) {
+      UpdateRequest updateRequest=(UpdateRequest)item.request();
+      int retryCount=0;
+      do {
+        UpdateResult updateResult;
+        try {
+          updateResult=shardUpdateOperation(clusterState,request,updateRequest,indexShard);
+        }
+ catch (        Throwable t) {
+          updateResult=new UpdateResult(null,null,false,t,null);
+        }
+        if (updateResult.success()) {
+switch (updateResult.result.operation()) {
+case UPSERT:
+case INDEX:
+            WriteResult result=updateResult.writeResult;
+          IndexRequest indexRequest=updateResult.request();
+        BytesReference indexSourceAsBytes=indexRequest.source();
+      IndexResponse indexResponse=result.response();
+    UpdateResponse updateResponse=new UpdateResponse(indexResponse.getIndex(),indexResponse.getType(),indexResponse.getId(),indexResponse.getVersion());
+  updateResponse.setMatches(indexResponse.getMatches());
+if (updateRequest.fields() != null && updateRequest.fields().length > 0) {
+  Tuple<XContentType,Map<String,Object>> sourceAndContent=XContentHelper.convertToMap(indexSourceAsBytes,true);
+  updateResponse.setGetResult(updateHelper.extractGetResult(updateRequest,indexResponse.getVersion(),sourceAndContent.v2(),sourceAndContent.v1(),indexSourceAsBytes));
+}
+responses[i]=new BulkItemResponse(item.id(),"update",updateResponse);
+preVersions[i]=result.preVersion;
+if (result.mappingToUpdate != null) {
+if (mappingsToUpdate == null) {
+mappingsToUpdate=Sets.newHashSet();
+}
+mappingsToUpdate.add(result.mappingToUpdate);
+}
+if (result.op != null) {
+if (ops == null) {
+ops=new Engine.IndexingOperation[request.items().length];
+}
+ops[i]=result.op;
+}
+request.items()[i]=new BulkItemRequest(request.items()[i].id(),indexRequest);
+break;
+case DELETE:
+DeleteResponse response=updateResult.writeResult.response();
+DeleteRequest deleteRequest=updateResult.request();
+updateResponse=new UpdateResponse(response.getIndex(),response.getType(),response.getId(),response.getVersion());
+updateResponse.setGetResult(updateHelper.extractGetResult(updateRequest,response.getVersion(),updateResult.result.updatedSourceAsMap(),updateResult.result.updateSourceContentType(),null));
+responses[i]=new BulkItemResponse(item.id(),"update",updateResponse);
+request.items()[i]=new BulkItemRequest(request.items()[i].id(),deleteRequest);
+break;
+case NONE:
+responses[i]=new BulkItemResponse(item.id(),"update",updateResult.noopResult);
+request.items()[i]=null;
+break;
+}
+break;
+}
+ else if (updateResult.failure()) {
+Throwable t=updateResult.error;
+if (!updateResult.retry) {
+if (retryPrimaryException(t)) {
+for (int j=0; j < i; j++) {
+applyVersion(request.items()[j],preVersions[j]);
+}
+throw (ElasticSearchException)t;
+}
+if (updateResult.result == null) {
+responses[i]=new BulkItemResponse(item.id(),"update",new BulkItemResponse.Failure(updateRequest.index(),updateRequest.type(),updateRequest.id(),ExceptionsHelper.detailedMessage(t)));
+}
+ else {
+switch (updateResult.result.operation()) {
+case UPSERT:
+case INDEX:
+IndexRequest indexRequest=updateResult.request();
+if (t instanceof ElasticSearchException && ((ElasticSearchException)t).status() == RestStatus.CONFLICT) {
+logger.trace("[{}][{}] failed to execute bulk item (index) {}",t,shardRequest.request.index(),shardRequest.shardId,indexRequest);
+}
+ else {
+logger.debug("[{}][{}] failed to execute bulk item (index) {}",t,shardRequest.request.index(),shardRequest.shardId,indexRequest);
+}
+responses[i]=new BulkItemResponse(item.id(),indexRequest.opType().lowercase(),new BulkItemResponse.Failure(indexRequest.index(),indexRequest.type(),indexRequest.id(),ExceptionsHelper.detailedMessage(t)));
+break;
+case DELETE:
+DeleteRequest deleteRequest=updateResult.request();
+if (t instanceof ElasticSearchException && ((ElasticSearchException)t).status() == RestStatus.CONFLICT) {
+logger.trace("[{}][{}] failed to execute bulk item (delete) {}",t,shardRequest.request.index(),shardRequest.shardId,deleteRequest);
+}
+ else {
+logger.debug("[{}][{}] failed to execute bulk item (delete) {}",t,shardRequest.request.index(),shardRequest.shardId,deleteRequest);
+}
+responses[i]=new BulkItemResponse(item.id(),"delete",new BulkItemResponse.Failure(deleteRequest.index(),deleteRequest.type(),deleteRequest.id(),ExceptionsHelper.detailedMessage(t)));
+break;
+}
+}
+request.items()[i]=null;
+break;
+}
+}
+}
+ while (++retryCount < updateRequest.retryOnConflict());
+}
+}
+if (mappingsToUpdate != null) {
+for (Tuple<String,String> mappingToUpdate : mappingsToUpdate) {
+updateMappingOnMaster(mappingToUpdate.v1(),mappingToUpdate.v2());
+}
+}
+if (request.refresh()) {
+try {
+indexShard.refresh(new Engine.Refresh(false));
+}
+ catch (Exception e) {
+}
+}
+BulkShardResponse response=new BulkShardResponse(new ShardId(request.index(),request.shardId()),responses);
+return new PrimaryResponse<BulkShardResponse,BulkShardRequest>(shardRequest.request,response,ops);
 }
