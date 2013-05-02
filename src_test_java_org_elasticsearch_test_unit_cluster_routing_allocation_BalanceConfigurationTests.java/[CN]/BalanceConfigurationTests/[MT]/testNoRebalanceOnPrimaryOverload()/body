@@ -1,0 +1,118 @@
+{
+  ImmutableSettings.Builder settings=settingsBuilder();
+  AllocationService strategy=new AllocationService(settings.build(),new AllocationDeciders(settings.build(),new NodeSettingsService(ImmutableSettings.Builder.EMPTY_SETTINGS)),new ShardsAllocators(settings.build(),new NoneGatewayAllocator(),new ShardsAllocator(){
+    @Override public boolean rebalance(    RoutingAllocation allocation){
+      return false;
+    }
+    @Override public boolean move(    MutableShardRouting shardRouting,    RoutingNode node,    RoutingAllocation allocation){
+      return false;
+    }
+    @Override public void applyStartedShards(    StartedRerouteAllocation allocation){
+    }
+    @Override public void applyFailedShards(    FailedRerouteAllocation allocation){
+    }
+    @Override public boolean allocateUnassigned(    RoutingAllocation allocation){
+      List<MutableShardRouting> unassigned=allocation.routingNodes().unassigned();
+      boolean changed=!unassigned.isEmpty();
+      for (      MutableShardRouting sr : unassigned) {
+switch (sr.id()) {
+case 0:
+          if (sr.primary()) {
+            allocation.routingNodes().node("node1").add(sr);
+          }
+ else {
+            allocation.routingNodes().node("node0").add(sr);
+          }
+        break;
+case 1:
+      if (sr.primary()) {
+        allocation.routingNodes().node("node1").add(sr);
+      }
+ else {
+        allocation.routingNodes().node("node2").add(sr);
+      }
+    break;
+case 2:
+  if (sr.primary()) {
+    allocation.routingNodes().node("node3").add(sr);
+  }
+ else {
+    allocation.routingNodes().node("node2").add(sr);
+  }
+break;
+case 3:
+if (sr.primary()) {
+allocation.routingNodes().node("node3").add(sr);
+}
+ else {
+allocation.routingNodes().node("node1").add(sr);
+}
+break;
+case 4:
+if (sr.primary()) {
+allocation.routingNodes().node("node2").add(sr);
+}
+ else {
+allocation.routingNodes().node("node0").add(sr);
+}
+break;
+}
+}
+unassigned.clear();
+return changed;
+}
+}
+));
+MetaData.Builder metaDataBuilder=newMetaDataBuilder();
+RoutingTable.Builder routingTableBuilder=routingTable();
+IndexMetaData.Builder indexMeta=newIndexMetaDataBuilder("test").numberOfShards(5).numberOfReplicas(1);
+metaDataBuilder=metaDataBuilder.put(indexMeta);
+MetaData metaData=metaDataBuilder.build();
+for (IndexMetaData index : metaData.indices().values()) {
+routingTableBuilder.addAsNew(index);
+}
+RoutingTable routingTable=routingTableBuilder.build();
+DiscoveryNodes.Builder nodes=newNodesBuilder();
+for (int i=0; i < 4; i++) {
+DiscoveryNode node=newNode("node" + i);
+nodes.put(node);
+}
+ClusterState clusterState=newClusterStateBuilder().nodes(nodes).metaData(metaData).routingTable(routingTable).build();
+routingTable=strategy.reroute(clusterState).routingTable();
+clusterState=newClusterStateBuilder().state(clusterState).routingTable(routingTable).build();
+RoutingNodes routingNodes=clusterState.routingNodes();
+for (RoutingNode routingNode : routingNodes) {
+for (MutableShardRouting mutableShardRouting : routingNode) {
+assertThat(mutableShardRouting.state(),Matchers.equalTo(ShardRoutingState.INITIALIZING));
+}
+}
+strategy=new AllocationService(settings.build());
+logger.info("use the new allocator and check if it moves shards");
+routingNodes=clusterState.routingNodes();
+routingTable=strategy.applyStartedShards(clusterState,routingNodes.shardsWithState(INITIALIZING)).routingTable();
+clusterState=newClusterStateBuilder().state(clusterState).routingTable(routingTable).build();
+routingNodes=clusterState.routingNodes();
+for (RoutingNode routingNode : routingNodes) {
+for (MutableShardRouting mutableShardRouting : routingNode) {
+assertThat(mutableShardRouting.state(),Matchers.equalTo(ShardRoutingState.STARTED));
+}
+}
+logger.info("start the replica shards");
+routingTable=strategy.applyStartedShards(clusterState,routingNodes.shardsWithState(INITIALIZING)).routingTable();
+clusterState=newClusterStateBuilder().state(clusterState).routingTable(routingTable).build();
+routingNodes=clusterState.routingNodes();
+for (RoutingNode routingNode : routingNodes) {
+for (MutableShardRouting mutableShardRouting : routingNode) {
+assertThat(mutableShardRouting.state(),Matchers.equalTo(ShardRoutingState.STARTED));
+}
+}
+logger.info("rebalancing");
+routingTable=strategy.reroute(clusterState).routingTable();
+clusterState=newClusterStateBuilder().state(clusterState).routingTable(routingTable).build();
+routingNodes=clusterState.routingNodes();
+for (RoutingNode routingNode : routingNodes) {
+for (MutableShardRouting mutableShardRouting : routingNode) {
+assertThat(mutableShardRouting.state(),Matchers.equalTo(ShardRoutingState.STARTED));
+}
+}
+}
