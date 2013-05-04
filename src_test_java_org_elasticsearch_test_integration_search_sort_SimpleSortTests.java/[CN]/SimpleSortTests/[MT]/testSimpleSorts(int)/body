@@ -1,4 +1,7 @@
 {
+  final long seed=System.currentTimeMillis();
+  logger.info("testSimpleSorts SEED:[{}]",seed);
+  Random random=new Random(seed);
   try {
     client.admin().indices().prepareDelete("test").execute().actionGet();
   }
@@ -6,115 +9,143 @@
   }
   client.admin().indices().prepareCreate("test").setSettings(ImmutableSettings.settingsBuilder().put("index.number_of_shards",numberOfShards).put("index.number_of_replicas",0)).addMapping("type1",XContentFactory.jsonBuilder().startObject().startObject("type1").startObject("properties").startObject("str_value").field("type","string").endObject().startObject("boolean_value").field("type","boolean").endObject().startObject("byte_value").field("type","byte").endObject().startObject("short_value").field("type","short").endObject().startObject("integer_value").field("type","integer").endObject().startObject("long_value").field("type","long").endObject().startObject("float_value").field("type","float").endObject().startObject("double_value").field("type","double").endObject().endObject().endObject().endObject()).execute().actionGet();
   client.admin().cluster().prepareHealth().setWaitForEvents(Priority.LANGUID).setWaitForGreenStatus().execute().actionGet();
+  List<IndexRequestBuilder> builders=new ArrayList<IndexRequestBuilder>();
   for (int i=0; i < 10; i++) {
-    client.prepareIndex("test","type1",Integer.toString(i)).setSource(jsonBuilder().startObject().field("str_value",new String(new char[]{(char)(97 + i),(char)(97 + i)})).field("boolean_value",true).field("byte_value",i).field("short_value",i).field("integer_value",i).field("long_value",i).field("float_value",0.1 * i).field("double_value",0.1 * i).endObject()).execute().actionGet();
+    IndexRequestBuilder builder=client.prepareIndex("test","type1",Integer.toString(i)).setSource(jsonBuilder().startObject().field("str_value",new String(new char[]{(char)(97 + i),(char)(97 + i)})).field("boolean_value",true).field("byte_value",i).field("short_value",i).field("integer_value",i).field("long_value",i).field("float_value",0.1 * i).field("double_value",0.1 * i).endObject());
+    builders.add(builder);
+  }
+  Collections.shuffle(builders,random);
+  for (  IndexRequestBuilder builder : builders) {
+    builder.execute().actionGet();
+    if (random.nextBoolean()) {
+      if (random.nextInt(5) != 0) {
+        client.admin().indices().prepareRefresh().execute().actionGet();
+      }
+ else {
+        client.admin().indices().prepareFlush().execute().actionGet();
+      }
+    }
   }
   client.admin().indices().prepareRefresh().execute().actionGet();
-  SearchResponse searchResponse=client.prepareSearch().setQuery(matchAllQuery()).setSize(10).addSort("str_value",SortOrder.ASC).execute().actionGet();
+  int size=1 + random.nextInt(10);
+  SearchResponse searchResponse=client.prepareSearch().setQuery(matchAllQuery()).setSize(size).addSort("str_value",SortOrder.ASC).execute().actionGet();
   assertThat(searchResponse.getHits().getTotalHits(),equalTo(10l));
-  assertThat(searchResponse.getHits().hits().length,equalTo(10));
-  for (int i=0; i < 10; i++) {
+  assertThat(searchResponse.getHits().hits().length,equalTo(size));
+  for (int i=0; i < size; i++) {
     assertThat(searchResponse.getHits().getAt(i).id(),equalTo(Integer.toString(i)));
     assertThat(searchResponse.getHits().getAt(i).sortValues()[0].toString(),equalTo(new String(new char[]{(char)(97 + i),(char)(97 + i)})));
   }
-  searchResponse=client.prepareSearch().setQuery(matchAllQuery()).setSize(10).addSort("str_value",SortOrder.DESC).execute().actionGet();
+  size=1 + random.nextInt(10);
+  searchResponse=client.prepareSearch().setQuery(matchAllQuery()).setSize(size).addSort("str_value",SortOrder.DESC).execute().actionGet();
   assertThat(searchResponse.getHits().getTotalHits(),equalTo(10l));
-  assertThat(searchResponse.getHits().hits().length,equalTo(10));
-  for (int i=0; i < 10; i++) {
+  assertThat(searchResponse.getHits().hits().length,equalTo(size));
+  for (int i=0; i < size; i++) {
     assertThat(searchResponse.getHits().getAt(i).id(),equalTo(Integer.toString(9 - i)));
     assertThat(searchResponse.getHits().getAt(i).sortValues()[0].toString(),equalTo(new String(new char[]{(char)(97 + (9 - i)),(char)(97 + (9 - i))})));
   }
   assertThat(searchResponse.toString(),not(containsString("error")));
-  searchResponse=client.prepareSearch().setQuery(matchAllQuery()).setSize(10).addSort("byte_value",SortOrder.ASC).execute().actionGet();
+  size=1 + random.nextInt(10);
+  searchResponse=client.prepareSearch().setQuery(matchAllQuery()).setSize(size).addSort("byte_value",SortOrder.ASC).execute().actionGet();
   assertThat(searchResponse.getHits().getTotalHits(),equalTo(10l));
-  assertThat(searchResponse.getHits().hits().length,equalTo(10));
-  for (int i=0; i < 10; i++) {
+  assertThat(searchResponse.getHits().hits().length,equalTo(size));
+  for (int i=0; i < size; i++) {
     assertThat(searchResponse.getHits().getAt(i).id(),equalTo(Integer.toString(i)));
     assertThat(((Number)searchResponse.getHits().getAt(i).sortValues()[0]).byteValue(),equalTo((byte)i));
   }
-  searchResponse=client.prepareSearch().setQuery(matchAllQuery()).setSize(10).addSort("byte_value",SortOrder.DESC).execute().actionGet();
+  size=1 + random.nextInt(10);
+  searchResponse=client.prepareSearch().setQuery(matchAllQuery()).setSize(size).addSort("byte_value",SortOrder.DESC).execute().actionGet();
   assertThat(searchResponse.getHits().getTotalHits(),equalTo(10l));
-  assertThat(searchResponse.getHits().hits().length,equalTo(10));
-  for (int i=0; i < 10; i++) {
+  assertThat(searchResponse.getHits().hits().length,equalTo(size));
+  for (int i=0; i < size; i++) {
     assertThat(searchResponse.getHits().getAt(i).id(),equalTo(Integer.toString(9 - i)));
     assertThat(((Number)searchResponse.getHits().getAt(i).sortValues()[0]).byteValue(),equalTo((byte)(9 - i)));
   }
   assertThat(searchResponse.toString(),not(containsString("error")));
-  searchResponse=client.prepareSearch().setQuery(matchAllQuery()).setSize(10).addSort("short_value",SortOrder.ASC).execute().actionGet();
+  size=1 + random.nextInt(10);
+  searchResponse=client.prepareSearch().setQuery(matchAllQuery()).setSize(size).addSort("short_value",SortOrder.ASC).execute().actionGet();
   assertThat(searchResponse.getHits().getTotalHits(),equalTo(10l));
-  assertThat(searchResponse.getHits().hits().length,equalTo(10));
-  for (int i=0; i < 10; i++) {
+  assertThat(searchResponse.getHits().hits().length,equalTo(size));
+  for (int i=0; i < size; i++) {
     assertThat(searchResponse.getHits().getAt(i).id(),equalTo(Integer.toString(i)));
     assertThat(((Number)searchResponse.getHits().getAt(i).sortValues()[0]).shortValue(),equalTo((short)i));
   }
-  searchResponse=client.prepareSearch().setQuery(matchAllQuery()).setSize(10).addSort("short_value",SortOrder.DESC).execute().actionGet();
+  size=1 + random.nextInt(10);
+  searchResponse=client.prepareSearch().setQuery(matchAllQuery()).setSize(size).addSort("short_value",SortOrder.DESC).execute().actionGet();
   assertThat(searchResponse.getHits().getTotalHits(),equalTo(10l));
-  assertThat(searchResponse.getHits().hits().length,equalTo(10));
-  for (int i=0; i < 10; i++) {
+  assertThat(searchResponse.getHits().hits().length,equalTo(size));
+  for (int i=0; i < size; i++) {
     assertThat(searchResponse.getHits().getAt(i).id(),equalTo(Integer.toString(9 - i)));
     assertThat(((Number)searchResponse.getHits().getAt(i).sortValues()[0]).shortValue(),equalTo((short)(9 - i)));
   }
   assertThat(searchResponse.toString(),not(containsString("error")));
-  searchResponse=client.prepareSearch().setQuery(matchAllQuery()).setSize(10).addSort("integer_value",SortOrder.ASC).execute().actionGet();
+  size=1 + random.nextInt(10);
+  searchResponse=client.prepareSearch().setQuery(matchAllQuery()).setSize(size).addSort("integer_value",SortOrder.ASC).execute().actionGet();
   assertThat(searchResponse.getHits().getTotalHits(),equalTo(10l));
-  assertThat(searchResponse.getHits().hits().length,equalTo(10));
-  for (int i=0; i < 10; i++) {
+  assertThat(searchResponse.getHits().hits().length,equalTo(size));
+  for (int i=0; i < size; i++) {
     assertThat(searchResponse.getHits().getAt(i).id(),equalTo(Integer.toString(i)));
     assertThat(((Number)searchResponse.getHits().getAt(i).sortValues()[0]).intValue(),equalTo((int)i));
   }
   assertThat(searchResponse.toString(),not(containsString("error")));
-  searchResponse=client.prepareSearch().setQuery(matchAllQuery()).setSize(10).addSort("integer_value",SortOrder.DESC).execute().actionGet();
+  size=1 + random.nextInt(10);
+  searchResponse=client.prepareSearch().setQuery(matchAllQuery()).setSize(size).addSort("integer_value",SortOrder.DESC).execute().actionGet();
   assertThat(searchResponse.getHits().getTotalHits(),equalTo(10l));
-  assertThat(searchResponse.getHits().hits().length,equalTo(10));
-  for (int i=0; i < 10; i++) {
+  assertThat(searchResponse.getHits().hits().length,equalTo(size));
+  for (int i=0; i < size; i++) {
     assertThat(searchResponse.getHits().getAt(i).id(),equalTo(Integer.toString(9 - i)));
     assertThat(((Number)searchResponse.getHits().getAt(i).sortValues()[0]).intValue(),equalTo((int)(9 - i)));
   }
   assertThat(searchResponse.toString(),not(containsString("error")));
-  searchResponse=client.prepareSearch().setQuery(matchAllQuery()).setSize(10).addSort("long_value",SortOrder.ASC).execute().actionGet();
+  size=1 + random.nextInt(10);
+  searchResponse=client.prepareSearch().setQuery(matchAllQuery()).setSize(size).addSort("long_value",SortOrder.ASC).execute().actionGet();
   assertThat(searchResponse.getHits().getTotalHits(),equalTo(10l));
-  assertThat(searchResponse.getHits().hits().length,equalTo(10));
-  for (int i=0; i < 10; i++) {
+  assertThat(searchResponse.getHits().hits().length,equalTo(size));
+  for (int i=0; i < size; i++) {
     assertThat(searchResponse.getHits().getAt(i).id(),equalTo(Integer.toString(i)));
     assertThat(((Number)searchResponse.getHits().getAt(i).sortValues()[0]).longValue(),equalTo((long)i));
   }
   assertThat(searchResponse.toString(),not(containsString("error")));
-  searchResponse=client.prepareSearch().setQuery(matchAllQuery()).setSize(10).addSort("long_value",SortOrder.DESC).execute().actionGet();
+  size=1 + random.nextInt(10);
+  searchResponse=client.prepareSearch().setQuery(matchAllQuery()).setSize(size).addSort("long_value",SortOrder.DESC).execute().actionGet();
   assertThat(searchResponse.getHits().getTotalHits(),equalTo(10l));
-  assertThat(searchResponse.getHits().hits().length,equalTo(10));
-  for (int i=0; i < 10; i++) {
+  assertThat(searchResponse.getHits().hits().length,equalTo(size));
+  for (int i=0; i < size; i++) {
     assertThat(searchResponse.getHits().getAt(i).id(),equalTo(Integer.toString(9 - i)));
     assertThat(((Number)searchResponse.getHits().getAt(i).sortValues()[0]).longValue(),equalTo((long)(9 - i)));
   }
   assertThat(searchResponse.toString(),not(containsString("error")));
-  searchResponse=client.prepareSearch().setQuery(matchAllQuery()).setSize(10).addSort("float_value",SortOrder.ASC).execute().actionGet();
+  size=1 + random.nextInt(10);
+  searchResponse=client.prepareSearch().setQuery(matchAllQuery()).setSize(size).addSort("float_value",SortOrder.ASC).execute().actionGet();
   assertThat(searchResponse.getHits().getTotalHits(),equalTo(10l));
-  assertThat(searchResponse.getHits().hits().length,equalTo(10));
-  for (int i=0; i < 10; i++) {
+  assertThat(searchResponse.getHits().hits().length,equalTo(size));
+  for (int i=0; i < size; i++) {
     assertThat(searchResponse.getHits().getAt(i).id(),equalTo(Integer.toString(i)));
     assertThat(((Number)searchResponse.getHits().getAt(i).sortValues()[0]).doubleValue(),closeTo(0.1d * i,0.000001d));
   }
   assertThat(searchResponse.toString(),not(containsString("error")));
-  searchResponse=client.prepareSearch().setQuery(matchAllQuery()).setSize(10).addSort("float_value",SortOrder.DESC).execute().actionGet();
+  size=1 + random.nextInt(10);
+  searchResponse=client.prepareSearch().setQuery(matchAllQuery()).setSize(size).addSort("float_value",SortOrder.DESC).execute().actionGet();
   assertThat(searchResponse.getHits().getTotalHits(),equalTo(10l));
-  assertThat(searchResponse.getHits().hits().length,equalTo(10));
-  for (int i=0; i < 10; i++) {
+  assertThat(searchResponse.getHits().hits().length,equalTo(size));
+  for (int i=0; i < size; i++) {
     assertThat(searchResponse.getHits().getAt(i).id(),equalTo(Integer.toString(9 - i)));
     assertThat(((Number)searchResponse.getHits().getAt(i).sortValues()[0]).doubleValue(),closeTo(0.1d * (9 - i),0.000001d));
   }
   assertThat(searchResponse.toString(),not(containsString("error")));
-  searchResponse=client.prepareSearch().setQuery(matchAllQuery()).setSize(10).addSort("double_value",SortOrder.ASC).execute().actionGet();
+  size=1 + random.nextInt(10);
+  searchResponse=client.prepareSearch().setQuery(matchAllQuery()).setSize(size).addSort("double_value",SortOrder.ASC).execute().actionGet();
   assertThat(searchResponse.getHits().getTotalHits(),equalTo(10l));
-  assertThat(searchResponse.getHits().hits().length,equalTo(10));
-  for (int i=0; i < 10; i++) {
+  assertThat(searchResponse.getHits().hits().length,equalTo(size));
+  for (int i=0; i < size; i++) {
     assertThat(searchResponse.getHits().getAt(i).id(),equalTo(Integer.toString(i)));
     assertThat(((Number)searchResponse.getHits().getAt(i).sortValues()[0]).doubleValue(),closeTo(0.1d * i,0.000001d));
   }
   assertThat(searchResponse.toString(),not(containsString("error")));
-  searchResponse=client.prepareSearch().setQuery(matchAllQuery()).setSize(10).addSort("double_value",SortOrder.DESC).execute().actionGet();
+  size=1 + random.nextInt(10);
+  searchResponse=client.prepareSearch().setQuery(matchAllQuery()).setSize(size).addSort("double_value",SortOrder.DESC).execute().actionGet();
   assertThat(searchResponse.getHits().getTotalHits(),equalTo(10l));
-  assertThat(searchResponse.getHits().hits().length,equalTo(10));
-  for (int i=0; i < 10; i++) {
+  assertThat(searchResponse.getHits().hits().length,equalTo(size));
+  for (int i=0; i < size; i++) {
     assertThat(searchResponse.getHits().getAt(i).id(),equalTo(Integer.toString(9 - i)));
     assertThat(((Number)searchResponse.getHits().getAt(i).sortValues()[0]).doubleValue(),closeTo(0.1d * (9 - i),0.000001d));
   }
