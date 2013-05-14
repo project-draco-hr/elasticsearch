@@ -77,9 +77,31 @@
   if (searchContext == null) {
     throw new ElasticSearchIllegalStateException("[has_parent] Can't execute, search context not set");
   }
-  HasParentFilter parentFilter=HasParentFilter.create(query,parentType,searchContext);
-  searchContext.addRewrite(parentFilter);
-  Filter filter=parentFilter;
+  List<String> parentTypes=new ArrayList<String>(2);
+  for (  DocumentMapper documentMapper : parseContext.mapperService()) {
+    ParentFieldMapper parentFieldMapper=documentMapper.parentFieldMapper();
+    if (parentFieldMapper != null) {
+      parentTypes.add(parentFieldMapper.type());
+    }
+  }
+  Filter parentFilter;
+  if (parentTypes.size() == 1) {
+    DocumentMapper documentMapper=parseContext.mapperService().documentMapper(parentTypes.get(0));
+    parentFilter=parseContext.cacheFilter(documentMapper.typeFilter(),null);
+  }
+ else {
+    XBooleanFilter parentsFilter=new XBooleanFilter();
+    for (    String parentTypeStr : parentTypes) {
+      DocumentMapper documentMapper=parseContext.mapperService().documentMapper(parentTypeStr);
+      Filter filter=parseContext.cacheFilter(documentMapper.typeFilter(),null);
+      parentsFilter.add(filter,BooleanClause.Occur.SHOULD);
+    }
+    parentFilter=parentsFilter;
+  }
+  Filter childrenFilter=parseContext.cacheFilter(new NotFilter(parentFilter),null);
+  HasParentFilter hasParentFilter=new HasParentFilter(query,parentType,searchContext,childrenFilter);
+  searchContext.addRewrite(hasParentFilter);
+  Filter filter=hasParentFilter;
   if (cache) {
     filter=parseContext.cacheFilter(filter,cacheKey);
   }
