@@ -42,7 +42,7 @@
       if ("field".equals(currentFieldName)) {
         field=parser.text();
       }
- else       if ("script_field".equals(currentFieldName)) {
+ else       if ("script_field".equals(currentFieldName) || "scriptField".equals(currentFieldName)) {
         script=parser.text();
       }
  else       if ("size".equals(currentFieldName)) {
@@ -87,14 +87,24 @@
     searchScript=context.scriptService().search(context.lookup(),scriptLang,script,params);
   }
   if (fieldsNames != null) {
-    return new FieldsTermsStringFacetExecutor(facetName,fieldsNames,size,comparatorType,allTerms,context,excluded,pattern,searchScript);
+    ArrayList<FieldMapper> mappers=new ArrayList<FieldMapper>(fieldsNames.length);
+    for (int i=0; i < fieldsNames.length; i++) {
+      FieldMapper mapper=context.smartNameFieldMapper(fieldsNames[i]);
+      if (mapper != null) {
+        mappers.add(mapper);
+      }
+    }
+    if (mappers.isEmpty()) {
+      return new UnmappedFieldExecutor(size,comparatorType);
+    }
+    return new FieldsTermsStringFacetExecutor(facetName,mappers.toArray(new FieldMapper[mappers.size()]),size,comparatorType,allTerms,context,excluded,pattern,searchScript);
   }
   if (field == null && fieldsNames == null && script != null) {
     return new ScriptTermsStringFieldFacetExecutor(size,comparatorType,context,excluded,pattern,scriptLang,script,params);
   }
   FieldMapper fieldMapper=context.smartNameFieldMapper(field);
   if (fieldMapper == null) {
-    throw new FacetPhaseExecutionException(facetName,"failed to find mapping for [" + field + "]");
+    return new UnmappedFieldExecutor(size,comparatorType);
   }
   IndexFieldData indexFieldData=context.fieldData().getForField(fieldMapper);
   if (indexFieldData instanceof IndexNumericFieldData) {
