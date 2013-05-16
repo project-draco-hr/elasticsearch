@@ -5,6 +5,8 @@
   GeoDistance geoDistance=GeoDistance.ARC;
   boolean reverse=false;
   SortMode sortMode=null;
+  String nestedPath=null;
+  Filter nestedFilter=null;
   boolean normalizeLon=true;
   boolean normalizeLat=true;
   XContentParser.Token token;
@@ -23,20 +25,25 @@
       fieldName=currentName;
     }
  else     if (token == XContentParser.Token.START_OBJECT) {
-      fieldName=currentName;
-      while ((token=parser.nextToken()) != XContentParser.Token.END_OBJECT) {
-        if (token == XContentParser.Token.FIELD_NAME) {
-          currentName=parser.currentName();
-        }
- else         if (token.isValue()) {
-          if (currentName.equals(GeoPointFieldMapper.Names.LAT)) {
-            point.resetLat(parser.doubleValue());
+      if ("nested_filter".equals(currentName) || "nestedFilter".equals(currentName)) {
+        nestedFilter=context.queryParserService().parseInnerFilter(parser);
+      }
+ else {
+        fieldName=currentName;
+        while ((token=parser.nextToken()) != XContentParser.Token.END_OBJECT) {
+          if (token == XContentParser.Token.FIELD_NAME) {
+            currentName=parser.currentName();
           }
- else           if (currentName.equals(GeoPointFieldMapper.Names.LON)) {
-            point.resetLon(parser.doubleValue());
-          }
- else           if (currentName.equals(GeoPointFieldMapper.Names.GEOHASH)) {
-            GeoHashUtils.decode(parser.text(),point);
+ else           if (token.isValue()) {
+            if (currentName.equals(GeoPointFieldMapper.Names.LAT)) {
+              point.resetLat(parser.doubleValue());
+            }
+ else             if (currentName.equals(GeoPointFieldMapper.Names.LON)) {
+              point.resetLon(parser.doubleValue());
+            }
+ else             if (currentName.equals(GeoPointFieldMapper.Names.GEOHASH)) {
+              GeoHashUtils.decode(parser.text(),point);
+            }
           }
         }
       }
@@ -61,6 +68,9 @@
  else       if ("mode".equals(currentName)) {
         sortMode=SortMode.fromString(parser.text());
       }
+ else       if ("nested_path".equals(currentName) || "nestedPath".equals(currentName)) {
+        nestedPath=parser.text();
+      }
  else {
         point.resetFromString(parser.text());
         fieldName=currentName;
@@ -81,5 +91,31 @@
     throw new ElasticSearchIllegalArgumentException("failed to find mapper for [" + fieldName + "] for geo distance based sort");
   }
   IndexGeoPointFieldData indexFieldData=context.fieldData().getForField(mapper);
-  return new SortField(fieldName,new GeoDistanceComparatorSource(indexFieldData,point.lat(),point.lon(),unit,geoDistance,sortMode),reverse);
+  IndexFieldData.XFieldComparatorSource geoDistanceComparatorSource=new GeoDistanceComparatorSource(indexFieldData,point.lat(),point.lon(),unit,geoDistance,sortMode);
+  ObjectMapper objectMapper;
+  if (nestedPath != null) {
+    ObjectMappers objectMappers=context.mapperService().objectMapper(nestedPath);
+    if (objectMappers == null) {
+      throw new ElasticSearchIllegalArgumentException("failed to find nested object mapping for explicit nested path [" + nestedPath + "]");
+    }
+    objectMapper=objectMappers.mapper();
+    if (!objectMapper.nested().isNested()) {
+      throw new ElasticSearchIllegalArgumentException("mapping for explicit nested path is not mapped as nested: [" + nestedPath + "]");
+    }
+  }
+ else {
+    objectMapper=context.mapperService().resolveClosestNestedObjectMapper(fieldName);
+  }
+  if (objectMapper != null && objectMapper.nested().isNested()) {
+    Filter rootDocumentsFilter=context.filterCache().cache(NonNestedDocsFilter.INSTANCE);
+    Filter innerDocumentsFilter;
+    if (nestedFilter != null) {
+      innerDocumentsFilter=context.filterCache().cache(nestedFilter);
+    }
+ else {
+      innerDocumentsFilter=context.filterCache().cache(objectMapper.nestedTypeFilter());
+    }
+    geoDistanceComparatorSource=new NestedFieldComparatorSource(sortMode,geoDistanceComparatorSource,rootDocumentsFilter,innerDocumentsFilter);
+  }
+  return new SortField(fieldName,geoDistanceComparatorSource,reverse);
 }
