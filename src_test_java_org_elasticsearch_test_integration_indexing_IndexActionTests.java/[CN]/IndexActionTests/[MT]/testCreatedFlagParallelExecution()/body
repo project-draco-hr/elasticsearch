@@ -1,0 +1,26 @@
+{
+  createIndex("test");
+  ensureGreen();
+  int threadCount=20;
+  final int docCount=300;
+  int taskCount=docCount * threadCount;
+  final AtomicIntegerArray createdCounts=new AtomicIntegerArray(docCount);
+  ExecutorService threadPool=Executors.newFixedThreadPool(threadCount);
+  List<Callable<Void>> tasks=new ArrayList<Callable<Void>>(taskCount);
+  final Random random=new Random();
+  for (int i=0; i < taskCount; i++) {
+    tasks.add(new Callable<Void>(){
+      @Override public Void call() throws Exception {
+        int docId=random.nextInt(docCount);
+        IndexResponse indexResponse=index("test","type",Integer.toString(docId),"field1","value");
+        if (indexResponse.isCreated())         createdCounts.incrementAndGet(docId);
+        return null;
+      }
+    }
+);
+  }
+  threadPool.invokeAll(tasks);
+  for (int i=0; i < docCount; i++) {
+    assertThat(createdCounts.get(i),lessThanOrEqualTo(1));
+  }
+}

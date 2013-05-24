@@ -8,7 +8,7 @@ synchronized (dirtyLock(index.uid())) {
     }
  else {
       if (enableGcDeletes && versionValue.delete() && (threadPool.estimatedTimeInMillis() - versionValue.time()) > gcDeletesInMillis) {
-        currentVersion=-1;
+        currentVersion=Versions.NOT_FOUND;
       }
  else {
         currentVersion=versionValue.version();
@@ -18,15 +18,15 @@ synchronized (dirtyLock(index.uid())) {
     if (index.origin() == Operation.Origin.PRIMARY) {
       if (index.versionType() == VersionType.INTERNAL) {
         long expectedVersion=index.version();
-        if (expectedVersion != 0 && currentVersion != -2) {
-          if (currentVersion == -1) {
-            throw new VersionConflictEngineException(shardId,index.type(),index.id(),-1,expectedVersion);
+        if (expectedVersion != Versions.MATCH_ANY && currentVersion != Versions.NOT_SET) {
+          if (currentVersion == Versions.NOT_FOUND) {
+            throw new VersionConflictEngineException(shardId,index.type(),index.id(),Versions.NOT_FOUND,expectedVersion);
           }
  else           if (expectedVersion != currentVersion) {
             throw new VersionConflictEngineException(shardId,index.type(),index.id(),currentVersion,expectedVersion);
           }
         }
-        updatedVersion=currentVersion < 0 ? 1 : currentVersion + 1;
+        updatedVersion=(currentVersion == Versions.NOT_SET || currentVersion == Versions.NOT_FOUND) ? 1 : currentVersion + 1;
       }
  else {
         if (currentVersion >= 0) {
@@ -39,8 +39,8 @@ synchronized (dirtyLock(index.uid())) {
     }
  else {
       long expectedVersion=index.version();
-      if (currentVersion != -2) {
-        if (!(currentVersion == -1 && index.version() == 1)) {
+      if (currentVersion != Versions.NOT_SET) {
+        if (!(currentVersion == Versions.NOT_FOUND && index.version() == 1)) {
           if (expectedVersion <= currentVersion) {
             if (index.origin() == Operation.Origin.RECOVERY) {
               return;
@@ -54,7 +54,8 @@ synchronized (dirtyLock(index.uid())) {
       updatedVersion=index.version();
     }
     index.version(updatedVersion);
-    if (currentVersion == -1) {
+    if (currentVersion == Versions.NOT_FOUND) {
+      index.created(true);
       if (index.docs().size() > 1) {
         writer.addDocuments(index.docs(),index.analyzer());
       }
@@ -63,6 +64,7 @@ synchronized (dirtyLock(index.uid())) {
       }
     }
  else {
+      if (versionValue != null)       index.created(versionValue.delete());
       if (index.docs().size() > 1) {
         writer.updateDocuments(index.uid(),index.docs(),index.analyzer());
       }
