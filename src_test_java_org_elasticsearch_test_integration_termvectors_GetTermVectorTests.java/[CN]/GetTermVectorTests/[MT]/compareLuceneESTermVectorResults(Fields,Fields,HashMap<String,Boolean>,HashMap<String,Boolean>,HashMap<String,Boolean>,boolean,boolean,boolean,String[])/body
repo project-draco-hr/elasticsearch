@@ -1,0 +1,57 @@
+{
+  HashSet<String> selectedFieldsMap=new HashSet<String>(Arrays.asList(selectedFields));
+  Iterator<String> luceneFieldNames=luceneFields.iterator();
+  assertThat(luceneFields.size(),equalTo(storeOfsetsMap.size()));
+  assertThat(fields.size(),equalTo(selectedFields.length));
+  while (luceneFieldNames.hasNext()) {
+    String luceneFieldName=luceneFieldNames.next();
+    if (!selectedFieldsMap.contains(luceneFieldName))     continue;
+    Terms esTerms=fields.terms(luceneFieldName);
+    Terms luceneTerms=luceneFields.terms(luceneFieldName);
+    TermsEnum esTermEnum=esTerms.iterator(null);
+    TermsEnum luceneTermEnum=luceneTerms.iterator(null);
+    int numTerms=0;
+    while (esTermEnum.next() != null) {
+      luceneTermEnum.next();
+      assertThat(esTermEnum.totalTermFreq(),equalTo(luceneTermEnum.totalTermFreq()));
+      DocsAndPositionsEnum esDocsPosEnum=esTermEnum.docsAndPositions(null,null,0);
+      DocsAndPositionsEnum luceneDocsPosEnum=luceneTermEnum.docsAndPositions(null,null,0);
+      if (luceneDocsPosEnum == null) {
+        assertThat(storeOfsetsMap.get(luceneFieldName),equalTo(false));
+        assertThat(storePayloadsMap.get(luceneFieldName),equalTo(false));
+        assertThat(storePositionsMap.get(luceneFieldName),equalTo(false));
+        continue;
+      }
+      numTerms++;
+      assertThat("failed for field: " + luceneFieldName,esTermEnum.term().utf8ToString(),equalTo(luceneTermEnum.term().utf8ToString()));
+      esDocsPosEnum.nextDoc();
+      luceneDocsPosEnum.nextDoc();
+      int freq=(int)esDocsPosEnum.freq();
+      assertThat(freq,equalTo(luceneDocsPosEnum.freq()));
+      for (int i=0; i < freq; i++) {
+        int lucenePos=luceneDocsPosEnum.nextPosition();
+        int esPos=esDocsPosEnum.nextPosition();
+        if (storePositionsMap.get(luceneFieldName) && getPositions) {
+          assertThat(luceneFieldName,lucenePos,equalTo(esPos));
+        }
+ else {
+          assertThat(esPos,equalTo(-1));
+        }
+        if (storeOfsetsMap.get(luceneFieldName) && getOffsets) {
+          assertThat(luceneDocsPosEnum.startOffset(),equalTo(esDocsPosEnum.startOffset()));
+          assertThat(luceneDocsPosEnum.endOffset(),equalTo(esDocsPosEnum.endOffset()));
+        }
+ else {
+          assertThat(esDocsPosEnum.startOffset(),equalTo(-1));
+          assertThat(esDocsPosEnum.endOffset(),equalTo(-1));
+        }
+        if (storePayloadsMap.get(luceneFieldName) && getPayloads) {
+          assertThat(luceneFieldName,luceneDocsPosEnum.getPayload(),equalTo(esDocsPosEnum.getPayload()));
+        }
+ else {
+          assertThat(esDocsPosEnum.getPayload(),equalTo(null));
+        }
+      }
+    }
+  }
+}

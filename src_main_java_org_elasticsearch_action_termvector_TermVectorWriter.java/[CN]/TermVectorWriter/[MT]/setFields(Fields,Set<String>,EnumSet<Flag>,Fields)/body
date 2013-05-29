@@ -1,0 +1,42 @@
+{
+  int numFieldsWritten=0;
+  TermsEnum iterator=null;
+  DocsAndPositionsEnum docsAndPosEnum=null;
+  DocsEnum docsEnum=null;
+  TermsEnum topLevelIterator=null;
+  for (  String field : fields) {
+    if ((selectedFields != null) && (!selectedFields.contains(field))) {
+      continue;
+    }
+    Terms terms=fields.terms(field);
+    Terms topLevelTerms=topLevelFields.terms(field);
+    topLevelIterator=topLevelTerms.iterator(topLevelIterator);
+    boolean positions=flags.contains(Flag.Positions) && terms.hasPositions();
+    boolean offsets=flags.contains(Flag.Offsets) && terms.hasOffsets();
+    boolean payloads=flags.contains(Flag.Payloads) && terms.hasPayloads();
+    startField(field,terms.size(),positions,offsets,payloads);
+    if (flags.contains(Flag.FieldStatistics)) {
+      writeFieldStatistics(topLevelTerms);
+    }
+    iterator=terms.iterator(iterator);
+    final boolean useDocsAndPos=positions || offsets || payloads;
+    while (iterator.next() != null) {
+      BytesRef term=iterator.term();
+      boolean foundTerm=topLevelIterator.seekExact(term,false);
+      assert(foundTerm);
+      startTerm(term);
+      if (flags.contains(Flag.TermStatistics)) {
+        writeTermStatistics(topLevelIterator);
+      }
+      if (useDocsAndPos) {
+        docsAndPosEnum=writeTermWithDocsAndPos(iterator,docsAndPosEnum,positions,offsets,payloads);
+      }
+ else {
+        docsEnum=writeTermWithDocsOnly(iterator,docsEnum);
+      }
+    }
+    numFieldsWritten++;
+  }
+  response.setTermVectorField(output);
+  response.setHeader(writeHeader(numFieldsWritten,flags.contains(Flag.TermStatistics),flags.contains(Flag.FieldStatistics)));
+}
