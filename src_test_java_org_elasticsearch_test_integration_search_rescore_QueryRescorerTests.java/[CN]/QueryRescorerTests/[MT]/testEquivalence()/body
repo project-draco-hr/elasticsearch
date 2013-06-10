@@ -4,16 +4,18 @@
   for (int i=0; i < numDocs; i++) {
     client().prepareIndex("test","type1",String.valueOf(i)).setSource("field1",English.intToEnglish(i)).execute().actionGet();
   }
-  client().admin().indices().prepareRefresh("test").execute().actionGet();
+  flush();
+  optimize();
+  refresh();
   for (int i=0; i < numDocs; i++) {
     String intToEnglish=English.intToEnglish(i);
     String query=intToEnglish.split(" ")[0];
-    SearchResponse rescored=client().prepareSearch().setQuery(QueryBuilders.matchQuery("field1",query).operator(MatchQueryBuilder.Operator.OR)).setFrom(0).setSize(10).setRescorer(RescoreBuilder.queryRescorer(QueryBuilders.constantScoreQuery(QueryBuilders.matchPhraseQuery("field1",intToEnglish).slop(3))).setQueryWeight(1.0f).setRescoreQueryWeight(0.0f)).setRescoreWindow(50).execute().actionGet();
-    SearchResponse plain=client().prepareSearch().setQuery(QueryBuilders.matchQuery("field1",query).operator(MatchQueryBuilder.Operator.OR)).setFrom(0).setSize(10).execute().actionGet();
+    SearchResponse rescored=client().prepareSearch().setPreference("test").setQuery(QueryBuilders.matchQuery("field1",query).operator(MatchQueryBuilder.Operator.OR)).setFrom(0).setSize(10).setRescorer(RescoreBuilder.queryRescorer(QueryBuilders.constantScoreQuery(QueryBuilders.matchPhraseQuery("field1",intToEnglish).slop(3))).setQueryWeight(1.0f).setRescoreQueryWeight(0.0f)).setRescoreWindow(50).execute().actionGet();
+    SearchResponse plain=client().prepareSearch().setPreference("test").setQuery(QueryBuilders.matchQuery("field1",query).operator(MatchQueryBuilder.Operator.OR)).setFrom(0).setSize(10).execute().actionGet();
     assertEquivalent(plain,rescored);
-    rescored=client().prepareSearch().setQuery(QueryBuilders.matchQuery("field1",query).operator(MatchQueryBuilder.Operator.OR)).setFrom(0).setSize(10).setRescorer(RescoreBuilder.queryRescorer(QueryBuilders.constantScoreQuery(QueryBuilders.matchPhraseQuery("field1","not in the index").slop(3))).setQueryWeight(1.0f).setRescoreQueryWeight(1.0f)).setRescoreWindow(50).execute().actionGet();
+    rescored=client().prepareSearch().setPreference("test").setQuery(QueryBuilders.matchQuery("field1",query).operator(MatchQueryBuilder.Operator.OR)).setFrom(0).setSize(10).setRescorer(RescoreBuilder.queryRescorer(QueryBuilders.constantScoreQuery(QueryBuilders.matchPhraseQuery("field1","not in the index").slop(3))).setQueryWeight(1.0f).setRescoreQueryWeight(1.0f)).setRescoreWindow(50).execute().actionGet();
     assertEquivalent(plain,rescored);
-    rescored=client().prepareSearch().setQuery(QueryBuilders.matchQuery("field1",query).operator(MatchQueryBuilder.Operator.OR)).setFrom(0).setSize(10).setRescorer(RescoreBuilder.queryRescorer(QueryBuilders.matchPhraseQuery("field1",intToEnglish).slop(0)).setQueryWeight(1.0f).setRescoreQueryWeight(1.0f)).setRescoreWindow(100).execute().actionGet();
+    rescored=client().prepareSearch().setPreference("test").setQuery(QueryBuilders.matchQuery("field1",query).operator(MatchQueryBuilder.Operator.OR)).setFrom(0).setSize(10).setRescorer(RescoreBuilder.queryRescorer(QueryBuilders.matchPhraseQuery("field1",intToEnglish).slop(0)).setQueryWeight(1.0f).setRescoreQueryWeight(1.0f)).setRescoreWindow(100).execute().actionGet();
     assertEquivalentOrSubstringMatch(intToEnglish,plain,rescored);
   }
 }
