@@ -1,6 +1,6 @@
 {
   XContentParser parser=parseContext.parser();
-  String fieldName=null;
+  String fieldPattern=null;
   String filterName=null;
   XContentParser.Token token;
   String currentFieldName=null;
@@ -10,7 +10,7 @@
     }
  else     if (token.isValue()) {
       if ("field".equals(currentFieldName)) {
-        fieldName=parser.text();
+        fieldPattern=parser.text();
       }
  else       if ("_name".equals(currentFieldName)) {
         filterName=parser.text();
@@ -20,19 +20,35 @@
       }
     }
   }
-  if (fieldName == null) {
+  if (fieldPattern == null) {
     throw new QueryParsingException(parseContext.index(),"exists must be provided with a [field]");
   }
-  Filter filter=null;
-  MapperService.SmartNameFieldMappers smartNameFieldMappers=parseContext.smartFieldMappers(fieldName);
-  if (smartNameFieldMappers != null && smartNameFieldMappers.hasMapper()) {
-    filter=smartNameFieldMappers.mapper().rangeFilter(null,null,true,true,parseContext);
+  MapperService.SmartNameObjectMapper smartNameObjectMapper=parseContext.smartObjectMapper(fieldPattern);
+  if (smartNameObjectMapper != null && smartNameObjectMapper.hasMapper()) {
+    fieldPattern=fieldPattern + ".*";
   }
-  if (filter == null) {
-    filter=new TermRangeFilter(fieldName,null,null,true,true);
+  Set<String> fields=parseContext.simpleMatchToIndexNames(fieldPattern);
+  if (fields.isEmpty()) {
+    return null;
   }
-  filter=parseContext.cacheFilter(filter,null);
-  filter=wrapSmartNameFilter(filter,smartNameFieldMappers,parseContext);
+  MapperService.SmartNameFieldMappers nonNullFieldMappers=null;
+  XBooleanFilter boolFilter=new XBooleanFilter();
+  for (  String field : fields) {
+    MapperService.SmartNameFieldMappers smartNameFieldMappers=parseContext.smartFieldMappers(field);
+    if (smartNameFieldMappers != null) {
+      nonNullFieldMappers=smartNameFieldMappers;
+    }
+    Filter filter=null;
+    if (smartNameFieldMappers != null && smartNameFieldMappers.hasMapper()) {
+      filter=smartNameFieldMappers.mapper().rangeFilter(null,null,true,true,parseContext);
+    }
+    if (filter == null) {
+      filter=new TermRangeFilter(field,null,null,true,true);
+    }
+    boolFilter.add(filter,BooleanClause.Occur.SHOULD);
+  }
+  Filter filter=parseContext.cacheFilter(boolFilter,new CacheKeyFilter.Key("$exists$" + fieldPattern));
+  filter=wrapSmartNameFilter(filter,nonNullFieldMappers,parseContext);
   if (filterName != null) {
     parseContext.addNamedFilter(filterName,filter);
   }
