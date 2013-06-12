@@ -1,24 +1,26 @@
 {
   final String[] indices=splitIndices(request.param("index"));
-  final Set<String> types=ImmutableSet.copyOf(splitTypes(request.param("type")));
-  ClusterStateRequest clusterStateRequest=Requests.clusterStateRequest().filterRoutingTable(true).filterNodes(true).filteredIndices(indices);
-  clusterStateRequest.listenerThreaded(false);
-  client.admin().cluster().state(clusterStateRequest,new ActionListener<ClusterStateResponse>(){
-    @Override public void onResponse(    ClusterStateResponse response){
+  final String[] types=splitTypes(request.param("type"));
+  boolean local=request.paramAsBooleanOptional("local",false);
+  GetMappingsRequest getMappingsRequest=new GetMappingsRequest();
+  getMappingsRequest.indices(indices).types(types).local(local);
+  client.admin().indices().getMappings(getMappingsRequest,new ActionListener<GetMappingsResponse>(){
+    @Override public void onResponse(    GetMappingsResponse response){
       try {
         boolean foundAny=false;
-        MetaData metaData=response.getState().metaData();
         XContentBuilder builder=RestXContentBuilder.restContentBuilder(request);
         builder.startObject();
-        if (indices.length == 1 && metaData.indices().isEmpty()) {
+        ImmutableMap<String,ImmutableMap<String,MappingMetaData>> mappingsByIndex=response.getMappings();
+        if (indices.length == 1 && mappingsByIndex.isEmpty()) {
           channel.sendResponse(new XContentThrowableRestResponse(request,new IndexMissingException(new Index(indices[0]))));
           return;
         }
-        if (indices.length == 1 && types.size() == 1) {
+        ImmutableSet<String> uniqueTypes=ImmutableSet.copyOf(types);
+        if (indices.length == 1 && uniqueTypes.size() == 1) {
           boolean foundType=false;
-          IndexMetaData indexMetaData=metaData.iterator().next();
-          for (          MappingMetaData mappingMd : indexMetaData.mappings().values()) {
-            if (!types.isEmpty() && !types.contains(mappingMd.type())) {
+          ImmutableMap<String,MappingMetaData> indexMetaData=mappingsByIndex.entrySet().iterator().next().getValue();
+          for (          MappingMetaData mappingMd : indexMetaData.values()) {
+            if (!uniqueTypes.isEmpty() && !uniqueTypes.contains(mappingMd.type())) {
               continue;
             }
             foundAny=true;
@@ -27,22 +29,22 @@
             builder.map(mappingMd.sourceAsMap());
           }
           if (!foundType) {
-            channel.sendResponse(new XContentThrowableRestResponse(request,new TypeMissingException(new Index(indices[0]),types.iterator().next())));
+            channel.sendResponse(new XContentThrowableRestResponse(request,new TypeMissingException(new Index(indices[0]),uniqueTypes.iterator().next())));
             return;
           }
         }
  else {
-          for (          IndexMetaData indexMetaData : metaData) {
-            builder.startObject(indexMetaData.index(),XContentBuilder.FieldCaseConversion.NONE);
-            for (            MappingMetaData mappingMd : indexMetaData.mappings().values()) {
-              if (!types.isEmpty() && !types.contains(mappingMd.type())) {
+          for (          Map.Entry<String,ImmutableMap<String,MappingMetaData>> indexEntry : mappingsByIndex.entrySet()) {
+            builder.startObject(indexEntry.getKey(),XContentBuilder.FieldCaseConversion.NONE);
+            for (            Map.Entry<String,MappingMetaData> typeEntry : indexEntry.getValue().entrySet()) {
+              if (!uniqueTypes.isEmpty() && !uniqueTypes.contains(typeEntry.getKey())) {
                 continue;
               }
               foundAny=true;
-              builder.field(mappingMd.type());
-              builder.map(mappingMd.sourceAsMap());
+              builder.field(typeEntry.getKey());
+              builder.map(typeEntry.getValue().sourceAsMap());
             }
-            if (indexMetaData.mappings().values().isEmpty() && types.isEmpty()) {
+            if (indexEntry.getValue().isEmpty() && uniqueTypes.isEmpty()) {
               foundAny=true;
             }
             builder.endObject();
