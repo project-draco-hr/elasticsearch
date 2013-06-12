@@ -1,0 +1,48 @@
+{
+  XContentParser parser=parseContext.parser();
+  String fieldName=null;
+  String geohash=null;
+  boolean neighbors=false;
+  XContentParser.Token token;
+  if ((token=parser.currentToken()) != Token.START_OBJECT) {
+    throw new ElasticSearchParseException(NAME + " must be an object");
+  }
+  while ((token=parser.nextToken()) != XContentParser.Token.END_OBJECT) {
+    if (token == Token.FIELD_NAME) {
+      String field=parser.text();
+      if (FIELDNAME.equals(field)) {
+        parser.nextToken();
+        fieldName=parser.text();
+      }
+ else       if (GEOHASH.equals(field)) {
+        parser.nextToken();
+        geohash=parser.text();
+      }
+ else       if (NEIGHBORS.equals(field)) {
+        parser.nextToken();
+        neighbors=parser.booleanValue();
+      }
+ else {
+        throw new ElasticSearchParseException("unexpected field [" + field + "]");
+      }
+    }
+ else {
+      throw new ElasticSearchParseException("unexpected token [" + token + "]");
+    }
+  }
+  MapperService.SmartNameFieldMappers smartMappers=parseContext.smartFieldMappers(fieldName);
+  if (smartMappers == null || !smartMappers.hasMapper()) {
+    throw new QueryParsingException(parseContext.index(),"failed to find geo_point field [" + fieldName + "]");
+  }
+  FieldMapper<?> mapper=smartMappers.mapper();
+  if (!(mapper instanceof GeoPointFieldMapper.GeoStringFieldMapper)) {
+    throw new QueryParsingException(parseContext.index(),"field [" + fieldName + "] is not a geo_point field");
+  }
+  GeoPointFieldMapper geoMapper=((GeoPointFieldMapper.GeoStringFieldMapper)mapper).geoMapper();
+  if (neighbors) {
+    return create(parseContext,geoMapper,geohash,GeoHashUtils.neighbors(geohash));
+  }
+ else {
+    return create(parseContext,geoMapper,geohash);
+  }
+}

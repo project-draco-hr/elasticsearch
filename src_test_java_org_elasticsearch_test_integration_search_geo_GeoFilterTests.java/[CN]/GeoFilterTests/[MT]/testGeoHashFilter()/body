@@ -1,0 +1,23 @@
+{
+  String geohash=randomhash(12);
+  String[] neighbors=GeoHashUtils.neighbors(geohash);
+  logger.info("Testing geohash boundingbox filter for [{}]",geohash);
+  logger.info("Neighbors {}",Arrays.toString(neighbors));
+  String mapping=XContentFactory.jsonBuilder().startObject().startObject("location").startObject("properties").startObject("pin").field("type","geo_point").field("geohash",true).field("geohash_prefix",true).field("latlon",false).field("store",true).endObject().endObject().endObject().endObject().string();
+  ensureYellow();
+  client().admin().indices().prepareCreate("locations").addMapping("location",mapping).execute().actionGet();
+  client().prepareIndex("locations","location","1").setCreate(true).setSource("{\"pin\":\"" + geohash + "\"}").execute().actionGet();
+  for (int i=0; i < neighbors.length; i++) {
+    client().prepareIndex("locations","location","N" + i).setCreate(true).setSource("{\"pin\":\"" + neighbors[i] + "\"}").execute().actionGet();
+  }
+  client().prepareIndex("locations","location","p").setCreate(true).setSource("{\"pin\":\"" + geohash.substring(0,geohash.length() - 1) + "\"}").execute().actionGet();
+  String[] parentNeighbors=GeoHashUtils.neighbors(geohash.substring(0,geohash.length() - 1));
+  for (int i=0; i < parentNeighbors.length; i++) {
+    client().prepareIndex("locations","location","p" + i).setCreate(true).setSource("{\"pin\":\"" + parentNeighbors[i] + "\"}").execute().actionGet();
+  }
+  client().admin().indices().prepareRefresh("locations").execute().actionGet();
+  SearchResponse results1=client().prepareSearch("locations").setQuery(QueryBuilders.matchAllQuery()).setFilter("{\"geohash_cell\": {\"field\": \"pin\", \"geohash\": \"" + geohash + "\", \"neighbors\": false}}").execute().actionGet();
+  assertHitCount(results1,1);
+  SearchResponse results2=client().prepareSearch("locations").setQuery(QueryBuilders.matchAllQuery()).setFilter("{\"geohash_cell\": {\"field\": \"pin\", \"geohash\": \"" + geohash.substring(0,geohash.length() - 1) + "\", \"neighbors\": true}}").execute().actionGet();
+  assertHitCount(results2,2 + neighbors.length + parentNeighbors.length);
+}
