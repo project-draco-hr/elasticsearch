@@ -9,6 +9,10 @@
       for (      int j : numbers) {
         d.add(new FloatField("float",j,Field.Store.NO));
         d.add(new DoubleField("double",j,Field.Store.NO));
+        if (LuceneTestCase.defaultCodecSupportsSortedSet()) {
+          d.add(doubleDV("double",j));
+          d.add(floatDV("float",j));
+        }
       }
     }
     writer.addDocument(d);
@@ -17,9 +21,13 @@
     }
   }
   AtomicReaderContext context=refreshReader();
-  Map<FieldDataType,Type> typeMap=new HashMap<FieldDataType,DuelFieldDataTests.Type>();
-  typeMap.put(new FieldDataType("float"),Type.Float);
-  typeMap.put(new FieldDataType("double"),Type.Double);
+  Map<FieldDataType,Type> typeMap=new HashMap<FieldDataType,Type>();
+  typeMap.put(new FieldDataType("double",ImmutableSettings.builder().put("format","array")),Type.Double);
+  typeMap.put(new FieldDataType("float",ImmutableSettings.builder().put("format","array")),Type.Float);
+  if (LuceneTestCase.defaultCodecSupportsSortedSet()) {
+    typeMap.put(new FieldDataType("double",ImmutableSettings.builder().put("format","doc_values")),Type.Double);
+    typeMap.put(new FieldDataType("float",ImmutableSettings.builder().put("format","doc_values")),Type.Float);
+  }
   ArrayList<Entry<FieldDataType,Type>> list=new ArrayList<Entry<FieldDataType,Type>>(typeMap.entrySet());
   while (!list.isEmpty()) {
     Entry<FieldDataType,Type> left;
@@ -32,9 +40,9 @@
       right=left=list.remove(0);
     }
     ifdService.clear();
-    IndexNumericFieldData leftFieldData=ifdService.getForField(new FieldMapper.Names(left.getValue().name().toLowerCase(Locale.ROOT)),left.getKey());
+    IndexNumericFieldData leftFieldData=ifdService.getForField(new FieldMapper.Names(left.getValue().name().toLowerCase(Locale.ROOT)),left.getKey(),true);
     ifdService.clear();
-    IndexNumericFieldData rightFieldData=ifdService.getForField(new FieldMapper.Names(right.getValue().name().toLowerCase(Locale.ROOT)),right.getKey());
+    IndexNumericFieldData rightFieldData=ifdService.getForField(new FieldMapper.Names(right.getValue().name().toLowerCase(Locale.ROOT)),right.getKey(),true);
     duelFieldDataDouble(random,context,leftFieldData,rightFieldData);
     duelFieldDataDouble(random,context,rightFieldData,leftFieldData);
     DirectoryReader perSegment=DirectoryReader.open(writer,true);

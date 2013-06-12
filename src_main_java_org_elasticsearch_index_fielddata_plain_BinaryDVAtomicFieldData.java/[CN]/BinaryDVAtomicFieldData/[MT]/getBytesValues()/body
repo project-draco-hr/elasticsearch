@@ -1,0 +1,38 @@
+{
+  final BinaryDocValues values;
+  final Bits docsWithField;
+  try {
+    final BinaryDocValues v=reader.getBinaryDocValues(field);
+    if (v == null) {
+      values=BinaryDocValues.EMPTY;
+      docsWithField=new Bits.MatchNoBits(reader.maxDoc());
+    }
+ else {
+      values=v;
+      final Bits b=reader.getDocsWithField(field);
+      docsWithField=b == null ? new Bits.MatchAllBits(reader.maxDoc()) : b;
+    }
+  }
+ catch (  IOException e) {
+    throw new ElasticSearchIllegalStateException("Cannot load doc values",e);
+  }
+  return new BytesValues(false){
+    final BytesValues.Iter.Single iter=new BytesValues.Iter.Single();
+    final BytesRef spare=new BytesRef();
+    @Override public boolean hasValue(    int docId){
+      return docsWithField.get(docId);
+    }
+    @Override public BytesRef getValueScratch(    int docId,    BytesRef ret){
+      values.get(docId,ret);
+      return ret;
+    }
+    @Override public Iter getIter(    int docId){
+      if (!docsWithField.get(docId)) {
+        return BytesValues.Iter.Empty.INSTANCE;
+      }
+      values.get(docId,spare);
+      return iter.reset(spare,-1L);
+    }
+  }
+;
+}
