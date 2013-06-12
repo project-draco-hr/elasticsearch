@@ -1,7 +1,8 @@
 {
   XContentParser parser=parseContext.parser();
   Query query=null;
-  boolean queryFound=false;
+  Filter filter=null;
+  boolean queryOrFilterFound=false;
   float boost=1.0f;
   String script=null;
   String scriptLang=null;
@@ -15,7 +16,11 @@
  else     if (token == XContentParser.Token.START_OBJECT) {
       if ("query".equals(currentFieldName)) {
         query=parseContext.parseInnerQuery();
-        queryFound=true;
+        queryOrFilterFound=true;
+      }
+ else       if ("filter".equals(currentFieldName)) {
+        filter=parseContext.parseInnerFilter();
+        queryOrFilterFound=true;
       }
  else       if ("params".equals(currentFieldName)) {
         vars=parser.map();
@@ -39,14 +44,17 @@
       }
     }
   }
-  if (!queryFound) {
-    throw new QueryParsingException(parseContext.index(),"[custom_score] requires 'query' field");
+  if (!queryOrFilterFound) {
+    throw new QueryParsingException(parseContext.index(),"[custom_score] requires 'query' or 'filter' field");
   }
   if (script == null) {
     throw new QueryParsingException(parseContext.index(),"[custom_score] requires 'script' field");
   }
-  if (query == null) {
+  if (query == null && filter == null) {
     return null;
+  }
+ else   if (filter != null) {
+    query=new ConstantScoreQuery(filter);
   }
   SearchScript searchScript;
   try {
