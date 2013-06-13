@@ -1,32 +1,37 @@
 {
   clearAttributes();
-  if (bufferStart >= buffer.length - maxGram) {
-    System.arraycopy(buffer,bufferStart,buffer,0,bufferEnd - bufferStart);
-    bufferEnd-=bufferStart;
-    bufferStart=0;
-    if (!exhausted) {
-      while (bufferEnd < buffer.length) {
-        final int read=input.read(buffer,bufferEnd,buffer.length - bufferEnd);
-        if (read == -1) {
-          exhausted=true;
-          break;
-        }
-        bufferEnd+=read;
-      }
+  while (true) {
+    if (bufferStart >= bufferEnd - maxGram - 1 && !exhausted) {
+      System.arraycopy(buffer,bufferStart,buffer,0,bufferEnd - bufferStart);
+      bufferEnd-=bufferStart;
+      lastCheckedChar-=bufferStart;
+      lastNonTokenChar-=bufferStart;
+      bufferStart=0;
+      exhausted=!charUtils.fill(charBuffer,input,buffer.length - bufferEnd);
+      bufferEnd+=charUtils.toCodePoints(charBuffer.getBuffer(),0,charBuffer.getLength(),buffer,bufferEnd);
     }
+    if (gramSize > maxGram || (bufferStart + gramSize) > bufferEnd) {
+      if (bufferStart + 1 + minGram > bufferEnd) {
+        assert exhausted;
+        return false;
+      }
+      consume();
+      gramSize=minGram;
+    }
+    updateLastNonTokenChar();
+    final boolean termContainsNonTokenChar=lastNonTokenChar >= bufferStart && lastNonTokenChar < (bufferStart + gramSize);
+    final boolean isEdgeAndPreviousCharIsTokenChar=edgesOnly && lastNonTokenChar != bufferStart - 1;
+    if (termContainsNonTokenChar || isEdgeAndPreviousCharIsTokenChar) {
+      consume();
+      gramSize=minGram;
+      continue;
+    }
+    final int length=charUtils.toChars(buffer,bufferStart,gramSize,termAtt.buffer(),0);
+    termAtt.setLength(length);
+    posIncAtt.setPositionIncrement(1);
+    posLenAtt.setPositionLength(1);
+    offsetAtt.setOffset(correctOffset(offset),correctOffset(offset + length));
+    ++gramSize;
+    return true;
   }
-  if (gramSize > maxGram || bufferStart + gramSize > bufferEnd) {
-    bufferStart++;
-    offset++;
-    gramSize=minGram;
-  }
-  if (bufferStart + gramSize > bufferEnd) {
-    return false;
-  }
-  termAtt.copyBuffer(buffer,bufferStart,gramSize);
-  posIncAtt.setPositionIncrement(1);
-  posLenAtt.setPositionLength(1);
-  offsetAtt.setOffset(correctOffset(offset),correctOffset(offset + gramSize));
-  ++gramSize;
-  return true;
 }
