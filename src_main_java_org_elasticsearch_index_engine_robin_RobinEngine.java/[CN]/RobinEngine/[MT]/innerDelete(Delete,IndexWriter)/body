@@ -15,41 +15,23 @@ synchronized (dirtyLock(delete.uid())) {
       }
     }
     long updatedVersion;
+    long expectedVersion=delete.version();
     if (delete.origin() == Operation.Origin.PRIMARY) {
-      if (delete.versionType() == VersionType.INTERNAL) {
-        if (delete.version() != Versions.MATCH_ANY && currentVersion != Versions.NOT_SET) {
-          if (currentVersion == Versions.NOT_FOUND) {
-            throw new VersionConflictEngineException(shardId,delete.type(),delete.id(),Versions.NOT_FOUND,delete.version());
-          }
- else           if (delete.version() != currentVersion) {
-            throw new VersionConflictEngineException(shardId,delete.type(),delete.id(),currentVersion,delete.version());
-          }
-        }
-        updatedVersion=(currentVersion == Versions.NOT_SET || currentVersion == Versions.NOT_FOUND) ? 1 : currentVersion + 1;
+      if (delete.versionType().isVersionConflict(currentVersion,expectedVersion)) {
+        throw new VersionConflictEngineException(shardId,delete.type(),delete.id(),currentVersion,expectedVersion);
       }
- else {
-        if (currentVersion == Versions.NOT_FOUND) {
-        }
- else         if (currentVersion >= delete.version()) {
-          throw new VersionConflictEngineException(shardId,delete.type(),delete.id(),currentVersion,delete.version());
-        }
-        updatedVersion=delete.version();
-      }
+      updatedVersion=delete.versionType().updateVersion(currentVersion,expectedVersion);
     }
  else {
-      if (currentVersion != Versions.NOT_SET) {
-        if (currentVersion != Versions.NOT_FOUND) {
-          if (delete.version() <= currentVersion) {
-            if (delete.origin() == Operation.Origin.RECOVERY) {
-              return;
-            }
+      if (VersionType.EXTERNAL.isVersionConflict(currentVersion,expectedVersion)) {
+        if (delete.origin() == Operation.Origin.RECOVERY) {
+          return;
+        }
  else {
-              throw new VersionConflictEngineException(shardId,delete.type(),delete.id(),currentVersion - 1,delete.version());
-            }
-          }
+          throw new VersionConflictEngineException(shardId,delete.type(),delete.id(),currentVersion - 1,expectedVersion);
         }
       }
-      updatedVersion=delete.version();
+      updatedVersion=VersionType.EXTERNAL.updateVersion(currentVersion,expectedVersion);
     }
     if (currentVersion == Versions.NOT_FOUND) {
       delete.version(updatedVersion).notFound(true);

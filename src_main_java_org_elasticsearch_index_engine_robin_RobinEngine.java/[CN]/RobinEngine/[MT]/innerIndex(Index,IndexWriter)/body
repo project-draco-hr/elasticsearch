@@ -15,43 +15,23 @@ synchronized (dirtyLock(index.uid())) {
       }
     }
     long updatedVersion;
+    long expectedVersion=index.version();
     if (index.origin() == Operation.Origin.PRIMARY) {
-      if (index.versionType() == VersionType.INTERNAL) {
-        long expectedVersion=index.version();
-        if (expectedVersion != Versions.MATCH_ANY && currentVersion != Versions.NOT_SET) {
-          if (currentVersion == Versions.NOT_FOUND) {
-            throw new VersionConflictEngineException(shardId,index.type(),index.id(),Versions.NOT_FOUND,expectedVersion);
-          }
- else           if (expectedVersion != currentVersion) {
-            throw new VersionConflictEngineException(shardId,index.type(),index.id(),currentVersion,expectedVersion);
-          }
-        }
-        updatedVersion=(currentVersion == Versions.NOT_SET || currentVersion == Versions.NOT_FOUND) ? 1 : currentVersion + 1;
+      if (index.versionType().isVersionConflict(currentVersion,expectedVersion)) {
+        throw new VersionConflictEngineException(shardId,index.type(),index.id(),currentVersion,expectedVersion);
       }
- else {
-        if (currentVersion >= 0) {
-          if (currentVersion >= index.version()) {
-            throw new VersionConflictEngineException(shardId,index.type(),index.id(),currentVersion,index.version());
-          }
-        }
-        updatedVersion=index.version();
-      }
+      updatedVersion=index.versionType().updateVersion(currentVersion,expectedVersion);
     }
  else {
-      long expectedVersion=index.version();
-      if (currentVersion != Versions.NOT_SET) {
-        if (!(currentVersion == Versions.NOT_FOUND && index.version() == 1)) {
-          if (expectedVersion <= currentVersion) {
-            if (index.origin() == Operation.Origin.RECOVERY) {
-              return;
-            }
+      if (VersionType.EXTERNAL.isVersionConflict(currentVersion,expectedVersion)) {
+        if (index.origin() == Operation.Origin.RECOVERY) {
+          return;
+        }
  else {
-              throw new VersionConflictEngineException(shardId,index.type(),index.id(),currentVersion,expectedVersion);
-            }
-          }
+          throw new VersionConflictEngineException(shardId,index.type(),index.id(),currentVersion,expectedVersion);
         }
       }
-      updatedVersion=index.version();
+      updatedVersion=VersionType.EXTERNAL.updateVersion(currentVersion,expectedVersion);
     }
     index.version(updatedVersion);
     if (currentVersion == Versions.NOT_FOUND) {
@@ -64,7 +44,9 @@ synchronized (dirtyLock(index.uid())) {
       }
     }
  else {
-      if (versionValue != null)       index.created(versionValue.delete());
+      if (versionValue != null) {
+        index.created(versionValue.delete());
+      }
       if (index.docs().size() > 1) {
         writer.updateDocuments(index.uid(),index.docs(),index.analyzer());
       }

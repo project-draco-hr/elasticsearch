@@ -15,43 +15,23 @@ synchronized (dirtyLock(create.uid())) {
       }
     }
     long updatedVersion;
+    long expectedVersion=create.version();
     if (create.origin() == Operation.Origin.PRIMARY) {
-      if (create.versionType() == VersionType.INTERNAL) {
-        long expectedVersion=create.version();
-        if (expectedVersion != Versions.MATCH_ANY && currentVersion != Versions.NOT_SET) {
-          if (currentVersion == Versions.NOT_FOUND) {
-            throw new VersionConflictEngineException(shardId,create.type(),create.id(),Versions.NOT_FOUND,expectedVersion);
-          }
- else           if (expectedVersion != currentVersion) {
-            throw new VersionConflictEngineException(shardId,create.type(),create.id(),currentVersion,expectedVersion);
-          }
-        }
-        updatedVersion=(currentVersion == Versions.NOT_SET || currentVersion == Versions.NOT_FOUND) ? 1 : currentVersion + 1;
+      if (create.versionType().isVersionConflict(currentVersion,expectedVersion)) {
+        throw new VersionConflictEngineException(shardId,create.type(),create.id(),currentVersion,expectedVersion);
       }
- else {
-        if (currentVersion >= 0) {
-          if (currentVersion >= create.version()) {
-            throw new VersionConflictEngineException(shardId,create.type(),create.id(),currentVersion,create.version());
-          }
-        }
-        updatedVersion=create.version();
-      }
+      updatedVersion=create.versionType().updateVersion(currentVersion,expectedVersion);
     }
  else {
-      long expectedVersion=create.version();
-      if (currentVersion != Versions.NOT_SET) {
-        if (!(currentVersion == Versions.NOT_FOUND && create.version() == 1)) {
-          if (expectedVersion <= currentVersion) {
-            if (create.origin() == Operation.Origin.RECOVERY) {
-              return;
-            }
+      if (VersionType.EXTERNAL.isVersionConflict(currentVersion,expectedVersion)) {
+        if (create.origin() == Operation.Origin.RECOVERY) {
+          return;
+        }
  else {
-              throw new VersionConflictEngineException(shardId,create.type(),create.id(),currentVersion,expectedVersion);
-            }
-          }
+          throw new VersionConflictEngineException(shardId,create.type(),create.id(),currentVersion,expectedVersion);
         }
       }
-      updatedVersion=create.version();
+      updatedVersion=VersionType.EXTERNAL.updateVersion(currentVersion,expectedVersion);
     }
     if (versionValue != null) {
       if (!versionValue.delete()) {
