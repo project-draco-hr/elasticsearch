@@ -2,5 +2,20 @@
   if (uidToScore == null) {
     throw new ElasticSearchIllegalStateException("has_child query hasn't executed properly");
   }
-  return new ParentWeight(rewrittenChildQuery.createWeight(searcher));
+  int size=uidToScore.size();
+  if (size == 0) {
+    return Queries.NO_MATCH_QUERY.createWeight(searcher);
+  }
+  Filter parentFilter;
+  if (size == 1) {
+    BytesRef id=uidToScore.keySet().iterator().next().toBytesRef();
+    parentFilter=new TermFilter(new Term(UidFieldMapper.NAME,Uid.createUidAsBytes(parentType,id)));
+  }
+ else   if (size <= shortCircuitParentDocSet) {
+    parentFilter=new ParentIdsFilter(parentType,uidToScore.keySet());
+  }
+ else {
+    parentFilter=this.parentFilter;
+  }
+  return new ParentWeight(rewrittenChildQuery.createWeight(searcher),parentFilter,size);
 }
