@@ -1,3 +1,97 @@
 {
-  return discoNodes;
+  if (refreshInterval.millis() != 0) {
+    if (cachedDiscoNodes != null && (refreshInterval.millis() < 0 || (System.currentTimeMillis() - lastRefresh) < refreshInterval.millis())) {
+      if (logger.isTraceEnabled())       logger.trace("using cache to retrieve node list");
+      return cachedDiscoNodes;
+    }
+    lastRefresh=System.currentTimeMillis();
+  }
+  logger.debug("start building nodes list using GCE API");
+  cachedDiscoNodes=Lists.newArrayList();
+  String ipAddress=null;
+  try {
+    InetAddress inetAddress=networkService.resolvePublishHostAddress(null);
+    if (inetAddress != null) {
+      ipAddress=inetAddress.getHostAddress();
+    }
+  }
+ catch (  IOException e) {
+  }
+  try {
+    Compute.Instances.List list=gceComputeService.client().instances().list(project,zone);
+    InstanceList instanceList=list.execute();
+    for (    Instance instance : instanceList.getItems()) {
+      String name=instance.getName();
+      String type=instance.getMachineType();
+      String image=instance.getImage();
+      String status=instance.getStatus();
+      if (Status.TERMINATED.equals(status)) {
+        logger.debug("node {} is TERMINATED. Ignoring",name);
+        continue;
+      }
+      boolean filterByTag=false;
+      if (tags.length > 0) {
+        if (instance.getTags() == null || instance.getTags().isEmpty()) {
+          filterByTag=true;
+        }
+ else {
+          for (          String tag : tags) {
+            boolean found=false;
+            for (            String instancetag : instance.getTags().getItems()) {
+              if (instancetag.equals(tag)) {
+                found=true;
+                break;
+              }
+            }
+            if (!found) {
+              filterByTag=true;
+              break;
+            }
+          }
+        }
+      }
+      if (filterByTag) {
+        logger.trace("filtering out instance {} based tags {}, not part of {}",name,tags,instance.getTags().getItems());
+        continue;
+      }
+      String ip_public=null;
+      String ip_private=null;
+      List<NetworkInterface> interfaces=instance.getNetworkInterfaces();
+      for (      NetworkInterface networkInterface : interfaces) {
+        if (ip_public == null) {
+          for (          AccessConfig accessConfig : networkInterface.getAccessConfigs()) {
+            if (Strings.hasText(accessConfig.getNatIP())) {
+              ip_public=accessConfig.getNatIP();
+              break;
+            }
+          }
+        }
+        if (ip_private == null) {
+          ip_private=networkInterface.getNetworkIP();
+        }
+        if (ip_private != null && ip_public != null)         break;
+      }
+      try {
+        if (ip_private.equals(ipAddress)) {
+          logger.trace("current node found. Ignoring {} - {}",name,ip_private);
+        }
+ else {
+          TransportAddress[] addresses=transportService.addressesFromString(ip_private);
+          for (int i=0; (i < addresses.length && i < UnicastZenPing.LIMIT_PORTS_COUNT); i++) {
+            logger.trace("adding {}, type {}, image {}, address {}, transport_address {}, status {}",name,type,image,ip_private,addresses[i],status);
+            cachedDiscoNodes.add(new DiscoveryNode("#cloud-" + name + "-"+ i,addresses[i]));
+          }
+        }
+      }
+ catch (      Exception e) {
+        logger.warn("failed to add {}, address {}",e,name,ip_private);
+      }
+    }
+  }
+ catch (  IOException e) {
+    logger.warn("Exception caught during discovery {} : {}",e.getClass().getName(),e.getMessage());
+    logger.trace("Exception caught during discovery",e);
+  }
+  logger.debug("using dynamic discovery nodes {}",cachedDiscoNodes);
+  return cachedDiscoNodes;
 }
