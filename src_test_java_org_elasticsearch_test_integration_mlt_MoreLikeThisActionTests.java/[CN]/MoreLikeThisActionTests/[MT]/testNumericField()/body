@@ -1,0 +1,39 @@
+{
+  prepareCreate("test").execute().actionGet();
+  ensureGreen();
+  client().prepareIndex("test","type","1").setSource(jsonBuilder().startObject().field("string_value","lucene index").field("int_value",1).endObject()).execute().actionGet();
+  client().prepareIndex("test","type","2").setSource(jsonBuilder().startObject().field("string_value","elasticsearch index").field("int_value",42).endObject()).execute().actionGet();
+  refresh();
+  SearchResponse searchResponse=client().prepareMoreLikeThis("test","type","1").setMinDocFreq(1).setMinTermFreq(1).execute().actionGet();
+  assertThat(searchResponse.getFailedShards(),equalTo(0));
+  assertThat(searchResponse.getHits().totalHits(),equalTo(1L));
+  try {
+    searchResponse=client().prepareMoreLikeThis("test","type","1").setField("string_value","int_value").execute().actionGet();
+    fail();
+  }
+ catch (  SearchPhaseExecutionException e) {
+  }
+  searchResponse=client().prepareSearch().setQuery(moreLikeThisQuery().likeText("index").minTermFreq(1).minDocFreq(1)).execute().actionGet();
+  assertThat(searchResponse.getFailedShards(),equalTo(0));
+  assertThat(searchResponse.getHits().getTotalHits(),equalTo(2L));
+  searchResponse=client().prepareSearch().setQuery(moreLikeThisQuery("string_value").likeText("index").minTermFreq(1).minDocFreq(1)).execute().actionGet();
+  assertThat(searchResponse.getFailedShards(),equalTo(0));
+  assertThat(searchResponse.getHits().getTotalHits(),equalTo(2L));
+  try {
+    searchResponse=client().prepareSearch().setQuery(moreLikeThisQuery("string_value","int_value").likeText("index")).execute().actionGet();
+    fail();
+  }
+ catch (  SearchPhaseExecutionException e) {
+  }
+  searchResponse=client().prepareSearch().setQuery(moreLikeThisQuery("string_value","int_value").likeText("index").minTermFreq(1).minDocFreq(1).failOnUnsupportedField(false)).execute().actionGet();
+  assertThat(searchResponse.getFailedShards(),equalTo(0));
+  assertThat(searchResponse.getHits().getTotalHits(),equalTo(2L));
+  try {
+    searchResponse=client().prepareSearch().setQuery(moreLikeThisFieldQuery("int_value").likeText("42").minTermFreq(1).minDocFreq(1)).execute().actionGet();
+  }
+ catch (  SearchPhaseExecutionException e) {
+  }
+  searchResponse=client().prepareSearch().setQuery(moreLikeThisFieldQuery("int_value").likeText("42").minTermFreq(1).minDocFreq(1).failOnUnsupportedField(false)).execute().actionGet();
+  assertThat(searchResponse.getFailedShards(),equalTo(0));
+  assertThat(searchResponse.getHits().getTotalHits(),equalTo(0L));
+}
