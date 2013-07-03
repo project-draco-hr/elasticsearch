@@ -1,0 +1,26 @@
+{
+  cluster().ensureAtLeastNumNodes(2);
+  try {
+    client().admin().indices().prepareDelete("test").execute().actionGet();
+  }
+ catch (  IndexMissingException e) {
+  }
+  client().admin().indices().prepareCreate("test").execute().actionGet();
+  client().admin().cluster().prepareHealth("test").setWaitForGreenStatus().execute().actionGet();
+  client().prepareIndex("test","test","1").setSource(jsonBuilder().startObject().startObject("obj1").field("field1","value1").field("field2","value2").endObject().endObject()).execute().actionGet();
+  client().admin().indices().prepareRefresh("test").execute().actionGet();
+  ExplainResponse response=client().prepareExplain("test","test","1").setQuery(QueryBuilders.matchAllQuery()).setFetchSource("obj1.field1",null).get();
+  assertNotNull(response);
+  assertTrue(response.isMatch());
+  assertNotNull(response.getExplanation());
+  assertTrue(response.getExplanation().isMatch());
+  assertThat(response.getExplanation().getValue(),equalTo(1.0f));
+  assertThat(response.getGetResult().isExists(),equalTo(true));
+  assertThat(response.getGetResult().getId(),equalTo("1"));
+  assertThat(response.getGetResult().getSource().size(),equalTo(1));
+  assertThat(((Map<String,Object>)response.getGetResult().getSource().get("obj1")).get("field1").toString(),equalTo("value1"));
+  response=client().prepareExplain("test","test","1").setQuery(QueryBuilders.matchAllQuery()).setFetchSource(null,"obj1.field2").execute().actionGet();
+  assertNotNull(response);
+  assertTrue(response.isMatch());
+  assertThat(((Map<String,Object>)response.getGetResult().getSource().get("obj1")).get("field1").toString(),equalTo("value1"));
+}

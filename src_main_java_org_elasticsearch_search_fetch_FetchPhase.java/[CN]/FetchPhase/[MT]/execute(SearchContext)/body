@@ -1,21 +1,24 @@
 {
   FieldsVisitor fieldsVisitor;
   List<String> extractFieldNames=null;
-  boolean sourceRequested=false;
   if (!context.hasFieldNames()) {
     if (context.hasPartialFields()) {
       fieldsVisitor=new UidAndSourceFieldsVisitor();
     }
- else     if (context.hasScriptFields()) {
-      fieldsVisitor=new JustUidFieldsVisitor();
-    }
  else {
-      sourceRequested=true;
-      fieldsVisitor=new UidAndSourceFieldsVisitor();
+      if (!context.hasScriptFields() && !context.hasFetchSourceContext()) {
+        context.fetchSourceContext(new FetchSourceContext(true));
+      }
+      fieldsVisitor=context.sourceRequested() ? new UidAndSourceFieldsVisitor() : new JustUidFieldsVisitor();
     }
   }
  else   if (context.fieldNames().isEmpty()) {
-    fieldsVisitor=new JustUidFieldsVisitor();
+    if (context.sourceRequested()) {
+      fieldsVisitor=new UidAndSourceFieldsVisitor();
+    }
+ else {
+      fieldsVisitor=new JustUidFieldsVisitor();
+    }
   }
  else {
     boolean loadAllStored=false;
@@ -26,7 +29,12 @@
         continue;
       }
       if (fieldName.equals(SourceFieldMapper.NAME)) {
-        sourceRequested=true;
+        if (context.hasFetchSourceContext()) {
+          context.fetchSourceContext().fetchSource(true);
+        }
+ else {
+          context.fetchSourceContext(new FetchSourceContext(true));
+        }
         continue;
       }
       FieldMappers x=context.smartNameFieldMappers(fieldName);
@@ -44,18 +52,13 @@
       }
     }
     if (loadAllStored) {
-      if (sourceRequested || extractFieldNames != null) {
-        fieldsVisitor=new CustomFieldsVisitor(true,true);
-      }
- else {
-        fieldsVisitor=new CustomFieldsVisitor(true,false);
-      }
+      fieldsVisitor=new AllFieldsVisitor();
     }
  else     if (fieldNames != null) {
-      boolean loadSource=extractFieldNames != null || sourceRequested;
+      boolean loadSource=extractFieldNames != null || context.sourceRequested();
       fieldsVisitor=new CustomFieldsVisitor(fieldNames,loadSource);
     }
- else     if (extractFieldNames != null || sourceRequested) {
+ else     if (extractFieldNames != null || context.sourceRequested()) {
       fieldsVisitor=new UidAndSourceFieldsVisitor();
     }
  else {
@@ -82,7 +85,7 @@
  else {
       typeText=documentMapper.typeText();
     }
-    InternalSearchHit searchHit=new InternalSearchHit(docId,fieldsVisitor.uid().id(),typeText,sourceRequested ? fieldsVisitor.source() : null,searchFields);
+    InternalSearchHit searchHit=new InternalSearchHit(docId,fieldsVisitor.uid().id(),typeText,searchFields);
     hits[index]=searchHit;
     int readerIndex=ReaderUtil.subIndex(docId,context.searcher().getIndexReader().leaves());
     AtomicReaderContext subReaderContext=context.searcher().getIndexReader().leaves().get(readerIndex);

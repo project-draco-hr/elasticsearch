@@ -1,0 +1,52 @@
+{
+  XContentParser.Token token;
+  List<String> includes=null, excludes=null;
+  String currentFieldName=null;
+  token=parser.currentToken();
+  if (token == XContentParser.Token.VALUE_BOOLEAN) {
+    context.fetchSourceContext(new FetchSourceContext(parser.booleanValue()));
+    return;
+  }
+ else   if (token == XContentParser.Token.VALUE_STRING) {
+    context.fetchSourceContext(new FetchSourceContext(new String[]{parser.text()}));
+    return;
+  }
+ else   if (token == XContentParser.Token.START_ARRAY) {
+    includes=new ArrayList<String>();
+    while ((token=parser.nextToken()) != XContentParser.Token.END_ARRAY) {
+      includes.add(parser.text());
+    }
+  }
+ else   if (token == XContentParser.Token.START_OBJECT) {
+    List<String> currentList=null;
+    while ((token=parser.nextToken()) != XContentParser.Token.END_OBJECT) {
+      if (token == XContentParser.Token.FIELD_NAME) {
+        currentFieldName=parser.currentName();
+        if ("includes".equals(currentFieldName) || "include".equals(currentFieldName)) {
+          currentList=includes != null ? includes : (includes=new ArrayList<String>(2));
+        }
+ else         if ("excludes".equals(currentFieldName) || "exclude".equals(currentFieldName)) {
+          currentList=excludes != null ? excludes : (excludes=new ArrayList<String>(2));
+        }
+ else {
+          throw new ElasticSearchParseException("Source definition may not contain " + parser.text());
+        }
+      }
+ else       if (token == XContentParser.Token.START_ARRAY) {
+        while ((token=parser.nextToken()) != XContentParser.Token.END_ARRAY) {
+          currentList.add(parser.text());
+        }
+      }
+ else       if (token.isValue()) {
+        currentList.add(parser.text());
+      }
+ else {
+        throw new ElasticSearchParseException("unexpected token while parsing source settings");
+      }
+    }
+  }
+ else {
+    throw new ElasticSearchParseException("source element value can be of type " + token.name());
+  }
+  context.fetchSourceContext(new FetchSourceContext(includes == null ? Strings.EMPTY_ARRAY : includes.toArray(new String[includes.size()]),excludes == null ? Strings.EMPTY_ARRAY : excludes.toArray(new String[excludes.size()])));
+}
