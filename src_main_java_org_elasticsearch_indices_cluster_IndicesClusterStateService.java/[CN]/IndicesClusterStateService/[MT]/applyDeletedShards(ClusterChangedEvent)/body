@@ -1,35 +1,36 @@
 {
-  RoutingNode routingNodes=event.state().readOnlyRoutingNodes().nodesToShards().get(event.state().nodes().localNodeId());
-  if (routingNodes == null) {
+  RoutingNode routingNode=event.state().readOnlyRoutingNodes().nodesToShards().get(event.state().nodes().localNodeId());
+  if (routingNode == null) {
     return;
   }
-  for (  final String index : indicesService.indices()) {
+  TIntHashSet newShardIds=new TIntHashSet();
+  for (  IndexService indexService : indicesService) {
+    String index=indexService.index().name();
     IndexMetaData indexMetaData=event.state().metaData().index(index);
-    if (indexMetaData != null) {
-      Set<Integer> newShardIds=newHashSet();
-      for (      final ShardRouting shardRouting : routingNodes) {
-        if (shardRouting.index().equals(index)) {
-          newShardIds.add(shardRouting.id());
+    if (indexMetaData == null) {
+      continue;
+    }
+    newShardIds.clear();
+    List<MutableShardRouting> shards=routingNode.shards();
+    for (int i=0; i < shards.size(); i++) {
+      ShardRouting shardRouting=shards.get(i);
+      if (shardRouting.index().equals(index)) {
+        newShardIds.add(shardRouting.id());
+      }
+    }
+    for (    Integer existingShardId : indexService.shardIds()) {
+      if (!newShardIds.contains(existingShardId)) {
+        if (indexMetaData.state() == IndexMetaData.State.CLOSE) {
+          if (logger.isDebugEnabled()) {
+            logger.debug("[{}][{}] removing shard (index is closed)",index,existingShardId);
+          }
+          indexService.removeShard(existingShardId,"removing shard (index is closed)");
         }
-      }
-      final IndexService indexService=indicesService.indexService(index);
-      if (indexService == null) {
-        continue;
-      }
-      for (      Integer existingShardId : indexService.shardIds()) {
-        if (!newShardIds.contains(existingShardId)) {
-          if (indexMetaData.state() == IndexMetaData.State.CLOSE) {
-            if (logger.isDebugEnabled()) {
-              logger.debug("[{}][{}] removing shard (index is closed)",index,existingShardId);
-            }
-            indexService.removeShard(existingShardId,"removing shard (index is closed)");
-          }
  else {
-            if (logger.isDebugEnabled()) {
-              logger.debug("[{}][{}] removing shard (not allocated)",index,existingShardId);
-            }
-            indexService.removeShard(existingShardId,"removing shard (not allocated)");
+          if (logger.isDebugEnabled()) {
+            logger.debug("[{}][{}] removing shard (not allocated)",index,existingShardId);
           }
+          indexService.removeShard(existingShardId,"removing shard (not allocated)");
         }
       }
     }
