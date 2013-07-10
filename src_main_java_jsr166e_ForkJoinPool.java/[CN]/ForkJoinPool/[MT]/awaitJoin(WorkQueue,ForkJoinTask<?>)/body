@@ -1,19 +1,17 @@
 {
   int s=0;
-  if (joiner != null && task != null && (s=task.status) >= 0) {
+  if (task != null && (s=task.status) >= 0 && joiner != null) {
     ForkJoinTask<?> prevJoin=joiner.currentJoin;
     joiner.currentJoin=task;
     do {
     }
- while ((s=task.status) >= 0 && !joiner.isEmpty() && joiner.tryRemoveAndExec(task));
-    if (s >= 0 && (s=task.status) >= 0) {
-      helpSignal(task,joiner.poolIndex);
-      if ((s=task.status) >= 0 && (task instanceof CountedCompleter))       s=helpComplete(task,LIFO_QUEUE);
-    }
+ while (joiner.tryRemoveAndExec(task) && (s=task.status) >= 0);
+    if (s >= 0 && (task instanceof CountedCompleter))     s=helpComplete(joiner,(CountedCompleter<?>)task);
+    long cc=0;
     while (s >= 0 && (s=task.status) >= 0) {
-      if ((!joiner.isEmpty() || (s=tryHelpStealer(joiner,task)) == 0) && (s=task.status) >= 0) {
-        helpSignal(task,joiner.poolIndex);
-        if ((s=task.status) >= 0 && tryCompensate()) {
+      if ((s=tryHelpStealer(joiner,task)) == 0 && (s=task.status) >= 0) {
+        if (!tryCompensate(cc))         cc=ctl;
+ else {
           if (task.trySetSignal() && (s=task.status) >= 0) {
 synchronized (task) {
               if (task.status >= 0) {
@@ -29,7 +27,7 @@ synchronized (task) {
           long c;
           do {
           }
- while (!U.compareAndSwapLong(this,CTL,c=ctl,c + AC_UNIT));
+ while (!U.compareAndSwapLong(this,CTL,c=ctl,((c & ~AC_MASK) | ((c & AC_MASK) + AC_UNIT))));
         }
       }
     }

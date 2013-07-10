@@ -1,6 +1,6 @@
 {
   int stat=0, steps=0;
-  if (joiner != null && task != null) {
+  if (task != null && joiner != null && joiner.base - joiner.top >= 0) {
     restart:     for (; ; ) {
       ForkJoinTask<?> subtask=task;
       for (WorkQueue j=joiner, v; ; ) {
@@ -30,11 +30,21 @@
             ForkJoinTask<?> t=(ForkJoinTask<?>)U.getObjectVolatile(a,i);
             if (subtask.status < 0 || j.currentJoin != subtask || v.currentSteal != subtask)             continue restart;
             stat=1;
-            if (t != null && v.base == b && U.compareAndSwapObject(a,i,t,null)) {
-              v.base=b + 1;
-              joiner.runSubtask(t);
+            if (v.base == b) {
+              if (t == null)               break restart;
+              if (U.compareAndSwapObject(a,i,t,null)) {
+                U.putOrderedInt(v,QBASE,b + 1);
+                ForkJoinTask<?> ps=joiner.currentSteal;
+                int jt=joiner.top;
+                do {
+                  joiner.currentSteal=t;
+                  t.doExec();
+                }
+ while (task.status >= 0 && joiner.top != jt && (t=joiner.pop()) != null);
+                joiner.currentSteal=ps;
+                break restart;
+              }
             }
- else             if (v.base == b && ++steps == MAX_HELP)             break restart;
           }
  else {
             ForkJoinTask<?> next=v.currentJoin;

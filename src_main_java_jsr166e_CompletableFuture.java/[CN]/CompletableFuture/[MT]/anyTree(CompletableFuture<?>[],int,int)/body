@@ -1,0 +1,33 @@
+{
+  CompletableFuture<?> fst, snd;
+  int mid=(lo + hi) >>> 1;
+  if ((fst=(lo == mid ? cfs[lo] : anyTree(cfs,lo,mid))) == null || (snd=(hi == mid + 1 ? cfs[hi] : anyTree(cfs,mid + 1,hi))) == null)   throw new NullPointerException();
+  CompletableFuture<Object> dst=new CompletableFuture<Object>();
+  OrCompletion d=null;
+  CompletionNode p=null, q=null;
+  Object r;
+  while ((r=fst.result) == null && (r=snd.result) == null) {
+    if (d == null)     d=new OrCompletion(fst,snd,dst);
+ else     if (p == null)     p=new CompletionNode(d);
+ else     if (q == null) {
+      if (UNSAFE.compareAndSwapObject(fst,COMPLETIONS,p.next=fst.completions,p))       q=new CompletionNode(d);
+    }
+ else     if (UNSAFE.compareAndSwapObject(snd,COMPLETIONS,q.next=snd.completions,q))     break;
+  }
+  if ((r != null || (r=fst.result) != null || (r=snd.result) != null) && (d == null || d.compareAndSet(0,1))) {
+    Throwable ex;
+    Object t;
+    if (r instanceof AltResult) {
+      ex=((AltResult)r).ex;
+      t=null;
+    }
+ else {
+      ex=null;
+      t=r;
+    }
+    dst.internalComplete(t,ex);
+  }
+  fst.helpPostComplete();
+  snd.helpPostComplete();
+  return dst;
+}

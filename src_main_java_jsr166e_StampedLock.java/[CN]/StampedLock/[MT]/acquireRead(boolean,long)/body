@@ -36,7 +36,6 @@
       if (pp != null && p == wtail && U.compareAndSwapObject(p,WCOWAIT,node.cowait=p.cowait,node)) {
         node.thread=Thread.currentThread();
         for (long time; ; ) {
-          if (interruptible && Thread.interrupted())           return cancelWaiter(node,p,true);
           if (deadline == 0L)           time=0L;
  else           if ((time=deadline - System.nanoTime()) <= 0L)           return cancelWaiter(node,p,false);
           if (node.thread == null)           break;
@@ -44,8 +43,12 @@
             node.thread=null;
             break;
           }
+          Thread wt=Thread.currentThread();
+          U.putObject(wt,PARKBLOCKER,this);
           if (node.thread == null)           break;
           U.park(false,time);
+          U.putObject(wt,PARKBLOCKER,null);
+          if (interruptible && Thread.interrupted())           return cancelWaiter(node,p,true);
         }
         group=p;
       }
@@ -92,9 +95,12 @@
       long time;
       if (deadline == 0L)       time=0L;
  else       if ((time=deadline - System.nanoTime()) <= 0L)       return cancelWaiter(node,node,false);
-      node.thread=Thread.currentThread();
+      Thread wt=Thread.currentThread();
+      U.putObject(wt,PARKBLOCKER,this);
+      node.thread=wt;
       if (node.prev == p && p.status == WAITING && (p != whead || (state & ABITS) != WBIT))       U.park(false,time);
       node.thread=null;
+      U.putObject(wt,PARKBLOCKER,null);
       if (interruptible && Thread.interrupted())       return cancelWaiter(node,node,true);
     }
   }

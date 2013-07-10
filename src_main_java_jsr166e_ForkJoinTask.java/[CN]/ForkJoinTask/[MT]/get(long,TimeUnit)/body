@@ -3,6 +3,7 @@
   int s;
   long ms;
   long ns=unit.toNanos(timeout);
+  ForkJoinPool cp;
   if ((s=status) >= 0 && ns > 0L) {
     long deadline=System.nanoTime() + ns;
     ForkJoinPool p=null;
@@ -14,14 +15,17 @@
       w=wt.workQueue;
       p.helpJoinOnce(w,this);
     }
- else     ForkJoinPool.externalHelpJoin(this);
+ else     if ((cp=ForkJoinPool.common) != null) {
+      if (this instanceof CountedCompleter)       cp.externalHelpComplete((CountedCompleter<?>)this);
+ else       if (cp.tryExternalUnpush(this))       doExec();
+    }
     boolean canBlock=false;
     boolean interrupted=false;
     try {
       while ((s=status) >= 0) {
         if (w != null && w.qlock < 0)         cancelIgnoringExceptions(this);
  else         if (!canBlock) {
-          if (p == null || p.tryCompensate())           canBlock=true;
+          if (p == null || p.tryCompensate(p.ctl))           canBlock=true;
         }
  else {
           if ((ms=TimeUnit.NANOSECONDS.toMillis(ns)) > 0L && U.compareAndSwapInt(this,STATUS,s,s | SIGNAL)) {
