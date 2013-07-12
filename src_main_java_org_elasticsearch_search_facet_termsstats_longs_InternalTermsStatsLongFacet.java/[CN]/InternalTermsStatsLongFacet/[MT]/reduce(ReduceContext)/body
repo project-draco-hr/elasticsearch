@@ -1,0 +1,57 @@
+{
+  List<Facet> facets=context.facets();
+  if (facets.size() == 1) {
+    if (requiredSize == 0) {
+      InternalTermsStatsLongFacet tsFacet=(InternalTermsStatsLongFacet)facets.get(0);
+      if (!tsFacet.entries.isEmpty()) {
+        List<LongEntry> entries=tsFacet.mutableList();
+        CollectionUtil.timSort(entries,comparatorType.comparator());
+      }
+    }
+    return facets.get(0);
+  }
+  int missing=0;
+  ExtTLongObjectHashMap<LongEntry> map=context.cacheRecycler().popLongObjectMap();
+  for (  Facet facet : facets) {
+    InternalTermsStatsLongFacet tsFacet=(InternalTermsStatsLongFacet)facet;
+    missing+=tsFacet.missing;
+    for (    Entry entry : tsFacet) {
+      LongEntry longEntry=(LongEntry)entry;
+      LongEntry current=map.get(longEntry.term);
+      if (current != null) {
+        current.count+=longEntry.count;
+        current.totalCount+=longEntry.totalCount;
+        current.total+=longEntry.total;
+        if (longEntry.min < current.min) {
+          current.min=longEntry.min;
+        }
+        if (longEntry.max > current.max) {
+          current.max=longEntry.max;
+        }
+      }
+ else {
+        map.put(longEntry.term,longEntry);
+      }
+    }
+  }
+  if (requiredSize == 0) {
+    LongEntry[] entries1=map.values(new LongEntry[map.size()]);
+    Arrays.sort(entries1,comparatorType.comparator());
+    context.cacheRecycler().pushLongObjectMap(map);
+    return new InternalTermsStatsLongFacet(getName(),comparatorType,requiredSize,Arrays.asList(entries1),missing);
+  }
+ else {
+    Object[] values=map.internalValues();
+    Arrays.sort(values,(Comparator)comparatorType.comparator());
+    List<LongEntry> ordered=new ArrayList<LongEntry>(map.size());
+    for (int i=0; i < requiredSize; i++) {
+      LongEntry value=(LongEntry)values[i];
+      if (value == null) {
+        break;
+      }
+      ordered.add(value);
+    }
+    context.cacheRecycler().pushLongObjectMap(map);
+    return new InternalTermsStatsLongFacet(getName(),comparatorType,requiredSize,ordered,missing);
+  }
+}

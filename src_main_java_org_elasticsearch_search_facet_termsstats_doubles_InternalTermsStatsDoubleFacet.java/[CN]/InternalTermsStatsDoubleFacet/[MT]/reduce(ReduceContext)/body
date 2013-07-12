@@ -1,0 +1,57 @@
+{
+  List<Facet> facets=context.facets();
+  if (facets.size() == 1) {
+    if (requiredSize == 0) {
+      InternalTermsStatsDoubleFacet tsFacet=(InternalTermsStatsDoubleFacet)facets.get(0);
+      if (!tsFacet.entries.isEmpty()) {
+        List<DoubleEntry> entries=tsFacet.mutableList();
+        CollectionUtil.timSort(entries,comparatorType.comparator());
+      }
+    }
+    return facets.get(0);
+  }
+  int missing=0;
+  ExtTDoubleObjectHashMap<DoubleEntry> map=context.cacheRecycler().popDoubleObjectMap();
+  for (  Facet facet : facets) {
+    InternalTermsStatsDoubleFacet tsFacet=(InternalTermsStatsDoubleFacet)facet;
+    missing+=tsFacet.missing;
+    for (    Entry entry : tsFacet) {
+      DoubleEntry doubleEntry=(DoubleEntry)entry;
+      DoubleEntry current=map.get(doubleEntry.term);
+      if (current != null) {
+        current.count+=doubleEntry.count;
+        current.totalCount+=doubleEntry.totalCount;
+        current.total+=doubleEntry.total;
+        if (doubleEntry.min < current.min) {
+          current.min=doubleEntry.min;
+        }
+        if (doubleEntry.max > current.max) {
+          current.max=doubleEntry.max;
+        }
+      }
+ else {
+        map.put(doubleEntry.term,doubleEntry);
+      }
+    }
+  }
+  if (requiredSize == 0) {
+    DoubleEntry[] entries1=map.values(new DoubleEntry[map.size()]);
+    Arrays.sort(entries1,comparatorType.comparator());
+    context.cacheRecycler().pushDoubleObjectMap(map);
+    return new InternalTermsStatsDoubleFacet(getName(),comparatorType,requiredSize,Arrays.asList(entries1),missing);
+  }
+ else {
+    Object[] values=map.internalValues();
+    Arrays.sort(values,(Comparator)comparatorType.comparator());
+    List<DoubleEntry> ordered=new ArrayList<DoubleEntry>(map.size());
+    for (int i=0; i < requiredSize; i++) {
+      DoubleEntry value=(DoubleEntry)values[i];
+      if (value == null) {
+        break;
+      }
+      ordered.add(value);
+    }
+    context.cacheRecycler().pushDoubleObjectMap(map);
+    return new InternalTermsStatsDoubleFacet(getName(),comparatorType,requiredSize,ordered,missing);
+  }
+}

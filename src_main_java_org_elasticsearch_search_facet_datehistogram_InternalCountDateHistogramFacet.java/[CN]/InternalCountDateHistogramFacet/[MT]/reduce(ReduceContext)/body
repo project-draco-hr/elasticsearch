@@ -1,0 +1,42 @@
+{
+  List<Facet> facets=context.facets();
+  if (facets.size() == 1) {
+    InternalCountDateHistogramFacet histoFacet=(InternalCountDateHistogramFacet)facets.get(0);
+    if (histoFacet.entries == null) {
+      histoFacet.entries=new CountEntry[histoFacet.counts.size()];
+      int i=0;
+      for (TLongLongIterator it=histoFacet.counts.iterator(); it.hasNext(); ) {
+        it.advance();
+        histoFacet.entries[i++]=new CountEntry(it.key(),it.value());
+      }
+    }
+    Arrays.sort(histoFacet.entries,histoFacet.comparatorType.comparator());
+    histoFacet.releaseCache();
+    return facets.get(0);
+  }
+  TLongLongHashMap counts=context.cacheRecycler().popLongLongMap();
+  for (  Facet facet : facets) {
+    InternalCountDateHistogramFacet histoFacet=(InternalCountDateHistogramFacet)facet;
+    if (histoFacet.entries != null) {
+      for (      CountEntry entry : histoFacet.entries) {
+        counts.adjustOrPutValue(entry.getTime(),entry.getCount(),entry.getCount());
+      }
+    }
+ else {
+      for (TLongLongIterator it=histoFacet.counts.iterator(); it.hasNext(); ) {
+        it.advance();
+        counts.adjustOrPutValue(it.key(),it.value(),it.value());
+      }
+    }
+    histoFacet.releaseCache();
+  }
+  CountEntry[] entries=new CountEntry[counts.size()];
+  int i=0;
+  for (TLongLongIterator it=counts.iterator(); it.hasNext(); ) {
+    it.advance();
+    entries[i++]=new CountEntry(it.key(),it.value());
+  }
+  context.cacheRecycler().pushLongLongMap(counts);
+  Arrays.sort(entries,comparatorType.comparator());
+  return new InternalCountDateHistogramFacet(getName(),comparatorType,entries);
+}

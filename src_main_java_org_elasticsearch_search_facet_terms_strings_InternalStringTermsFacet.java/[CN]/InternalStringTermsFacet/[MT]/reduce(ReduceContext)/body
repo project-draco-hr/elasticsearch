@@ -1,0 +1,34 @@
+{
+  List<Facet> facets=context.facets();
+  if (facets.size() == 1) {
+    return facets.get(0);
+  }
+  InternalStringTermsFacet first=null;
+  TObjectIntHashMap<Text> aggregated=context.cacheRecycler().popObjectIntMap();
+  long missing=0;
+  long total=0;
+  for (  Facet facet : facets) {
+    InternalTermsFacet termsFacet=(InternalTermsFacet)facet;
+    missing+=termsFacet.getMissingCount();
+    total+=termsFacet.getTotalCount();
+    if (!(termsFacet instanceof InternalStringTermsFacet)) {
+      return termsFacet.reduce(context);
+    }
+    if (first == null) {
+      first=(InternalStringTermsFacet)termsFacet;
+    }
+    for (    Entry entry : termsFacet.getEntries()) {
+      aggregated.adjustOrPutValue(entry.getTerm(),entry.getCount(),entry.getCount());
+    }
+  }
+  BoundedTreeSet<TermEntry> ordered=new BoundedTreeSet<TermEntry>(first.comparatorType.comparator(),first.requiredSize);
+  for (TObjectIntIterator<Text> it=aggregated.iterator(); it.hasNext(); ) {
+    it.advance();
+    ordered.add(new TermEntry(it.key(),it.value()));
+  }
+  first.entries=ordered;
+  first.missing=missing;
+  first.total=total;
+  context.cacheRecycler().pushObjectIntMap(aggregated);
+  return first;
+}
