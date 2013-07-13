@@ -1,18 +1,20 @@
 {
   request.beforeStart();
   int localOperations=0;
+  int shardRequestId=-1;
   for (  final ShardIterator shardIt : shardsIts) {
+    shardRequestId++;
     final ShardRouting shard=shardIt.firstOrNull();
     if (shard != null) {
       if (shard.currentNodeId().equals(nodes.localNodeId())) {
         localOperations++;
       }
  else {
-        performFirstPhase(shardIt);
+        performFirstPhase(shardRequestId,shardIt);
       }
     }
  else {
-      onFirstPhaseResult(null,shardIt,null);
+      onFirstPhaseResult(shardRequestId,null,shardIt,null);
     }
   }
   if (localOperations > 0) {
@@ -20,11 +22,13 @@
       request.beforeLocalFork();
       threadPool.executor(ThreadPool.Names.SEARCH).execute(new Runnable(){
         @Override public void run(){
+          int shardRequestId=-1;
           for (          final ShardIterator shardIt : shardsIts) {
+            shardRequestId++;
             final ShardRouting shard=shardIt.firstOrNull();
             if (shard != null) {
               if (shard.currentNodeId().equals(nodes.localNodeId())) {
-                performFirstPhase(shardIt);
+                performFirstPhase(shardRequestId,shardIt);
               }
             }
           }
@@ -37,20 +41,23 @@
       if (localAsync) {
         request.beforeLocalFork();
       }
+      shardRequestId=-1;
       for (      final ShardIterator shardIt : shardsIts) {
+        shardRequestId++;
+        final int fShardRequestId=shardRequestId;
         final ShardRouting shard=shardIt.firstOrNull();
         if (shard != null) {
           if (shard.currentNodeId().equals(nodes.localNodeId())) {
             if (localAsync) {
               threadPool.executor(ThreadPool.Names.SEARCH).execute(new Runnable(){
                 @Override public void run(){
-                  performFirstPhase(shardIt);
+                  performFirstPhase(fShardRequestId,shardIt);
                 }
               }
 );
             }
  else {
-              performFirstPhase(shardIt);
+              performFirstPhase(fShardRequestId,shardIt);
             }
           }
         }

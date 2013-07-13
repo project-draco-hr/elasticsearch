@@ -1,0 +1,127 @@
+{
+  if (results1.asList().isEmpty()) {
+    return EMPTY;
+  }
+  if (optimizeSingleShard) {
+    boolean canOptimize=false;
+    QuerySearchResult result=null;
+    int shardRequestId=-1;
+    if (results1.asList().size() == 1) {
+      canOptimize=true;
+      result=results1.asList().get(0).value.queryResult();
+      shardRequestId=results1.asList().get(0).index;
+    }
+ else {
+      for (      AtomicArray.Entry<? extends QuerySearchResultProvider> entry : results1.asList()) {
+        if (entry.value.queryResult().topDocs().scoreDocs.length > 0) {
+          if (result != null) {
+            canOptimize=false;
+            break;
+          }
+          canOptimize=true;
+          result=entry.value.queryResult();
+          shardRequestId=entry.index;
+        }
+      }
+    }
+    if (canOptimize) {
+      ScoreDoc[] scoreDocs=result.topDocs().scoreDocs;
+      if (scoreDocs.length < result.from()) {
+        return EMPTY;
+      }
+      int resultDocsSize=result.size();
+      if ((scoreDocs.length - result.from()) < resultDocsSize) {
+        resultDocsSize=scoreDocs.length - result.from();
+      }
+      if (result.topDocs() instanceof TopFieldDocs) {
+        ShardDoc[] docs=new ShardDoc[resultDocsSize];
+        for (int i=0; i < resultDocsSize; i++) {
+          ScoreDoc scoreDoc=scoreDocs[result.from() + i];
+          docs[i]=new ShardFieldDoc(shardRequestId,scoreDoc.doc,scoreDoc.score,((FieldDoc)scoreDoc).fields);
+        }
+        return docs;
+      }
+ else {
+        ShardDoc[] docs=new ShardDoc[resultDocsSize];
+        for (int i=0; i < resultDocsSize; i++) {
+          ScoreDoc scoreDoc=scoreDocs[result.from() + i];
+          docs[i]=new ShardScoreDoc(shardRequestId,scoreDoc.doc,scoreDoc.score);
+        }
+        return docs;
+      }
+    }
+  }
+  List<? extends AtomicArray.Entry<? extends QuerySearchResultProvider>> results=QUERY_RESULT_ORDERING.sortedCopy(results1.asList());
+  QuerySearchResultProvider queryResultProvider=results.get(0).value;
+  int totalNumDocs=0;
+  int queueSize=queryResultProvider.queryResult().from() + queryResultProvider.queryResult().size();
+  if (queryResultProvider.includeFetch()) {
+    queueSize*=results.size();
+  }
+  PriorityQueue queue;
+  if (queryResultProvider.queryResult().topDocs() instanceof TopFieldDocs) {
+    TopFieldDocs fieldDocs=(TopFieldDocs)queryResultProvider.queryResult().topDocs();
+    for (int i=0; i < fieldDocs.fields.length; i++) {
+      boolean allValuesAreNull=true;
+      boolean resolvedField=false;
+      for (      AtomicArray.Entry<? extends QuerySearchResultProvider> entry : results) {
+        for (        ScoreDoc doc : entry.value.queryResult().topDocs().scoreDocs) {
+          FieldDoc fDoc=(FieldDoc)doc;
+          if (fDoc.fields[i] != null) {
+            allValuesAreNull=false;
+            if (fDoc.fields[i] instanceof String) {
+              fieldDocs.fields[i]=new SortField(fieldDocs.fields[i].getField(),SortField.Type.STRING,fieldDocs.fields[i].getReverse());
+            }
+            resolvedField=true;
+            break;
+          }
+        }
+        if (resolvedField) {
+          break;
+        }
+      }
+      if (!resolvedField && allValuesAreNull && fieldDocs.fields[i].getField() != null) {
+        fieldDocs.fields[i]=new SortField(fieldDocs.fields[i].getField(),SortField.Type.STRING,fieldDocs.fields[i].getReverse());
+      }
+    }
+    queue=new ShardFieldDocSortedHitQueue(fieldDocs.fields,queueSize);
+    for (    AtomicArray.Entry<? extends QuerySearchResultProvider> entry : results) {
+      QuerySearchResult result=entry.value.queryResult();
+      ScoreDoc[] scoreDocs=result.topDocs().scoreDocs;
+      totalNumDocs+=scoreDocs.length;
+      for (      ScoreDoc doc : scoreDocs) {
+        ShardFieldDoc nodeFieldDoc=new ShardFieldDoc(entry.index,doc.doc,doc.score,((FieldDoc)doc).fields);
+        if (queue.insertWithOverflow(nodeFieldDoc) == nodeFieldDoc) {
+          break;
+        }
+      }
+    }
+  }
+ else {
+    queue=new ScoreDocQueue(queueSize);
+    for (    AtomicArray.Entry<? extends QuerySearchResultProvider> entry : results) {
+      QuerySearchResult result=entry.value.queryResult();
+      ScoreDoc[] scoreDocs=result.topDocs().scoreDocs;
+      totalNumDocs+=scoreDocs.length;
+      for (      ScoreDoc doc : scoreDocs) {
+        ShardScoreDoc nodeScoreDoc=new ShardScoreDoc(entry.index,doc.doc,doc.score);
+        if (queue.insertWithOverflow(nodeScoreDoc) == nodeScoreDoc) {
+          break;
+        }
+      }
+    }
+  }
+  int resultDocsSize=queryResultProvider.queryResult().size();
+  if (queryResultProvider.includeFetch()) {
+    resultDocsSize*=results.size();
+  }
+  if (totalNumDocs < queueSize) {
+    resultDocsSize=totalNumDocs - queryResultProvider.queryResult().from();
+  }
+  if (resultDocsSize <= 0) {
+    return EMPTY;
+  }
+  ShardDoc[] shardDocs=new ShardDoc[resultDocsSize];
+  for (int i=resultDocsSize - 1; i >= 0; i--)   shardDocs[i]=(ShardDoc)queue.pop();
+  return shardDocs;
+}

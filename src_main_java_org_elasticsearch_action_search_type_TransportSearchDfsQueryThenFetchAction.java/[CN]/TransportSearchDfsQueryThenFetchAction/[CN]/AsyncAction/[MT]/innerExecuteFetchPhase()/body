@@ -1,32 +1,33 @@
 {
-  sortedShardList=searchPhaseController.sortDocs(queryResults.values());
-  final Map<SearchShardTarget,ExtTIntArrayList> docIdsToLoad=searchPhaseController.docIdsToLoad(sortedShardList);
-  this.docIdsToLoad=docIdsToLoad;
-  if (docIdsToLoad.isEmpty()) {
+  sortedShardList=searchPhaseController.sortDocs(queryResults);
+  searchPhaseController.fillDocIdsToLoad(docIdsToLoad,sortedShardList);
+  if (docIdsToLoad.asList().isEmpty()) {
     finishHim();
     return;
   }
-  final AtomicInteger counter=new AtomicInteger(docIdsToLoad.size());
+  final AtomicInteger counter=new AtomicInteger(docIdsToLoad.asList().size());
   int localOperations=0;
-  for (  final Map.Entry<SearchShardTarget,ExtTIntArrayList> entry : docIdsToLoad.entrySet()) {
-    DiscoveryNode node=nodes.get(entry.getKey().nodeId());
+  for (  final AtomicArray.Entry<ExtTIntArrayList> entry : docIdsToLoad.asList()) {
+    QuerySearchResult queryResult=queryResults.get(entry.index);
+    DiscoveryNode node=nodes.get(queryResult.shardTarget().nodeId());
     if (node.id().equals(nodes.localNodeId())) {
       localOperations++;
     }
  else {
-      FetchSearchRequest fetchSearchRequest=new FetchSearchRequest(request,queryResults.get(entry.getKey()).id(),entry.getValue());
-      executeFetch(entry.getKey(),counter,fetchSearchRequest,node);
+      FetchSearchRequest fetchSearchRequest=new FetchSearchRequest(request,queryResult.id(),entry.value);
+      executeFetch(entry.index,queryResult.shardTarget(),counter,fetchSearchRequest,node);
     }
   }
   if (localOperations > 0) {
     if (request.operationThreading() == SearchOperationThreading.SINGLE_THREAD) {
       threadPool.executor(ThreadPool.Names.SEARCH).execute(new Runnable(){
         @Override public void run(){
-          for (          final Map.Entry<SearchShardTarget,ExtTIntArrayList> entry : docIdsToLoad.entrySet()) {
-            DiscoveryNode node=nodes.get(entry.getKey().nodeId());
+          for (          final AtomicArray.Entry<ExtTIntArrayList> entry : docIdsToLoad.asList()) {
+            QuerySearchResult queryResult=queryResults.get(entry.index);
+            DiscoveryNode node=nodes.get(queryResult.shardTarget().nodeId());
             if (node.id().equals(nodes.localNodeId())) {
-              FetchSearchRequest fetchSearchRequest=new FetchSearchRequest(request,queryResults.get(entry.getKey()).id(),entry.getValue());
-              executeFetch(entry.getKey(),counter,fetchSearchRequest,node);
+              FetchSearchRequest fetchSearchRequest=new FetchSearchRequest(request,queryResult.id(),entry.value);
+              executeFetch(entry.index,queryResult.shardTarget(),counter,fetchSearchRequest,node);
             }
           }
         }
@@ -35,20 +36,21 @@
     }
  else {
       boolean localAsync=request.operationThreading() == SearchOperationThreading.THREAD_PER_SHARD;
-      for (      final Map.Entry<SearchShardTarget,ExtTIntArrayList> entry : docIdsToLoad.entrySet()) {
-        final DiscoveryNode node=nodes.get(entry.getKey().nodeId());
+      for (      final AtomicArray.Entry<ExtTIntArrayList> entry : docIdsToLoad.asList()) {
+        final QuerySearchResult queryResult=queryResults.get(entry.index);
+        final DiscoveryNode node=nodes.get(queryResult.shardTarget().nodeId());
         if (node.id().equals(nodes.localNodeId())) {
-          final FetchSearchRequest fetchSearchRequest=new FetchSearchRequest(request,queryResults.get(entry.getKey()).id(),entry.getValue());
+          final FetchSearchRequest fetchSearchRequest=new FetchSearchRequest(request,queryResult.id(),entry.value);
           if (localAsync) {
             threadPool.executor(ThreadPool.Names.SEARCH).execute(new Runnable(){
               @Override public void run(){
-                executeFetch(entry.getKey(),counter,fetchSearchRequest,node);
+                executeFetch(entry.index,queryResult.shardTarget(),counter,fetchSearchRequest,node);
               }
             }
 );
           }
  else {
-            executeFetch(entry.getKey(),counter,fetchSearchRequest,node);
+            executeFetch(entry.index,queryResult.shardTarget(),counter,fetchSearchRequest,node);
           }
         }
       }

@@ -1,0 +1,98 @@
+{
+  boolean sorted=false;
+  int sortScoreIndex=-1;
+  if (queryResults.asList().isEmpty()) {
+    return InternalSearchResponse.EMPTY;
+  }
+  QuerySearchResult querySearchResult=queryResults.asList().get(0).value.queryResult();
+  if (querySearchResult.topDocs() instanceof TopFieldDocs) {
+    sorted=true;
+    TopFieldDocs fieldDocs=(TopFieldDocs)querySearchResult.queryResult().topDocs();
+    for (int i=0; i < fieldDocs.fields.length; i++) {
+      if (fieldDocs.fields[i].getType() == SortField.Type.SCORE) {
+        sortScoreIndex=i;
+      }
+    }
+  }
+  InternalFacets facets=null;
+  if (!queryResults.asList().isEmpty()) {
+    if (querySearchResult.facets() != null && querySearchResult.facets().facets() != null && !querySearchResult.facets().facets().isEmpty()) {
+      List<Facet> aggregatedFacets=Lists.newArrayList();
+      List<Facet> namedFacets=Lists.newArrayList();
+      for (      Facet facet : querySearchResult.facets()) {
+        namedFacets.clear();
+        for (        AtomicArray.Entry<? extends QuerySearchResultProvider> entry : queryResults.asList()) {
+          for (          Facet facet1 : entry.value.queryResult().facets()) {
+            if (facet.getName().equals(facet1.getName())) {
+              namedFacets.add(facet1);
+            }
+          }
+        }
+        if (!namedFacets.isEmpty()) {
+          Facet aggregatedFacet=((InternalFacet)namedFacets.get(0)).reduce(new InternalFacet.ReduceContext(cacheRecycler,namedFacets));
+          aggregatedFacets.add(aggregatedFacet);
+        }
+      }
+      facets=new InternalFacets(aggregatedFacets);
+    }
+  }
+  long totalHits=0;
+  float maxScore=Float.NEGATIVE_INFINITY;
+  boolean timedOut=false;
+  for (  AtomicArray.Entry<? extends QuerySearchResultProvider> entry : queryResults.asList()) {
+    QuerySearchResult result=entry.value.queryResult();
+    if (result.searchTimedOut()) {
+      timedOut=true;
+    }
+    totalHits+=result.topDocs().totalHits;
+    if (!Float.isNaN(result.topDocs().getMaxScore())) {
+      maxScore=Math.max(maxScore,result.topDocs().getMaxScore());
+    }
+  }
+  if (Float.isInfinite(maxScore)) {
+    maxScore=Float.NaN;
+  }
+  for (  AtomicArray.Entry<? extends FetchSearchResultProvider> entry : fetchResults.asList()) {
+    entry.value.fetchResult().initCounter();
+  }
+  List<InternalSearchHit> hits=new ArrayList<InternalSearchHit>();
+  if (!fetchResults.asList().isEmpty()) {
+    for (    ShardDoc shardDoc : sortedDocs) {
+      FetchSearchResultProvider fetchResultProvider=fetchResults.get(shardDoc.shardRequestId());
+      if (fetchResultProvider == null) {
+        continue;
+      }
+      FetchSearchResult fetchResult=fetchResultProvider.fetchResult();
+      int index=fetchResult.counterGetAndIncrement();
+      if (index < fetchResult.hits().internalHits().length) {
+        InternalSearchHit searchHit=fetchResult.hits().internalHits()[index];
+        searchHit.score(shardDoc.score());
+        searchHit.shard(fetchResult.shardTarget());
+        if (sorted) {
+          FieldDoc fieldDoc=(FieldDoc)shardDoc;
+          searchHit.sortValues(fieldDoc.fields);
+          if (sortScoreIndex != -1) {
+            searchHit.score(((Number)fieldDoc.fields[sortScoreIndex]).floatValue());
+          }
+        }
+        hits.add(searchHit);
+      }
+    }
+  }
+  Suggest suggest=null;
+  if (!queryResults.asList().isEmpty()) {
+    final Map<String,List<Suggest.Suggestion>> groupedSuggestions=new HashMap<String,List<Suggest.Suggestion>>();
+    boolean hasSuggestions=false;
+    for (    AtomicArray.Entry<? extends QuerySearchResultProvider> entry : queryResults.asList()) {
+      Suggest shardResult=entry.value.queryResult().queryResult().suggest();
+      if (shardResult == null) {
+        continue;
+      }
+      hasSuggestions=true;
+      Suggest.group(groupedSuggestions,shardResult);
+    }
+    suggest=hasSuggestions ? new Suggest(Suggest.Fields.SUGGEST,Suggest.reduce(groupedSuggestions)) : null;
+  }
+  InternalSearchHits searchHits=new InternalSearchHits(hits.toArray(new InternalSearchHit[hits.size()]),totalHits,maxScore);
+  return new InternalSearchResponse(searchHits,facets,suggest,timedOut);
+}
