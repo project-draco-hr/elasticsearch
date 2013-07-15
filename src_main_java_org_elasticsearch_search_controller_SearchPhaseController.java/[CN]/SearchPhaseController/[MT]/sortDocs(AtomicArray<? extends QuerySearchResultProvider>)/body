@@ -1,15 +1,15 @@
 {
   if (results1.asList().isEmpty()) {
-    return EMPTY;
+    return EMPTY_DOCS;
   }
   if (optimizeSingleShard) {
     boolean canOptimize=false;
     QuerySearchResult result=null;
-    int shardRequestId=-1;
+    int shardIndex=-1;
     if (results1.asList().size() == 1) {
       canOptimize=true;
       result=results1.asList().get(0).value.queryResult();
-      shardRequestId=results1.asList().get(0).index;
+      shardIndex=results1.asList().get(0).index;
     }
  else {
       for (      AtomicArray.Entry<? extends QuerySearchResultProvider> entry : results1.asList()) {
@@ -20,32 +20,34 @@
           }
           canOptimize=true;
           result=entry.value.queryResult();
-          shardRequestId=entry.index;
+          shardIndex=entry.index;
         }
       }
     }
     if (canOptimize) {
       ScoreDoc[] scoreDocs=result.topDocs().scoreDocs;
       if (scoreDocs.length < result.from()) {
-        return EMPTY;
+        return EMPTY_DOCS;
       }
       int resultDocsSize=result.size();
       if ((scoreDocs.length - result.from()) < resultDocsSize) {
         resultDocsSize=scoreDocs.length - result.from();
       }
       if (result.topDocs() instanceof TopFieldDocs) {
-        ShardDoc[] docs=new ShardDoc[resultDocsSize];
+        ScoreDoc[] docs=new ScoreDoc[resultDocsSize];
         for (int i=0; i < resultDocsSize; i++) {
           ScoreDoc scoreDoc=scoreDocs[result.from() + i];
-          docs[i]=new ShardFieldDoc(shardRequestId,scoreDoc.doc,scoreDoc.score,((FieldDoc)scoreDoc).fields);
+          scoreDoc.shardIndex=shardIndex;
+          docs[i]=scoreDoc;
         }
         return docs;
       }
  else {
-        ShardDoc[] docs=new ShardDoc[resultDocsSize];
+        ScoreDoc[] docs=new ScoreDoc[resultDocsSize];
         for (int i=0; i < resultDocsSize; i++) {
           ScoreDoc scoreDoc=scoreDocs[result.from() + i];
-          docs[i]=new ShardScoreDoc(shardRequestId,scoreDoc.doc,scoreDoc.score);
+          scoreDoc.shardIndex=shardIndex;
+          docs[i]=scoreDoc;
         }
         return docs;
       }
@@ -90,8 +92,8 @@
       ScoreDoc[] scoreDocs=result.topDocs().scoreDocs;
       totalNumDocs+=scoreDocs.length;
       for (      ScoreDoc doc : scoreDocs) {
-        ShardFieldDoc nodeFieldDoc=new ShardFieldDoc(entry.index,doc.doc,doc.score,((FieldDoc)doc).fields);
-        if (queue.insertWithOverflow(nodeFieldDoc) == nodeFieldDoc) {
+        doc.shardIndex=entry.index;
+        if (queue.insertWithOverflow(doc) == doc) {
           break;
         }
       }
@@ -104,8 +106,8 @@
       ScoreDoc[] scoreDocs=result.topDocs().scoreDocs;
       totalNumDocs+=scoreDocs.length;
       for (      ScoreDoc doc : scoreDocs) {
-        ShardScoreDoc nodeScoreDoc=new ShardScoreDoc(entry.index,doc.doc,doc.score);
-        if (queue.insertWithOverflow(nodeScoreDoc) == nodeScoreDoc) {
+        doc.shardIndex=entry.index;
+        if (queue.insertWithOverflow(doc) == doc) {
           break;
         }
       }
@@ -119,9 +121,9 @@
     resultDocsSize=totalNumDocs - queryResultProvider.queryResult().from();
   }
   if (resultDocsSize <= 0) {
-    return EMPTY;
+    return EMPTY_DOCS;
   }
-  ShardDoc[] shardDocs=new ShardDoc[resultDocsSize];
-  for (int i=resultDocsSize - 1; i >= 0; i--)   shardDocs[i]=(ShardDoc)queue.pop();
+  ScoreDoc[] shardDocs=new ScoreDoc[resultDocsSize];
+  for (int i=resultDocsSize - 1; i >= 0; i--)   shardDocs[i]=(ScoreDoc)queue.pop();
   return shardDocs;
 }
