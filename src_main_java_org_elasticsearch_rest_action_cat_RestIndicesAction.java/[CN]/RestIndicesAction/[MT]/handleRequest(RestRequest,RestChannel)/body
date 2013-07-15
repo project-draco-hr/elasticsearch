@@ -1,20 +1,22 @@
 {
+  final String[] indices=splitIndices(request.param("index"));
   final ClusterStateRequest clusterStateRequest=new ClusterStateRequest();
-  clusterStateRequest.filterMetaData(true);
+  clusterStateRequest.filterMetaData(true).filteredIndices(indices);
   clusterStateRequest.local(request.paramAsBoolean("local",clusterStateRequest.local()));
   clusterStateRequest.masterNodeTimeout(request.paramAsTime("master_timeout",clusterStateRequest.masterNodeTimeout()));
   client.admin().cluster().state(clusterStateRequest,new ActionListener<ClusterStateResponse>(){
     @Override public void onResponse(    final ClusterStateResponse clusterStateResponse){
-      NodesInfoRequest nodesInfoRequest=new NodesInfoRequest();
-      nodesInfoRequest.clear().jvm(true).os(true).process(true);
-      client.admin().cluster().nodesInfo(nodesInfoRequest,new ActionListener<NodesInfoResponse>(){
-        @Override public void onResponse(        final NodesInfoResponse nodesInfoResponse){
-          NodesStatsRequest nodesStatsRequest=new NodesStatsRequest();
-          nodesStatsRequest.clear().jvm(true).fs(true);
-          client.admin().cluster().nodesStats(nodesStatsRequest,new ActionListener<NodesStatsResponse>(){
-            @Override public void onResponse(            NodesStatsResponse nodesStatsResponse){
+      ClusterHealthRequest clusterHealthRequest=Requests.clusterHealthRequest(indices);
+      clusterHealthRequest.local(request.paramAsBoolean("local",clusterHealthRequest.local()));
+      clusterHealthRequest.indices(indices);
+      client.admin().cluster().health(clusterHealthRequest,new ActionListener<ClusterHealthResponse>(){
+        @Override public void onResponse(        final ClusterHealthResponse clusterHealthResponse){
+          IndicesStatsRequest indicesStatsRequest=new IndicesStatsRequest();
+          indicesStatsRequest.clear().store(true).docs(true);
+          client.admin().indices().stats(indicesStatsRequest,new ActionListener<IndicesStatsResponse>(){
+            @Override public void onResponse(            IndicesStatsResponse indicesStatsResponse){
               try {
-                channel.sendResponse(RestTable.buildResponse(buildTable(clusterStateResponse,nodesInfoResponse,nodesStatsResponse),request,channel));
+                channel.sendResponse(RestTable.buildResponse(buildTable(clusterStateResponse,clusterHealthResponse,indicesStatsResponse),request,channel));
               }
  catch (              Throwable e) {
                 onFailure(e);
