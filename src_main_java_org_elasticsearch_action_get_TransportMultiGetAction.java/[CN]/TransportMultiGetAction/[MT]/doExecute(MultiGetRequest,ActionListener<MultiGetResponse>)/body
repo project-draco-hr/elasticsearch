@@ -1,12 +1,12 @@
 {
   ClusterState clusterState=clusterService.state();
   clusterState.blocks().globalBlockedRaiseException(ClusterBlockLevel.READ);
-  final MultiGetItemResponse[] responses=new MultiGetItemResponse[request.items.size()];
+  final AtomicArray<MultiGetItemResponse> responses=new AtomicArray<MultiGetItemResponse>(request.items.size());
   Map<ShardId,MultiGetShardRequest> shardRequests=new HashMap<ShardId,MultiGetShardRequest>();
   for (int i=0; i < request.items.size(); i++) {
     MultiGetRequest.Item item=request.items.get(i);
     if (!clusterState.metaData().hasConcreteIndex(item.index())) {
-      responses[i]=new MultiGetItemResponse(null,new MultiGetResponse.Failure(item.index(),item.type(),item.id(),"[" + item.index() + "] missing"));
+      responses.set(i,new MultiGetItemResponse(null,new MultiGetResponse.Failure(item.index(),item.type(),item.id(),"[" + item.index() + "] missing")));
       continue;
     }
     item.routing(clusterState.metaData().resolveIndexRouting(item.routing(),item.index()));
@@ -23,16 +23,14 @@
     shardRequest.add(i,item.type(),item.id(),item.fields());
   }
   if (shardRequests.size() == 0) {
-    listener.onResponse(new MultiGetResponse(responses));
+    listener.onResponse(new MultiGetResponse(responses.toArray(new MultiGetItemResponse[responses.length()])));
   }
   final AtomicInteger counter=new AtomicInteger(shardRequests.size());
   for (  final MultiGetShardRequest shardRequest : shardRequests.values()) {
     shardAction.execute(shardRequest,new ActionListener<MultiGetShardResponse>(){
       @Override public void onResponse(      MultiGetShardResponse response){
-synchronized (responses) {
-          for (int i=0; i < response.locations.size(); i++) {
-            responses[response.locations.get(i)]=new MultiGetItemResponse(response.responses.get(i),response.failures.get(i));
-          }
+        for (int i=0; i < response.locations.size(); i++) {
+          responses.set(response.locations.get(i),new MultiGetItemResponse(response.responses.get(i),response.failures.get(i)));
         }
         if (counter.decrementAndGet() == 0) {
           finishHim();
@@ -40,17 +38,15 @@ synchronized (responses) {
       }
       @Override public void onFailure(      Throwable e){
         String message=ExceptionsHelper.detailedMessage(e);
-synchronized (responses) {
-          for (int i=0; i < shardRequest.locations.size(); i++) {
-            responses[shardRequest.locations.get(i)]=new MultiGetItemResponse(null,new MultiGetResponse.Failure(shardRequest.index(),shardRequest.types.get(i),shardRequest.ids.get(i),message));
-          }
+        for (int i=0; i < shardRequest.locations.size(); i++) {
+          responses.set(shardRequest.locations.get(i),new MultiGetItemResponse(null,new MultiGetResponse.Failure(shardRequest.index(),shardRequest.types.get(i),shardRequest.ids.get(i),message)));
         }
         if (counter.decrementAndGet() == 0) {
           finishHim();
         }
       }
       private void finishHim(){
-        listener.onResponse(new MultiGetResponse(responses));
+        listener.onResponse(new MultiGetResponse(responses.toArray(new MultiGetItemResponse[responses.length()])));
       }
     }
 );
