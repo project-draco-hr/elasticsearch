@@ -1,0 +1,33 @@
+{
+  client().admin().indices().prepareCreate("test").execute().actionGet();
+  ensureGreen();
+  logger.info("--> Add dummy doc");
+  client().prepareIndex("test","type","1").setSource("field","value").execute().actionGet();
+  logger.info("--> register a queries");
+  client().prepareIndex("test","_percolator","1").setSource(jsonBuilder().startObject().field("query",matchQuery("field1","b")).field("a","b").endObject()).execute().actionGet();
+  client().prepareIndex("test","_percolator","2").setSource(jsonBuilder().startObject().field("query",matchQuery("field1","c")).endObject()).execute().actionGet();
+  client().prepareIndex("test","_percolator","3").setSource(jsonBuilder().startObject().field("query",boolQuery().must(matchQuery("field1","b")).must(matchQuery("field1","c"))).endObject()).execute().actionGet();
+  client().prepareIndex("test","_percolator","4").setSource(jsonBuilder().startObject().field("query",matchAllQuery()).endObject()).execute().actionGet();
+  client().admin().indices().prepareRefresh("test").execute().actionGet();
+  logger.info("--> Percolate doc with field1=b");
+  PercolateResponse response=client().preparePercolate("test","type").setSource(jsonBuilder().startObject().startObject("doc").field("field1","b").endObject().endObject()).execute().actionGet();
+  assertThat(response.getMatches(),arrayWithSize(2));
+  assertThat(convertFromTextArray(response.getMatches()),arrayContainingInAnyOrder("1","4"));
+  logger.info("--> Percolate doc with field1=c");
+  response=client().preparePercolate("test","type").setSource(jsonBuilder().startObject().startObject("doc").field("field1","c").endObject().endObject()).execute().actionGet();
+  assertThat(response.getMatches(),arrayWithSize(2));
+  assertThat(convertFromTextArray(response.getMatches()),arrayContainingInAnyOrder("2","4"));
+  logger.info("--> Percolate doc with field1=b c");
+  response=client().preparePercolate("test","type").setSource(jsonBuilder().startObject().startObject("doc").field("field1","b c").endObject().endObject()).execute().actionGet();
+  assertThat(response.getMatches(),arrayWithSize(4));
+  assertThat(convertFromTextArray(response.getMatches()),arrayContainingInAnyOrder("1","2","3","4"));
+  logger.info("--> Percolate doc with field1=d");
+  response=client().preparePercolate("test","type").setSource(jsonBuilder().startObject().startObject("doc").field("field1","d").endObject().endObject()).execute().actionGet();
+  assertThat(response.getMatches(),arrayWithSize(1));
+  assertThat(convertFromTextArray(response.getMatches()),arrayContaining("4"));
+  logger.info("--> Search dummy doc, percolate queries must not be included");
+  SearchResponse searchResponse=client().prepareSearch("test").execute().actionGet();
+  assertThat(searchResponse.getHits().totalHits(),equalTo(1L));
+  assertThat(searchResponse.getHits().getAt(0).type(),equalTo("type"));
+  assertThat(searchResponse.getHits().getAt(0).id(),equalTo("1"));
+}

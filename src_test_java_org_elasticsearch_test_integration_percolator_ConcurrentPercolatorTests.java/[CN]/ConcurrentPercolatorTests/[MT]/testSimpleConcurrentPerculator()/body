@@ -1,0 +1,61 @@
+{
+  client().admin().indices().prepareCreate("index").setSettings(ImmutableSettings.settingsBuilder().put("index.number_of_shards",1).put("index.number_of_replicas",0).build()).execute().actionGet();
+  ensureGreen();
+  final XContentBuilder onlyField1=XContentFactory.jsonBuilder().startObject().startObject("doc").field("field1",1).endObject().endObject();
+  final XContentBuilder onlyField2=XContentFactory.jsonBuilder().startObject().startObject("doc").field("field2","value").endObject().endObject();
+  final XContentBuilder bothFields=XContentFactory.jsonBuilder().startObject().startObject("doc").field("field1",1).field("field2","value").endObject().endObject();
+  client().prepareIndex("index","type","1").setSource(XContentFactory.jsonBuilder().startObject().field("field1",1).field("field2","value").endObject()).execute().actionGet();
+  client().prepareIndex("index","_percolator","test1").setSource(XContentFactory.jsonBuilder().startObject().field("query",termQuery("field2","value")).endObject()).execute().actionGet();
+  client().prepareIndex("index","_percolator","test2").setSource(XContentFactory.jsonBuilder().startObject().field("query",termQuery("field1",1)).endObject()).execute().actionGet();
+  final CountDownLatch start=new CountDownLatch(1);
+  final AtomicBoolean stop=new AtomicBoolean(false);
+  final AtomicInteger counts=new AtomicInteger(0);
+  final AtomicBoolean assertionFailure=new AtomicBoolean(false);
+  Thread[] threads=new Thread[5];
+  for (int i=0; i < threads.length; i++) {
+    Runnable r=new Runnable(){
+      @Override public void run(){
+        try {
+          start.await();
+          while (!stop.get()) {
+            int count=counts.incrementAndGet();
+            if ((count > 10000)) {
+              stop.set(true);
+            }
+            PercolateResponse percolate;
+            if (count % 3 == 0) {
+              percolate=client().preparePercolate("index","type").setSource(bothFields).execute().actionGet();
+              assertThat(percolate.getMatches(),arrayWithSize(2));
+              assertThat(convertFromTextArray(percolate.getMatches()),arrayContainingInAnyOrder("test1","test2"));
+            }
+ else             if (count % 3 == 1) {
+              percolate=client().preparePercolate("index","type").setSource(onlyField2).execute().actionGet();
+              assertThat(percolate.getMatches(),arrayWithSize(1));
+              assertThat(convertFromTextArray(percolate.getMatches()),arrayContaining("test1"));
+            }
+ else {
+              percolate=client().preparePercolate("index","type").setSource(onlyField1).execute().actionGet();
+              assertThat(percolate.getMatches(),arrayWithSize(1));
+              assertThat(convertFromTextArray(percolate.getMatches()),arrayContaining("test2"));
+            }
+          }
+        }
+ catch (        InterruptedException e) {
+          Thread.currentThread().interrupt();
+        }
+catch (        AssertionError e) {
+          assertionFailure.set(true);
+          Thread.currentThread().interrupt();
+        }
+      }
+    }
+;
+    threads[i]=new Thread(r);
+    threads[i].start();
+  }
+  start.countDown();
+  for (  Thread thread : threads) {
+    thread.join();
+  }
+  assertThat(assertionFailure.get(),equalTo(false));
+}

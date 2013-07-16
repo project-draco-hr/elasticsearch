@@ -1,0 +1,25 @@
+{
+  long purgeInterval=200;
+  Settings settings=settingsBuilder().put("gateway.type","none").put("indices.ttl.interval",purgeInterval).build();
+  logger.info("--> starting 2 nodes");
+  startNode("node1",settings);
+  startNode("node2",settings);
+  Client client=client("node1");
+  client.admin().indices().prepareDelete().execute().actionGet();
+  ensureGreen(client);
+  String mapping=XContentFactory.jsonBuilder().startObject().startObject("_percolator").startObject("_ttl").field("enabled",true).endObject().startObject("_timestamp").field("enabled",true).endObject().endObject().endObject().string();
+  client.admin().indices().prepareCreate("test").setSettings(settingsBuilder().put("index.number_of_shards",2)).addMapping("_percolator",mapping).addMapping("type1",mapping).execute().actionGet();
+  ensureGreen(client);
+  long ttl=1500;
+  long now=System.currentTimeMillis();
+  client.prepareIndex("test","_percolator","kuku").setSource(jsonBuilder().startObject().startObject("query").startObject("term").field("field1","value1").endObject().endObject().endObject()).setRefresh(true).setTTL(ttl).execute().actionGet();
+  PercolateResponse percolateResponse=client.preparePercolate("test","type1").setSource(jsonBuilder().startObject().startObject("doc").field("field1","value1").endObject().endObject()).execute().actionGet();
+  assertThat(convertFromTextArray(percolateResponse.getMatches()),arrayContaining("kuku"));
+  long now1=System.currentTimeMillis();
+  if ((now1 - now) <= (ttl + purgeInterval)) {
+    logger.info("Waiting for ttl purger...");
+    Thread.sleep((ttl + purgeInterval) - (now1 - now));
+  }
+  percolateResponse=client.preparePercolate("test","type1").setSource(jsonBuilder().startObject().startObject("doc").field("field1","value1").endObject().endObject()).execute().actionGet();
+  assertThat(percolateResponse.getMatches(),emptyArray());
+}

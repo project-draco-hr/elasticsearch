@@ -1,0 +1,31 @@
+{
+  Settings settings=settingsBuilder().put("gateway.type","local").build();
+  logger.info("--> starting 2 nodes");
+  startNode("node1",settings);
+  startNode("node2",settings);
+  Client client=client("node1");
+  client.admin().indices().prepareDelete().execute().actionGet();
+  ensureGreen(client);
+  client.admin().indices().prepareCreate("test").setSettings(settingsBuilder().put("index.number_of_shards",2)).execute().actionGet();
+  ensureGreen(client);
+  logger.info("--> Add dummy docs");
+  client.prepareIndex("test","type1","1").setSource("field1",0).execute().actionGet();
+  client.prepareIndex("test","type2","1").setSource("field1","0").execute().actionGet();
+  logger.info("--> register a queries");
+  for (int i=1; i <= 100; i++) {
+    client.prepareIndex("test","_percolator",Integer.toString(i)).setSource(jsonBuilder().startObject().field("query",rangeQuery("field1").from(0).to(i)).field("type","type1").endObject()).execute().actionGet();
+  }
+  logger.info("--> Percolate doc with field1=95");
+  PercolateResponse response=client.preparePercolate("test","type1").setSource(jsonBuilder().startObject().startObject("doc").field("field1",95).endObject().endObject()).execute().actionGet();
+  assertThat(response.getMatches(),arrayWithSize(6));
+  assertThat(convertFromTextArray(response.getMatches()),arrayContainingInAnyOrder("95","96","97","98","99","100"));
+  logger.info("--> Close and open index to trigger percolate queries loading...");
+  client.admin().indices().prepareClose("test").execute().actionGet();
+  ensureGreen(client);
+  client.admin().indices().prepareOpen("test").execute().actionGet();
+  ensureGreen(client);
+  logger.info("--> Percolate doc with field1=100");
+  response=client.preparePercolate("test","type1").setSource(jsonBuilder().startObject().startObject("doc").field("field1",100).endObject().endObject()).execute().actionGet();
+  assertThat(response.getMatches(),arrayWithSize(1));
+  assertThat(response.getMatches()[0].string(),equalTo("100"));
+}

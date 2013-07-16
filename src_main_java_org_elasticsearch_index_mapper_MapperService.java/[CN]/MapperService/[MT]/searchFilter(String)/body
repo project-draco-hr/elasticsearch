@@ -1,7 +1,26 @@
 {
+  boolean filterPercolateType=hasMapping(PercolatorService.Constants.TYPE_NAME);
+  if (types != null && filterPercolateType) {
+    for (    String type : types) {
+      if (PercolatorService.Constants.TYPE_NAME.equals(type)) {
+        filterPercolateType=false;
+        break;
+      }
+    }
+  }
+  Filter excludePercolatorType=null;
+  if (filterPercolateType) {
+    excludePercolatorType=new NotFilter(documentMapper(PercolatorService.Constants.TYPE_NAME).typeFilter());
+  }
   if (types == null || types.length == 0) {
-    if (hasNested) {
+    if (hasNested && filterPercolateType) {
+      return new AndFilter(ImmutableList.of(excludePercolatorType,NonNestedDocsFilter.INSTANCE));
+    }
+ else     if (hasNested) {
       return NonNestedDocsFilter.INSTANCE;
+    }
+ else     if (filterPercolateType) {
+      return excludePercolatorType;
     }
  else {
       return null;
@@ -31,7 +50,13 @@
     for (int i=0; i < typesBytes.length; i++) {
       typesBytes[i]=new BytesRef(types[i]);
     }
-    return new TermsFilter(TypeFieldMapper.NAME,typesBytes);
+    TermsFilter termsFilter=new TermsFilter(TypeFieldMapper.NAME,typesBytes);
+    if (filterPercolateType) {
+      return new AndFilter(ImmutableList.of(excludePercolatorType,termsFilter));
+    }
+ else {
+      return termsFilter;
+    }
   }
  else {
     XBooleanFilter bool=new XBooleanFilter();
@@ -43,6 +68,9 @@
  else {
         bool.add(new FilterClause(docMapper.typeFilter(),BooleanClause.Occur.SHOULD));
       }
+    }
+    if (filterPercolateType) {
+      bool.add(excludePercolatorType,BooleanClause.Occur.MUST);
     }
     return bool;
   }
