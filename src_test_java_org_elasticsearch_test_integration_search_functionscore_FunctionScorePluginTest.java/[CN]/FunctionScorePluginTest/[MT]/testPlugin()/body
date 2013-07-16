@@ -1,0 +1,14 @@
+{
+  client.index(indexRequest("test").type("type1").id("1").source(jsonBuilder().startObject().field("test","value").field("num1","2013-05-26").endObject())).actionGet();
+  client.index(indexRequest("test").type("type1").id("2").source(jsonBuilder().startObject().field("test","value").field("num1","2013-05-27").endObject())).actionGet();
+  client.admin().indices().prepareRefresh().execute().actionGet();
+  DecayFunctionBuilder gfb=new CustomDistanceScoreBuilder();
+  gfb.setParameters("num1","2013-05-28","+1d");
+  ActionFuture<SearchResponse> response=client.search(searchRequest().searchType(SearchType.QUERY_THEN_FETCH).source(searchSource().explain(false).query(functionScoreQuery(termQuery("test","value")).add(gfb))));
+  SearchResponse sr=response.actionGet();
+  ElasticsearchAssertions.assertNoFailures(sr);
+  SearchHits sh=sr.getHits();
+  assertThat(sh.hits().length,equalTo(2));
+  assertThat(sh.getAt(0).getId(),equalTo("1"));
+  assertThat(sh.getAt(1).getId(),equalTo("2"));
+}
