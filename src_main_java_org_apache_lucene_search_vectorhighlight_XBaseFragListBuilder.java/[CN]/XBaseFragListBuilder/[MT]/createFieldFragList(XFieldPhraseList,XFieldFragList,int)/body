@@ -1,0 +1,45 @@
+{
+  if (fragCharSize < minFragCharSize)   throw new IllegalArgumentException("fragCharSize(" + fragCharSize + ") is too small. It must be "+ minFragCharSize+ " or higher.");
+  List<WeightedPhraseInfo> wpil=new ArrayList<WeightedPhraseInfo>();
+  IteratorQueue<WeightedPhraseInfo> queue=new IteratorQueue<WeightedPhraseInfo>(fieldPhraseList.getPhraseList().iterator());
+  WeightedPhraseInfo phraseInfo=null;
+  int startOffset=0;
+  while ((phraseInfo=queue.top()) != null) {
+    if (phraseInfo.getStartOffset() < startOffset) {
+      queue.removeTop();
+      continue;
+    }
+    wpil.clear();
+    final int currentPhraseStartOffset=phraseInfo.getStartOffset();
+    int currentPhraseEndOffset=phraseInfo.getEndOffset();
+    int spanStart=Math.max(currentPhraseStartOffset - margin,startOffset);
+    int spanEnd=Math.max(currentPhraseEndOffset,spanStart + fragCharSize);
+    if (acceptPhrase(queue.removeTop(),currentPhraseEndOffset - currentPhraseStartOffset,fragCharSize)) {
+      wpil.add(phraseInfo);
+    }
+    while ((phraseInfo=queue.top()) != null) {
+      if (phraseInfo.getEndOffset() <= spanEnd) {
+        currentPhraseEndOffset=phraseInfo.getEndOffset();
+        if (acceptPhrase(queue.removeTop(),currentPhraseEndOffset - currentPhraseStartOffset,fragCharSize)) {
+          wpil.add(phraseInfo);
+        }
+      }
+ else {
+        break;
+      }
+    }
+    if (wpil.isEmpty()) {
+      continue;
+    }
+    final int matchLen=currentPhraseEndOffset - currentPhraseStartOffset;
+    final int newMargin=Math.max(0,(fragCharSize - matchLen) / 2);
+    spanStart=currentPhraseStartOffset - newMargin;
+    if (spanStart < startOffset) {
+      spanStart=startOffset;
+    }
+    spanEnd=spanStart + Math.max(matchLen,fragCharSize);
+    startOffset=spanEnd;
+    fieldFragList.add(spanStart,spanEnd,wpil);
+  }
+  return fieldFragList;
+}
