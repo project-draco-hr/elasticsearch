@@ -5,21 +5,41 @@
   client().prepareIndex("test","type1","2").setSource("field1","the quick lazy huge brown fox jumps over the tree").execute().actionGet();
   client().prepareIndex("test","type1","3").setSource("field1","quick huge brown","field2","the quick lazy huge brown fox jumps over the tree").execute().actionGet();
   refresh();
-  SearchResponse searchResponse=client().prepareSearch().setSearchType(SearchType.DFS_QUERY_THEN_FETCH).setQuery(QueryBuilders.matchQuery("field1","the quick brown").operator(MatchQueryBuilder.Operator.OR)).setRescorer(RescoreBuilder.queryRescorer(QueryBuilders.matchPhraseQuery("field1","the quick brown").slop(2).boost(4.0f)).setQueryWeight(0.5f).setRescoreQueryWeight(0.4f)).setRescoreWindow(5).setExplain(true).execute().actionGet();
-  assertHitCount(searchResponse,3);
-  assertFirstHit(searchResponse,hasId("1"));
-  assertSecondHit(searchResponse,hasId("2"));
-  assertThirdHit(searchResponse,hasId("3"));
-  for (int i=0; i < 3; i++) {
-    assertThat(searchResponse.getHits().getAt(i).explanation(),notNullValue());
-    assertThat(searchResponse.getHits().getAt(i).explanation().isMatch(),equalTo(true));
-    assertThat(searchResponse.getHits().getAt(i).explanation().getDetails().length,equalTo(2));
-    assertThat(searchResponse.getHits().getAt(i).explanation().getDetails()[0].isMatch(),equalTo(true));
-    assertThat(searchResponse.getHits().getAt(i).explanation().getDetails()[0].getDetails()[1].getValue(),equalTo(0.5f));
-    assertThat(searchResponse.getHits().getAt(i).explanation().getDetails()[1].getDetails()[1].getValue(),equalTo(0.4f));
-    if (i == 2) {
-      assertThat(searchResponse.getHits().getAt(i).explanation().getDetails()[1].isMatch(),equalTo(false));
-      assertThat(searchResponse.getHits().getAt(i).explanation().getDetails()[1].getDetails()[0].getValue(),equalTo(0.0f));
+{
+    SearchResponse searchResponse=client().prepareSearch().setSearchType(SearchType.DFS_QUERY_THEN_FETCH).setQuery(QueryBuilders.matchQuery("field1","the quick brown").operator(MatchQueryBuilder.Operator.OR)).setRescorer(RescoreBuilder.queryRescorer(QueryBuilders.matchPhraseQuery("field1","the quick brown").slop(2).boost(4.0f)).setQueryWeight(0.5f).setRescoreQueryWeight(0.4f)).setRescoreWindow(5).setExplain(true).execute().actionGet();
+    assertHitCount(searchResponse,3);
+    assertFirstHit(searchResponse,hasId("1"));
+    assertSecondHit(searchResponse,hasId("2"));
+    assertThirdHit(searchResponse,hasId("3"));
+    for (int i=0; i < 3; i++) {
+      assertThat(searchResponse.getHits().getAt(i).explanation(),notNullValue());
+      assertThat(searchResponse.getHits().getAt(i).explanation().isMatch(),equalTo(true));
+      assertThat(searchResponse.getHits().getAt(i).explanation().getDetails().length,equalTo(2));
+      assertThat(searchResponse.getHits().getAt(i).explanation().getDetails()[0].isMatch(),equalTo(true));
+      if (i == 2) {
+        assertThat(searchResponse.getHits().getAt(i).explanation().getDetails()[1].getValue(),equalTo(0.5f));
+      }
+ else {
+        assertThat(searchResponse.getHits().getAt(i).explanation().getDescription(),equalTo("sum of:"));
+        assertThat(searchResponse.getHits().getAt(i).explanation().getDetails()[0].getDetails()[1].getValue(),equalTo(0.5f));
+        assertThat(searchResponse.getHits().getAt(i).explanation().getDetails()[1].getDetails()[1].getValue(),equalTo(0.4f));
+      }
+    }
+  }
+  String[] scoreModes=new String[]{"max","min","avg","total","multiply",""};
+  String[] descriptionModes=new String[]{"max of:","min of:","avg of:","sum of:","product of:","sum of:"};
+  for (int i=0; i < scoreModes.length; i++) {
+    QueryRescorer rescoreQuery=RescoreBuilder.queryRescorer(QueryBuilders.matchQuery("field1","the quick brown").boost(4.0f)).setQueryWeight(0.5f).setRescoreQueryWeight(0.4f);
+    if (!"".equals(scoreModes[i])) {
+      rescoreQuery.setScoreMode(scoreModes[i]);
+    }
+    SearchResponse searchResponse=client().prepareSearch().setSearchType(SearchType.DFS_QUERY_THEN_FETCH).setQuery(QueryBuilders.matchQuery("field1","the quick brown").operator(MatchQueryBuilder.Operator.OR)).setRescorer(rescoreQuery).setRescoreWindow(5).setExplain(true).execute().actionGet();
+    assertHitCount(searchResponse,3);
+    assertFirstHit(searchResponse,hasId("1"));
+    assertSecondHit(searchResponse,hasId("2"));
+    assertThirdHit(searchResponse,hasId("3"));
+    for (int j=0; j < 3; j++) {
+      assertThat(searchResponse.getHits().getAt(j).explanation().getDescription(),equalTo(descriptionModes[i]));
     }
   }
 }
