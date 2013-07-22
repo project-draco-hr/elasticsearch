@@ -2,6 +2,7 @@
   ChannelFuture[] connectLow=new ChannelFuture[nodeChannels.low.length];
   ChannelFuture[] connectMed=new ChannelFuture[nodeChannels.med.length];
   ChannelFuture[] connectHigh=new ChannelFuture[nodeChannels.high.length];
+  ChannelFuture[] connectPing=new ChannelFuture[nodeChannels.ping.length];
   InetSocketAddress address=((InetSocketTransportAddress)node.address()).address();
   for (int i=0; i < connectLow.length; i++) {
     connectLow[i]=clientBootstrap.connect(address);
@@ -11,6 +12,9 @@
   }
   for (int i=0; i < connectHigh.length; i++) {
     connectHigh[i]=clientBootstrap.connect(address);
+  }
+  for (int i=0; i < connectPing.length; i++) {
+    connectPing[i]=clientBootstrap.connect(address);
   }
   try {
     for (int i=0; i < connectLow.length; i++) {
@@ -37,6 +41,14 @@
       nodeChannels.high[i]=connectHigh[i].getChannel();
       nodeChannels.high[i].getCloseFuture().addListener(new ChannelCloseListener(node));
     }
+    for (int i=0; i < connectPing.length; i++) {
+      connectPing[i].awaitUninterruptibly((long)(connectTimeout.millis() * 1.5));
+      if (!connectPing[i].isSuccess()) {
+        throw new ConnectTransportException(node,"connect_timeout[" + connectTimeout + "]",connectPing[i].getCause());
+      }
+      nodeChannels.ping[i]=connectPing[i].getChannel();
+      nodeChannels.ping[i].getCloseFuture().addListener(new ChannelCloseListener(node));
+    }
     if (nodeChannels.low.length == 0) {
       if (nodeChannels.med.length > 0) {
         nodeChannels.low=nodeChannels.med;
@@ -59,6 +71,14 @@
       }
  else {
         nodeChannels.high=nodeChannels.low;
+      }
+    }
+    if (nodeChannels.ping.length == 0) {
+      if (nodeChannels.high.length > 0) {
+        nodeChannels.ping=nodeChannels.high;
+      }
+ else {
+        nodeChannels.ping=nodeChannels.med;
       }
     }
   }
