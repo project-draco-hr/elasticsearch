@@ -13,10 +13,8 @@
   assertThat(indicesResponse.getTotal().getPercolate().getCurrent(),equalTo(0l));
   NodesStatsResponse nodesResponse=client().admin().cluster().prepareNodesStats().execute().actionGet();
   long percolateCount=0;
-  long percolateSumTime=0;
   for (  NodeStats nodeStats : nodesResponse) {
     percolateCount+=nodeStats.getIndices().getPercolate().getCount();
-    percolateSumTime+=nodeStats.getIndices().getPercolate().getTimeInMillis();
   }
   assertThat(percolateCount,equalTo(5l));
   logger.info("--> Second percolate request");
@@ -28,10 +26,29 @@
   assertThat(indicesResponse.getTotal().getPercolate().getCurrent(),equalTo(0l));
   nodesResponse=client().admin().cluster().prepareNodesStats().execute().actionGet();
   percolateCount=0;
-  percolateSumTime=0;
+  for (  NodeStats nodeStats : nodesResponse) {
+    percolateCount+=nodeStats.getIndices().getPercolate().getCount();
+  }
+  assertThat(percolateCount,equalTo(10l));
+  boolean moreThanOneMs=false;
+  int counter=3;
+  do {
+    indicesResponse=client().admin().indices().prepareStats("test").execute().actionGet();
+    if (indicesResponse.getTotal().getPercolate().getTimeInMillis() > 0) {
+      moreThanOneMs=true;
+      break;
+    }
+    logger.info("--> {}th percolate request",counter);
+    response=client().preparePercolate("test","type").setSource(jsonBuilder().startObject().startObject("doc").field("field","val").endObject().endObject()).execute().actionGet();
+    assertThat(response.getMatches(),arrayWithSize(1));
+    assertThat(convertFromTextArray(response.getMatches()),arrayContaining("1"));
+  }
+ while (++counter <= 1000);
+  assertTrue(moreThanOneMs,"Something is off, we should have spent at least 1ms on percolating...");
+  long percolateSumTime=0;
   for (  NodeStats nodeStats : nodesResponse) {
     percolateCount+=nodeStats.getIndices().getPercolate().getCount();
     percolateSumTime+=nodeStats.getIndices().getPercolate().getTimeInMillis();
   }
-  assertThat(percolateCount,equalTo(10l));
+  assertThat(percolateSumTime,greaterThan(0l));
 }
