@@ -1,0 +1,41 @@
+{
+  ClusterState currentState=clusterService.state();
+  ClusterState.Builder builder=newClusterStateBuilder();
+  if (!request.filterNodes()) {
+    builder.nodes(currentState.nodes());
+  }
+  if (!request.filterRoutingTable()) {
+    builder.routingTable(currentState.routingTable());
+    builder.allocationExplanation(currentState.allocationExplanation());
+  }
+  if (!request.filterBlocks()) {
+    builder.blocks(currentState.blocks());
+  }
+  if (!request.filterMetaData()) {
+    MetaData.Builder mdBuilder=newMetaDataBuilder();
+    if (request.filteredIndices().length == 0 && request.filteredIndexTemplates().length == 0) {
+      mdBuilder.metaData(currentState.metaData());
+    }
+    if (request.filteredIndices().length > 0) {
+      if (!(request.filteredIndices().length == 1 && ClusterStateRequest.NONE.equals(request.filteredIndices()[0]))) {
+        String[] indices=currentState.metaData().concreteIndicesIgnoreMissing(request.filteredIndices());
+        for (        String filteredIndex : indices) {
+          IndexMetaData indexMetaData=currentState.metaData().index(filteredIndex);
+          if (indexMetaData != null) {
+            mdBuilder.put(indexMetaData,false);
+          }
+        }
+      }
+    }
+    if (request.filteredIndexTemplates().length > 0) {
+      for (      String templateName : request.filteredIndexTemplates()) {
+        IndexTemplateMetaData indexTemplateMetaData=currentState.metaData().templates().get(templateName);
+        if (indexTemplateMetaData != null) {
+          mdBuilder.put(indexTemplateMetaData);
+        }
+      }
+    }
+    builder.metaData(mdBuilder);
+  }
+  listener.onResponse(new ClusterStateResponse(clusterName,builder.build()));
+}

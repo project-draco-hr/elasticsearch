@@ -4,10 +4,10 @@
     @Override public TimeValue timeout(){
       return request.masterTimeout;
     }
-    @Override public void onTimeout(    TimeValue timeout,    String source){
-      listener.onFailure(new ProcessClusterEventTimeoutException(timeout,source));
+    @Override public void onFailure(    String source,    Throwable t){
+      listener.onFailure(t);
     }
-    @Override public ClusterState execute(    ClusterState currentState){
+    @Override public ClusterState execute(    final ClusterState currentState) throws Exception {
       List<String> indicesToClose=Lists.newArrayList();
       try {
         if (request.indices.length == 0) {
@@ -15,7 +15,7 @@
         }
         for (        String index : request.indices) {
           if (!currentState.metaData().hasIndex(index)) {
-            listener.onFailure(new IndexMissingException(new Index(index)));
+            throw new IndexMissingException(new Index(index));
           }
         }
         for (        String index : request.indices) {
@@ -94,7 +94,6 @@
           }
         }
         if (mappings.isEmpty()) {
-          listener.onResponse(new Response(true));
           return currentState;
         }
         MetaData.Builder builder=newMetaDataBuilder().metaData(currentState.metaData());
@@ -123,17 +122,13 @@
         mappingCreatedAction.add(new CountDownListener(counter,listener),request.timeout);
         return updatedState;
       }
- catch (      Throwable e) {
-        listener.onFailure(e);
-        return currentState;
-      }
- finally {
+  finally {
         for (        String index : indicesToClose) {
           indicesService.removeIndex(index,"created for mapping processing");
         }
       }
     }
-    @Override public void clusterStateProcessed(    ClusterState clusterState){
+    @Override public void clusterStateProcessed(    String source,    ClusterState oldState,    ClusterState newState){
       if (notifyOnPostProcess.get()) {
         listener.onResponse(new Response(true));
       }

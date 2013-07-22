@@ -1,50 +1,38 @@
 {
-  final AtomicBoolean notifyOnPostProcess=new AtomicBoolean();
   clusterService.submitStateUpdateTask("remove-mapping [" + request.mappingType + "]",Priority.URGENT,new TimeoutClusterStateUpdateTask(){
     @Override public TimeValue timeout(){
       return request.masterTimeout;
     }
-    @Override public void onTimeout(    TimeValue timeout,    String source){
-      listener.onFailure(new ProcessClusterEventTimeoutException(timeout,source));
+    @Override public void onFailure(    String source,    Throwable t){
+      listener.onFailure(t);
     }
     @Override public ClusterState execute(    ClusterState currentState){
       if (request.indices.length == 0) {
-        listener.onFailure(new IndexMissingException(new Index("_all")));
-        return currentState;
+        throw new IndexMissingException(new Index("_all"));
       }
-      try {
-        MetaData.Builder builder=newMetaDataBuilder().metaData(currentState.metaData());
-        boolean changed=false;
-        String latestIndexWithout=null;
-        for (        String indexName : request.indices) {
-          IndexMetaData indexMetaData=currentState.metaData().index(indexName);
-          if (indexMetaData != null) {
-            if (indexMetaData.mappings().containsKey(request.mappingType)) {
-              builder.put(newIndexMetaDataBuilder(indexMetaData).removeMapping(request.mappingType));
-              changed=true;
-            }
+      MetaData.Builder builder=newMetaDataBuilder().metaData(currentState.metaData());
+      boolean changed=false;
+      String latestIndexWithout=null;
+      for (      String indexName : request.indices) {
+        IndexMetaData indexMetaData=currentState.metaData().index(indexName);
+        if (indexMetaData != null) {
+          if (indexMetaData.mappings().containsKey(request.mappingType)) {
+            builder.put(newIndexMetaDataBuilder(indexMetaData).removeMapping(request.mappingType));
+            changed=true;
+          }
  else {
-              latestIndexWithout=indexMetaData.index();
-            }
+            latestIndexWithout=indexMetaData.index();
           }
         }
-        if (!changed) {
-          listener.onFailure(new TypeMissingException(new Index(latestIndexWithout),request.mappingType));
-          return currentState;
-        }
-        logger.info("[{}] remove_mapping [{}]",request.indices,request.mappingType);
-        notifyOnPostProcess.set(true);
-        return ClusterState.builder().state(currentState).metaData(builder).build();
       }
- catch (      Throwable e) {
-        listener.onFailure(e);
-        return currentState;
+      if (!changed) {
+        throw new TypeMissingException(new Index(latestIndexWithout),request.mappingType);
       }
+      logger.info("[{}] remove_mapping [{}]",request.indices,request.mappingType);
+      return ClusterState.builder().state(currentState).metaData(builder).build();
     }
-    @Override public void clusterStateProcessed(    ClusterState clusterState){
-      if (notifyOnPostProcess.get()) {
-        listener.onResponse(new Response(true));
-      }
+    @Override public void clusterStateProcessed(    String source,    ClusterState oldState,    ClusterState newState){
+      listener.onResponse(new Response(true));
     }
   }
 );

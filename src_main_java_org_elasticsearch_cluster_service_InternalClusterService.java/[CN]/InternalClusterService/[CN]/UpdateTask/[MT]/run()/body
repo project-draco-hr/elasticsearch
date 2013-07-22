@@ -9,18 +9,21 @@
   try {
     newClusterState=updateTask.execute(previousClusterState);
   }
- catch (  Exception e) {
-    StringBuilder sb=new StringBuilder("failed to execute cluster state update, state:\nversion [").append(previousClusterState.version()).append("], source [").append(source).append("]\n");
-    sb.append(previousClusterState.nodes().prettyPrint());
-    sb.append(previousClusterState.routingTable().prettyPrint());
-    sb.append(previousClusterState.readOnlyRoutingNodes().prettyPrint());
-    logger.warn(sb.toString(),e);
+ catch (  Throwable e) {
+    if (logger.isTraceEnabled()) {
+      StringBuilder sb=new StringBuilder("failed to execute cluster state update, state:\nversion [").append(previousClusterState.version()).append("], source [").append(source).append("]\n");
+      sb.append(previousClusterState.nodes().prettyPrint());
+      sb.append(previousClusterState.routingTable().prettyPrint());
+      sb.append(previousClusterState.readOnlyRoutingNodes().prettyPrint());
+      logger.trace(sb.toString(),e);
+    }
+    updateTask.onFailure(source,e);
     return;
   }
   if (previousClusterState == newClusterState) {
     logger.debug("processing [{}]: no change in cluster_state",source);
     if (updateTask instanceof ProcessedClusterStateUpdateTask) {
-      ((ProcessedClusterStateUpdateTask)updateTask).clusterStateProcessed(newClusterState);
+      ((ProcessedClusterStateUpdateTask)updateTask).clusterStateProcessed(source,previousClusterState,newClusterState);
     }
     return;
   }
@@ -101,7 +104,7 @@
 );
     }
     if (updateTask instanceof ProcessedClusterStateUpdateTask) {
-      ((ProcessedClusterStateUpdateTask)updateTask).clusterStateProcessed(newClusterState);
+      ((ProcessedClusterStateUpdateTask)updateTask).clusterStateProcessed(source,previousClusterState,newClusterState);
     }
     logger.debug("processing [{}]: done applying updated cluster_state",source);
   }

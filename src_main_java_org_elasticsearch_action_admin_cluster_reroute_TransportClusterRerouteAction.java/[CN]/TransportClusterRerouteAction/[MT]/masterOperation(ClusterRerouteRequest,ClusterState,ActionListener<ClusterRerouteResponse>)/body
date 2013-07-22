@@ -1,0 +1,25 @@
+{
+  clusterService.submitStateUpdateTask("cluster_reroute (api)",Priority.URGENT,new TimeoutClusterStateUpdateTask(){
+    private volatile ClusterState clusterStateToSend;
+    @Override public TimeValue timeout(){
+      return request.masterNodeTimeout();
+    }
+    @Override public void onFailure(    String source,    Throwable t){
+      logger.debug("failed to perform [{}]",t,source);
+      listener.onFailure(t);
+    }
+    @Override public ClusterState execute(    ClusterState currentState){
+      RoutingAllocation.Result routingResult=allocationService.reroute(currentState,request.commands);
+      ClusterState newState=newClusterStateBuilder().state(currentState).routingResult(routingResult).build();
+      clusterStateToSend=newState;
+      if (request.dryRun) {
+        return currentState;
+      }
+      return newState;
+    }
+    @Override public void clusterStateProcessed(    String source,    ClusterState oldState,    ClusterState newState){
+      listener.onResponse(new ClusterRerouteResponse(clusterStateToSend));
+    }
+  }
+);
+}
