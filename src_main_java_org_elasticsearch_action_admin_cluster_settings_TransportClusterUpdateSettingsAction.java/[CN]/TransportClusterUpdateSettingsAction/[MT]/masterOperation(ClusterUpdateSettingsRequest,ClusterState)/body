@@ -3,7 +3,14 @@
   final CountDownLatch latch=new CountDownLatch(1);
   final ImmutableSettings.Builder transientUpdates=ImmutableSettings.settingsBuilder();
   final ImmutableSettings.Builder persistentUpdates=ImmutableSettings.settingsBuilder();
-  clusterService.submitStateUpdateTask("cluster_update_settings",Priority.URGENT,new ProcessedClusterStateUpdateTask(){
+  clusterService.submitStateUpdateTask("cluster_update_settings",Priority.URGENT,new TimeoutClusterStateUpdateTask(){
+    @Override public TimeValue timeout(){
+      return request.masterNodeTimeout();
+    }
+    @Override public void onTimeout(    TimeValue timeout,    String source){
+      failureRef.set(new ProcessClusterEventTimeoutException(timeout,source));
+      latch.countDown();
+    }
     @Override public ClusterState execute(    ClusterState currentState){
       try {
         boolean changed=false;
@@ -58,7 +65,7 @@
         }
         return ClusterState.builder().state(currentState).metaData(metaData).blocks(blocks).build();
       }
- catch (      Exception e) {
+ catch (      Throwable e) {
         latch.countDown();
         logger.warn("failed to update cluster settings",e);
         return currentState;

@@ -8,7 +8,13 @@
     return;
   }
   final DeleteIndexListener listener=new DeleteIndexListener(mdLock,request,userListener);
-  clusterService.submitStateUpdateTask("delete-index [" + request.index + "]",Priority.URGENT,new ClusterStateUpdateTask(){
+  clusterService.submitStateUpdateTask("delete-index [" + request.index + "]",Priority.URGENT,new TimeoutClusterStateUpdateTask(){
+    @Override public TimeValue timeout(){
+      return request.masterTimeout;
+    }
+    @Override public void onTimeout(    TimeValue timeout,    String source){
+      listener.onFailure(new ProcessClusterEventTimeoutException(timeout,source));
+    }
     @Override public ClusterState execute(    ClusterState currentState){
       try {
         if (!currentState.metaData().hasConcreteIndex(request.index)) {
@@ -47,6 +53,8 @@
         listener.onFailure(e);
         return currentState;
       }
+    }
+    @Override public void clusterStateProcessed(    ClusterState clusterState){
     }
   }
 );

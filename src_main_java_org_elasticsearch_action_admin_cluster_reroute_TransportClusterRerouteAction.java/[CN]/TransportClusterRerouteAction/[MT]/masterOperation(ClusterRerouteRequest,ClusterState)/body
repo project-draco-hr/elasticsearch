@@ -2,7 +2,14 @@
   final AtomicReference<Throwable> failureRef=new AtomicReference<Throwable>();
   final AtomicReference<ClusterState> clusterStateResponse=new AtomicReference<ClusterState>();
   final CountDownLatch latch=new CountDownLatch(1);
-  clusterService.submitStateUpdateTask("cluster_reroute (api)",Priority.URGENT,new ProcessedClusterStateUpdateTask(){
+  clusterService.submitStateUpdateTask("cluster_reroute (api)",Priority.URGENT,new TimeoutClusterStateUpdateTask(){
+    @Override public TimeValue timeout(){
+      return request.masterNodeTimeout();
+    }
+    @Override public void onTimeout(    TimeValue timeout,    String source){
+      failureRef.set(new ProcessClusterEventTimeoutException(timeout,source));
+      latch.countDown();
+    }
     @Override public ClusterState execute(    ClusterState currentState){
       try {
         RoutingAllocation.Result routingResult=allocationService.reroute(currentState,request.commands);
@@ -13,7 +20,7 @@
         }
         return newState;
       }
- catch (      Exception e) {
+ catch (      Throwable e) {
         logger.debug("failed to reroute",e);
         failureRef.set(e);
         latch.countDown();
