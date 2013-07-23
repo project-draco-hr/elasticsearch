@@ -1,49 +1,11 @@
 {
-  clusterService.submitStateUpdateTask("update-mapping [" + index + "]["+ type+ "]",Priority.URGENT,new ProcessedClusterStateUpdateTask(){
+  refreshOrUpdateQueue.add(new UpdateTask(index,type,mappingSource,listener));
+  clusterService.submitStateUpdateTask("update-mapping [" + index + "]["+ type+ "]",Priority.HIGH,new ProcessedClusterStateUpdateTask(){
     @Override public void onFailure(    String source,    Throwable t){
       listener.onFailure(t);
     }
     @Override public ClusterState execute(    final ClusterState currentState) throws Exception {
-      boolean createdIndex=false;
-      try {
-        final IndexMetaData indexMetaData=currentState.metaData().index(index);
-        if (indexMetaData == null) {
-          return currentState;
-        }
-        if (indexMetaData.mappings().containsKey(type) && indexMetaData.mapping(type).source().equals(mappingSource)) {
-          return currentState;
-        }
-        IndexService indexService=indicesService.indexService(index);
-        if (indexService == null) {
-          indexService=indicesService.createIndex(indexMetaData.index(),indexMetaData.settings(),currentState.nodes().localNode().id());
-          createdIndex=true;
-          if (indexMetaData.mappings().containsKey(type)) {
-            indexService.mapperService().merge(type,indexMetaData.mappings().get(type).source().string(),false);
-          }
-        }
-        DocumentMapper updatedMapper=indexService.mapperService().merge(type,mappingSource.string(),false);
-        if (indexMetaData.mappings().containsKey(type) && indexMetaData.mapping(type).source().equals(updatedMapper.mappingSource())) {
-          return currentState;
-        }
-        if (logger.isDebugEnabled()) {
-          try {
-            logger.debug("[{}] update_mapping [{}] (dynamic) with source [{}]",index,type,updatedMapper.mappingSource().string());
-          }
- catch (          IOException e) {
-          }
-        }
- else         if (logger.isInfoEnabled()) {
-          logger.info("[{}] update_mapping [{}] (dynamic)",index,type);
-        }
-        MetaData.Builder builder=newMetaDataBuilder().metaData(currentState.metaData());
-        builder.put(newIndexMetaDataBuilder(indexMetaData).putMapping(new MappingMetaData(updatedMapper)));
-        return newClusterStateBuilder().state(currentState).metaData(builder).build();
-      }
-  finally {
-        if (createdIndex) {
-          indicesService.removeIndex(index,"created for mapping processing");
-        }
-      }
+      return executeRefreshOrUpdate(currentState);
     }
     @Override public void clusterStateProcessed(    String source,    ClusterState oldState,    ClusterState newState){
       listener.onResponse(new Response(true));
