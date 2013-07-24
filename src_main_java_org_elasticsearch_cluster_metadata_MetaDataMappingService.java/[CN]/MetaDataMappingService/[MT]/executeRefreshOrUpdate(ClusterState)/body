@@ -5,6 +5,7 @@
     return currentState;
   }
   Set<String> indicesToRemove=Sets.newHashSet();
+  Set<Tuple<String,String>> processedRefreshes=Sets.newHashSet();
   try {
     boolean dirty=false;
     MetaData.Builder mdBuilder=newMetaDataBuilder().metaData(currentState.metaData());
@@ -29,11 +30,16 @@
         IndexMetaData.Builder indexMetaDataBuilder=newIndexMetaDataBuilder(indexMetaData);
         List<String> updatedTypes=Lists.newArrayList();
         for (        String type : refreshTask.types) {
+          Tuple<String,String> processedRefresh=Tuple.tuple(index,type);
+          if (processedRefreshes.contains(processedRefresh)) {
+            continue;
+          }
           DocumentMapper mapper=indexService.mapperService().documentMapper(type);
           if (!mapper.mappingSource().equals(indexMetaData.mappings().get(type).source())) {
             updatedTypes.add(type);
             indexMetaDataBuilder.putMapping(new MappingMetaData(mapper));
           }
+          processedRefreshes.add(processedRefresh);
         }
         if (updatedTypes.isEmpty()) {
           continue;
@@ -63,6 +69,7 @@
           }
         }
         DocumentMapper updatedMapper=indexService.mapperService().merge(type,mappingSource.string(),false);
+        processedRefreshes.add(Tuple.tuple(index,type));
         if (indexMetaData.mappings().containsKey(type) && indexMetaData.mapping(type).source().equals(updatedMapper.mappingSource())) {
           continue;
         }
