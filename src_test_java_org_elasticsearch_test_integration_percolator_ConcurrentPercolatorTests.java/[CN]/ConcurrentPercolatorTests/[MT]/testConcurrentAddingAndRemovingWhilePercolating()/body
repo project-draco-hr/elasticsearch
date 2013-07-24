@@ -3,9 +3,9 @@
   ensureGreen();
   final int numIndexThreads=3;
   final int numberPercolateOperation=100;
-  final AtomicBoolean assertionFailure=new AtomicBoolean(false);
-  final AtomicInteger indexOperations=new AtomicInteger();
-  final AtomicInteger deleteOperations=new AtomicInteger();
+  final AtomicReference<Throwable> exceptionHolder=new AtomicReference<Throwable>(null);
+  final AtomicInteger idGen=new AtomicInteger(0);
+  final Set<String> liveIds=ConcurrentCollections.newConcurrentSet();
   final AtomicBoolean run=new AtomicBoolean(true);
   Thread[] indexThreads=new Thread[numIndexThreads];
   final Semaphore semaphore=new Semaphore(numIndexThreads,true);
@@ -17,15 +17,21 @@
           while (run.get()) {
             semaphore.acquire();
             try {
-              if ((indexOperations.get() - deleteOperations.get()) > 0 && getRandom().nextInt(100) < 19) {
-                String id=Integer.toString(deleteOperations.incrementAndGet());
+              if (!liveIds.isEmpty() && getRandom().nextInt(100) < 19) {
+                String id;
+                do {
+                  id=Integer.toString(randomInt(idGen.get()));
+                }
+ while (!liveIds.remove(id));
                 DeleteResponse response=client().prepareDelete("index","_percolator",id).execute().actionGet();
                 assertThat(response.getId(),equalTo(id));
-                assertThat(response.isNotFound(),equalTo(false));
+                assertThat("doc[" + id + "] should have been deleted, but isn't",response.isNotFound(),equalTo(false));
               }
  else {
-                String id=Integer.toString(indexOperations.incrementAndGet());
+                String id=Integer.toString(idGen.getAndIncrement());
                 IndexResponse response=client().prepareIndex("index","_percolator",id).setSource(doc).execute().actionGet();
+                liveIds.add(id);
+                assertThat(response.isCreated(),equalTo(true));
                 assertThat(response.getId(),equalTo(id));
               }
             }
@@ -40,7 +46,7 @@
         }
 catch (        Throwable t) {
           run.set(false);
-          assertionFailure.set(true);
+          exceptionHolder.set(t);
           logger.error("Error in indexing thread...",t);
         }
       }
@@ -57,7 +63,7 @@ catch (        Throwable t) {
       if (!run.get()) {
         break;
       }
-      int atLeastExpected=indexOperations.get() - deleteOperations.get();
+      int atLeastExpected=liveIds.size();
       PercolateResponse response=client().preparePercolate("index","type").setSource(percolateDoc).execute().actionGet();
       assertThat(response.getShardFailures(),emptyArray());
       assertThat(response.getSuccessfulShards(),equalTo(response.getTotalShards()));
@@ -71,5 +77,5 @@ catch (        Throwable t) {
   for (  Thread thread : indexThreads) {
     thread.join();
   }
-  assertThat(assertionFailure.get(),equalTo(false));
+  assertThat("exceptionHolder should have been empty, but holds: " + exceptionHolder.toString(),exceptionHolder.get(),nullValue());
 }
