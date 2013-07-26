@@ -1,0 +1,53 @@
+{
+  XContentParser parser=parseContext.parser();
+  Query query=null;
+  float boost=1.0f;
+  FiltersFunctionScoreQuery.ScoreMode scoreMode=FiltersFunctionScoreQuery.ScoreMode.Multiply;
+  ArrayList<FiltersFunctionScoreQuery.FilterFunction> filterFunctions=new ArrayList<FiltersFunctionScoreQuery.FilterFunction>();
+  float maxBoost=Float.MAX_VALUE;
+  String currentFieldName=null;
+  XContentParser.Token token;
+  while ((token=parser.nextToken()) != XContentParser.Token.END_OBJECT) {
+    if (token == XContentParser.Token.FIELD_NAME) {
+      currentFieldName=parser.currentName();
+    }
+ else     if ("query".equals(currentFieldName)) {
+      query=parseContext.parseInnerQuery();
+    }
+ else     if ("filter".equals(currentFieldName)) {
+      query=new XConstantScoreQuery(parseContext.parseInnerFilter());
+    }
+ else     if ("score_mode".equals(currentFieldName) || "scoreMode".equals(currentFieldName)) {
+      scoreMode=parseScoreMode(parseContext,parser);
+    }
+ else     if ("max_boost".equals(currentFieldName) || "maxBoost".equals(currentFieldName)) {
+      maxBoost=parser.floatValue();
+    }
+ else     if ("boost".equals(currentFieldName)) {
+      boost=parser.floatValue();
+    }
+ else     if ("functions".equals(currentFieldName)) {
+      currentFieldName=parseFiltersAndFunctions(parseContext,parser,filterFunctions,currentFieldName);
+    }
+ else {
+      filterFunctions.add(new FiltersFunctionScoreQuery.FilterFunction(null,funtionParserMapper.get(parseContext.index(),currentFieldName).parse(parseContext,parser)));
+    }
+  }
+  if (query == null) {
+    throw new QueryParsingException(parseContext.index(),NAME + " requires 'query' field");
+  }
+  if (filterFunctions.isEmpty()) {
+    return query;
+  }
+  if (filterFunctions.size() == 1 && filterFunctions.get(0).filter == null) {
+    FunctionScoreQuery theQuery=new FunctionScoreQuery(query,filterFunctions.get(0).function);
+    theQuery.setBoost(boost);
+    theQuery.setMaxBoost(maxBoost);
+    return theQuery;
+  }
+ else {
+    FiltersFunctionScoreQuery functionScoreQuery=new FiltersFunctionScoreQuery(query,scoreMode,filterFunctions.toArray(new FiltersFunctionScoreQuery.FilterFunction[filterFunctions.size()]),maxBoost);
+    functionScoreQuery.setBoost(boost);
+    return functionScoreQuery;
+  }
+}
