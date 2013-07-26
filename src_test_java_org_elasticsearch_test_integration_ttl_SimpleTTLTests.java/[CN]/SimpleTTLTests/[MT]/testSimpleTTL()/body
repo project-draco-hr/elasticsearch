@@ -34,12 +34,25 @@
   getResponse=client.prepareGet("test","type2","default_ttl").setFields("_ttl").setRealtime(true).execute().actionGet();
   ttl0=((Number)getResponse.getField("_ttl").getValue()).longValue();
   assertThat(ttl0,greaterThan(0L));
-  logger.info("--> checking purger");
   long shouldBeExpiredDate=now + providedTTLValue + purgeInterval+ 2000;
   now1=System.currentTimeMillis();
   if (shouldBeExpiredDate - now1 > 0) {
     Thread.sleep(shouldBeExpiredDate - now1);
   }
+  logger.info("--> checking purger");
+  long currentDeleteCount;
+  do {
+    if (rarely()) {
+      client.admin().indices().prepareFlush("test").setFull(true).execute().actionGet();
+    }
+ else     if (rarely()) {
+      client.admin().indices().prepareOptimize("test").setMaxNumSegments(1).execute().actionGet();
+    }
+    IndicesStatsResponse response=client.admin().indices().prepareStats("test").clear().setIndexing(true).execute().actionGet();
+    currentDeleteCount=response.getIndices().get("test").getTotal().getIndexing().getTotal().getDeleteCount();
+  }
+ while (currentDeleteCount < 4);
+  assertThat(currentDeleteCount,equalTo(4l));
   getResponse=client.prepareGet("test","type1","1").setFields("_ttl").setRealtime(true).execute().actionGet();
   assertThat(getResponse.isExists(),equalTo(false));
   getResponse=client.prepareGet("test","type1","with_routing").setRouting("routing").setFields("_ttl").setRealtime(true).execute().actionGet();

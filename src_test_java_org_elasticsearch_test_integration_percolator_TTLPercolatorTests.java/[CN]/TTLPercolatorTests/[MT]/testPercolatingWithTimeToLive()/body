@@ -16,12 +16,24 @@
   PercolateResponse percolateResponse=client.preparePercolate("test","type1").setSource(jsonBuilder().startObject().startObject("doc").field("field1","value1").endObject().endObject()).execute().actionGet();
   assertThat(convertFromTextArray(percolateResponse.getMatches()),arrayContaining("kuku"));
   long timeSpent=System.currentTimeMillis() - now;
-  long waitTime=ttl + purgeInterval + 200;
-  if (timeSpent <= waitTime) {
-    long timeToWait=waitTime - timeSpent;
-    logger.info("Waiting {} ms for ttl purging...",timeToWait);
-    Thread.sleep(timeToWait);
+  long waitTime=ttl + purgeInterval - timeSpent;
+  if (waitTime >= 0) {
+    Thread.sleep(waitTime);
   }
+  logger.info("Checking if the ttl purger has run");
+  long currentDeleteCount;
+  do {
+    if (rarely()) {
+      client.admin().indices().prepareFlush("test").setFull(true).execute().actionGet();
+    }
+ else     if (rarely()) {
+      client.admin().indices().prepareOptimize("test").setMaxNumSegments(1).execute().actionGet();
+    }
+    IndicesStatsResponse response=client.admin().indices().prepareStats("test").clear().setIndexing(true).execute().actionGet();
+    currentDeleteCount=response.getIndices().get("test").getTotal().getIndexing().getTotal().getDeleteCount();
+  }
+ while (currentDeleteCount < 2);
+  assertThat(currentDeleteCount,equalTo(2l));
   percolateResponse=client.preparePercolate("test","type1").setSource(jsonBuilder().startObject().startObject("doc").field("field1","value1").endObject().endObject()).execute().actionGet();
   assertThat(percolateResponse.getMatches(),emptyArray());
 }
