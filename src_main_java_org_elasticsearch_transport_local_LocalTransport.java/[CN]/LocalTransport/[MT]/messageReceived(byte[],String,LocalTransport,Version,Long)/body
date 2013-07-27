@@ -1,0 +1,36 @@
+{
+  try {
+    transportServiceAdapter.received(data.length);
+    StreamInput stream=new BytesStreamInput(data,false);
+    stream=CachedStreamInput.cachedHandles(stream);
+    stream.setVersion(version);
+    long requestId=stream.readLong();
+    byte status=stream.readByte();
+    boolean isRequest=TransportStatus.isRequest(status);
+    if (isRequest) {
+      handleRequest(stream,requestId,sourceTransport,version);
+    }
+ else {
+      final TransportResponseHandler handler=transportServiceAdapter.remove(requestId);
+      if (handler != null) {
+        if (TransportStatus.isError(status)) {
+          handlerResponseError(stream,handler);
+        }
+ else {
+          handleResponse(stream,handler);
+        }
+      }
+    }
+  }
+ catch (  Throwable e) {
+    if (sendRequestId != null) {
+      TransportResponseHandler handler=transportServiceAdapter.remove(sendRequestId);
+      if (handler != null) {
+        handleException(handler,new RemoteTransportException(nodeName(),localAddress,action,e));
+      }
+    }
+ else {
+      logger.warn("Failed to receive message for action [" + action + "]",e);
+    }
+  }
+}
