@@ -1,11 +1,11 @@
 {
-  cluster().ensureAtMostNumNodes(1);
   for (int i=0; i < 20; i++) {
-    run(prepareCreate("test").setSettings(settingsBuilder().put("index.number_of_shards",10)));
-    run(client().prepareIndex("test","type1","id:" + i).setSource("field","test"));
-    refresh();
+    prepareCreate("test").setSettings(settingsBuilder().put("index.number_of_shards",10));
+    client().prepareIndex("test","type1","id:" + i).setSource("field","test").execute().actionGet();
+    RefreshResponse refreshResponse=client().admin().indices().prepareRefresh("test").execute().actionGet();
+    assertThat(refreshResponse.getSuccessfulShards(),greaterThanOrEqualTo(1));
     SearchResponse searchResponse=client().prepareSearch("test").setQuery(QueryBuilders.termQuery("field","test")).execute().actionGet();
-    assertThat("Found unexpected number of hits ShardFailures:" + Arrays.toString(searchResponse.getShardFailures()) + " id: "+ i,searchResponse.getHits().totalHits(),equalTo(1l));
+    assertThat("found unexpected number of hits, shard_failures (we expected to potentially non active ones!):" + Arrays.toString(searchResponse.getShardFailures()) + " id: "+ i,searchResponse.getHits().totalHits(),equalTo(1l));
     wipeIndex("test");
   }
 }
