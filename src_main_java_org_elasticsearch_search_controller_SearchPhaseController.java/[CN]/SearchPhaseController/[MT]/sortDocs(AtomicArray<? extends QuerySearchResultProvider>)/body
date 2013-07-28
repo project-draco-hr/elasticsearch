@@ -1,18 +1,19 @@
 {
-  if (results1.asList().isEmpty()) {
+  List<? extends AtomicArray.Entry<? extends QuerySearchResultProvider>> results=resultsArr.asList();
+  if (results.isEmpty()) {
     return EMPTY_DOCS;
   }
   if (optimizeSingleShard) {
     boolean canOptimize=false;
     QuerySearchResult result=null;
     int shardIndex=-1;
-    if (results1.asList().size() == 1) {
+    if (results.size() == 1) {
       canOptimize=true;
-      result=results1.asList().get(0).value.queryResult();
-      shardIndex=results1.asList().get(0).index;
+      result=results.get(0).value.queryResult();
+      shardIndex=results.get(0).index;
     }
  else {
-      for (      AtomicArray.Entry<? extends QuerySearchResultProvider> entry : results1.asList()) {
+      for (      AtomicArray.Entry<? extends QuerySearchResultProvider> entry : results) {
         if (entry.value.queryResult().topDocs().scoreDocs.length > 0) {
           if (result != null) {
             canOptimize=false;
@@ -53,12 +54,13 @@
       }
     }
   }
-  List<? extends AtomicArray.Entry<? extends QuerySearchResultProvider>> results=QUERY_RESULT_ORDERING.sortedCopy(results1.asList());
-  QuerySearchResultProvider firstResult=results.get(0).value;
+  @SuppressWarnings("unchecked") AtomicArray.Entry<? extends QuerySearchResultProvider>[] sortedResults=results.toArray(new AtomicArray.Entry[results.size()]);
+  Arrays.sort(sortedResults,QUERY_RESULT_ORDERING);
+  QuerySearchResultProvider firstResult=sortedResults[0].value;
   int totalNumDocs=0;
   int queueSize=firstResult.queryResult().from() + firstResult.queryResult().size();
   if (firstResult.includeFetch()) {
-    queueSize*=results.size();
+    queueSize*=sortedResults.length;
   }
   PriorityQueue queue;
   if (firstResult.queryResult().topDocs() instanceof TopFieldDocs) {
@@ -66,7 +68,7 @@
     for (int i=0; i < fieldDocs.fields.length; i++) {
       boolean allValuesAreNull=true;
       boolean resolvedField=false;
-      for (      AtomicArray.Entry<? extends QuerySearchResultProvider> entry : results) {
+      for (      AtomicArray.Entry<? extends QuerySearchResultProvider> entry : sortedResults) {
         for (        ScoreDoc doc : entry.value.queryResult().topDocs().scoreDocs) {
           FieldDoc fDoc=(FieldDoc)doc;
           if (fDoc.fields[i] != null) {
@@ -87,7 +89,7 @@
       }
     }
     queue=new ShardFieldDocSortedHitQueue(fieldDocs.fields,queueSize);
-    for (    AtomicArray.Entry<? extends QuerySearchResultProvider> entry : results) {
+    for (    AtomicArray.Entry<? extends QuerySearchResultProvider> entry : sortedResults) {
       QuerySearchResult result=entry.value.queryResult();
       ScoreDoc[] scoreDocs=result.topDocs().scoreDocs;
       totalNumDocs+=scoreDocs.length;
@@ -101,7 +103,7 @@
   }
  else {
     queue=new ScoreDocQueue(queueSize);
-    for (    AtomicArray.Entry<? extends QuerySearchResultProvider> entry : results) {
+    for (    AtomicArray.Entry<? extends QuerySearchResultProvider> entry : sortedResults) {
       QuerySearchResult result=entry.value.queryResult();
       ScoreDoc[] scoreDocs=result.topDocs().scoreDocs;
       totalNumDocs+=scoreDocs.length;
@@ -115,7 +117,7 @@
   }
   int resultDocsSize=firstResult.queryResult().size();
   if (firstResult.includeFetch()) {
-    resultDocsSize*=results.size();
+    resultDocsSize*=sortedResults.length;
   }
   if (totalNumDocs < queueSize) {
     resultDocsSize=totalNumDocs - firstResult.queryResult().from();
