@@ -7,6 +7,12 @@
         if (versionValue.delete()) {
           return GetResult.NOT_EXISTS;
         }
+        if (get.version() != Versions.MATCH_ANY) {
+          if (get.versionType().isVersionConflict(versionValue.version(),get.version())) {
+            Uid uid=Uid.createUid(get.uid().text());
+            throw new VersionConflictEngineException(shardId,uid.type(),uid.id(),versionValue.version(),get.version());
+          }
+        }
         if (!get.loadSource()) {
           return new GetResult(true,versionValue.version(),null);
         }
@@ -22,18 +28,28 @@
       }
     }
     Searcher searcher=searcher();
+    final Versions.DocIdAndVersion docIdAndVersion;
     try {
-      final Versions.DocIdAndVersion docIdAndVersion=Versions.loadDocIdAndVersion(searcher.reader(),get.uid());
-      if (docIdAndVersion != null) {
-        return new GetResult(searcher,docIdAndVersion);
-      }
+      docIdAndVersion=Versions.loadDocIdAndVersion(searcher.reader(),get.uid());
     }
  catch (    Exception e) {
       searcher.release();
       throw new EngineException(shardId(),"Couldn't resolve version",e);
     }
-    searcher.release();
-    return GetResult.NOT_EXISTS;
+    if (get.version() != Versions.MATCH_ANY && docIdAndVersion != null) {
+      if (get.versionType().isVersionConflict(docIdAndVersion.version,get.version())) {
+        searcher.release();
+        Uid uid=Uid.createUid(get.uid().text());
+        throw new VersionConflictEngineException(shardId,uid.type(),uid.id(),docIdAndVersion.version,get.version());
+      }
+    }
+    if (docIdAndVersion != null) {
+      return new GetResult(searcher,docIdAndVersion);
+    }
+ else {
+      searcher.release();
+      return GetResult.NOT_EXISTS;
+    }
   }
   finally {
     rwl.readLock().unlock();
