@@ -1,7 +1,64 @@
 {
-  PercolateRequest percolateRequest=new PercolateRequest(restRequest.param("index"),restRequest.param("type"));
+  String index=restRequest.param("index");
+  String type=restRequest.param("type");
+  PercolateRequest percolateRequest=new PercolateRequest(index,type);
   percolateRequest.routing(restRequest.param("routing"));
   percolateRequest.preference(restRequest.param("preference"));
   percolateRequest.source(restRequest.content(),restRequest.contentUnsafe());
-  executePercolateRequest(percolateRequest,restRequest,restChannel);
+  percolateRequest.routing(restRequest.param("routing"));
+  percolateRequest.preference(restRequest.param("preference"));
+  GetRequest getRequest=new GetRequest(restRequest.param("get_index",index),restRequest.param("get_type",type),restRequest.param("id"));
+  getRequest.routing(restRequest.param("get_routing"));
+  getRequest.preference(restRequest.param("get_preference"));
+  getRequest.refresh(restRequest.paramAsBoolean("refresh",getRequest.refresh()));
+  getRequest.realtime(restRequest.paramAsBooleanOptional("realtime",null));
+  getRequest.version(RestActions.parseVersion(restRequest));
+  getRequest.versionType(VersionType.fromString(restRequest.param("version_type"),getRequest.versionType()));
+  percolateRequest.getRequest(getRequest);
+  percolateRequest.listenerThreaded(false);
+  client.percolate(percolateRequest,new ActionListener<PercolateResponse>(){
+    @Override public void onResponse(    PercolateResponse response){
+      try {
+        XContentBuilder builder=RestXContentBuilder.restContentBuilder(restRequest);
+        builder.startObject();
+        builder.field(Fields.TOOK,response.getTookInMillis());
+        builder.startObject(Fields._SHARDS);
+        builder.field(Fields.TOTAL,response.getTotalShards());
+        builder.field(Fields.SUCCESSFUL,response.getSuccessfulShards());
+        builder.field(Fields.FAILED,response.getFailedShards());
+        if (response.getShardFailures().length > 0) {
+          builder.startArray(Fields.FAILURES);
+          for (          ShardOperationFailedException shardFailure : response.getShardFailures()) {
+            builder.startObject();
+            builder.field(Fields.INDEX,shardFailure.index());
+            builder.field(Fields.SHARD,shardFailure.shardId());
+            builder.field(Fields.STATUS,shardFailure.status().getStatus());
+            builder.field(Fields.REASON,shardFailure.reason());
+            builder.endObject();
+          }
+          builder.endArray();
+        }
+        builder.endObject();
+        builder.startArray(Fields.MATCHES);
+        for (        Text match : response) {
+          builder.value(match);
+        }
+        builder.endArray();
+        builder.endObject();
+        restChannel.sendResponse(new XContentRestResponse(restRequest,OK,builder));
+      }
+ catch (      Throwable e) {
+        onFailure(e);
+      }
+    }
+    @Override public void onFailure(    Throwable e){
+      try {
+        restChannel.sendResponse(new XContentThrowableRestResponse(restRequest,e));
+      }
+ catch (      IOException e1) {
+        logger.error("Failed to send failure response",e1);
+      }
+    }
+  }
+);
 }
