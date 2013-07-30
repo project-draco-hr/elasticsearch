@@ -11,6 +11,7 @@
   }
   writeStateExecutor.execute(new Runnable(){
     @Override public void run(){
+      Set<String> indicesDeleted=Sets.newHashSet();
       if (event.localNodeMaster()) {
         logger.debug("writing to gateway {} ...",this);
         StopWatch stopWatch=new StopWatch().start();
@@ -25,6 +26,7 @@
           for (          IndexMetaData current : currentMetaData) {
             if (!event.state().metaData().hasIndex(current.index())) {
               delete(current);
+              indicesDeleted.add(current.index());
             }
           }
         }
@@ -34,11 +36,20 @@
           for (          IndexMetaData current : currentMetaData) {
             if (!event.state().metaData().hasIndex(current.index())) {
               FileSystemUtils.deleteRecursively(nodeEnv.indexLocations(new Index(current.index())));
+              indicesDeleted.add(current.index());
             }
           }
         }
       }
       currentMetaData=event.state().metaData();
+      for (      String indexDeleted : indicesDeleted) {
+        try {
+          nodeIndexDeletedAction.nodeIndexStoreDeleted(indexDeleted,event.state().nodes().masterNodeId());
+        }
+ catch (        Exception e) {
+          logger.debug("[{}] failed to notify master on local index store deletion",e,indexDeleted);
+        }
+      }
     }
   }
 );
