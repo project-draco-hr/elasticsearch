@@ -1,0 +1,37 @@
+{
+  client().admin().indices().prepareCreate("test1").setSettings(settingsBuilder().put("index.number_of_shards",2)).execute().actionGet();
+  client().admin().indices().prepareCreate("test2").setSettings(settingsBuilder().put("index.number_of_shards",2)).execute().actionGet();
+  ensureGreen();
+  logger.info("--> registering queries");
+  for (int i=1; i <= 10; i++) {
+    String index=i % 2 == 0 ? "test1" : "test2";
+    client().prepareIndex(index,"_percolator",Integer.toString(i)).setSource(jsonBuilder().startObject().field("query",matchAllQuery()).endObject()).execute().actionGet();
+  }
+  logger.info("--> Percolate doc to index test1");
+  PercolateResponse response=client().preparePercolate().setIndices("test1").setDocumentType("type").setSource(jsonBuilder().startObject().startObject("doc").field("field1","value").endObject().endObject()).execute().actionGet();
+  assertThat(response.getMatches(),arrayWithSize(5));
+  logger.info("--> Percolate doc to index test2");
+  response=client().preparePercolate().setIndices("test2").setDocumentType("type").setSource(jsonBuilder().startObject().startObject("doc").field("field1","value").endObject().endObject()).execute().actionGet();
+  assertThat(response.getMatches(),arrayWithSize(5));
+  logger.info("--> Percolate doc to index test1 and test2");
+  response=client().preparePercolate().setIndices("test1","test2").setDocumentType("type").setSource(jsonBuilder().startObject().startObject("doc").field("field1","value").endObject().endObject()).execute().actionGet();
+  assertThat(response.getMatches(),arrayWithSize(10));
+  logger.info("--> Percolate doc to index test2 and test3, with ignore missing");
+  response=client().preparePercolate().setIndices("test1","test3").setDocumentType("type").setIgnoreIndices(IgnoreIndices.MISSING).setSource(jsonBuilder().startObject().startObject("doc").field("field1","value").endObject().endObject()).execute().actionGet();
+  assertThat(response.getMatches(),arrayWithSize(5));
+  logger.info("--> Adding aliases");
+  IndicesAliasesResponse aliasesResponse=client().admin().indices().prepareAliases().addAlias("test1","my-alias1").addAlias("test2","my-alias1").addAlias("test2","my-alias2").setTimeout(TimeValue.timeValueHours(10)).execute().actionGet();
+  assertTrue(aliasesResponse.isAcknowledged());
+  logger.info("--> Percolate doc to my-alias1");
+  response=client().preparePercolate().setIndices("my-alias1").setDocumentType("type").setSource(jsonBuilder().startObject().startObject("doc").field("field1","value").endObject().endObject()).execute().actionGet();
+  assertThat(response.getMatches(),arrayWithSize(10));
+  for (  PercolateResponse.Match match : response) {
+    assertThat(match.getIndex().string(),anyOf(equalTo("test1"),equalTo("test2")));
+  }
+  logger.info("--> Percolate doc to my-alias2");
+  response=client().preparePercolate().setIndices("my-alias2").setDocumentType("type").setSource(jsonBuilder().startObject().startObject("doc").field("field1","value").endObject().endObject()).execute().actionGet();
+  assertThat(response.getMatches(),arrayWithSize(5));
+  for (  PercolateResponse.Match match : response) {
+    assertThat(match.getIndex().string(),equalTo("test2"));
+  }
+}

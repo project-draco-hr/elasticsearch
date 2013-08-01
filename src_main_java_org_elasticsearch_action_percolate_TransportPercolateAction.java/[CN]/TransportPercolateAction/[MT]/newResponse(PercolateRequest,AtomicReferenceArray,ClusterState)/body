@@ -1,2 +1,43 @@
 {
+  int successfulShards=0;
+  int failedShards=0;
+  List<PercolateShardResponse> shardResults=null;
+  List<ShardOperationFailedException> shardFailures=null;
+  for (int i=0; i < shardsResponses.length(); i++) {
+    Object shardResponse=shardsResponses.get(i);
+    if (shardResponse == null) {
+      failedShards++;
+    }
+ else     if (shardResponse instanceof BroadcastShardOperationFailedException) {
+      failedShards++;
+      if (shardFailures == null) {
+        shardFailures=newArrayList();
+      }
+      shardFailures.add(new DefaultShardOperationFailedException((BroadcastShardOperationFailedException)shardResponse));
+    }
+ else {
+      PercolateShardResponse percolateShardResponse=(PercolateShardResponse)shardResponse;
+      if (shardResults == null) {
+        shardResults=newArrayList();
+      }
+      shardResults.add(percolateShardResponse);
+      successfulShards++;
+    }
+  }
+  long tookInMillis=System.currentTimeMillis() - request.startTime;
+  if (shardResults == null) {
+    return new PercolateResponse(shardsResponses.length(),successfulShards,failedShards,shardFailures,tookInMillis);
+  }
+  int size=0;
+  for (  PercolateShardResponse response : shardResults) {
+    size+=response.matches().length;
+  }
+  List<PercolateResponse.Match> finalMatches=new ArrayList<PercolateResponse.Match>(size);
+  for (  PercolateShardResponse response : shardResults) {
+    Text index=new StringText(response.getIndex());
+    for (    Text id : response.matches()) {
+      finalMatches.add(new PercolateResponse.Match(id,index));
+    }
+  }
+  return new PercolateResponse(shardsResponses.length(),successfulShards,failedShards,shardFailures,finalMatches.toArray(new PercolateResponse.Match[size]),tookInMillis);
 }
