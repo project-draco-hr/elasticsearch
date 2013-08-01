@@ -1,0 +1,34 @@
+{
+  RAMDirectory dir=new RAMDirectory();
+  FilterCodec filterCodec=new FilterCodec("filtered",Codec.getDefault()){
+    public PostingsFormat postingsFormat(){
+      return mapper.postingsFormatProvider().get();
+    }
+  }
+;
+  IndexWriterConfig indexWriterConfig=new IndexWriterConfig(TEST_VERSION_CURRENT,mapper.indexAnalyzer());
+  indexWriterConfig.setCodec(filterCodec);
+  IndexWriter writer=new IndexWriter(dir,indexWriterConfig);
+  for (int i=0; i < weights.length; i++) {
+    Document doc=new Document();
+    BytesRef payload=mapper.buildPayload(new BytesRef(surfaces[i]),weights[i],new BytesRef(Long.toString(weights[i])));
+    doc.add(mapper.getCompletionField(terms[i],payload));
+    if (randomBoolean()) {
+      writer.commit();
+    }
+    writer.addDocument(doc);
+  }
+  writer.commit();
+  writer.forceMerge(1);
+  writer.commit();
+  DirectoryReader reader=DirectoryReader.open(writer,true);
+  assertThat(reader.leaves().size(),equalTo(1));
+  assertThat(reader.leaves().get(0).reader().numDocs(),equalTo(weights.length));
+  AtomicReaderContext atomicReaderContext=reader.leaves().get(0);
+  Terms luceneTerms=atomicReaderContext.reader().terms(mapper.name());
+  Lookup lookup=((Completion090PostingsFormat.CompletionTerms)luceneTerms).getLookup(mapper,false);
+  reader.close();
+  writer.close();
+  dir.close();
+  return lookup;
+}

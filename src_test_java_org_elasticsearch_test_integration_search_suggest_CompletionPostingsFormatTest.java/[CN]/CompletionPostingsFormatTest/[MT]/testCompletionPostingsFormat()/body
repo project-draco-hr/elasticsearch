@@ -1,0 +1,30 @@
+{
+  AnalyzingCompletionLookupProvider provider=new AnalyzingCompletionLookupProvider(true,false,true,true);
+  RAMDirectory dir=new RAMDirectory();
+  IndexOutput output=dir.createOutput("foo.txt",IOContext.DEFAULT);
+  FieldsConsumer consumer=provider.consumer(output);
+  FieldInfo fieldInfo=new FieldInfo("foo",true,1,false,true,true,IndexOptions.DOCS_AND_FREQS_AND_POSITIONS,DocValuesType.SORTED,DocValuesType.BINARY,new HashMap<String,String>());
+  TermsConsumer addField=consumer.addField(fieldInfo);
+  PostingsConsumer postingsConsumer=addField.startTerm(new BytesRef("foofightersgenerator"));
+  postingsConsumer.startDoc(0,1);
+  postingsConsumer.addPosition(256 - 2,provider.buildPayload(new BytesRef("Generator - Foo Fighters"),9,new BytesRef("id:10")),0,1);
+  postingsConsumer.finishDoc();
+  addField.finishTerm(new BytesRef("foofightersgenerator"),new TermStats(1,1));
+  addField.startTerm(new BytesRef("generator"));
+  postingsConsumer.startDoc(0,1);
+  postingsConsumer.addPosition(256 - 1,provider.buildPayload(new BytesRef("Generator - Foo Fighters"),9,new BytesRef("id:10")),0,1);
+  postingsConsumer.finishDoc();
+  addField.finishTerm(new BytesRef("generator"),new TermStats(1,1));
+  addField.finish(1,1,1);
+  consumer.close();
+  output.close();
+  IndexInput input=dir.openInput("foo.txt",IOContext.DEFAULT);
+  LookupFactory load=provider.load(input);
+  PostingsFormatProvider format=new PreBuiltPostingsFormatProvider(new ElasticSearch090PostingsFormat());
+  NamedAnalyzer analyzer=new NamedAnalyzer("foo",new StandardAnalyzer(TEST_VERSION_CURRENT));
+  Lookup lookup=load.getLookup(new CompletionFieldMapper(new Names("foo"),analyzer,analyzer,format,null,true,true,true),false);
+  List<LookupResult> result=lookup.lookup("ge",false,10);
+  assertThat(result.get(0).key.toString(),equalTo("Generator - Foo Fighters"));
+  assertThat(result.get(0).payload.utf8ToString(),equalTo("id:10"));
+  dir.close();
+}

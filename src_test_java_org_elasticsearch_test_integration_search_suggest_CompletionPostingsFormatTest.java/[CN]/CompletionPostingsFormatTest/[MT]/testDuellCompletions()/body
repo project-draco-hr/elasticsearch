@@ -1,0 +1,93 @@
+{
+  final boolean preserveSeparators=getRandom().nextBoolean();
+  final boolean preservePositionIncrements=getRandom().nextBoolean();
+  final boolean usePayloads=getRandom().nextBoolean();
+  final int options=preserveSeparators ? AnalyzingSuggester.PRESERVE_SEP : 0;
+  XAnalyzingSuggester reference=new XAnalyzingSuggester(new StandardAnalyzer(TEST_VERSION_CURRENT),new StandardAnalyzer(TEST_VERSION_CURRENT),options,256,-1,null,false,1);
+  reference.setPreservePositionIncrements(preservePositionIncrements);
+  LineFileDocs docs=new LineFileDocs(getRandom());
+  int num=atLeast(150);
+  final String[] titles=new String[num];
+  final long[] weights=new long[num];
+  for (int i=0; i < titles.length; i++) {
+    Document nextDoc=docs.nextDoc();
+    IndexableField field=nextDoc.getField("title");
+    titles[i]=field.stringValue();
+    weights[i]=between(0,100);
+  }
+  docs.close();
+  final TermFreqIterator primaryIter=new TermFreqIterator(){
+    int index=0;
+    long currentWeight=-1;
+    @Override public Comparator<BytesRef> getComparator(){
+      return null;
+    }
+    @Override public BytesRef next() throws IOException {
+      if (index < titles.length) {
+        currentWeight=weights[index];
+        return new BytesRef(titles[index++]);
+      }
+      return null;
+    }
+    @Override public long weight(){
+      return currentWeight;
+    }
+  }
+;
+  TermFreqIterator iter;
+  if (usePayloads) {
+    iter=new TermFreqPayloadIterator(){
+      @Override public long weight(){
+        return primaryIter.weight();
+      }
+      @Override public Comparator<BytesRef> getComparator(){
+        return primaryIter.getComparator();
+      }
+      @Override public BytesRef next() throws IOException {
+        return primaryIter.next();
+      }
+      @Override public BytesRef payload(){
+        return new BytesRef(Long.toString(weight()));
+      }
+    }
+;
+  }
+ else {
+    iter=primaryIter;
+  }
+  reference.build(iter);
+  PostingsFormatProvider provider=new PreBuiltPostingsFormatProvider(new ElasticSearch090PostingsFormat());
+  NamedAnalyzer namedAnalzyer=new NamedAnalyzer("foo",new StandardAnalyzer(TEST_VERSION_CURRENT));
+  final CompletionFieldMapper mapper=new CompletionFieldMapper(new Names("foo"),namedAnalzyer,namedAnalzyer,provider,null,usePayloads,preserveSeparators,preservePositionIncrements);
+  Lookup buildAnalyzingLookup=buildAnalyzingLookup(mapper,titles,titles,weights);
+  Field field=buildAnalyzingLookup.getClass().getDeclaredField("maxAnalyzedPathsForOneInput");
+  field.setAccessible(true);
+  Field refField=reference.getClass().getDeclaredField("maxAnalyzedPathsForOneInput");
+  refField.setAccessible(true);
+  assertThat(refField.get(reference),equalTo(field.get(buildAnalyzingLookup)));
+  for (int i=0; i < titles.length; i++) {
+    int res=between(1,10);
+    final StringBuilder builder=new StringBuilder();
+    SuggestUtils.analyze(namedAnalzyer.tokenStream("foo",titles[i]),new SuggestUtils.TokenConsumer(){
+      @Override public void nextToken() throws IOException {
+        if (builder.length() == 0) {
+          builder.append(this.charTermAttr.toString());
+        }
+      }
+    }
+);
+    String firstTerm=builder.toString();
+    String prefix=firstTerm.isEmpty() ? "" : firstTerm.substring(0,between(1,firstTerm.length()));
+    List<LookupResult> refLookup=reference.lookup(prefix,false,res);
+    List<LookupResult> lookup=buildAnalyzingLookup.lookup(prefix,false,res);
+    assertThat(refLookup.toString(),lookup.size(),equalTo(refLookup.size()));
+    for (int j=0; j < refLookup.size(); j++) {
+      assertThat(lookup.get(j).key,equalTo(refLookup.get(j).key));
+      assertThat("prefix: " + prefix + " "+ j+ " -- missmatch cost: "+ lookup.get(j).key+ " - "+ lookup.get(j).value+ " | "+ refLookup.get(j).key+ " - "+ refLookup.get(j).value,lookup.get(j).value,equalTo(refLookup.get(j).value));
+      assertThat(lookup.get(j).payload,equalTo(refLookup.get(j).payload));
+      if (usePayloads) {
+        assertThat(lookup.get(j).payload.utf8ToString(),equalTo(Long.toString(lookup.get(j).value)));
+      }
+    }
+  }
+}

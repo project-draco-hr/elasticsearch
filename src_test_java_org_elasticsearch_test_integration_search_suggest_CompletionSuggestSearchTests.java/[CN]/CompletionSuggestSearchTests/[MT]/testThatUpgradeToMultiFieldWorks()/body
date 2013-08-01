@@ -1,0 +1,17 @@
+{
+  client().admin().indices().prepareDelete().get();
+  int randomShardNumber=between(1,5);
+  int randomReplicaNumber=between(0,2);
+  Settings.Builder settingsBuilder=settingsBuilder().put(SETTING_NUMBER_OF_SHARDS,randomShardNumber).put(SETTING_NUMBER_OF_REPLICAS,randomReplicaNumber);
+  client().admin().indices().prepareCreate(INDEX).setSettings(settingsBuilder).get();
+  ensureYellow();
+  client().prepareIndex(INDEX,TYPE,"1").setRefresh(true).setSource(jsonBuilder().startObject().field(FIELD,"Foo Fighters").endObject()).get();
+  PutMappingResponse putMappingResponse=client().admin().indices().preparePutMapping(INDEX).setType(TYPE).setSource(jsonBuilder().startObject().startObject(TYPE).startObject("properties").startObject(FIELD).field("type","multi_field").startObject("fields").startObject(FIELD).field("type","string").endObject().startObject("suggest").field("type","completion").field("index_analyzer","simple").field("search_analyzer","simple").endObject().endObject().endObject().endObject().endObject().endObject()).get();
+  assertThat(putMappingResponse.isAcknowledged(),is(true));
+  SuggestResponse suggestResponse=client().prepareSuggest(INDEX).addSuggestion(new CompletionSuggestionBuilder("suggs").field(FIELD + ".suggest").text("f").size(10)).execute().actionGet();
+  assertSuggestions(suggestResponse,"suggs");
+  client().prepareIndex(INDEX,TYPE,"1").setRefresh(true).setSource(jsonBuilder().startObject().field(FIELD,"Foo Fighters").endObject()).get();
+  waitForRelocation(ClusterHealthStatus.GREEN);
+  SuggestResponse afterReindexingResponse=client().prepareSuggest(INDEX).addSuggestion(new CompletionSuggestionBuilder("suggs").field(FIELD + ".suggest").text("f").size(10)).execute().actionGet();
+  assertSuggestions(afterReindexingResponse,"suggs","Foo Fighters");
+}

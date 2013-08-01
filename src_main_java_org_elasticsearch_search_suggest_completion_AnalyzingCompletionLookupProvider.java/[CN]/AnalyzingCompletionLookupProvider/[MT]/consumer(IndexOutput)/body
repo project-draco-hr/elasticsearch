@@ -1,0 +1,52 @@
+{
+  CodecUtil.writeHeader(output,CODEC_NAME,CODEC_VERSION);
+  return new FieldsConsumer(){
+    private Map<FieldInfo,Long> fieldOffsets=new HashMap<FieldInfo,Long>();
+    @Override public void close() throws IOException {
+      try {
+        long pointer=output.getFilePointer();
+        output.writeVInt(fieldOffsets.size());
+        for (        Map.Entry<FieldInfo,Long> entry : fieldOffsets.entrySet()) {
+          output.writeString(entry.getKey().name);
+          output.writeVLong(entry.getValue());
+        }
+        output.writeLong(pointer);
+        output.flush();
+      }
+  finally {
+        IOUtils.close(output);
+      }
+    }
+    @Override public TermsConsumer addField(    final FieldInfo field) throws IOException {
+      return new TermsConsumer(){
+        final XAnalyzingSuggester.XBuilder builder=new XAnalyzingSuggester.XBuilder(maxSurfaceFormsPerAnalyzedForm,hasPayloads);
+        final CompletionPostingsConsumer postingsConsumer=new CompletionPostingsConsumer(AnalyzingCompletionLookupProvider.this,builder);
+        @Override public PostingsConsumer startTerm(        BytesRef text) throws IOException {
+          builder.startTerm(text);
+          return postingsConsumer;
+        }
+        @Override public Comparator<BytesRef> getComparator() throws IOException {
+          return BytesRef.getUTF8SortedAsUnicodeComparator();
+        }
+        @Override public void finishTerm(        BytesRef text,        TermStats stats) throws IOException {
+          builder.finishTerm(stats.docFreq);
+        }
+        @Override public void finish(        long sumTotalTermFreq,        long sumDocFreq,        int docCount) throws IOException {
+          FST<Pair<Long,BytesRef>> build=builder.build();
+          fieldOffsets.put(field,output.getFilePointer());
+          build.save(output);
+          output.writeVInt(postingsConsumer.getMaxAnalyzedPathsForOneInput());
+          output.writeVInt(maxSurfaceFormsPerAnalyzedForm);
+          output.writeInt(maxGraphExpansions);
+          int options=0;
+          options|=preserveSep ? SERIALIZE_PRESERVE_SEPERATORS : 0;
+          options|=hasPayloads ? SERIALIZE_HAS_PAYLOADS : 0;
+          options|=preservePositionIncrements ? SERIALIZE_PRESERVE_POSITION_INCREMENTS : 0;
+          output.writeVInt(options);
+        }
+      }
+;
+    }
+  }
+;
+}
