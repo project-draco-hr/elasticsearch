@@ -1,0 +1,25 @@
+{
+  client().admin().indices().prepareCreate("test").execute().actionGet();
+  client().admin().cluster().prepareHealth().setWaitForEvents(Priority.LANGUID).setWaitForGreenStatus().execute().actionGet();
+  client().prepareIndex("test","type1","1").setSource(jsonBuilder().startObject().field("name","test").field("title","title1").endObject()).execute().actionGet();
+  client().prepareIndex("test","type1","2").setSource(jsonBuilder().startObject().field("name","test").endObject()).execute().actionGet();
+  client().prepareIndex("test","type1","3").setSource(jsonBuilder().startObject().field("name","test").endObject()).execute().actionGet();
+  client().admin().indices().prepareRefresh().execute().actionGet();
+  SearchResponse searchResponse=client().prepareSearch().setQuery(matchAllQuery()).setFilter(orFilter(termFilter("name","test").filterName("name"),termFilter("title","title1").filterName("title"))).execute().actionGet();
+  assertThat(searchResponse.getShardFailures().length,equalTo(0));
+  assertThat(searchResponse.getHits().totalHits(),equalTo(3l));
+  for (  SearchHit hit : searchResponse.getHits()) {
+    if (hit.id().equals("1")) {
+      assertThat(hit.matchedFilters().length,equalTo(2));
+      assertThat(hit.matchedFilters(),hasItemInArray("name"));
+      assertThat(hit.matchedFilters(),hasItemInArray("title"));
+    }
+ else     if (hit.id().equals("2") || hit.id().equals("3")) {
+      assertThat(hit.matchedFilters().length,equalTo(1));
+      assertThat(hit.matchedFilters(),hasItemInArray("name"));
+    }
+ else {
+      fail("Unexpected document returned with id " + hit.id());
+    }
+  }
+}
