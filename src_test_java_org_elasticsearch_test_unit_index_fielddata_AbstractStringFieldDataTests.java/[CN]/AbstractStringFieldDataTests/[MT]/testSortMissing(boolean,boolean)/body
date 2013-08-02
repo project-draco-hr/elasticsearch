@@ -1,0 +1,49 @@
+{
+  Document d=new Document();
+  final StringField s=new StringField("value","",Field.Store.YES);
+  d.add(s);
+  final String[] values=new String[randomIntBetween(2,10)];
+  for (int i=1; i < values.length; ++i) {
+    values[i]=_TestUtil.randomUnicodeString(getRandom());
+  }
+  final int numDocs=atLeast(100);
+  for (int i=0; i < numDocs; ++i) {
+    final String value=RandomPicks.randomFrom(getRandom(),values);
+    if (value == null) {
+      writer.addDocument(new Document());
+    }
+ else {
+      s.setStringValue(value);
+      writer.addDocument(d);
+    }
+    if (randomInt(10) == 0) {
+      writer.commit();
+    }
+  }
+  final IndexFieldData indexFieldData=getForField("value");
+  IndexSearcher searcher=new IndexSearcher(DirectoryReader.open(writer,true));
+  XFieldComparatorSource comparator=indexFieldData.comparatorSource(first ? "_first" : "_last",SortMode.MIN);
+  TopFieldDocs topDocs=searcher.search(new MatchAllDocsQuery(),randomBoolean() ? numDocs : randomIntBetween(10,numDocs),new Sort(new SortField("value",comparator,reverse)));
+  assertEquals(numDocs,topDocs.totalHits);
+  BytesRef previousValue=first ? null : reverse ? UnicodeUtil.BIG_TERM : new BytesRef();
+  for (int i=0; i < topDocs.scoreDocs.length; ++i) {
+    final String docValue=searcher.doc(topDocs.scoreDocs[i].doc).get("value");
+    if (first && docValue == null) {
+      assertNull(previousValue);
+    }
+ else     if (!first && docValue != null) {
+      assertNotNull(previousValue);
+    }
+    final BytesRef value=docValue == null ? null : new BytesRef(docValue);
+    if (previousValue != null && value != null) {
+      if (reverse) {
+        assertTrue(previousValue.compareTo(value) >= 0);
+      }
+ else {
+        assertTrue(previousValue.compareTo(value) <= 0);
+      }
+    }
+    previousValue=value;
+  }
+  searcher.getIndexReader().close();
+}
