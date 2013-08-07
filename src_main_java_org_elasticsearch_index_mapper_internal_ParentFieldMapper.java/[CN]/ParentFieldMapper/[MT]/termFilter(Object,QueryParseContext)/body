@@ -3,10 +3,26 @@
     return super.termFilter(value,context);
   }
   BytesRef bValue=BytesRefs.toBytesRef(value);
-  BytesRef[] typesValues=new BytesRef[context.mapperService().types().size()];
-  int i=0;
-  for (  String type : context.mapperService().types()) {
-    typesValues[i++]=Uid.createUidAsBytes(type,bValue);
+  if (Uid.hasDelimiter(bValue)) {
+    return new TermFilter(new Term(names.indexName(),bValue));
   }
-  return new TermsFilter(names.indexName(),typesValues);
+  List<String> parentTypes=new ArrayList<String>(context.mapperService().types().size());
+  for (  DocumentMapper documentMapper : context.mapperService()) {
+    if (documentMapper.parentFieldMapper() == null) {
+      parentTypes.add(documentMapper.type());
+    }
+  }
+  if (parentTypes.isEmpty()) {
+    return Queries.MATCH_NO_FILTER;
+  }
+ else   if (parentTypes.size() == 1) {
+    return new TermFilter(new Term(names.indexName(),Uid.createUidAsBytes(parentTypes.get(0),bValue)));
+  }
+ else {
+    List<BytesRef> typesValues=new ArrayList<BytesRef>(parentTypes.size());
+    for (    String type : context.mapperService().types()) {
+      typesValues.add(Uid.createUidAsBytes(type,bValue));
+    }
+    return new TermsFilter(names.indexName(),typesValues);
+  }
 }
