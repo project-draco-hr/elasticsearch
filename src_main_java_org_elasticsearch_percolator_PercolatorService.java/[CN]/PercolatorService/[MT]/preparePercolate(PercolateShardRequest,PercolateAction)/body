@@ -1,0 +1,63 @@
+{
+  IndexService percolateIndexService=indicesService.indexServiceSafe(request.index());
+  IndexShard indexShard=percolateIndexService.shardSafe(request.shardId());
+  ShardPercolateService shardPercolateService=indexShard.shardPercolateService();
+  shardPercolateService.prePercolate();
+  long startTime=System.nanoTime();
+  try {
+    ConcurrentMap<Text,Query> percolateQueries=indexShard.percolateRegistry().percolateQueries();
+    if (percolateQueries.isEmpty()) {
+      return new PercolateShardResponse(request.index(),request.shardId());
+    }
+    final PercolateContext context=new PercolateContext();
+    context.percolateQueries=percolateQueries;
+    context.indexShard=indexShard;
+    ParsedDocument parsedDocument=parsePercolate(percolateIndexService,request,context);
+    if (request.docSource() != null && request.docSource().length() != 0) {
+      parsedDocument=parseFetchedDoc(request.docSource(),percolateIndexService,request.documentType());
+    }
+ else     if (parsedDocument == null) {
+      throw new ElasticSearchParseException("No doc to percolate in the request");
+    }
+    if (context.size < 0) {
+      context.size=0;
+    }
+    final MemoryIndex memoryIndex=cache.get();
+    try {
+      for (      IndexableField field : parsedDocument.rootDoc().getFields()) {
+        if (!field.fieldType().indexed()) {
+          continue;
+        }
+        if (field.name().equals(UidFieldMapper.NAME)) {
+          continue;
+        }
+        TokenStream tokenStream;
+        try {
+          tokenStream=field.tokenStream(parsedDocument.analyzer());
+          if (tokenStream != null) {
+            memoryIndex.addField(field.name(),tokenStream,field.boost());
+          }
+        }
+ catch (        IOException e) {
+          throw new ElasticSearchException("Failed to create token stream",e);
+        }
+      }
+      context.docSearcher=memoryIndex.createSearcher();
+      context.fieldDataService=percolateIndexService.fieldData();
+      IndexCache indexCache=percolateIndexService.cache();
+      try {
+        return action.doPercolateAction(context);
+      }
+  finally {
+        indexCache.clear(context.docSearcher.getIndexReader());
+        context.fieldDataService.clear(context.docSearcher.getIndexReader());
+      }
+    }
+  finally {
+      memoryIndex.reset();
+    }
+  }
+  finally {
+    shardPercolateService.postPercolate(System.nanoTime() - startTime);
+  }
+}

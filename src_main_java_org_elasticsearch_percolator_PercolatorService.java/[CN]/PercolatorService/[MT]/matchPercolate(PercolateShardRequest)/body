@@ -1,35 +1,47 @@
 {
-  return innerPercolate(request,new PercolateAction(){
+  return preparePercolate(request,new PercolateAction(){
     @Override public PercolateShardResponse doPercolateAction(    PercolateContext context){
-      List<Text> matches=new ArrayList<Text>();
+      final List<Text> matches;
+      long count=0;
       if (context.query == null) {
+        matches=new ArrayList<Text>();
         Lucene.ExistsCollector collector=new Lucene.ExistsCollector();
         for (        Map.Entry<Text,Query> entry : context.percolateQueries.entrySet()) {
           collector.reset();
           try {
-            context.searcher.search(entry.getValue(),collector);
+            context.docSearcher.search(entry.getValue(),collector);
           }
  catch (          IOException e) {
             logger.warn("[" + entry.getKey() + "] failed to execute query",e);
           }
           if (collector.exists()) {
-            matches.add(entry.getKey());
+            if (!context.limit) {
+              matches.add(entry.getKey());
+            }
+ else             if (count < context.size) {
+              matches.add(entry.getKey());
+            }
+            count++;
           }
         }
       }
  else {
         Engine.Searcher percolatorSearcher=context.indexShard.searcher();
         try {
-          percolatorSearcher.searcher().search(context.query,match(logger,context.percolateQueries,context.searcher,context.fieldDataService,matches));
+          Match match=match(logger,context.percolateQueries,context.docSearcher,context.fieldDataService,context);
+          percolatorSearcher.searcher().search(context.query,match);
+          matches=match.matches();
+          count=match.counter();
         }
  catch (        IOException e) {
-          logger.warn("failed to execute",e);
+          logger.debug("failed to execute",e);
+          throw new PercolateException(context.indexShard.shardId(),"failed to execute",e);
         }
  finally {
           percolatorSearcher.release();
         }
       }
-      return new PercolateShardResponse(matches.toArray(new Text[matches.size()]),request.index(),request.shardId());
+      return new PercolateShardResponse(matches.toArray(new Text[matches.size()]),count,context,request.index(),request.shardId());
     }
   }
 );
