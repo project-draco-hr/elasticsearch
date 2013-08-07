@@ -3,88 +3,66 @@
   if (!subQueryExpl.isMatch()) {
     return subQueryExpl;
   }
-  if (scoreMode == ScoreMode.First) {
-    for (    FilterFunction filterFunction : filterFunctions) {
-      Bits docSet=DocIdSets.toSafeBits(context.reader(),filterFunction.filter.getDocIdSet(context,context.reader().getLiveDocs()));
-      if (docSet.get(doc)) {
-        filterFunction.function.setNextReader(context);
-        Explanation functionExplanation=filterFunction.function.explainFactor(doc);
-        double factor=functionExplanation.getValue();
-        if (factor > maxBoost) {
-          factor=maxBoost;
-        }
-        float sc=FunctionScoreQuery.toFloat(getBoost() * factor);
-        Explanation filterExplanation=new ComplexExplanation(true,sc,"function score, product of:");
-        filterExplanation.addDetail(new Explanation(1.0f,"match filter: " + filterFunction.filter.toString()));
-        filterExplanation.addDetail(functionExplanation);
-        filterExplanation.addDetail(new Explanation(getBoost(),"queryBoost"));
-        float topLevelScore=subQueryExpl.getValue() * sc;
-        Explanation topLevel=new ComplexExplanation(true,topLevelScore,"function score, score mode [" + scoreMode.toString().toLowerCase(Locale.ROOT) + "]");
-        topLevel.addDetail(subQueryExpl);
-        topLevel.addDetail(filterExplanation);
-        return topLevel;
-      }
+  List<ComplexExplanation> filterExplanations=new ArrayList<ComplexExplanation>();
+  for (  FilterFunction filterFunction : filterFunctions) {
+    Bits docSet=DocIdSets.toSafeBits(context.reader(),filterFunction.filter.getDocIdSet(context,context.reader().getLiveDocs()));
+    if (docSet.get(doc)) {
+      filterFunction.function.setNextReader(context);
+      Explanation functionExplanation=filterFunction.function.explainScore(doc,subQueryExpl);
+      double factor=functionExplanation.getValue();
+      float sc=CombineFunction.toFloat(factor);
+      ComplexExplanation filterExplanation=new ComplexExplanation(true,sc,"function score, product of:");
+      filterExplanation.addDetail(new Explanation(1.0f,"match filter: " + filterFunction.filter.toString()));
+      filterExplanation.addDetail(functionExplanation);
+      filterExplanations.add(filterExplanation);
     }
   }
- else {
-    int count=0;
-    float total=0;
-    float multiply=1;
-    double max=Double.NEGATIVE_INFINITY;
-    double min=Double.POSITIVE_INFINITY;
-    ArrayList<Explanation> filtersExplanations=new ArrayList<Explanation>();
-    for (    FilterFunction filterFunction : filterFunctions) {
-      Bits docSet=DocIdSets.toSafeBits(context.reader(),filterFunction.filter.getDocIdSet(context,context.reader().getLiveDocs()));
-      if (docSet.get(doc)) {
-        filterFunction.function.setNextReader(context);
-        Explanation functionExplanation=filterFunction.function.explainFactor(doc);
-        double factor=functionExplanation.getValue();
-        count++;
-        total+=factor;
-        multiply*=factor;
-        max=Math.max(factor,max);
-        min=Math.min(factor,min);
-        Explanation res=new ComplexExplanation(true,FunctionScoreQuery.toFloat(factor),"function score, product of:");
-        res.addDetail(new Explanation(1.0f,"match filter: " + filterFunction.filter.toString()));
-        res.addDetail(functionExplanation);
-        res.addDetail(new Explanation(getBoost(),"queryBoost"));
-        filtersExplanations.add(res);
-      }
-    }
-    if (count > 0) {
-      double factor=0;
+  if (filterExplanations.size() == 0) {
+    float sc=getBoost() * subQueryExpl.getValue();
+    Explanation res=new ComplexExplanation(true,sc,"function score, no filter match, product of:");
+    res.addDetail(subQueryExpl);
+    res.addDetail(new Explanation(getBoost(),"queryBoost"));
+    return res;
+  }
+  double factor=1.0;
 switch (scoreMode) {
-case Avg:
-        factor=total / count;
-      break;
-case Max:
-    factor=max;
+case First:
+    factor=filterExplanations.get(0).getValue();
   break;
-case Min:
-factor=min;
+case Max:
+double maxFactor=Double.NEGATIVE_INFINITY;
+for (int i=0; i < filterExplanations.size(); i++) {
+factor=Math.max(filterExplanations.get(i).getValue(),maxFactor);
+}
 break;
-case Total:
-factor=total;
+case Min:
+double minFactor=Double.POSITIVE_INFINITY;
+for (int i=0; i < filterExplanations.size(); i++) {
+factor=Math.min(filterExplanations.get(i).getValue(),minFactor);
+}
 break;
 case Multiply:
-factor=multiply;
+for (int i=0; i < filterExplanations.size(); i++) {
+factor*=filterExplanations.get(i).getValue();
+}
 break;
+default :
+double totalFactor=0.0f;
+int count=0;
+for (int i=0; i < filterExplanations.size(); i++) {
+totalFactor+=filterExplanations.get(i).getValue();
+count++;
 }
-if (factor > maxBoost) {
-factor=maxBoost;
-}
-float sc=FunctionScoreQuery.toFloat(factor * subQueryExpl.getValue() * getBoost());
-Explanation res=new ComplexExplanation(true,sc,"function score, score mode [" + scoreMode.toString().toLowerCase(Locale.ROOT) + "]");
-res.addDetail(subQueryExpl);
-for (Explanation explanation : filtersExplanations) {
-res.addDetail(explanation);
-}
-return res;
+if (count != 0) {
+factor=totalFactor;
+if (scoreMode == ScoreMode.Avg) {
+factor/=count;
 }
 }
-float sc=getBoost() * subQueryExpl.getValue();
-Explanation res=new ComplexExplanation(true,sc,"custom score, no filter match, product of:");
-res.addDetail(subQueryExpl);
-res.addDetail(new Explanation(getBoost(),"queryBoost"));
-return res;
+}
+ComplexExplanation factorExplanaition=new ComplexExplanation(true,CombineFunction.toFloat(factor),"function score, score mode [" + scoreMode.toString().toLowerCase(Locale.ROOT) + "]");
+for (int i=0; i < filterExplanations.size(); i++) {
+factorExplanaition.addDetail(filterExplanations.get(i));
+}
+return combineFunction.explain(getBoost(),subQueryExpl,factorExplanaition,maxBoost);
 }
