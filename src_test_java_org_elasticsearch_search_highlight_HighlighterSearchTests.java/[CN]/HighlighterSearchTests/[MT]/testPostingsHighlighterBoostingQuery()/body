@@ -1,0 +1,11 @@
+{
+  client().admin().indices().prepareCreate("test").addMapping("type1",type1PostingsffsetsMapping()).get();
+  ensureGreen();
+  client().prepareIndex("test","type1").setSource("field1","this is a test","field2","The quick brown fox jumps over the lazy dog! Second sentence.").get();
+  refresh();
+  logger.info("--> highlighting and searching on field1");
+  SearchSourceBuilder source=searchSource().query(boostingQuery().positive(termQuery("field2","brown")).negative(termQuery("field2","foobar")).negativeBoost(0.5f)).highlight(highlight().field("field2").preTags("<x>").postTags("</x>"));
+  SearchResponse searchResponse=client().search(searchRequest("test").source(source)).actionGet();
+  assertHitCount(searchResponse,1l);
+  assertThat(searchResponse.getHits().getAt(0).highlightFields().get("field2").fragments()[0].string(),equalTo("The quick <x>brown</x> fox jumps over the lazy dog!"));
+}

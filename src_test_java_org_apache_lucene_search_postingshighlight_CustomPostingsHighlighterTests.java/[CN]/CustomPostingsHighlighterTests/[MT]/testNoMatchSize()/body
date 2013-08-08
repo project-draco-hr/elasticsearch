@@ -1,0 +1,38 @@
+{
+  Directory dir=newDirectory();
+  IndexWriterConfig iwc=newIndexWriterConfig(TEST_VERSION_CURRENT,new MockAnalyzer(random()));
+  iwc.setMergePolicy(newLogMergePolicy());
+  RandomIndexWriter iw=new RandomIndexWriter(random(),dir,iwc);
+  FieldType offsetsType=new FieldType(TextField.TYPE_STORED);
+  offsetsType.setIndexOptions(FieldInfo.IndexOptions.DOCS_AND_FREQS_AND_POSITIONS_AND_OFFSETS);
+  Field body=new Field("body","",offsetsType);
+  Field none=new Field("none","",offsetsType);
+  Document doc=new Document();
+  doc.add(body);
+  doc.add(none);
+  String firstValue="This is a test. Just a test highlighting from postings. Feel free to ignore.";
+  body.setStringValue(firstValue);
+  none.setStringValue(firstValue);
+  iw.addDocument(doc);
+  IndexReader ir=iw.getReader();
+  iw.close();
+  Query query=new TermQuery(new Term("none","highlighting"));
+  SortedSet<Term> queryTerms=extractTerms(query);
+  IndexSearcher searcher=newSearcher(ir);
+  TopDocs topDocs=searcher.search(query,null,10,Sort.INDEXORDER);
+  assertThat(topDocs.totalHits,equalTo(1));
+  int docId=topDocs.scoreDocs[0].doc;
+  List<Object> values=new ArrayList<Object>();
+  values.add(firstValue);
+  BytesRef[] filteredQueryTerms=filterTerms(queryTerms,"body",true);
+  CustomPassageFormatter passageFormatter=new CustomPassageFormatter("<b>","</b>",new DefaultEncoder());
+  CustomPostingsHighlighter highlighter=new CustomPostingsHighlighter(passageFormatter,values,true,Integer.MAX_VALUE - 1,0);
+  Snippet[] snippets=highlighter.highlightDoc("body",filteredQueryTerms,searcher,docId,5);
+  assertThat(snippets.length,equalTo(0));
+  highlighter=new CustomPostingsHighlighter(passageFormatter,values,true,Integer.MAX_VALUE - 1,atLeast(1));
+  snippets=highlighter.highlightDoc("body",filteredQueryTerms,searcher,docId,5);
+  assertThat(snippets.length,equalTo(1));
+  assertThat(snippets[0].getText(),equalTo("This is a test."));
+  ir.close();
+  dir.close();
+}

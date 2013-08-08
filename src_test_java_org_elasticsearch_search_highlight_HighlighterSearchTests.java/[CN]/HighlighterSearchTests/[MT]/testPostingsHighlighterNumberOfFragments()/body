@@ -1,0 +1,43 @@
+{
+  client().admin().indices().prepareCreate("test").addMapping("type1",type1PostingsffsetsMapping()).get();
+  ensureGreen();
+  client().prepareIndex("test","type1","1").setSource("field1","The quick brown fox jumps over the lazy dog. The lazy red fox jumps over the quick dog. The quick brown dog jumps over the lazy fox.","field2","The quick brown fox jumps over the lazy dog. The lazy red fox jumps over the quick dog. The quick brown dog jumps over the lazy fox.").setRefresh(true).get();
+  logger.info("--> highlighting and searching on field1");
+  SearchSourceBuilder source=searchSource().query(termQuery("field1","fox")).highlight(highlight().field(new HighlightBuilder.Field("field1").numOfFragments(5).preTags("<field1>").postTags("</field1>")).field(new HighlightBuilder.Field("field2").numOfFragments(2).preTags("<field2>").postTags("</field2>")));
+  SearchResponse searchResponse=client().search(searchRequest("test").source(source)).actionGet();
+  assertHitCount(searchResponse,1l);
+  Map<String,HighlightField> highlightFieldMap=searchResponse.getHits().getAt(0).highlightFields();
+  assertThat(highlightFieldMap.size(),equalTo(2));
+  HighlightField field1=highlightFieldMap.get("field1");
+  assertThat(field1.fragments().length,equalTo(3));
+  assertThat(field1.fragments()[0].string(),equalTo("The quick brown <field1>fox</field1> jumps over the lazy dog."));
+  assertThat(field1.fragments()[1].string(),equalTo("The lazy red <field1>fox</field1> jumps over the quick dog."));
+  assertThat(field1.fragments()[2].string(),equalTo("The quick brown dog jumps over the lazy <field1>fox</field1>."));
+  HighlightField field2=highlightFieldMap.get("field2");
+  assertThat(field2.fragments().length,equalTo(2));
+  assertThat(field2.fragments()[0].string(),equalTo("The quick brown <field2>fox</field2> jumps over the lazy dog."));
+  assertThat(field2.fragments()[1].string(),equalTo("The lazy red <field2>fox</field2> jumps over the quick dog."));
+  client().prepareIndex("test","type1","2").setSource("field1",new String[]{"The quick brown fox jumps over the lazy dog. Second sentence not finished","The lazy red fox jumps over the quick dog.","The quick brown dog jumps over the lazy fox."}).setRefresh(true).get();
+  source=searchSource().query(termQuery("field1","fox")).highlight(highlight().field(new HighlightBuilder.Field("field1").numOfFragments(0).preTags("<field1>").postTags("</field1>")));
+  searchResponse=client().search(searchRequest("test").source(source)).actionGet();
+  assertHitCount(searchResponse,2l);
+  for (  SearchHit searchHit : searchResponse.getHits()) {
+    highlightFieldMap=searchHit.highlightFields();
+    assertThat(highlightFieldMap.size(),equalTo(1));
+    field1=highlightFieldMap.get("field1");
+    assertThat(field1,notNullValue());
+    if ("1".equals(searchHit.id())) {
+      assertThat(field1.fragments().length,equalTo(1));
+      assertThat(field1.fragments()[0].string(),equalTo("The quick brown <field1>fox</field1> jumps over the lazy dog. The lazy red <field1>fox</field1> jumps over the quick dog. The quick brown dog jumps over the lazy <field1>fox</field1>."));
+    }
+ else     if ("2".equals(searchHit.id())) {
+      assertThat(field1.fragments().length,equalTo(3));
+      assertThat(field1.fragments()[0].string(),equalTo("The quick brown <field1>fox</field1> jumps over the lazy dog. Second sentence not finished"));
+      assertThat(field1.fragments()[1].string(),equalTo("The lazy red <field1>fox</field1> jumps over the quick dog."));
+      assertThat(field1.fragments()[2].string(),equalTo("The quick brown dog jumps over the lazy <field1>fox</field1>."));
+    }
+ else {
+      fail("Only hits with id 1 and 2 are returned");
+    }
+  }
+}

@@ -1,2 +1,103 @@
 {
+  SearchContextHighlight.Field field=highlighterContext.field;
+  SearchContext context=highlighterContext.context;
+  FetchSubPhase.HitContext hitContext=highlighterContext.hitContext;
+  FieldMapper<?> mapper=highlighterContext.mapper;
+  Encoder encoder=field.encoder().equals("html") ? HighlightUtils.Encoders.HTML : HighlightUtils.Encoders.DEFAULT;
+  if (!hitContext.cache().containsKey(CACHE_KEY)) {
+    Map<FieldMapper<?>,org.apache.lucene.search.highlight.Highlighter> mappers=Maps.newHashMap();
+    hitContext.cache().put(CACHE_KEY,mappers);
+  }
+  Map<FieldMapper<?>,org.apache.lucene.search.highlight.Highlighter> cache=(Map<FieldMapper<?>,org.apache.lucene.search.highlight.Highlighter>)hitContext.cache().get(CACHE_KEY);
+  org.apache.lucene.search.highlight.Highlighter entry=cache.get(mapper);
+  if (entry == null) {
+    Query query=highlighterContext.highlightQuery;
+    QueryScorer queryScorer=new CustomQueryScorer(query,field.requireFieldMatch() ? mapper.names().indexName() : null);
+    queryScorer.setExpandMultiTermQuery(true);
+    Fragmenter fragmenter;
+    if (field.numberOfFragments() == 0) {
+      fragmenter=new NullFragmenter();
+    }
+ else     if (field.fragmenter() == null) {
+      fragmenter=new SimpleSpanFragmenter(queryScorer,field.fragmentCharSize());
+    }
+ else     if ("simple".equals(field.fragmenter())) {
+      fragmenter=new SimpleFragmenter(field.fragmentCharSize());
+    }
+ else     if ("span".equals(field.fragmenter())) {
+      fragmenter=new SimpleSpanFragmenter(queryScorer,field.fragmentCharSize());
+    }
+ else {
+      throw new ElasticSearchIllegalArgumentException("unknown fragmenter option [" + field.fragmenter() + "] for the field ["+ highlighterContext.fieldName+ "]");
+    }
+    Formatter formatter=new SimpleHTMLFormatter(field.preTags()[0],field.postTags()[0]);
+    entry=new org.apache.lucene.search.highlight.Highlighter(formatter,encoder,queryScorer);
+    entry.setTextFragmenter(fragmenter);
+    entry.setMaxDocCharsToAnalyze(Integer.MAX_VALUE);
+    cache.put(mapper,entry);
+  }
+  int numberOfFragments=field.numberOfFragments() == 0 ? 1 : field.numberOfFragments();
+  ArrayList<TextFragment> fragsList=new ArrayList<TextFragment>();
+  List<Object> textsToHighlight;
+  try {
+    textsToHighlight=HighlightUtils.loadFieldValues(mapper,context,hitContext);
+    for (    Object textToHighlight : textsToHighlight) {
+      String text=textToHighlight.toString();
+      Analyzer analyzer=context.mapperService().documentMapper(hitContext.hit().type()).mappers().indexAnalyzer();
+      TokenStream tokenStream=analyzer.tokenStream(mapper.names().indexName(),text);
+      if (!tokenStream.hasAttribute(CharTermAttribute.class) || !tokenStream.hasAttribute(OffsetAttribute.class)) {
+        continue;
+      }
+      TextFragment[] bestTextFragments=entry.getBestTextFragments(tokenStream,text,false,numberOfFragments);
+      for (      TextFragment bestTextFragment : bestTextFragments) {
+        if (bestTextFragment != null && bestTextFragment.getScore() > 0) {
+          fragsList.add(bestTextFragment);
+        }
+      }
+    }
+  }
+ catch (  Exception e) {
+    throw new FetchPhaseExecutionException(context,"Failed to highlight field [" + highlighterContext.fieldName + "]",e);
+  }
+  if (field.scoreOrdered()) {
+    CollectionUtil.introSort(fragsList,new Comparator<TextFragment>(){
+      public int compare(      TextFragment o1,      TextFragment o2){
+        return Math.round(o2.getScore() - o1.getScore());
+      }
+    }
+);
+  }
+  String[] fragments;
+  if (field.numberOfFragments() == 0 && textsToHighlight.size() > 1 && fragsList.size() > 0) {
+    fragments=new String[fragsList.size()];
+    for (int i=0; i < fragsList.size(); i++) {
+      fragments[i]=fragsList.get(i).toString();
+    }
+  }
+ else {
+    numberOfFragments=fragsList.size() < numberOfFragments ? fragsList.size() : numberOfFragments;
+    fragments=new String[numberOfFragments];
+    for (int i=0; i < fragments.length; i++) {
+      fragments[i]=fragsList.get(i).toString();
+    }
+  }
+  if (fragments != null && fragments.length > 0) {
+    return new HighlightField(highlighterContext.fieldName,StringText.convertFromStringArray(fragments));
+  }
+  int noMatchSize=highlighterContext.field.noMatchSize();
+  if (noMatchSize > 0 && textsToHighlight.size() > 0) {
+    String fieldContents=textsToHighlight.get(0).toString();
+    Analyzer analyzer=context.mapperService().documentMapper(hitContext.hit().type()).mappers().indexAnalyzer();
+    int end;
+    try {
+      end=findGoodEndForNoHighlightExcerpt(noMatchSize,analyzer.tokenStream(mapper.names().indexName(),fieldContents));
+    }
+ catch (    Exception e) {
+      throw new FetchPhaseExecutionException(context,"Failed to highlight field [" + highlighterContext.fieldName + "]",e);
+    }
+    if (end > 0) {
+      return new HighlightField(highlighterContext.fieldName,new Text[]{new StringText(fieldContents.substring(0,end))});
+    }
+  }
+  return null;
 }
