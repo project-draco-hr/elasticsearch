@@ -1,0 +1,39 @@
+{
+  Map<String,Analyzer> mapping=new HashMap<String,Analyzer>();
+  for (  TestFieldSetting field : testDocs[0].fieldSettings) {
+    if (field.storedPayloads) {
+      mapping.put(field.name,new Analyzer(){
+        @Override protected TokenStreamComponents createComponents(        String fieldName,        Reader reader){
+          Tokenizer tokenizer=new StandardTokenizer(Version.CURRENT.luceneVersion,reader);
+          TokenFilter filter=new LowerCaseFilter(Version.CURRENT.luceneVersion,tokenizer);
+          filter=new TypeAsPayloadTokenFilter(filter);
+          return new TokenStreamComponents(tokenizer,filter);
+        }
+      }
+);
+    }
+  }
+  PerFieldAnalyzerWrapper wrapper=new PerFieldAnalyzerWrapper(new StandardAnalyzer(Version.CURRENT.luceneVersion),mapping);
+  Directory dir=new RAMDirectory();
+  IndexWriterConfig conf=new IndexWriterConfig(Version.CURRENT.luceneVersion,wrapper);
+  conf.setOpenMode(IndexWriterConfig.OpenMode.CREATE);
+  IndexWriter writer=new IndexWriter(dir,conf);
+  for (  TestDoc doc : testDocs) {
+    Document d=new Document();
+    d.add(new Field("id",doc.id,StringField.TYPE_STORED));
+    for (int i=0; i < doc.fieldContent.length; i++) {
+      FieldType type=new FieldType(TextField.TYPE_STORED);
+      TestFieldSetting fieldSetting=doc.fieldSettings[i];
+      type.setStoreTermVectorOffsets(fieldSetting.storedOffset);
+      type.setStoreTermVectorPayloads(fieldSetting.storedPayloads);
+      type.setStoreTermVectorPositions(fieldSetting.storedPositions || fieldSetting.storedPayloads || fieldSetting.storedOffset);
+      type.setStoreTermVectors(true);
+      type.freeze();
+      d.add(new Field(fieldSetting.name,doc.fieldContent[i],type));
+    }
+    writer.updateDocument(new Term("id",doc.id),d);
+    writer.commit();
+  }
+  writer.close();
+  return DirectoryReader.open(dir);
+}

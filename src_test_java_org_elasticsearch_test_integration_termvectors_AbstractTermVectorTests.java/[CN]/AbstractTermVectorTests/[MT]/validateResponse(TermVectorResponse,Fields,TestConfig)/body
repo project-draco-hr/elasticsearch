@@ -1,0 +1,60 @@
+{
+  TestDoc testDoc=testConfig.doc;
+  HashSet<String> selectedFields=testConfig.selectedFields == null ? null : new HashSet<String>(Arrays.asList(testConfig.selectedFields));
+  Fields esTermVectorFields=esResponse.getFields();
+  for (  TestFieldSetting field : testDoc.fieldSettings) {
+    Terms esTerms=esTermVectorFields.terms(field.name);
+    if (selectedFields != null && !selectedFields.contains(field.name)) {
+      assertNull(esTerms);
+      continue;
+    }
+    assertNotNull(esTerms);
+    Terms luceneTerms=luceneFields.terms(field.name);
+    TermsEnum esTermEnum=esTerms.iterator(null);
+    TermsEnum luceneTermEnum=luceneTerms.iterator(null);
+    while (esTermEnum.next() != null) {
+      assertNotNull(luceneTermEnum.next());
+      assertThat(esTermEnum.totalTermFreq(),equalTo(luceneTermEnum.totalTermFreq()));
+      DocsAndPositionsEnum esDocsPosEnum=esTermEnum.docsAndPositions(null,null,0);
+      DocsAndPositionsEnum luceneDocsPosEnum=luceneTermEnum.docsAndPositions(null,null,0);
+      if (luceneDocsPosEnum == null) {
+        assertFalse(field.storedOffset);
+        assertFalse(field.storedPayloads);
+        assertFalse(field.storedPositions);
+        continue;
+      }
+      String currentTerm=esTermEnum.term().utf8ToString();
+      assertThat("Token mismatch for field: " + field.name,currentTerm,equalTo(luceneTermEnum.term().utf8ToString()));
+      esDocsPosEnum.nextDoc();
+      luceneDocsPosEnum.nextDoc();
+      int freq=esDocsPosEnum.freq();
+      assertThat(freq,equalTo(luceneDocsPosEnum.freq()));
+      for (int i=0; i < freq; i++) {
+        String failDesc=" (field:" + field.name + " term:"+ currentTerm+ ")";
+        int lucenePos=luceneDocsPosEnum.nextPosition();
+        int esPos=esDocsPosEnum.nextPosition();
+        if (field.storedPositions && testConfig.requestPositions) {
+          assertThat("Position test failed" + failDesc,lucenePos,equalTo(esPos));
+        }
+ else {
+          assertThat("Missing position test failed" + failDesc,esPos,equalTo(-1));
+        }
+        if (field.storedOffset && testConfig.requestOffsets) {
+          assertThat("Offset test failed" + failDesc,luceneDocsPosEnum.startOffset(),equalTo(esDocsPosEnum.startOffset()));
+          assertThat("Offset test failed" + failDesc,luceneDocsPosEnum.endOffset(),equalTo(esDocsPosEnum.endOffset()));
+        }
+ else {
+          assertThat("Missing offset test failed" + failDesc,esDocsPosEnum.startOffset(),equalTo(-1));
+          assertThat("Missing offset test failed" + failDesc,esDocsPosEnum.endOffset(),equalTo(-1));
+        }
+        if (field.storedPayloads && testConfig.requestPayloads) {
+          assertThat("Payload test failed" + failDesc,luceneDocsPosEnum.getPayload(),equalTo(esDocsPosEnum.getPayload()));
+        }
+ else {
+          assertThat("Missing payload test failed" + failDesc,esDocsPosEnum.getPayload(),equalTo(null));
+        }
+      }
+    }
+    assertNull("Es returned terms are done but lucene isn't",luceneTermEnum.next());
+  }
+}

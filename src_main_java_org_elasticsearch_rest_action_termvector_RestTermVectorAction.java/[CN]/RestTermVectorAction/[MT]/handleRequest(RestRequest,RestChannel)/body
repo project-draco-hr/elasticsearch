@@ -3,17 +3,26 @@
   termVectorRequest.routing(request.param("routing"));
   termVectorRequest.parent(request.param("parent"));
   termVectorRequest.preference(request.param("preference"));
+  XContentParser parser=null;
   if (request.hasContent()) {
     try {
-      parseRequest(request.content(),termVectorRequest);
+      parser=XContentFactory.xContent(request.content()).createParser(request.content());
+      TermVectorRequest.parseRequest(termVectorRequest,parser);
     }
- catch (    IOException e1) {
-      Set<String> selectedFields=termVectorRequest.selectedFields();
-      String fieldString="all";
-      if (selectedFields != null) {
-        Strings.arrayToDelimitedString(termVectorRequest.selectedFields().toArray(new String[1])," ");
+ catch (    IOException e) {
+      try {
+        XContentBuilder builder=RestXContentBuilder.restContentBuilder(request);
+        channel.sendResponse(new XContentRestResponse(request,BAD_REQUEST,builder.startObject().field("error",e.getMessage()).endObject()));
       }
-      logger.error("Something is wrong with your parameters for the term vector request. I am using parameters " + "\n positions :" + termVectorRequest.positions() + "\n offsets :"+ termVectorRequest.offsets()+ "\n payloads :"+ termVectorRequest.payloads()+ "\n termStatistics :"+ termVectorRequest.termStatistics()+ "\n fieldStatistics :"+ termVectorRequest.fieldStatistics()+ "\nfields "+ fieldString,(Object)null);
+ catch (      IOException e1) {
+        logger.warn("Failed to send response",e1);
+        return;
+      }
+    }
+ finally {
+      if (parser != null) {
+        parser.close();
+      }
     }
   }
   readURIParameters(termVectorRequest,request);
