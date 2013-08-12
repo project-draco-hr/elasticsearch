@@ -1,6 +1,6 @@
 {
-  final AtomicBoolean notifyOnPostProcess=new AtomicBoolean();
   clusterService.submitStateUpdateTask("put-mapping [" + request.mappingType + "]",Priority.HIGH,new TimeoutClusterStateUpdateTask(){
+    CountDownListener countDownListener;
     @Override public TimeValue timeout(){
       return request.masterTimeout;
     }
@@ -117,18 +117,15 @@
           }
         }
         ClusterState updatedState=newClusterStateBuilder().state(currentState).metaData(builder).build();
-        int counter=0;
+        int counter=1;
         for (        String index : request.indices) {
           IndexRoutingTable indexRoutingTable=updatedState.routingTable().index(index);
           if (indexRoutingTable != null) {
             counter+=indexRoutingTable.numberOfNodesShardsAreAllocatedOn(updatedState.nodes().masterNodeId());
           }
         }
-        if (counter == 0) {
-          notifyOnPostProcess.set(true);
-          return updatedState;
-        }
-        mappingCreatedAction.add(new CountDownListener(counter,listener),request.timeout);
+        countDownListener=new CountDownListener(counter,listener);
+        mappingCreatedAction.add(countDownListener,request.timeout);
         return updatedState;
       }
   finally {
@@ -138,8 +135,8 @@
       }
     }
     @Override public void clusterStateProcessed(    String source,    ClusterState oldState,    ClusterState newState){
-      if (notifyOnPostProcess.get()) {
-        listener.onResponse(new Response(true));
+      if (countDownListener != null) {
+        countDownListener.onNodeMappingCreated(null);
       }
     }
   }
