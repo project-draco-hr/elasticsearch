@@ -10,20 +10,20 @@
   startNode("node1",settings);
   startNode("node2",settings);
   ClusterState state;
-  long time=System.currentTimeMillis();
-  while ((System.currentTimeMillis() - time) < TimeValue.timeValueSeconds(5).millis()) {
-    state=client("node1").admin().cluster().prepareState().setLocal(true).execute().actionGet().getState();
-    if (state.blocks().hasGlobalBlock(Discovery.NO_MASTER_BLOCK)) {
-      break;
+  awaitBusy(new Predicate<Object>(){
+    public boolean apply(    Object obj){
+      ClusterState state=client("node1").admin().cluster().prepareState().setLocal(true).execute().actionGet().getState();
+      return state.blocks().hasGlobalBlock(Discovery.NO_MASTER_BLOCK);
     }
   }
-  time=System.currentTimeMillis();
-  while ((System.currentTimeMillis() - time) < TimeValue.timeValueSeconds(5).millis()) {
-    state=client("node2").admin().cluster().prepareState().setLocal(true).execute().actionGet().getState();
-    if (state.blocks().hasGlobalBlock(Discovery.NO_MASTER_BLOCK)) {
-      break;
+);
+  awaitBusy(new Predicate<Object>(){
+    public boolean apply(    Object obj){
+      ClusterState state=client("node2").admin().cluster().prepareState().setLocal(true).execute().actionGet().getState();
+      return state.blocks().hasGlobalBlock(Discovery.NO_MASTER_BLOCK);
     }
   }
+);
   state=client("node1").admin().cluster().prepareState().setLocal(true).execute().actionGet().getState();
   assertThat(state.blocks().hasGlobalBlock(Discovery.NO_MASTER_BLOCK),equalTo(true));
   state=client("node2").admin().cluster().prepareState().setLocal(true).execute().actionGet().getState();
@@ -35,7 +35,7 @@
   assertThat(clusterHealthResponse.isTimedOut(),equalTo(false));
   state=client("node1").admin().cluster().prepareState().execute().actionGet().getState();
   assertThat(state.nodes().size(),equalTo(4));
-  String masterNode=state.nodes().masterNode().name();
+  final String masterNode=state.nodes().masterNode().name();
   LinkedList<String> nonMasterNodes=new LinkedList<String>();
   for (  DiscoveryNode node : state.nodes()) {
     if (!node.name().equals(masterNode)) {
@@ -60,18 +60,18 @@
   for (  String nodeToShutdown : nodesToShutdown) {
     closeNode(nodeToShutdown);
   }
-  String lastNonMasterNodeUp=nonMasterNodes.removeLast();
+  final String lastNonMasterNodeUp=nonMasterNodes.removeLast();
   logger.info("--> verify that there is no master anymore on remaining nodes");
-  time=System.currentTimeMillis();
-  while ((System.currentTimeMillis() - time) < TimeValue.timeValueSeconds(20).millis()) {
-    state=client(masterNode).admin().cluster().prepareState().setLocal(true).execute().actionGet().getState();
-    boolean firstNoMasterLock=state.blocks().hasGlobalBlock(Discovery.NO_MASTER_BLOCK);
-    state=client(lastNonMasterNodeUp).admin().cluster().prepareState().setLocal(true).execute().actionGet().getState();
-    boolean secondNoMasterLock=state.blocks().hasGlobalBlock(Discovery.NO_MASTER_BLOCK);
-    if (firstNoMasterLock && secondNoMasterLock) {
-      break;
+  awaitBusy(new Predicate<Object>(){
+    public boolean apply(    Object obj){
+      ClusterState state=client(masterNode).admin().cluster().prepareState().setLocal(true).execute().actionGet().getState();
+      boolean firstNoMasterLock=state.blocks().hasGlobalBlock(Discovery.NO_MASTER_BLOCK);
+      state=client(lastNonMasterNodeUp).admin().cluster().prepareState().setLocal(true).execute().actionGet().getState();
+      boolean secondNoMasterLock=state.blocks().hasGlobalBlock(Discovery.NO_MASTER_BLOCK);
+      return firstNoMasterLock && secondNoMasterLock;
     }
   }
+,20,TimeUnit.SECONDS);
   state=client(masterNode).admin().cluster().prepareState().setLocal(true).execute().actionGet().getState();
   assertThat(state.blocks().hasGlobalBlock(Discovery.NO_MASTER_BLOCK),equalTo(true));
   state=client(lastNonMasterNodeUp).admin().cluster().prepareState().setLocal(true).execute().actionGet().getState();
