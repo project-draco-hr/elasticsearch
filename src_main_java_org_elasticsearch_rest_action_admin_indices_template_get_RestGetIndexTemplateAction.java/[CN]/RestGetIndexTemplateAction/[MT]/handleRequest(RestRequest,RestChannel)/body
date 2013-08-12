@@ -1,21 +1,21 @@
 {
-  ClusterStateRequest clusterStateRequest=Requests.clusterStateRequest().filterRoutingTable(true).filterNodes(true).filteredIndexTemplates(request.param("name")).filterOutIndices();
-  clusterStateRequest.listenerThreaded(false);
-  client.admin().cluster().state(clusterStateRequest,new ActionListener<ClusterStateResponse>(){
-    @Override public void onResponse(    ClusterStateResponse response){
-      Map<String,String> paramsMap=Maps.newHashMap();
-      paramsMap.put("reduce_mappings","true");
-      ToXContent.Params params=new ToXContent.DelegatingMapParams(paramsMap,request);
+  GetIndexTemplatesRequest getIndexTemplatesRequest=new GetIndexTemplatesRequest(request.param("name"));
+  getIndexTemplatesRequest.listenerThreaded(false);
+  client.admin().indices().getTemplates(getIndexTemplatesRequest,new ActionListener<GetIndexTemplatesResponse>(){
+    @Override public void onResponse(    GetIndexTemplatesResponse getIndexTemplatesResponse){
       try {
-        MetaData metaData=response.getState().metaData();
-        if (metaData.templates().values().size() == 0) {
+        boolean templateExists=getIndexTemplatesResponse.getIndexTemplates().size() > 0;
+        if (!templateExists) {
           channel.sendResponse(new StringRestResponse(NOT_FOUND));
         }
  else {
+          Map<String,String> paramsMap=Maps.newHashMap();
+          paramsMap.put("reduce_mappings","true");
+          ToXContent.Params params=new ToXContent.DelegatingMapParams(paramsMap,request);
           XContentBuilder builder=RestXContentBuilder.restContentBuilder(request);
           builder.startObject();
-          for (          IndexTemplateMetaData indexMetaData : metaData.templates().values()) {
-            IndexTemplateMetaData.Builder.toXContent(indexMetaData,builder,params);
+          for (          IndexTemplateMetaData indexTemplateMetaData : getIndexTemplatesResponse.getIndexTemplates()) {
+            IndexTemplateMetaData.Builder.toXContent(indexTemplateMetaData,builder,params);
           }
           builder.endObject();
           channel.sendResponse(new XContentRestResponse(request,OK,builder));
@@ -27,9 +27,9 @@
     }
     @Override public void onFailure(    Throwable e){
       try {
-        channel.sendResponse(new XContentThrowableRestResponse(request,e));
+        channel.sendResponse(new StringRestResponse(ExceptionsHelper.status(e)));
       }
- catch (      IOException e1) {
+ catch (      Exception e1) {
         logger.error("Failed to send failure response",e1);
       }
     }
