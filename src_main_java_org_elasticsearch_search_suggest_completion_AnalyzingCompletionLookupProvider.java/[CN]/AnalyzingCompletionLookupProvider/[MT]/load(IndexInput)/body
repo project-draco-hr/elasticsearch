@@ -24,16 +24,19 @@
     lookupMap.put(entry.getValue(),new AnalyzingSuggestHolder(preserveSep,preservePositionIncrements,maxSurfaceFormsPerAnalyzedForm,maxGraphExpansions,hasPayloads,maxAnalyzedPathsForOneInput,fst));
   }
   return new LookupFactory(){
-    @Override public Lookup getLookup(    FieldMapper<?> mapper,    boolean exactFirst){
+    @Override public Lookup getLookup(    FieldMapper<?> mapper,    CompletionSuggestionContext suggestionContext){
       AnalyzingSuggestHolder analyzingSuggestHolder=lookupMap.get(mapper.names().fullName());
       if (analyzingSuggestHolder == null) {
         return null;
       }
-      int flags=exactFirst ? XAnalyzingSuggester.EXACT_FIRST : 0;
-      if (analyzingSuggestHolder.preserveSep) {
-        flags|=XAnalyzingSuggester.PRESERVE_SEP;
+      int flags=analyzingSuggestHolder.preserveSep ? XAnalyzingSuggester.PRESERVE_SEP : 0;
+      XAnalyzingSuggester suggester;
+      if (suggestionContext.isFuzzy()) {
+        suggester=new XFuzzySuggester(mapper.indexAnalyzer(),mapper.searchAnalyzer(),flags,analyzingSuggestHolder.maxSurfaceFormsPerAnalyzedForm,analyzingSuggestHolder.maxGraphExpansions,suggestionContext.getFuzzyEditDistance(),suggestionContext.isFuzzyTranspositions(),suggestionContext.getFuzzyNonPrefixLength(),suggestionContext.getFuzzyMinPrefixLength(),analyzingSuggestHolder.fst,analyzingSuggestHolder.hasPayloads,analyzingSuggestHolder.maxAnalyzedPathsForOneInput);
       }
-      XAnalyzingSuggester suggester=new XAnalyzingSuggester(mapper.indexAnalyzer(),mapper.searchAnalyzer(),flags,analyzingSuggestHolder.maxSurfaceFormsPerAnalyzedForm,analyzingSuggestHolder.maxGraphExpansions,analyzingSuggestHolder.fst,analyzingSuggestHolder.hasPayloads,analyzingSuggestHolder.maxAnalyzedPathsForOneInput);
+ else {
+        suggester=new XAnalyzingSuggester(mapper.indexAnalyzer(),mapper.searchAnalyzer(),flags,analyzingSuggestHolder.maxSurfaceFormsPerAnalyzedForm,analyzingSuggestHolder.maxGraphExpansions,analyzingSuggestHolder.fst,analyzingSuggestHolder.hasPayloads,analyzingSuggestHolder.maxAnalyzedPathsForOneInput);
+      }
       suggester.setPreservePositionIncrements(analyzingSuggestHolder.preservePositionIncrements);
       return suggester;
     }
