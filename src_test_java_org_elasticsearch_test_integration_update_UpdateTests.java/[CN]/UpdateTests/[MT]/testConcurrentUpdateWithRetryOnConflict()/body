@@ -1,3 +1,46 @@
 {
-  concurrentUpdateWithRetryOnConflict(false);
+  final boolean useBulkApi=randomBoolean();
+  createIndex();
+  ensureGreen();
+  int numberOfThreads=between(2,5);
+  final CountDownLatch latch=new CountDownLatch(numberOfThreads);
+  final int numberOfUpdatesPerThread=between(1000,10000);
+  final List<Throwable> failures=new CopyOnWriteArrayList<Throwable>();
+  for (int i=0; i < numberOfThreads; i++) {
+    Runnable r=new Runnable(){
+      @Override public void run(){
+        try {
+          for (int i=0; i < numberOfUpdatesPerThread; i++) {
+            if (useBulkApi) {
+              UpdateRequestBuilder updateRequestBuilder=client().prepareUpdate("test","type1",Integer.toString(i)).setScript("ctx._source.field += 1").setRetryOnConflict(Integer.MAX_VALUE).setUpsert(jsonBuilder().startObject().field("field",1).endObject());
+              client().prepareBulk().add(updateRequestBuilder).execute().actionGet();
+            }
+ else {
+              client().prepareUpdate("test","type1",Integer.toString(i)).setScript("ctx._source.field += 1").setRetryOnConflict(Integer.MAX_VALUE).setUpsert(jsonBuilder().startObject().field("field",1).endObject()).execute().actionGet();
+            }
+          }
+        }
+ catch (        Throwable e) {
+          failures.add(e);
+        }
+ finally {
+          latch.countDown();
+        }
+      }
+    }
+;
+    new Thread(r).start();
+  }
+  latch.await();
+  for (  Throwable throwable : failures) {
+    logger.info("Captured failure on concurrent update:",throwable);
+  }
+  assertThat(failures.size(),equalTo(0));
+  for (int i=0; i < numberOfUpdatesPerThread; i++) {
+    GetResponse response=client().prepareGet("test","type1",Integer.toString(i)).execute().actionGet();
+    assertThat(response.getId(),equalTo(Integer.toString(i)));
+    assertThat(response.isExists(),equalTo(true));
+    assertThat(response.getVersion(),equalTo((long)numberOfThreads));
+    assertThat((Integer)response.getSource().get("field"),equalTo(numberOfThreads));
+  }
 }
