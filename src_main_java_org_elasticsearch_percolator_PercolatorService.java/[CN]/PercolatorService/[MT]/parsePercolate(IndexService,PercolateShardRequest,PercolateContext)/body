@@ -5,6 +5,7 @@
   }
   ParsedDocument doc=null;
   XContentParser parser=null;
+  SearchContext.setCurrent(new SearchContext(0,new ShardSearchRequest().types(new String[0]),null,context.indexShard.searcher(),context.percolateIndexService,context.indexShard,null,null));
   try {
     parser=XContentFactory.xContent(source).createParser(source);
     String currentFieldName=null;
@@ -36,6 +37,9 @@
           context.query=new XConstantScoreQuery(filter);
         }
       }
+ else       if (token == null) {
+        break;
+      }
  else       if (token.isValue()) {
         if ("size".equals(currentFieldName)) {
           context.limit=true;
@@ -44,9 +48,12 @@
             throw new ElasticSearchParseException("size is set to [" + context.size + "] and is expected to be higher or equal to 0");
           }
         }
-      }
- else       if (token == null) {
-        break;
+ else         if ("sort".equals(currentFieldName)) {
+          context.sort=parser.booleanValue();
+        }
+ else         if ("score".equals(currentFieldName)) {
+          context.score=parser.booleanValue();
+        }
       }
     }
   }
@@ -54,6 +61,8 @@
     throw new ElasticSearchParseException("failed to parse request",e);
   }
  finally {
+    SearchContext.current().release();
+    SearchContext.removeCurrent();
     if (parser != null) {
       parser.close();
     }
