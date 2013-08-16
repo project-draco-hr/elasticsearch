@@ -4,14 +4,13 @@
     InternalFullDateHistogramFacet internalFacet=(InternalFullDateHistogramFacet)facets.get(0);
     List<FullEntry> entries=internalFacet.getEntries();
     CollectionUtil.timSort(entries,comparatorType.comparator());
-    internalFacet.releaseCache();
     return internalFacet;
   }
-  ExtTLongObjectHashMap<FullEntry> map=context.cacheRecycler().popLongObjectMap();
+  Recycler.V<ExtTLongObjectHashMap<FullEntry>> map=context.cacheRecycler().longObjectMap(-1);
   for (  Facet facet : facets) {
     InternalFullDateHistogramFacet histoFacet=(InternalFullDateHistogramFacet)facet;
     for (    FullEntry fullEntry : histoFacet.entries) {
-      FullEntry current=map.get(fullEntry.time);
+      FullEntry current=map.v().get(fullEntry.time);
       if (current != null) {
         current.count+=fullEntry.count;
         current.total+=fullEntry.total;
@@ -24,22 +23,21 @@
         }
       }
  else {
-        map.put(fullEntry.time,fullEntry);
+        map.v().put(fullEntry.time,fullEntry);
       }
     }
-    histoFacet.releaseCache();
   }
-  Object[] values=map.internalValues();
+  Object[] values=map.v().internalValues();
   Arrays.sort(values,(Comparator)comparatorType.comparator());
-  List<FullEntry> ordered=new ArrayList<FullEntry>(map.size());
-  for (int i=0; i < map.size(); i++) {
+  List<FullEntry> ordered=new ArrayList<FullEntry>(map.v().size());
+  for (int i=0; i < map.v().size(); i++) {
     FullEntry value=(FullEntry)values[i];
     if (value == null) {
       break;
     }
     ordered.add(value);
   }
-  context.cacheRecycler().pushLongObjectMap(map);
+  map.release();
   InternalFullDateHistogramFacet ret=new InternalFullDateHistogramFacet(getName());
   ret.comparatorType=comparatorType;
   ret.entries=ordered;

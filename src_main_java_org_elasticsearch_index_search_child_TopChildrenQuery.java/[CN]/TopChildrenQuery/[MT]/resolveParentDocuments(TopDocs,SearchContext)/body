@@ -1,6 +1,6 @@
 {
   int parentHitsResolved=0;
-  ExtTHashMap<Object,TIntObjectHashMap<ParentDoc>> parentDocsPerReader=cacheRecycler.popHashMap();
+  Recycler.V<ExtTHashMap<Object,Recycler.V<TIntObjectHashMap<ParentDoc>>>> parentDocsPerReader=cacheRecycler.hashMap(context.searcher().getIndexReader().leaves().size());
   for (  ScoreDoc scoreDoc : topDocs.scoreDocs) {
     int readerIndex=ReaderUtil.subIndex(scoreDoc.doc,context.searcher().getIndexReader().leaves());
     AtomicReaderContext subContext=context.searcher().getIndexReader().leaves().get(readerIndex);
@@ -14,12 +14,12 @@
       int parentDocId=context.idCache().reader(indexReader).docById(parentType,parentId);
       Bits liveDocs=indexReader.getLiveDocs();
       if (parentDocId != -1 && (liveDocs == null || liveDocs.get(parentDocId))) {
-        TIntObjectHashMap<ParentDoc> readerParentDocs=parentDocsPerReader.get(indexReader.getCoreCacheKey());
+        Recycler.V<TIntObjectHashMap<ParentDoc>> readerParentDocs=parentDocsPerReader.v().get(indexReader.getCoreCacheKey());
         if (readerParentDocs == null) {
-          readerParentDocs=cacheRecycler.popIntObjectMap();
-          parentDocsPerReader.put(indexReader.getCoreCacheKey(),readerParentDocs);
+          readerParentDocs=cacheRecycler.intObjectMap(indexReader.maxDoc());
+          parentDocsPerReader.v().put(indexReader.getCoreCacheKey(),readerParentDocs);
         }
-        ParentDoc parentDoc=readerParentDocs.get(parentDocId);
+        ParentDoc parentDoc=readerParentDocs.v().get(parentDocId);
         if (parentDoc == null) {
           parentHitsResolved++;
           parentDoc=new ParentDoc();
@@ -27,7 +27,7 @@
           parentDoc.count=1;
           parentDoc.maxScore=scoreDoc.score;
           parentDoc.sumScores=scoreDoc.score;
-          readerParentDocs.put(parentDocId,parentDoc);
+          readerParentDocs.v().put(parentDocId,parentDoc);
         }
  else {
           parentDoc.count++;
@@ -39,12 +39,12 @@
       }
     }
   }
-  for (  Map.Entry<Object,TIntObjectHashMap<ParentDoc>> entry : parentDocsPerReader.entrySet()) {
-    ParentDoc[] values=entry.getValue().values(new ParentDoc[entry.getValue().size()]);
+  for (  Map.Entry<Object,Recycler.V<TIntObjectHashMap<ParentDoc>>> entry : parentDocsPerReader.v().entrySet()) {
+    ParentDoc[] values=entry.getValue().v().values(new ParentDoc[entry.getValue().v().size()]);
     Arrays.sort(values,PARENT_DOC_COMP);
-    parentDocs.put(entry.getKey(),values);
-    cacheRecycler.pushIntObjectMap(entry.getValue());
+    parentDocs.v().put(entry.getKey(),values);
+    entry.getValue().release();
   }
-  cacheRecycler.pushHashMap(parentDocsPerReader);
+  parentDocsPerReader.release();
   return parentHitsResolved;
 }
