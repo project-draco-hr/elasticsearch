@@ -1,0 +1,47 @@
+{
+  createIndexMapped("test","type1","test","string","num","double");
+  ensureYellow();
+  List<IndexRequestBuilder> indexBuilders=new ArrayList<IndexRequestBuilder>();
+  indexBuilders.add(new IndexRequestBuilder(client()).setType("type1").setId("1").setIndex("test").setSource(jsonBuilder().startObject().field("test","value").field("num",0.5).endObject()));
+  indexBuilders.add(new IndexRequestBuilder(client()).setType("type1").setId("2").setIndex("test").setSource(jsonBuilder().startObject().field("test","value").field("num",1.7).endObject()));
+  int numDummyDocs=20;
+  for (int i=0; i < numDummyDocs; i++) {
+    indexBuilders.add(new IndexRequestBuilder(client()).setType("type1").setId(Integer.toString(i + 3)).setIndex("test").setSource(jsonBuilder().startObject().field("test","value").field("num",3.0 + i).endObject()));
+  }
+  IndexRequestBuilder[] builders=indexBuilders.toArray(new IndexRequestBuilder[indexBuilders.size()]);
+  indexRandom("test",false,builders);
+  refresh();
+  DecayFunctionBuilder fb=new GaussDecayFunctionBuilder("num",1.0,5.0);
+  fb.setOffset(1.0);
+  ActionFuture<SearchResponse> response=client().search(searchRequest().searchType(SearchType.QUERY_THEN_FETCH).source(searchSource().explain(true).size(numDummyDocs + 2).query(functionScoreQuery(termQuery("test","value")).add(fb).boostMode(CombineFunction.REPLACE.getName()))));
+  SearchResponse sr=response.actionGet();
+  SearchHits sh=sr.getHits();
+  assertThat(sh.getTotalHits(),equalTo((long)(numDummyDocs + 2)));
+  assertThat(sh.getAt(0).getId(),anyOf(equalTo("1"),equalTo("2")));
+  assertThat(sh.getAt(1).getId(),anyOf(equalTo("1"),equalTo("2")));
+  assertThat(sh.getAt(1).score(),equalTo(sh.getAt(0).score()));
+  for (int i=0; i < numDummyDocs; i++) {
+    assertThat(sh.getAt(i + 2).getId(),equalTo(Integer.toString(i + 3)));
+  }
+  fb=new ExponentialDecayFunctionBuilder("num",1.0,5.0);
+  fb.setOffset(1.0);
+  response=client().search(searchRequest().searchType(SearchType.QUERY_THEN_FETCH).source(searchSource().explain(true).size(numDummyDocs + 2).query(functionScoreQuery(termQuery("test","value")).add(fb).boostMode(CombineFunction.REPLACE.getName()))));
+  sr=response.actionGet();
+  sh=sr.getHits();
+  assertThat(sh.getTotalHits(),equalTo((long)(numDummyDocs + 2)));
+  assertThat(sh.getAt(0).getId(),anyOf(equalTo("1"),equalTo("2")));
+  assertThat(sh.getAt(1).getId(),anyOf(equalTo("1"),equalTo("2")));
+  assertThat(sh.getAt(1).score(),equalTo(sh.getAt(0).score()));
+  for (int i=0; i < numDummyDocs; i++) {
+    assertThat(sh.getAt(i + 2).getId(),equalTo(Integer.toString(i + 3)));
+  }
+  fb=new LinearDecayFunctionBuilder("num",1.0,20.0);
+  fb.setOffset(1.0);
+  response=client().search(searchRequest().searchType(SearchType.QUERY_THEN_FETCH).source(searchSource().explain(true).size(numDummyDocs + 2).query(functionScoreQuery(termQuery("test","value")).add(fb).boostMode(CombineFunction.REPLACE.getName()))));
+  sr=response.actionGet();
+  sh=sr.getHits();
+  assertThat(sh.getTotalHits(),equalTo((long)(numDummyDocs + 2)));
+  assertThat(sh.getAt(0).getId(),anyOf(equalTo("1"),equalTo("2")));
+  assertThat(sh.getAt(1).getId(),anyOf(equalTo("1"),equalTo("2")));
+  assertThat(sh.getAt(1).score(),equalTo(sh.getAt(0).score()));
+}
