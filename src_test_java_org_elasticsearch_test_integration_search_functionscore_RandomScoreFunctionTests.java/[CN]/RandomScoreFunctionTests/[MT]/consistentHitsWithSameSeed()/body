@@ -1,0 +1,28 @@
+{
+  prepareCreate("test").execute().actionGet();
+  ensureGreen();
+  int docCount=atLeast(100);
+  for (int i=0; i < docCount; i++) {
+    index("test","type","" + docCount,jsonBuilder().startObject().endObject());
+  }
+  flush();
+  long seed=System.nanoTime();
+  String preference=_TestUtil.randomRealisticUnicodeString(getRandom());
+  float[] scores=null;
+  for (int i=0; i < 3; i++) {
+    SearchResponse searchResponse=client().prepareSearch().setPreference(preference).setQuery(functionScoreQuery(matchAllQuery()).add(new RandomScoreFunctionBuilder().seed(seed))).execute().actionGet();
+    assertThat("Failures " + Arrays.toString(searchResponse.getShardFailures()),searchResponse.getShardFailures().length,CoreMatchers.equalTo(0));
+    int hitCount=searchResponse.getHits().getHits().length;
+    if (scores == null) {
+      scores=new float[hitCount];
+      for (int j=0; j < hitCount; j++) {
+        scores[j]=searchResponse.getHits().getAt(j).score();
+      }
+    }
+ else {
+      for (int j=0; j < hitCount; j++) {
+        assertThat(searchResponse.getHits().getAt(j).score(),CoreMatchers.equalTo(scores[j]));
+      }
+    }
+  }
+}
