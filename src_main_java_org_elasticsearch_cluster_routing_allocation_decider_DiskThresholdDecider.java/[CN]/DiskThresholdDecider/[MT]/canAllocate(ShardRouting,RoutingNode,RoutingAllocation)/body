@@ -1,0 +1,60 @@
+{
+  if (!enabled) {
+    return Decision.YES;
+  }
+  if (allocation.nodes().size() <= 1) {
+    return Decision.YES;
+  }
+  ClusterInfo clusterInfo=allocation.clusterInfo();
+  if (clusterInfo == null) {
+    if (logger.isTraceEnabled()) {
+      logger.trace("Cluster info unavailable for disk threshold decider, allowing allocation.");
+    }
+    return Decision.YES;
+  }
+  Map<String,DiskUsage> usages=clusterInfo.getNodeDiskUsages();
+  Map<String,Long> shardSizes=clusterInfo.getShardSizes();
+  if (usages.isEmpty()) {
+    if (logger.isTraceEnabled()) {
+      logger.trace("Unable to determine disk usages for disk-aware allocation, allowing allocation");
+    }
+    return Decision.YES;
+  }
+  DiskUsage usage=usages.get(node.nodeId());
+  if (usage == null) {
+    usage=averageUsage(node,usages);
+    if (logger.isDebugEnabled()) {
+      logger.debug("Unable to determine disk usage for [{}], defaulting to average across nodes [{} total] [{} free] [{}% free]",node.nodeId(),usage.getTotalBytes(),usage.getFreeBytes(),usage.getFreeDiskAsPercentage());
+    }
+  }
+  double freeDiskPercentage=usage.getFreeDiskAsPercentage();
+  long freeBytes=usage.getFreeBytes();
+  if (logger.isDebugEnabled()) {
+    logger.debug("Node [{}] has {}% free disk",node.nodeId(),freeDiskPercentage);
+  }
+  if (freeBytes < freeBytesThresholdLow.bytes()) {
+    if (logger.isDebugEnabled()) {
+      logger.debug("Less than the required {} free bytes threshold ({} bytes free) on node {}, preventing allocation",freeBytesThresholdLow,freeBytes,node.nodeId());
+    }
+    return Decision.NO;
+  }
+  if (freeDiskPercentage < freeDiskThresholdLow) {
+    if (logger.isDebugEnabled()) {
+      logger.debug("Less than the required {}% free disk threshold ({}% free) on node [{}], preventing allocation",freeDiskThresholdLow,freeDiskPercentage,node.nodeId());
+    }
+    return Decision.NO;
+  }
+  Long shardSize=shardSizes.get(shardIdentifierFromRouting(shardRouting));
+  shardSize=shardSize == null ? 0 : shardSize;
+  double freeSpaceAfterShard=this.freeDiskPercentageAfterShardAssigned(usage,shardSize);
+  long freeBytesAfterShard=freeBytes - shardSize;
+  if (freeBytesAfterShard < freeBytesThresholdHigh.bytes()) {
+    logger.warn("After allocating, node [{}] would have less than the required {} free bytes threshold ({} bytes free), preventing allocation",node.nodeId(),freeBytesThresholdHigh,freeBytesAfterShard);
+    return Decision.NO;
+  }
+  if (freeSpaceAfterShard < freeDiskThresholdHigh) {
+    logger.warn("After allocating, node [{}] would have less than the required {}% free disk threshold ({}% free), preventing allocation",node.nodeId(),freeDiskThresholdHigh,freeSpaceAfterShard);
+    return Decision.NO;
+  }
+  return Decision.YES;
+}

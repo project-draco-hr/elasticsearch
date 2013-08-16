@@ -1,0 +1,30 @@
+{
+  if (!this.enabled) {
+    return;
+  }
+  boolean dataNodeAdded=false;
+  for (  DiscoveryNode addedNode : event.nodesDelta().addedNodes()) {
+    if (addedNode.dataNode()) {
+      dataNodeAdded=true;
+      break;
+    }
+  }
+  if (this.isMaster && dataNodeAdded && clusterService.state().getNodes().getDataNodes().size() > 1) {
+    if (logger.isDebugEnabled()) {
+      logger.debug("data node was added, retrieving new cluster info");
+    }
+    threadPool.executor(executorName()).execute(new ClusterInfoUpdateJob(false));
+  }
+  if (this.isMaster && event.nodesRemoved()) {
+    for (    DiscoveryNode removedNode : event.nodesDelta().removedNodes()) {
+      if (removedNode.dataNode()) {
+        if (logger.isTraceEnabled()) {
+          logger.trace("Removing node from cluster info: {}",removedNode.getId());
+        }
+        Map<String,DiskUsage> newUsages=new HashMap<String,DiskUsage>(usages);
+        newUsages.remove(removedNode.getId());
+        usages=ImmutableMap.copyOf(newUsages);
+      }
+    }
+  }
+}
