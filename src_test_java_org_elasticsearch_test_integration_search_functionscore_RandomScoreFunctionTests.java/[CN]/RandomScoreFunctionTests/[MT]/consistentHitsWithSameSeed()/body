@@ -1,27 +1,33 @@
 {
-  prepareCreate("test").execute().actionGet();
+  final int replicas=between(0,2);
+  cluster().ensureAtLeastNumNodes(replicas + 1);
+  assertAcked(client().admin().indices().prepareCreate("test").setSettings(ImmutableSettings.builder().put("index.number_of_shards",between(2,5)).put("index.number_of_replicas",replicas).build()));
   ensureGreen();
   int docCount=atLeast(100);
   for (int i=0; i < docCount; i++) {
     index("test","type","" + i,jsonBuilder().startObject().endObject());
   }
   flush();
-  long seed=System.nanoTime();
-  String preference=_TestUtil.randomRealisticUnicodeString(getRandom());
-  float[] scores=null;
-  for (int i=0; i < 3; i++) {
-    SearchResponse searchResponse=client().prepareSearch().setPreference(preference).setQuery(functionScoreQuery(matchAllQuery()).add(new RandomScoreFunctionBuilder().seed(seed))).execute().actionGet();
-    assertThat("Failures " + Arrays.toString(searchResponse.getShardFailures()),searchResponse.getShardFailures().length,CoreMatchers.equalTo(0));
-    int hitCount=searchResponse.getHits().getHits().length;
-    if (scores == null) {
-      scores=new float[hitCount];
-      for (int j=0; j < hitCount; j++) {
-        scores[j]=searchResponse.getHits().getAt(j).score();
+  int outerIters=atLeast(10);
+  for (int o=0; o < outerIters; o++) {
+    final long seed=randomLong();
+    final String preference=randomRealisticUnicodeOfLengthBetween(1,10);
+    int innerIters=atLeast(2);
+    SearchHits hits=null;
+    for (int i=0; i < innerIters; i++) {
+      SearchResponse searchResponse=client().prepareSearch().setPreference(preference).setQuery(functionScoreQuery(matchAllQuery()).add(new RandomScoreFunctionBuilder().seed(seed))).execute().actionGet();
+      assertThat("Failures " + Arrays.toString(searchResponse.getShardFailures()),searchResponse.getShardFailures().length,CoreMatchers.equalTo(0));
+      int hitCount=searchResponse.getHits().getHits().length;
+      if (i == 0) {
+        assertThat(hits,nullValue());
+        hits=searchResponse.getHits();
       }
-    }
  else {
-      for (int j=0; j < hitCount; j++) {
-        assertThat(searchResponse.getHits().getAt(j).score(),CoreMatchers.equalTo(scores[j]));
+        assertThat(hits.getHits().length,equalTo(searchResponse.getHits().getHits().length));
+        for (int j=0; j < hitCount; j++) {
+          assertThat(searchResponse.getHits().getAt(j).score(),equalTo(hits.getAt(j).score()));
+          assertThat(searchResponse.getHits().getAt(j).id(),equalTo(hits.getAt(j).id()));
+        }
       }
     }
   }
