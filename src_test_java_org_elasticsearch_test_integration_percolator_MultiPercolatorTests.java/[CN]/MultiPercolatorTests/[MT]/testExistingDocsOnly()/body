@@ -1,0 +1,45 @@
+{
+  client().admin().indices().prepareCreate("test").setSettings(ImmutableSettings.settingsBuilder().put("index.number_of_shards",2).put("index.number_of_replicas",1).build()).execute().actionGet();
+  ensureGreen();
+  int numQueries=randomIntBetween(50,100);
+  logger.info("--> register a queries");
+  for (int i=0; i < numQueries; i++) {
+    client().prepareIndex("test","_percolator",Integer.toString(i)).setSource(jsonBuilder().startObject().field("query",matchAllQuery()).endObject()).execute().actionGet();
+  }
+  client().prepareIndex("test","type","1").setSource(jsonBuilder().startObject().field("field","a")).execute().actionGet();
+  MultiPercolateRequestBuilder builder=client().prepareMultiPercolate();
+  int numPercolateRequest=randomIntBetween(50,100);
+  for (int i=0; i < numPercolateRequest; i++) {
+    builder.add(client().preparePercolate().setGetRequest(Requests.getRequest("test").type("type").id("1")).setIndices("test").setDocumentType("type"));
+  }
+  MultiPercolateResponse response=builder.execute().actionGet();
+  assertThat(response.items().length,equalTo(numPercolateRequest));
+  for (  MultiPercolateResponse.Item item : response) {
+    assertThat(item.isFailure(),equalTo(false));
+    assertNoFailures(item.response());
+    assertThat(item.getResponse().getCount(),equalTo((long)numQueries));
+    assertThat(item.getResponse().getMatches().length,equalTo(numQueries));
+  }
+  builder=client().prepareMultiPercolate();
+  for (int i=0; i < numPercolateRequest; i++) {
+    builder.add(client().preparePercolate().setGetRequest(Requests.getRequest("test").type("type").id("2")).setIndices("test").setDocumentType("type"));
+  }
+  response=builder.execute().actionGet();
+  assertThat(response.items().length,equalTo(numPercolateRequest));
+  for (  MultiPercolateResponse.Item item : response) {
+    assertThat(item.isFailure(),equalTo(true));
+    assertThat(item.errorMessage(),containsString("document missing"));
+    assertThat(item.getResponse(),nullValue());
+  }
+  builder=client().prepareMultiPercolate();
+  for (int i=0; i < numPercolateRequest; i++) {
+    builder.add(client().preparePercolate().setGetRequest(Requests.getRequest("test").type("type").id("2")).setIndices("test").setDocumentType("type"));
+  }
+  builder.add(client().preparePercolate().setGetRequest(Requests.getRequest("test").type("type").id("1")).setIndices("test").setDocumentType("type"));
+  response=builder.execute().actionGet();
+  assertThat(response.items().length,equalTo(numPercolateRequest + 1));
+  assertThat(response.items()[numPercolateRequest].isFailure(),equalTo(false));
+  assertNoFailures(response.items()[numPercolateRequest].response());
+  assertThat(response.items()[numPercolateRequest].getResponse().getCount(),equalTo((long)numQueries));
+  assertThat(response.items()[numPercolateRequest].getResponse().getMatches().length,equalTo(numQueries));
+}

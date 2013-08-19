@@ -1,31 +1,49 @@
 {
-  ClusterState clusterState=clusterService.state();
+  final ClusterState clusterState=clusterService.state();
   clusterState.blocks().globalBlockedRaiseException(ClusterBlockLevel.READ);
-  final MultiPercolateResponse.Item[] responses=new MultiPercolateResponse.Item[request.requests().size()];
-  final AtomicInteger counter=new AtomicInteger(responses.length);
-  for (int i=0; i < responses.length; i++) {
-    final int index=i;
-    percolateAction.execute(request.requests().get(i),new ActionListener<PercolateResponse>(){
-      @Override public void onResponse(      PercolateResponse percolateResponse){
-synchronized (responses) {
-          responses[index]=new MultiPercolateResponse.Item(percolateResponse,null);
+  @SuppressWarnings("unchecked") final List<Object> percolateRequests=(List)request.requests();
+  final TIntArrayList slots=new TIntArrayList();
+  final List<GetRequest> existingDocsRequests=new ArrayList<GetRequest>();
+  for (int i=0; i < request.requests().size(); i++) {
+    PercolateRequest percolateRequest=request.requests().get(i);
+    percolateRequest.startTime=System.currentTimeMillis();
+    if (percolateRequest.getRequest() != null) {
+      existingDocsRequests.add(percolateRequest.getRequest());
+      slots.add(i);
+    }
+  }
+  if (!existingDocsRequests.isEmpty()) {
+    final MultiGetRequest multiGetRequest=new MultiGetRequest();
+    for (    GetRequest getRequest : existingDocsRequests) {
+      multiGetRequest.add(new MultiGetRequest.Item(getRequest.index(),getRequest.type(),getRequest.id()).routing(getRequest.routing()));
+    }
+    multiGetAction.execute(multiGetRequest,new ActionListener<MultiGetResponse>(){
+      @Override public void onResponse(      MultiGetResponse multiGetItemResponses){
+        for (int i=0; i < multiGetItemResponses.getResponses().length; i++) {
+          MultiGetItemResponse itemResponse=multiGetItemResponses.getResponses()[i];
+          int slot=slots.get(i);
+          if (!itemResponse.isFailed()) {
+            GetResponse getResponse=itemResponse.getResponse();
+            if (getResponse.isExists()) {
+              percolateRequests.set(slot,new PercolateRequest((PercolateRequest)percolateRequests.get(slot),getResponse.getSourceAsBytesRef()));
+            }
+ else {
+              percolateRequests.set(slot,new DocumentMissingException(null,getResponse.getType(),getResponse.getId()));
+            }
+          }
+ else {
+            percolateRequests.set(slot,itemResponse.getFailure());
+          }
         }
-        if (counter.decrementAndGet() == 0) {
-          finishHim();
-        }
+        multiPercolate(request,percolateRequests,listener,clusterState);
       }
       @Override public void onFailure(      Throwable e){
-synchronized (responses) {
-          responses[index]=new MultiPercolateResponse.Item(null,ExceptionsHelper.detailedMessage(e));
-        }
-        if (counter.decrementAndGet() == 0) {
-          finishHim();
-        }
-      }
-      private void finishHim(){
-        listener.onResponse(new MultiPercolateResponse(responses));
+        listener.onFailure(e);
       }
     }
 );
+  }
+ else {
+    multiPercolate(request,percolateRequests,listener,clusterState);
   }
 }

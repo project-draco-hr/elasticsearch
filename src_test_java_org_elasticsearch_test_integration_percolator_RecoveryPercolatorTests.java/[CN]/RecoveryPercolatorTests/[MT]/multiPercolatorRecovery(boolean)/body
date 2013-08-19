@@ -1,0 +1,96 @@
+{
+  Settings settings=settingsBuilder().put("gateway.type","none").build();
+  logger.info("--> starting 3 nodes");
+  startNode("node1",settings);
+  startNode("node2",settings);
+  startNode("node3",settings);
+  final Client client=client("node1");
+  client.admin().indices().prepareDelete().execute().actionGet();
+  ensureGreen(client);
+  client.admin().indices().prepareCreate("test").setSettings(settingsBuilder().put("index.number_of_shards",2).put("index.number_of_replicas",2)).execute().actionGet();
+  ensureGreen(client);
+  final int numQueries=randomIntBetween(50,100);
+  logger.info("--> register a queries");
+  for (int i=0; i < numQueries; i++) {
+    client().prepareIndex("test","_percolator",Integer.toString(i)).setSource(jsonBuilder().startObject().field("query",matchAllQuery()).endObject()).execute().actionGet();
+  }
+  client().prepareIndex("test","type","1").setSource(jsonBuilder().startObject().field("field","a")).execute().actionGet();
+  final AtomicBoolean run=new AtomicBoolean(true);
+  final CountDownLatch done=new CountDownLatch(1);
+  final AtomicReference<Throwable> error=new AtomicReference<Throwable>();
+  Runnable r=new Runnable(){
+    @Override public void run(){
+      try {
+        XContentBuilder doc=null;
+        try {
+          doc=jsonBuilder().startObject().field("field","a").endObject();
+        }
+ catch (        IOException e) {
+        }
+        while (run.get()) {
+          if (multiPercolate) {
+            MultiPercolateRequestBuilder builder=client().prepareMultiPercolate();
+            int numPercolateRequest=randomIntBetween(50,100);
+            for (int i=0; i < numPercolateRequest / 2; i++) {
+              builder.add(client().preparePercolate().setIndices("test").setDocumentType("type").setPercolateDoc(docBuilder().setDoc(doc)));
+            }
+            for (int i=numPercolateRequest / 2; i < numPercolateRequest; i++) {
+              builder.add(client().preparePercolate().setGetRequest(Requests.getRequest("test").type("type").id("1")).setIndices("test").setDocumentType("type"));
+            }
+            MultiPercolateResponse response=builder.execute().actionGet();
+            assertThat(response.items().length,equalTo(numPercolateRequest));
+            for (            MultiPercolateResponse.Item item : response) {
+              assertThat(item.isFailure(),equalTo(false));
+              assertNoFailures(item.getResponse());
+              assertThat(item.getResponse().getCount(),equalTo((long)numQueries));
+              assertThat(item.getResponse().getMatches().length,equalTo(numQueries));
+            }
+          }
+ else {
+            PercolateResponse response;
+            if (randomBoolean()) {
+              response=client().preparePercolate().setIndices("test").setDocumentType("type").setPercolateDoc(docBuilder().setDoc(doc)).execute().actionGet();
+            }
+ else {
+              response=client().preparePercolate().setGetRequest(Requests.getRequest("test").type("type").id("1")).setIndices("test").setDocumentType("type").execute().actionGet();
+            }
+            assertNoFailures(response);
+            assertThat(response.getCount(),equalTo((long)numQueries));
+            assertThat(response.getMatches().length,equalTo(numQueries));
+          }
+        }
+      }
+ catch (      Throwable t) {
+        logger.info("Error in percolate thread...",t);
+        run.set(false);
+        error.set(t);
+      }
+ finally {
+        done.countDown();
+      }
+    }
+  }
+;
+  new Thread(r).start();
+  try {
+    for (int i=0; i < 4; i++) {
+      closeNode("node3");
+      client().admin().cluster().prepareHealth().setWaitForEvents(Priority.LANGUID).setWaitForYellowStatus().setWaitForNodes("2").execute().actionGet();
+      assertThat(error.get(),nullValue());
+      closeNode("node2");
+      client().admin().cluster().prepareHealth().setWaitForEvents(Priority.LANGUID).setWaitForYellowStatus().setWaitForNodes("1").execute().actionGet();
+      assertThat(error.get(),nullValue());
+      startNode("node3");
+      client().admin().cluster().prepareHealth().setWaitForEvents(Priority.LANGUID).setWaitForYellowStatus().setWaitForNodes("2").execute().actionGet();
+      assertThat(error.get(),nullValue());
+      startNode("node2");
+      client().admin().cluster().prepareHealth().setWaitForEvents(Priority.LANGUID).setWaitForYellowStatus().setWaitForNodes("3").execute().actionGet();
+      assertThat(error.get(),nullValue());
+    }
+  }
+  finally {
+    run.set(false);
+  }
+  done.await();
+  assertThat(error.get(),nullValue());
+}
