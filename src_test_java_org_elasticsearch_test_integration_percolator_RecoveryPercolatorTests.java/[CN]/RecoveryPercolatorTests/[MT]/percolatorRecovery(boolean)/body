@@ -28,14 +28,26 @@
  catch (        IOException e) {
         }
         while (run.get()) {
+          NodesInfoResponse nodesInfoResponse=client().admin().cluster().prepareNodesInfo().execute().actionGet();
+          String node2Id=null;
+          String node3Id=null;
+          for (          NodeInfo nodeInfo : nodesInfoResponse) {
+            if ("node2".equals(nodeInfo.getNode().getName())) {
+              node2Id=nodeInfo.getNode().id();
+            }
+ else             if ("node3".equals(nodeInfo.getNode().getName())) {
+              node3Id=nodeInfo.getNode().id();
+            }
+          }
+          String preference="_prefer_node:" + (randomBoolean() ? node2Id : node3Id);
           if (multiPercolate) {
             MultiPercolateRequestBuilder builder=client().prepareMultiPercolate();
             int numPercolateRequest=randomIntBetween(50,100);
             for (int i=0; i < numPercolateRequest / 2; i++) {
-              builder.add(client().preparePercolate().setIndices("test").setDocumentType("type").setPercolateDoc(docBuilder().setDoc(doc)));
+              builder.add(client().preparePercolate().setPreference(preference).setIndices("test").setDocumentType("type").setPercolateDoc(docBuilder().setDoc(doc)));
             }
             for (int i=numPercolateRequest / 2; i < numPercolateRequest; i++) {
-              builder.add(client().preparePercolate().setGetRequest(Requests.getRequest("test").type("type").id("1")).setIndices("test").setDocumentType("type"));
+              builder.add(client().preparePercolate().setPreference(preference).setGetRequest(Requests.getRequest("test").type("type").id("1")).setIndices("test").setDocumentType("type"));
             }
             MultiPercolateResponse response=builder.execute().actionGet();
             assertThat(response.items().length,equalTo(numPercolateRequest));
@@ -49,10 +61,10 @@
  else {
             PercolateResponse response;
             if (randomBoolean()) {
-              response=client().preparePercolate().setIndices("test").setDocumentType("type").setPercolateDoc(docBuilder().setDoc(doc)).execute().actionGet();
+              response=client().preparePercolate().setIndices("test").setDocumentType("type").setPercolateDoc(docBuilder().setDoc(doc)).setPreference(preference).execute().actionGet();
             }
  else {
-              response=client().preparePercolate().setGetRequest(Requests.getRequest("test").type("type").id("1")).setIndices("test").setDocumentType("type").execute().actionGet();
+              response=client().preparePercolate().setGetRequest(Requests.getRequest("test").type("type").id("1")).setIndices("test").setDocumentType("type").setPreference(preference).execute().actionGet();
             }
             assertNoFailures(response);
             assertThat(response.getCount(),equalTo((long)numQueries));
