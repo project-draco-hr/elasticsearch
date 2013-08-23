@@ -3,32 +3,37 @@
     return;
   }
   if (readersKeysToClean.isEmpty()) {
-    threadPool.schedule(cleanInterval,ThreadPool.Names.SAME,this);
+    schedule();
     return;
   }
-  threadPool.executor(ThreadPool.Names.GENERIC).execute(new Runnable(){
-    @Override public void run(){
-      Recycler.V<THashSet<Object>> keys=cacheRecycler.hashSet(-1);
-      try {
-        for (Iterator<Object> it=readersKeysToClean.iterator(); it.hasNext(); ) {
-          keys.v().add(it.next());
-          it.remove();
-        }
-        cache.cleanUp();
-        if (!keys.v().isEmpty()) {
-          for (Iterator<WeightedFilterCache.FilterCacheKey> it=cache.asMap().keySet().iterator(); it.hasNext(); ) {
-            WeightedFilterCache.FilterCacheKey filterCacheKey=it.next();
-            if (keys.v().contains(filterCacheKey.readerKey())) {
-              it.remove();
+  try {
+    threadPool.executor(ThreadPool.Names.GENERIC).execute(new Runnable(){
+      @Override public void run(){
+        Recycler.V<THashSet<Object>> keys=cacheRecycler.hashSet(-1);
+        try {
+          for (Iterator<Object> it=readersKeysToClean.iterator(); it.hasNext(); ) {
+            keys.v().add(it.next());
+            it.remove();
+          }
+          cache.cleanUp();
+          if (!keys.v().isEmpty()) {
+            for (Iterator<WeightedFilterCache.FilterCacheKey> it=cache.asMap().keySet().iterator(); it.hasNext(); ) {
+              WeightedFilterCache.FilterCacheKey filterCacheKey=it.next();
+              if (keys.v().contains(filterCacheKey.readerKey())) {
+                it.remove();
+              }
             }
           }
+          schedule();
         }
-        threadPool.schedule(cleanInterval,ThreadPool.Names.SAME,ReaderCleaner.this);
-      }
   finally {
-        keys.release();
+          keys.release();
+        }
       }
     }
-  }
 );
+  }
+ catch (  EsRejectedExecutionException ex) {
+    logger.debug("Can not run ReaderCleaner - execution rejected",ex);
+  }
 }
