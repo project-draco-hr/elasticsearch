@@ -1,0 +1,102 @@
+{
+  XContentParser parser=XContentFactory.xContent(data).createParser(data);
+  try {
+    XContentParser.Token token;
+    String currentFieldName=null;
+    boolean offsets=true;
+    boolean offsetsFound=false;
+    boolean positions=true;
+    boolean positionsFound=false;
+    boolean payloads=true;
+    boolean payloadsFound=false;
+    boolean termStatistics=false;
+    boolean termStatisticsFound=false;
+    boolean fieldStatistics=true;
+    boolean fieldStatisticsFound=false;
+    while ((token=parser.nextToken()) != XContentParser.Token.END_OBJECT) {
+      if (token == XContentParser.Token.FIELD_NAME) {
+        currentFieldName=parser.currentName();
+      }
+ else       if (token == XContentParser.Token.VALUE_BOOLEAN) {
+        if (currentFieldName.equals("offsets")) {
+          offsets=parser.booleanValue();
+          offsetsFound=true;
+        }
+ else         if (currentFieldName.equals("positions")) {
+          positions=parser.booleanValue();
+          positionsFound=true;
+        }
+ else         if (currentFieldName.equals("payloads")) {
+          payloads=parser.booleanValue();
+          payloadsFound=true;
+        }
+ else         if (currentFieldName.equals("term_statistics") || currentFieldName.equals("termStatistics")) {
+          termStatistics=parser.booleanValue();
+          termStatisticsFound=true;
+        }
+ else         if (currentFieldName.equals("field_statistics") || currentFieldName.equals("fieldStatistics")) {
+          fieldStatistics=parser.booleanValue();
+          fieldStatisticsFound=true;
+        }
+ else {
+          throw new ElasticSearchParseException("_mtermvectors: Parameter " + currentFieldName + "not supported");
+        }
+      }
+ else       if (token == XContentParser.Token.START_ARRAY) {
+        if ("docs".equals(currentFieldName)) {
+          while ((token=parser.nextToken()) != XContentParser.Token.END_ARRAY) {
+            if (token != XContentParser.Token.START_OBJECT) {
+              throw new ElasticSearchIllegalArgumentException("docs array element should include an object");
+            }
+            TermVectorRequest termVectorRequest=new TermVectorRequest(defaultIndex,defaultType,null);
+            TermVectorRequest.parseRequest(termVectorRequest,parser);
+            if (defaultFields != null) {
+              termVectorRequest.selectedFields(defaultFields.clone());
+            }
+            add(termVectorRequest);
+          }
+        }
+ else         if ("ids".equals(currentFieldName)) {
+          while ((token=parser.nextToken()) != XContentParser.Token.END_ARRAY) {
+            if (!token.isValue()) {
+              throw new ElasticSearchIllegalArgumentException("ids array element should only contain ids");
+            }
+            TermVectorRequest tvr=new TermVectorRequest(defaultIndex,defaultType,parser.text());
+            if (defaultFields != null) {
+              tvr.selectedFields(defaultFields.clone());
+            }
+            add(tvr);
+          }
+        }
+ else {
+          throw new ElasticSearchParseException("_mtermvectors: Parameter " + currentFieldName + "not supported");
+        }
+      }
+ else       if (currentFieldName != null) {
+        throw new ElasticSearchParseException("_mtermvectors: Parameter " + currentFieldName + "not supported");
+      }
+    }
+    for (int i=0; i < requests.size(); i++) {
+      TermVectorRequest curRequest=requests.get(i);
+      if (offsetsFound) {
+        curRequest.offsets(offsets);
+      }
+      if (payloadsFound) {
+        curRequest.payloads(payloads);
+      }
+      if (fieldStatisticsFound) {
+        curRequest.fieldStatistics(fieldStatistics);
+      }
+      if (positionsFound) {
+        curRequest.positions(positions);
+      }
+      if (termStatisticsFound) {
+        curRequest.termStatistics(termStatistics);
+      }
+      requests.set(i,curRequest);
+    }
+  }
+  finally {
+    parser.close();
+  }
+}

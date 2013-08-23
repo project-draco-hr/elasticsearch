@@ -1,0 +1,26 @@
+{
+  final Engine.Searcher searcher=indexShard.searcher();
+  IndexReader topLevelReader=searcher.reader();
+  final TermVectorResponse termVectorResponse=new TermVectorResponse(request.index(),request.type(),request.id());
+  final Term uidTerm=new Term(UidFieldMapper.NAME,Uid.createUidAsBytes(request.type(),request.id()));
+  try {
+    Fields topLevelFields=MultiFields.getFields(topLevelReader);
+    Versions.DocIdAndVersion docIdAndVersion=Versions.loadDocIdAndVersion(topLevelReader,uidTerm);
+    if (docIdAndVersion != null) {
+      Fields termVectorsByField=docIdAndVersion.context.reader().getTermVectors(docIdAndVersion.docId);
+      termVectorResponse.setFields(termVectorsByField,request.selectedFields(),request.getFlags(),topLevelFields);
+      termVectorResponse.setExists(true);
+      termVectorResponse.setDocVersion(docIdAndVersion.version);
+    }
+ else {
+      termVectorResponse.setExists(false);
+    }
+  }
+ catch (  Throwable ex) {
+    throw new ElasticSearchException("failed to execute term vector request",ex);
+  }
+ finally {
+    searcher.release();
+  }
+  return termVectorResponse;
+}
