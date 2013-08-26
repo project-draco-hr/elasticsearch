@@ -1,0 +1,33 @@
+{
+  final IndexSearcher docSearcher=memoryIndex.createSearcher();
+  final IndexReader topLevelReader=docSearcher.getIndexReader();
+  AtomicReaderContext readerContext=topLevelReader.leaves().get(0);
+  docEngineSearcher=new Engine.Searcher(){
+    @Override public IndexReader reader(){
+      return topLevelReader;
+    }
+    @Override public IndexSearcher searcher(){
+      return docSearcher;
+    }
+    @Override public boolean release() throws ElasticSearchException {
+      try {
+        docSearcher.getIndexReader().close();
+        memoryIndex.reset();
+      }
+ catch (      IOException e) {
+        throw new ElasticSearchException("failed to close percolator in-memory index",e);
+      }
+      return true;
+    }
+  }
+;
+  lookup().setNextReader(readerContext);
+  lookup().setNextDocId(0);
+  lookup().source().setNextSource(parsedDocument.source());
+  Map<String,SearchHitField> fields=new HashMap<String,SearchHitField>();
+  for (  IndexableField field : parsedDocument.rootDoc().getFields()) {
+    fields.put(field.name(),new InternalSearchHitField(field.name(),ImmutableList.of()));
+  }
+  hitContext=new FetchSubPhase.HitContext();
+  hitContext.reset(new InternalSearchHit(0,"unknown",new StringText(request.documentType()),fields),readerContext,0,topLevelReader,0,new JustSourceFieldsVisitor());
+}
