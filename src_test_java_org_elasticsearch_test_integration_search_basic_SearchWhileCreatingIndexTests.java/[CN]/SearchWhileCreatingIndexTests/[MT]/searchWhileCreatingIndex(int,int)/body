@@ -1,0 +1,22 @@
+{
+  for (int i=0; i < 20; i++) {
+    logger.info("running iteration {}",i);
+    if (numberOfShards > 0) {
+      CreateIndexResponse createIndexResponse=prepareCreate("test").setSettings(settingsBuilder().put("index.number_of_shards",numberOfShards).put("index.number_of_replicas",numberOfReplicas)).get();
+      assertThat(createIndexResponse.isAcknowledged(),equalTo(true));
+    }
+    client().prepareIndex("test","type1",randomAsciiOfLength(5)).setSource("field","test").execute().actionGet();
+    RefreshResponse refreshResponse=client().admin().indices().prepareRefresh("test").execute().actionGet();
+    assertThat(refreshResponse.getSuccessfulShards(),greaterThanOrEqualTo(1));
+    ClusterHealthStatus status=ClusterHealthStatus.RED;
+    while (status != ClusterHealthStatus.GREEN) {
+      SearchResponse searchResponse=client().prepareSearch("test").setPreference("_primary").setQuery(QueryBuilders.termQuery("field","test")).execute().actionGet();
+      assertHitCount(searchResponse,1);
+      searchResponse=client().prepareSearch("test").setPreference(randomAsciiOfLength(5)).setQuery(QueryBuilders.termQuery("field","test")).execute().actionGet();
+      assertHitCount(searchResponse,1);
+      status=client().admin().cluster().prepareHealth("test").get().getStatus();
+      cluster().ensureAtLeastNumNodes(numberOfReplicas + 1);
+    }
+    wipeIndex("test");
+  }
+}
