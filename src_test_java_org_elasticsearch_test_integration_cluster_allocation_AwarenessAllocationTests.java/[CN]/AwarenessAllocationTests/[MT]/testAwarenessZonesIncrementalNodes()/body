@@ -1,0 +1,35 @@
+{
+  Settings commonSettings=ImmutableSettings.settingsBuilder().put("cluster.routing.allocation.awareness.force.zone.values","a,b").put("cluster.routing.allocation.awareness.attributes","zone").build();
+  logger.info("--> starting 6 nodes on different zones");
+  startNode("A-0",ImmutableSettings.settingsBuilder().put(commonSettings).put("node.zone","a"));
+  startNode("B-0",ImmutableSettings.settingsBuilder().put(commonSettings).put("node.zone","b"));
+  client().admin().indices().prepareCreate("test").setSettings(settingsBuilder().put("index.number_of_shards",5).put("index.number_of_replicas",1)).execute().actionGet();
+  ClusterHealthResponse health=client().admin().cluster().prepareHealth().setWaitForEvents(Priority.LANGUID).setWaitForGreenStatus().setWaitForNodes("2").setWaitForRelocatingShards(0).execute().actionGet();
+  assertThat(health.isTimedOut(),equalTo(false));
+  ClusterState clusterState=client().admin().cluster().prepareState().execute().actionGet().getState();
+  TObjectIntHashMap<String> counts=new TObjectIntHashMap<String>();
+  for (  IndexRoutingTable indexRoutingTable : clusterState.routingTable()) {
+    for (    IndexShardRoutingTable indexShardRoutingTable : indexRoutingTable) {
+      for (      ShardRouting shardRouting : indexShardRoutingTable) {
+        counts.adjustOrPutValue(clusterState.nodes().get(shardRouting.currentNodeId()).name(),1,1);
+      }
+    }
+  }
+  assertThat(counts.get("A-0"),equalTo(5));
+  assertThat(counts.get("B-0"),equalTo(5));
+  startNode("B-1",ImmutableSettings.settingsBuilder().put(commonSettings).put("node.zone","b"));
+  Thread.sleep(1000);
+  health=client().admin().cluster().prepareHealth().setWaitForEvents(Priority.LANGUID).setWaitForGreenStatus().setWaitForNodes("3").setWaitForRelocatingShards(0).execute().actionGet();
+  assertThat(health.isTimedOut(),equalTo(false));
+  counts=new TObjectIntHashMap<String>();
+  for (  IndexRoutingTable indexRoutingTable : clusterState.routingTable()) {
+    for (    IndexShardRoutingTable indexShardRoutingTable : indexRoutingTable) {
+      for (      ShardRouting shardRouting : indexShardRoutingTable) {
+        counts.adjustOrPutValue(clusterState.nodes().get(shardRouting.currentNodeId()).name(),1,1);
+      }
+    }
+  }
+  assertThat(counts.get("A-0"),equalTo(5));
+  assertThat(counts.get("B-1"),equalTo(2));
+  assertThat(counts.get("B-0"),equalTo(3));
+}
