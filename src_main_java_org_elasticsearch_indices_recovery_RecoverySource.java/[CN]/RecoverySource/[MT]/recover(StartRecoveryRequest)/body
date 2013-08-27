@@ -58,8 +58,17 @@
         transportService.submitRequest(request.targetNode(),RecoveryTarget.Actions.FILES_INFO,recoveryInfoFilesRequest,TransportRequestOptions.options().withTimeout(internalActionTimeout),EmptyTransportResponseHandler.INSTANCE_SAME).txGet();
         final CountDownLatch latch=new CountDownLatch(response.phase1FileNames.size());
         final AtomicReference<Exception> lastException=new AtomicReference<Exception>();
+        int fileIndex=0;
         for (        final String name : response.phase1FileNames) {
-          recoverySettings.concurrentStreamPool().execute(new Runnable(){
+          ThreadPoolExecutor pool;
+          long fileSize=response.phase1FileSizes.get(fileIndex);
+          if (fileSize > recoverySettings.SMALL_FILE_CUTOFF_BYTES) {
+            pool=recoverySettings.concurrentStreamPool();
+          }
+ else {
+            pool=recoverySettings.concurrentSmallFileStreamPool();
+          }
+          pool.execute(new Runnable(){
             @Override public void run(){
               IndexInput indexInput=null;
               try {
@@ -104,6 +113,7 @@
             }
           }
 );
+          fileIndex++;
         }
         latch.await();
         if (lastException.get() != null) {
