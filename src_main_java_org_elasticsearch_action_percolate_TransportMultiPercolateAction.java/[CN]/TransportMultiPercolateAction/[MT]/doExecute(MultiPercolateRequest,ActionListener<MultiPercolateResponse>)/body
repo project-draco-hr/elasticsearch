@@ -1,17 +1,19 @@
 {
   final ClusterState clusterState=clusterService.state();
   clusterState.blocks().globalBlockedRaiseException(ClusterBlockLevel.READ);
-  @SuppressWarnings("unchecked") final List<Object> percolateRequests=(List)request.requests();
-  final TIntArrayList slots=new TIntArrayList();
-  final List<GetRequest> existingDocsRequests=new ArrayList<GetRequest>();
+  final AtomicReferenceArray<Object> percolateRequests=new AtomicReferenceArray<Object>(request.requests().size());
+  TIntArrayList getRequestSlots=new TIntArrayList();
+  List<GetRequest> existingDocsRequests=new ArrayList<GetRequest>();
   for (int i=0; i < request.requests().size(); i++) {
     PercolateRequest percolateRequest=request.requests().get(i);
     percolateRequest.startTime=System.currentTimeMillis();
+    percolateRequests.set(i,percolateRequest);
     if (percolateRequest.getRequest() != null) {
       existingDocsRequests.add(percolateRequest.getRequest());
-      slots.add(i);
+      getRequestSlots.add(i);
     }
   }
+  final AtomicIntegerArray percolateRequestSlotsWithGet=new AtomicIntegerArray(getRequestSlots.toArray());
   if (!existingDocsRequests.isEmpty()) {
     final MultiGetRequest multiGetRequest=new MultiGetRequest();
     for (    GetRequest getRequest : existingDocsRequests) {
@@ -21,7 +23,7 @@
       @Override public void onResponse(      MultiGetResponse multiGetItemResponses){
         for (int i=0; i < multiGetItemResponses.getResponses().length; i++) {
           MultiGetItemResponse itemResponse=multiGetItemResponses.getResponses()[i];
-          int slot=slots.get(i);
+          int slot=percolateRequestSlotsWithGet.get(i);
           if (!itemResponse.isFailed()) {
             GetResponse getResponse=itemResponse.getResponse();
             if (getResponse.isExists()) {
