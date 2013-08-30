@@ -4,6 +4,7 @@
     ClusterBlockException blockException=checkGlobalBlock(clusterState,request);
     if (blockException != null) {
       if (blockException.retryable()) {
+        logger.debug("Cluster is blocked ({}), scheduling a retry",blockException.getMessage());
         retry(fromClusterEvent,blockException);
         return false;
       }
@@ -17,6 +18,7 @@
     blockException=checkRequestBlock(clusterState,request);
     if (blockException != null) {
       if (blockException.retryable()) {
+        logger.debug("Cluster is blocked ({}), scheduling a retry",blockException.getMessage());
         retry(fromClusterEvent,blockException);
         return false;
       }
@@ -31,6 +33,7 @@
     return true;
   }
   if (shardIt.size() == 0) {
+    logger.debug("No shard instances known for index [{}]. Scheduling a retry",shardIt.shardId());
     retry(fromClusterEvent,null);
     return false;
   }
@@ -42,6 +45,7 @@
       continue;
     }
     if (!shard.active() || !clusterState.nodes().nodeExists(shard.currentNodeId())) {
+      logger.debug("primary shard [{}] is not yet active or we do not know that node it is assigned to [{}]. Scheduling a retry.",shard.shardId(),shard.currentNodeId());
       retry(fromClusterEvent,null);
       return false;
     }
@@ -58,6 +62,7 @@
         requiredNumber=shardIt.size();
       }
       if (shardIt.sizeActive() < requiredNumber) {
+        logger.debug("Not enough active copies of shard [{}] to meet write consistency of [{}] (have {}, needed {}). Scheduling a retry.",shard.shardId(),consistencyLevel,shardIt.sizeActive(),requiredNumber);
         retry(fromClusterEvent,null);
         return false;
       }
@@ -105,6 +110,7 @@
         @Override public void handleException(        TransportException exp){
           if (exp.unwrapCause() instanceof ConnectTransportException || exp.unwrapCause() instanceof NodeClosedException || retryPrimaryException(exp)) {
             primaryOperationStarted.set(false);
+            logger.debug("received an error from node the primary was assigned to ({}). Scheduling a retry",exp.getMessage());
             retry(false,null);
           }
  else {
@@ -117,6 +123,7 @@
     break;
   }
   if (!foundPrimary) {
+    logger.debug("Couldn't find a eligible primary shard. Scheduling for retry.");
     retry(fromClusterEvent,null);
     return false;
   }
