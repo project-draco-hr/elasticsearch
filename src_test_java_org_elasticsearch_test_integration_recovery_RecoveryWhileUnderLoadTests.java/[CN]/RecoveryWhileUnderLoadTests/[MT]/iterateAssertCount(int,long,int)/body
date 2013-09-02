@@ -1,17 +1,23 @@
 {
   CountResponse[] iterationResults=new CountResponse[iterations];
+  boolean error=false;
   for (int i=0; i < iterations; i++) {
     CountResponse countResponse=client().prepareCount().setQuery(matchAllQuery()).execute().actionGet();
+    logCountResponse(numberOfShards,numberOfDocs,i,countResponse);
     iterationResults[i]=countResponse;
-    logger.info("iteration [{}] - successful shards: {} (expected {})",i,countResponse.getSuccessfulShards(),numberOfShards);
-    logger.info("iteration [{}] - failed shards: {} (expected 0)",i,countResponse.getFailedShards());
-    if (countResponse.getShardFailures() != null && countResponse.getShardFailures().length > 0) {
-      logger.info("iteration [{}] - shard failures: {}",i,Arrays.toString(countResponse.getShardFailures()));
+    if (countResponse.getCount() != numberOfDocs) {
+      error=true;
     }
-    logger.info("iteration [{}] - returned documents: {} (expected {})",i,countResponse.getCount(),numberOfDocs);
+  }
+  if (error) {
+    logger.info("--> refreshing again");
+    refresh();
+    for (int i=0; i < iterations; i++) {
+      CountResponse countResponse=client().prepareCount().setQuery(matchAllQuery()).execute().actionGet();
+      logCountResponse(numberOfShards,numberOfDocs,i,countResponse);
+    }
   }
   for (int i=0; i < iterations; i++) {
-    CountResponse countResponse=iterationResults[i];
-    assertHitCount(countResponse,numberOfDocs);
+    assertHitCount(iterationResults[i],numberOfDocs);
   }
 }
