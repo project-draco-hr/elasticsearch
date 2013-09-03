@@ -1,0 +1,30 @@
+{
+  ConcurrentHashMap<String,Integer> counter=new ConcurrentHashMap<String,Integer>();
+  ConcurrentHashMap<String,AtomicInteger> safeCounter=new ConcurrentHashMap<String,AtomicInteger>();
+  KeyedLock<String> connectionLock=new KeyedLock<String>();
+  String[] names=new String[randomIntBetween(1,40)];
+  for (int i=0; i < names.length; i++) {
+    names[i]=randomRealisticUnicodeOfLengthBetween(10,20);
+  }
+  CountDownLatch startLatch=new CountDownLatch(1);
+  int numThreads=randomIntBetween(3,10);
+  Thread[] threads=new Thread[numThreads];
+  for (int i=0; i < numThreads; i++) {
+    threads[i]=new AcquireAndReleaseThread(startLatch,connectionLock,names,counter,safeCounter);
+  }
+  for (int i=0; i < numThreads; i++) {
+    threads[i].start();
+  }
+  startLatch.countDown();
+  for (int i=0; i < numThreads; i++) {
+    threads[i].join();
+  }
+  assertThat(connectionLock.hasLockedKeys(),equalTo(false));
+  Set<Entry<String,Integer>> entrySet=counter.entrySet();
+  assertThat(counter.size(),equalTo(safeCounter.size()));
+  for (  Entry<String,Integer> entry : entrySet) {
+    AtomicInteger atomicInteger=safeCounter.get(entry.getKey());
+    assertThat(atomicInteger,not(Matchers.nullValue()));
+    assertThat(atomicInteger.get(),equalTo(entry.getValue()));
+  }
+}
