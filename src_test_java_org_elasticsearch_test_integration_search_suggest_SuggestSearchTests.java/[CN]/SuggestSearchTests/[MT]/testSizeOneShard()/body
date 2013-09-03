@@ -1,24 +1,16 @@
 {
-  client().admin().indices().prepareCreate("test").setSettings(settingsBuilder().put(SETTING_NUMBER_OF_SHARDS,1).put(SETTING_NUMBER_OF_REPLICAS,0)).execute().actionGet();
-  client().admin().cluster().prepareHealth("test").setWaitForGreenStatus().execute().actionGet();
+  prepareCreate("test").setSettings(SETTING_NUMBER_OF_SHARDS,1,SETTING_NUMBER_OF_REPLICAS,0).get();
+  ensureGreen();
   for (int i=0; i < 15; i++) {
-    client().prepareIndex("test","type1").setSource(XContentFactory.jsonBuilder().startObject().field("text","abc" + i).endObject()).execute().actionGet();
+    index("test","type1",Integer.toString(i),"text","abc" + i);
   }
-  client().admin().indices().prepareRefresh().execute().actionGet();
-  SearchResponse _search=client().prepareSearch().setQuery(matchQuery("text","spellchecker")).execute().actionGet();
-  assertThat("didn't ask for suggestions but got some",_search.getSuggest(),nullValue());
-  Suggest suggest=searchSuggest(client(),termSuggestion("test").suggestMode("always").text("abcd").field("text").size(10));
-  assertThat(suggest,notNullValue());
-  assertThat(suggest.size(),equalTo(1));
-  assertThat(suggest.getSuggestion("test").getName(),equalTo("test"));
-  assertThat(suggest.getSuggestion("test").getEntries().size(),equalTo(1));
-  assertThat(suggest.getSuggestion("test").getEntries().get(0).getText().string(),equalTo("abcd"));
-  assertThat(suggest.getSuggestion("test").getEntries().get(0).getOptions().size(),equalTo(10));
-  suggest=searchSuggest(client(),termSuggestion("test").suggestMode("always").text("abcd").field("text").size(10).shardSize(5));
-  assertThat(suggest,notNullValue());
-  assertThat(suggest.size(),equalTo(1));
-  assertThat(suggest.getSuggestion("test").getName(),equalTo("test"));
-  assertThat(suggest.getSuggestion("test").getEntries().size(),equalTo(1));
-  assertThat(suggest.getSuggestion("test").getEntries().get(0).getText().string(),equalTo("abcd"));
-  assertThat(suggest.getSuggestion("test").getEntries().get(0).getOptions().size(),equalTo(5));
+  refresh();
+  SearchResponse search=client().prepareSearch().setQuery(matchQuery("text","spellchecker")).get();
+  assertThat("didn't ask for suggestions but got some",search.getSuggest(),nullValue());
+  TermSuggestionBuilder termSuggestion=termSuggestion("test").suggestMode("always").text("abcd").field("text").size(10);
+  Suggest suggest=searchSuggest(client(),termSuggestion);
+  assertSuggestion(suggest,0,"test",10,"abc0");
+  termSuggestion.text("abcd").shardSize(5);
+  suggest=searchSuggest(client(),termSuggestion);
+  assertSuggestion(suggest,0,"test",5,"abc0");
 }

@@ -1,7 +1,6 @@
 {
-  client().admin().indices().prepareDelete().execute().actionGet();
-  client().admin().indices().prepareCreate("test").setSettings(settingsBuilder().put(SETTING_NUMBER_OF_SHARDS,5).put(SETTING_NUMBER_OF_REPLICAS,0)).execute().actionGet();
-  client().admin().cluster().prepareHealth("test").setWaitForGreenStatus().execute().actionGet();
+  prepareCreate("test").setSettings(SETTING_NUMBER_OF_SHARDS,5,SETTING_NUMBER_OF_REPLICAS,0).get();
+  ensureGreen();
   Map<String,Integer> termsAndDocCount=new HashMap<String,Integer>();
   termsAndDocCount.put("prefix_aaad",20);
   termsAndDocCount.put("prefix_abbb",18);
@@ -17,42 +16,13 @@
   termsAndDocCount.put("prefix_accd",1);
   for (  Map.Entry<String,Integer> entry : termsAndDocCount.entrySet()) {
     for (int i=0; i < entry.getValue(); i++) {
-      client().prepareIndex("test","type1").setSource(XContentFactory.jsonBuilder().startObject().field("field1",entry.getKey()).endObject()).execute().actionGet();
+      index("test","type1",entry.getKey() + i,"field1",entry.getKey());
     }
   }
-  client().admin().indices().prepareRefresh().execute().actionGet();
+  refresh();
   Suggest suggest=searchSuggest(client(),"prefix_abcd",termSuggestion("size3SortScoreFirst").size(3).minDocFreq(0).field("field1").suggestMode("always"),termSuggestion("size10SortScoreFirst").size(10).minDocFreq(0).field("field1").suggestMode("always").shardSize(50),termSuggestion("size3SortScoreFirstMaxEdits1").maxEdits(1).size(10).minDocFreq(0).field("field1").suggestMode("always"),termSuggestion("size10SortFrequencyFirst").size(10).sort("frequency").shardSize(1000).minDocFreq(0).field("field1").suggestMode("always"));
-  assertThat(suggest,notNullValue());
-  assertThat(suggest.size(),equalTo(4));
-  assertThat(suggest.getSuggestion("size3SortScoreFirst").getName(),equalTo("size3SortScoreFirst"));
-  assertThat(suggest.getSuggestion("size3SortScoreFirst").getEntries().size(),equalTo(1));
-  assertThat(suggest.getSuggestion("size3SortScoreFirst").getEntries().get(0).getOptions().size(),equalTo(3));
-  assertThat(suggest.getSuggestion("size3SortScoreFirst").getEntries().get(0).getOptions().get(0).getText().string(),equalTo("prefix_aacd"));
-  assertThat(suggest.getSuggestion("size3SortScoreFirst").getEntries().get(0).getOptions().get(1).getText().string(),equalTo("prefix_abcc"));
-  assertThat(suggest.getSuggestion("size3SortScoreFirst").getEntries().get(0).getOptions().get(2).getText().string(),equalTo("prefix_accd"));
-  assertThat(suggest.getSuggestion("size10SortScoreFirst").getName(),equalTo("size10SortScoreFirst"));
-  assertThat(suggest.getSuggestion("size10SortScoreFirst").getEntries().size(),equalTo(1));
-  assertThat(suggest.getSuggestion("size10SortScoreFirst").getEntries().get(0).getOptions().size(),equalTo(10));
-  assertThat(suggest.getSuggestion("size10SortScoreFirst").getEntries().get(0).getOptions().get(0).getText().string(),equalTo("prefix_aacd"));
-  assertThat(suggest.getSuggestion("size10SortScoreFirst").getEntries().get(0).getOptions().get(1).getText().string(),equalTo("prefix_abcc"));
-  assertThat(suggest.getSuggestion("size10SortScoreFirst").getEntries().get(0).getOptions().get(2).getText().string(),equalTo("prefix_accd"));
-  assertThat(suggest.getSuggestion("size3SortScoreFirstMaxEdits1").getName(),equalTo("size3SortScoreFirstMaxEdits1"));
-  assertThat(suggest.getSuggestion("size3SortScoreFirstMaxEdits1").getEntries().size(),equalTo(1));
-  assertThat(suggest.getSuggestion("size3SortScoreFirstMaxEdits1").getEntries().get(0).getOptions().size(),equalTo(3));
-  assertThat(suggest.getSuggestion("size3SortScoreFirstMaxEdits1").getEntries().get(0).getOptions().get(0).getText().string(),equalTo("prefix_aacd"));
-  assertThat(suggest.getSuggestion("size3SortScoreFirstMaxEdits1").getEntries().get(0).getOptions().get(1).getText().string(),equalTo("prefix_abcc"));
-  assertThat(suggest.getSuggestion("size3SortScoreFirstMaxEdits1").getEntries().get(0).getOptions().get(2).getText().string(),equalTo("prefix_accd"));
-  assertThat(suggest.getSuggestion("size10SortFrequencyFirst").getName(),equalTo("size10SortFrequencyFirst"));
-  assertThat(suggest.getSuggestion("size10SortFrequencyFirst").getEntries().size(),equalTo(1));
-  assertThat(suggest.getSuggestion("size10SortFrequencyFirst").getEntries().get(0).getOptions().size(),equalTo(10));
-  assertThat(suggest.getSuggestion("size10SortFrequencyFirst").getEntries().get(0).getOptions().get(0).getText().string(),equalTo("prefix_aaad"));
-  assertThat(suggest.getSuggestion("size10SortFrequencyFirst").getEntries().get(0).getOptions().get(1).getText().string(),equalTo("prefix_abbb"));
-  assertThat(suggest.getSuggestion("size10SortFrequencyFirst").getEntries().get(0).getOptions().get(2).getText().string(),equalTo("prefix_aaca"));
-  assertThat(suggest.getSuggestion("size10SortFrequencyFirst").getEntries().get(0).getOptions().get(3).getText().string(),equalTo("prefix_abba"));
-  assertThat(suggest.getSuggestion("size10SortFrequencyFirst").getEntries().get(0).getOptions().get(4).getText().string(),equalTo("prefix_accc"));
-  assertThat(suggest.getSuggestion("size10SortFrequencyFirst").getEntries().get(0).getOptions().get(5).getText().string(),equalTo("prefix_addd"));
-  assertThat(suggest.getSuggestion("size10SortFrequencyFirst").getEntries().get(0).getOptions().get(6).getText().string(),equalTo("prefix_abaa"));
-  assertThat(suggest.getSuggestion("size10SortFrequencyFirst").getEntries().get(0).getOptions().get(7).getText().string(),equalTo("prefix_dbca"));
-  assertThat(suggest.getSuggestion("size10SortFrequencyFirst").getEntries().get(0).getOptions().get(8).getText().string(),equalTo("prefix_cbad"));
-  assertThat(suggest.getSuggestion("size10SortFrequencyFirst").getEntries().get(0).getOptions().get(9).getText().string(),equalTo("prefix_aacd"));
+  assertSuggestion(suggest,0,"size3SortScoreFirst","prefix_aacd","prefix_abcc","prefix_accd");
+  assertSuggestion(suggest,0,"size10SortScoreFirst",10,"prefix_aacd","prefix_abcc","prefix_accd");
+  assertSuggestion(suggest,0,"size3SortScoreFirstMaxEdits1","prefix_aacd","prefix_abcc","prefix_accd");
+  assertSuggestion(suggest,0,"size10SortFrequencyFirst","prefix_aaad","prefix_abbb","prefix_aaca","prefix_abba","prefix_accc","prefix_addd","prefix_abaa","prefix_dbca","prefix_cbad","prefix_aacd");
 }

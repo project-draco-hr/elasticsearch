@@ -1,29 +1,24 @@
 {
-  int numShards=between(1,5);
-  Builder builder=ImmutableSettings.builder();
-  builder.put("index.number_of_shards",numShards).put("index.number_of_replicas",between(0,numberOfNodes() - 1));
-  builder.put("index.analysis.analyzer.biword.tokenizer","standard");
-  builder.putArray("index.analysis.analyzer.biword.filter","shingler","lowercase");
-  builder.put("index.analysis.filter.shingler.type","shingle");
-  builder.put("index.analysis.filter.shingler.min_shingle_size",2);
-  builder.put("index.analysis.filter.shingler.max_shingle_size",3);
-  XContentBuilder mapping=XContentFactory.jsonBuilder().startObject().startObject("type1").startObject("properties").startObject("name").field("type","multi_field").field("path","just_name").startObject("fields").startObject("name").field("type","string").endObject().startObject("name_shingled").field("type","string").field("index_analyzer","biword").field("search_analyzer","standard").endObject().endObject().endObject().endObject().endObject().endObject();
-  client().admin().indices().prepareDelete().execute().actionGet();
-  client().admin().indices().prepareCreate("test").setSettings(builder.build()).addMapping("type1",mapping).execute().actionGet();
-  client().admin().cluster().prepareHealth("test").setWaitForGreenStatus().execute().actionGet();
-  indexRandom("test",true,client().prepareIndex("test","type1").setSource(XContentFactory.jsonBuilder().startObject().field("name","I like iced tea").endObject()),client().prepareIndex("test","type1").setSource(XContentFactory.jsonBuilder().startObject().field("name","I like tea.").endObject()),client().prepareIndex("test","type1").setSource(XContentFactory.jsonBuilder().startObject().field("name","I like ice cream.").endObject()));
-  Suggest searchSuggest=searchSuggest(client(),"ice tea",phraseSuggestion("did_you_mean").field("name_shingled").addCandidateGenerator(PhraseSuggestionBuilder.candidateGenerator("name").prefixLength(0).minWordLength(0).suggestMode("always").maxEdits(2)).gramSize(3));
-  ElasticsearchAssertions.assertSuggestion(searchSuggest,0,0,"did_you_mean","iced tea");
+  CreateIndexRequestBuilder builder=prepareCreate("test").setSettings(settingsBuilder().put(SETTING_NUMBER_OF_SHARDS,between(1,5)).put(SETTING_NUMBER_OF_REPLICAS,between(0,numberOfNodes() - 1)).put("index.analysis.analyzer.biword.tokenizer","standard").putArray("index.analysis.analyzer.biword.filter","shingler","lowercase").put("index.analysis.filter.shingler.type","shingle").put("index.analysis.filter.shingler.min_shingle_size",2).put("index.analysis.filter.shingler.max_shingle_size",3));
+  addMapping(builder,"type1",new Object[]{"name","type","multi_field","path","just_name","fields",ImmutableMap.of("name",ImmutableMap.of("type","string"),"name_shingled",ImmutableMap.of("type","string","index_analyzer","biword","search_analyzer","standard"))});
+  builder.get();
+  ensureGreen();
+  indexRandom("test",true,client().prepareIndex("test","type1").setSource("name","I like iced tea"),client().prepareIndex("test","type1").setSource("name","I like tea."),client().prepareIndex("test","type1").setSource("name","I like ice cream."));
+  refresh();
+  PhraseSuggestionBuilder phraseSuggestion=phraseSuggestion("did_you_mean").field("name_shingled").addCandidateGenerator(PhraseSuggestionBuilder.candidateGenerator("name").prefixLength(0).minWordLength(0).suggestMode("always").maxEdits(2)).gramSize(3);
+  Suggest searchSuggest=searchSuggest(client(),"ice tea",phraseSuggestion);
+  assertSuggestion(searchSuggest,0,0,"did_you_mean","iced tea");
+  phraseSuggestion.field("nosuchField");
 {
     SearchRequestBuilder suggestBuilder=client().prepareSearch().setSearchType(SearchType.COUNT);
     suggestBuilder.setSuggestText("tetsting sugestion");
-    suggestBuilder.addSuggestion(phraseSuggestion("did_you_mean").field("nosuchField").addCandidateGenerator(PhraseSuggestionBuilder.candidateGenerator("name").prefixLength(0).minWordLength(0).suggestMode("always").maxEdits(2)).gramSize(3));
+    suggestBuilder.addSuggestion(phraseSuggestion);
     assertThrows(suggestBuilder,SearchPhaseExecutionException.class);
   }
 {
     SearchRequestBuilder suggestBuilder=client().prepareSearch().setSearchType(SearchType.COUNT);
     suggestBuilder.setSuggestText("tetsting sugestion");
-    suggestBuilder.addSuggestion(phraseSuggestion("did_you_mean").field("nosuchField").addCandidateGenerator(PhraseSuggestionBuilder.candidateGenerator("name").prefixLength(0).minWordLength(0).suggestMode("always").maxEdits(2)).gramSize(3));
+    suggestBuilder.addSuggestion(phraseSuggestion);
     assertThrows(suggestBuilder,SearchPhaseExecutionException.class);
   }
 }
