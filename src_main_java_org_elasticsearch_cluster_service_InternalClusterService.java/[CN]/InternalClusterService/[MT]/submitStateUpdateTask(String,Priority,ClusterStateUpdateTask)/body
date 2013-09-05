@@ -2,22 +2,29 @@
   if (!lifecycle.started()) {
     return;
   }
-  final UpdateTask task=new UpdateTask(source,priority,updateTask);
-  if (updateTask instanceof TimeoutClusterStateUpdateTask) {
-    final TimeoutClusterStateUpdateTask timeoutUpdateTask=(TimeoutClusterStateUpdateTask)updateTask;
-    updateTasksExecutor.execute(task,threadPool.scheduler(),timeoutUpdateTask.timeout(),new Runnable(){
-      @Override public void run(){
-        threadPool.generic().execute(new Runnable(){
-          @Override public void run(){
-            timeoutUpdateTask.onFailure(task.source,new ProcessClusterEventTimeoutException(timeoutUpdateTask.timeout(),task.source));
+  try {
+    final UpdateTask task=new UpdateTask(source,priority,updateTask);
+    if (updateTask instanceof TimeoutClusterStateUpdateTask) {
+      final TimeoutClusterStateUpdateTask timeoutUpdateTask=(TimeoutClusterStateUpdateTask)updateTask;
+      updateTasksExecutor.execute(task,threadPool.scheduler(),timeoutUpdateTask.timeout(),new Runnable(){
+        @Override public void run(){
+          threadPool.generic().execute(new Runnable(){
+            @Override public void run(){
+              timeoutUpdateTask.onFailure(task.source,new ProcessClusterEventTimeoutException(timeoutUpdateTask.timeout(),task.source));
+            }
           }
+);
         }
-);
       }
-    }
 );
-  }
+    }
  else {
-    updateTasksExecutor.execute(task);
+      updateTasksExecutor.execute(task);
+    }
+  }
+ catch (  EsRejectedExecutionException e) {
+    if (!lifecycle.stoppedOrClosed()) {
+      throw e;
+    }
   }
 }
