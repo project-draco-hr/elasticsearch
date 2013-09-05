@@ -1,0 +1,27 @@
+{
+  prepareCreate("test").addMapping("type1",jsonBuilder().startObject().startObject("type").startObject("properties").startObject("text").field("type","string").field("store","yes").field("term_vector","with_positions_offsets").endObject().endObject().endObject().endObject()).get();
+  ensureGreen();
+  index("test","type1","1","text","some stuff stuff stuff stuff stuff to highlight against the stuff phrase");
+  refresh();
+  Matcher<String> highlightedMatcher=anyOf(containsString("<em>stuff phrase</em>"),containsString("<em>stuff</em> <em>phrase</em>"));
+  HighlightBuilder.Field field=new HighlightBuilder.Field("text").fragmentSize(20).numOfFragments(1).highlighterType("fvh");
+  SearchRequestBuilder search=client().prepareSearch("test").setQuery(QueryBuilders.matchQuery("text","stuff")).setHighlighterOrder("score").addHighlightedField(field);
+  SearchResponse response=search.get();
+  assertHighlight(response,0,"text",0,not(highlightedMatcher));
+  field.highlighterType("plain");
+  response=search.get();
+  assertHighlight(response,0,"text",0,not(highlightedMatcher));
+  field.highlighterType("fvh").highlightQuery(matchPhraseQuery("text","stuff phrase"));
+  response=search.get();
+  assertHighlight(response,0,"text",0,highlightedMatcher);
+  field.highlighterType("plain");
+  response=search.get();
+  assertHighlight(response,0,"text",0,highlightedMatcher);
+  search.setHighlighterQuery(matchPhraseQuery("text","stuff phrase"));
+  field.highlighterType("fvh").highlightQuery(null);
+  response=search.get();
+  assertHighlight(response,0,"text",0,highlightedMatcher);
+  field.highlighterType("plain");
+  response=search.get();
+  assertHighlight(response,0,"text",0,highlightedMatcher);
+}
