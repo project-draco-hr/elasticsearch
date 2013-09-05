@@ -1,7 +1,15 @@
 {
   HttpDownloadHelper downloadHelper=new HttpDownloadHelper();
+  boolean downloaded=false;
+  HttpDownloadHelper.DownloadProgress progress;
+  if (outputMode == OutputMode.SILENT) {
+    progress=new HttpDownloadHelper.NullProgress();
+  }
+ else {
+    progress=new HttpDownloadHelper.VerboseProgress(System.out);
+  }
   if (!environment.pluginsFile().canWrite()) {
-    System.out.println();
+    System.err.println();
     throw new IOException("plugin directory " + environment.pluginsFile() + " is read only");
   }
   PluginHandle pluginHandle=PluginHandle.parse(name);
@@ -10,32 +18,27 @@
   if (extractLocation.exists()) {
     throw new IOException("plugin directory " + extractLocation.getAbsolutePath() + " already exists. To update the plugin, uninstall it first using -remove "+ name+ " command");
   }
-  boolean downloaded=false;
   if (url != null) {
     URL pluginUrl=new URL(url);
-    System.out.println("Trying " + pluginUrl.toExternalForm() + "...");
+    log("Trying " + pluginUrl.toExternalForm() + "...");
     try {
-      downloadHelper.download(pluginUrl,pluginFile,new HttpDownloadHelper.VerboseProgress(System.out));
+      downloadHelper.download(pluginUrl,pluginFile,progress);
       downloaded=true;
     }
  catch (    IOException e) {
-      if (verbose) {
-        System.out.println("Failed: " + ExceptionsHelper.detailedMessage(e));
-      }
+      log("Failed: " + ExceptionsHelper.detailedMessage(e));
     }
   }
   if (!downloaded) {
     for (    URL url : pluginHandle.urls()) {
-      System.out.println("Trying " + url.toExternalForm() + "...");
+      log("Trying " + url.toExternalForm() + "...");
       try {
-        downloadHelper.download(url,pluginFile,new HttpDownloadHelper.VerboseProgress(System.out));
+        downloadHelper.download(url,pluginFile,progress);
         downloaded=true;
         break;
       }
  catch (      Exception e) {
-        if (verbose) {
-          System.out.println("Failed: " + ExceptionsHelper.detailedMessage(e));
-        }
+        debug("Failed: " + ExceptionsHelper.detailedMessage(e));
       }
     }
   }
@@ -60,10 +63,10 @@
       FileSystemUtils.mkdirs(target.getParentFile());
       Streams.copy(zipFile.getInputStream(zipEntry),new FileOutputStream(target));
     }
-    System.out.println("Installed " + name + " into "+ extractLocation.getAbsolutePath());
+    log("Installed " + name + " into "+ extractLocation.getAbsolutePath());
   }
  catch (  Exception e) {
-    System.err.println("failed to extract plugin [" + pluginFile + "]: "+ ExceptionsHelper.detailedMessage(e));
+    log("failed to extract plugin [" + pluginFile + "]: "+ ExceptionsHelper.detailedMessage(e));
     return;
   }
  finally {
@@ -77,27 +80,27 @@
     pluginFile.delete();
   }
   if (FileSystemUtils.hasExtensions(extractLocation,".java")) {
-    System.out.println("Plugin installation assumed to be site plugin, but contains source code, aborting installation...");
+    debug("Plugin installation assumed to be site plugin, but contains source code, aborting installation...");
     FileSystemUtils.deleteRecursively(extractLocation);
     return;
   }
   File binFile=new File(extractLocation,"bin");
   if (binFile.exists() && binFile.isDirectory()) {
     File toLocation=pluginHandle.binDir(environment);
-    System.out.println("Found bin, moving to " + toLocation.getAbsolutePath());
+    debug("Found bin, moving to " + toLocation.getAbsolutePath());
     FileSystemUtils.deleteRecursively(toLocation);
     binFile.renameTo(toLocation);
-    System.out.println("Installed " + name + " into "+ toLocation.getAbsolutePath());
+    debug("Installed " + name + " into "+ toLocation.getAbsolutePath());
   }
   if (!new File(extractLocation,"_site").exists()) {
     if (!FileSystemUtils.hasExtensions(extractLocation,".class",".jar")) {
-      System.out.println("Identified as a _site plugin, moving to _site structure ...");
+      log("Identified as a _site plugin, moving to _site structure ...");
       File site=new File(extractLocation,"_site");
       File tmpLocation=new File(environment.pluginsFile(),name + ".tmp");
       extractLocation.renameTo(tmpLocation);
       FileSystemUtils.mkdirs(extractLocation);
       tmpLocation.renameTo(site);
-      System.out.println("Installed " + name + " into "+ site.getAbsolutePath());
+      debug("Installed " + name + " into "+ site.getAbsolutePath());
     }
   }
 }
