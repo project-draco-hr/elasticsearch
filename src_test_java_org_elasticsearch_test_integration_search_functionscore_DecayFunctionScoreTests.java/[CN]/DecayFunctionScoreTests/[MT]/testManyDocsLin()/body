@@ -1,5 +1,5 @@
 {
-  createIndexMapped("test","type","test","string","date","date","num","double","geo","geo_point");
+  assertAcked(prepareCreate("test").addMapping("type",jsonBuilder().startObject().startObject("type").startObject("properties").startObject("test").field("type","string").endObject().startObject("date").field("type","date").endObject().startObject("num").field("type","double").endObject().startObject("geo").field("type","geo_point").endObject().endObject().endObject().endObject()));
   ensureYellow();
   int numDocs=200;
   List<IndexRequestBuilder> indexBuilders=new ArrayList<IndexRequestBuilder>();
@@ -12,12 +12,11 @@
     indexBuilders.add(new IndexRequestBuilder(client()).setType("type").setId(Integer.toString(i)).setIndex("test").setSource(jsonBuilder().startObject().field("test","value").field("date",date).field("num",i).startObject("geo").field("lat",lat).field("lon",lon).endObject().endObject()));
   }
   IndexRequestBuilder[] builders=indexBuilders.toArray(new IndexRequestBuilder[indexBuilders.size()]);
-  indexRandom("test",false,builders);
-  refresh();
+  indexRandom("test",true,builders);
   List<Float> lonlat=new ArrayList<Float>();
   lonlat.add(new Float(100));
   lonlat.add(new Float(110));
-  ActionFuture<SearchResponse> response=client().search(searchRequest().searchType(SearchType.QUERY_THEN_FETCH).source(searchSource().explain(true).size(numDocs).query(functionScoreQuery(termQuery("test","value")).add(new MatchAllFilterBuilder(),linearDecayFunction("date","2013-05-30","+15d")).add(new MatchAllFilterBuilder(),linearDecayFunction("geo",lonlat,"1000km")).add(new MatchAllFilterBuilder(),linearDecayFunction("num",Integer.toString(numDocs),Integer.toString(numDocs / 2))).scoreMode("multiply").boostMode(CombineFunction.REPLACE.getName()))));
+  ActionFuture<SearchResponse> response=client().search(searchRequest().searchType(SearchType.QUERY_THEN_FETCH).source(searchSource().size(numDocs).query(functionScoreQuery(termQuery("test","value")).add(new MatchAllFilterBuilder(),linearDecayFunction("date","2013-05-30","+15d")).add(new MatchAllFilterBuilder(),linearDecayFunction("geo",lonlat,"1000km")).add(new MatchAllFilterBuilder(),linearDecayFunction("num",Integer.toString(numDocs),Integer.toString(numDocs / 2))).scoreMode("multiply").boostMode(CombineFunction.REPLACE.getName()))));
   SearchResponse sr=response.actionGet();
   ElasticsearchAssertions.assertNoFailures(sr);
   SearchHits sh=sr.getHits();
