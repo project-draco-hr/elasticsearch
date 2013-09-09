@@ -1,7 +1,10 @@
 {
   rwl.writeLock().lock();
   try {
-    onGoingRecoveries++;
+    if (closed) {
+      throw new EngineClosedException(shardId);
+    }
+    onGoingRecoveries.increment();
   }
   finally {
     rwl.writeLock().unlock();
@@ -11,14 +14,14 @@
     phase1Snapshot=deletionPolicy.snapshot();
   }
  catch (  Throwable e) {
-    --onGoingRecoveries;
+    onGoingRecoveries.decrement();
     throw new RecoveryEngineException(shardId,1,"Snapshot failed",e);
   }
   try {
     recoveryHandler.phase1(phase1Snapshot);
   }
  catch (  Throwable e) {
-    --onGoingRecoveries;
+    onGoingRecoveries.decrement();
     phase1Snapshot.release();
     if (closed) {
       e=new EngineClosedException(shardId,e);
@@ -30,7 +33,7 @@
     phase2Snapshot=translog.snapshot();
   }
  catch (  Throwable e) {
-    --onGoingRecoveries;
+    onGoingRecoveries.decrement();
     phase1Snapshot.release();
     if (closed) {
       e=new EngineClosedException(shardId,e);
@@ -41,7 +44,7 @@
     recoveryHandler.phase2(phase2Snapshot);
   }
  catch (  Throwable e) {
-    --onGoingRecoveries;
+    onGoingRecoveries.decrement();
     phase1Snapshot.release();
     phase2Snapshot.release();
     if (closed) {
@@ -59,7 +62,7 @@
     throw new RecoveryEngineException(shardId,3,"Execution failed",e);
   }
  finally {
-    --onGoingRecoveries;
+    onGoingRecoveries.decrement();
     rwl.writeLock().unlock();
     phase1Snapshot.release();
     phase2Snapshot.release();
