@@ -1,0 +1,35 @@
+{
+  final String mapping="{" + mappingType + ": {"+ "\"properties\": {"+ "\"an_id\": {"+ "\"type\": \"string\","+ "\"store\": \"yes\","+ "\"index\": \"not_analyzed\""+ "}"+ "},"+ "\"dynamic_templates\": ["+ "{"+ "\"participants\": {"+ "\"path_match\": \"*\","+ "\"mapping\": {"+ "\"type\": \"string\","+ "\"store\": \"yes\","+ "\"index\": \"analyzed\","+ "\"analyzer\": \"whitespace\""+ "}"+ "}"+ "}"+ "]"+ "}"+ "}";
+  final String fieldName="participants.ACCEPTED";
+  int iters=atLeast(5);
+  for (int i=0; i < iters; i++) {
+    wipeIndex("test");
+    client().admin().indices().prepareCreate("test").addMapping(mappingType,mapping).execute().actionGet();
+    ensureYellow();
+    int numDocs=atLeast(5);
+    final CountDownLatch latch=new CountDownLatch(numDocs);
+    final List<Throwable> throwable=new CopyOnWriteArrayList<Throwable>();
+    for (int j=0; j < numDocs; j++) {
+      Map<String,Object> source=new HashMap<String,Object>();
+      source.put("an_id",UUID.randomUUID().toString());
+      source.put(fieldName,"test-user");
+      client().prepareIndex("test",mappingType).setSource(source).setConsistencyLevel(WriteConsistencyLevel.QUORUM).execute(new ActionListener<IndexResponse>(){
+        @Override public void onResponse(        IndexResponse response){
+          latch.countDown();
+        }
+        @Override public void onFailure(        Throwable e){
+          throwable.add(e);
+          latch.countDown();
+        }
+      }
+);
+    }
+    latch.await();
+    assertThat(throwable,emptyIterable());
+    refresh();
+    MatchQueryBuilder builder=QueryBuilders.matchQuery(fieldName,"test-user");
+    SearchHits sh=client().prepareSearch("test").setQuery(builder).execute().actionGet().getHits();
+    assertEquals(sh.getTotalHits(),numDocs);
+    assertEquals(client().prepareSearch("test").setQuery(QueryBuilders.matchQuery(fieldName,"test user")).execute().actionGet().getHits().getTotalHits(),0);
+  }
+}

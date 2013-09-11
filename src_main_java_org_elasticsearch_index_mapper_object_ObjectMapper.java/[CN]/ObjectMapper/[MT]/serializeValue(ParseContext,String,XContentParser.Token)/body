@@ -17,11 +17,9 @@
   if (dynamic == Dynamic.FALSE) {
     return;
   }
-  boolean newMapper=false;
 synchronized (mutex) {
     mapper=mappers.get(currentFieldName);
     if (mapper == null) {
-      newMapper=true;
       BuilderContext builderContext=new BuilderContext(context.indexSettings(),context.path());
       if (token == XContentParser.Token.VALUE_STRING) {
         boolean resolved=false;
@@ -161,12 +159,26 @@ synchronized (mutex) {
           throw new ElasticSearchIllegalStateException("Can't handle serializing a dynamic type with content token [" + token + "] and field name ["+ currentFieldName+ "]");
         }
       }
+      if (context.isWithinNewMapper()) {
+        mapper.parse(context);
+      }
+ else {
+        context.setWithinNewMapper();
+        try {
+          mapper.parse(context);
+          FieldMapperListener.Aggregator newFields=new FieldMapperListener.Aggregator();
+          mapper.traverse(newFields);
+          context.docMapper().addFieldMappers(newFields.mappers);
+        }
+  finally {
+          context.clearWithinNewMapper();
+        }
+      }
       putMapper(mapper);
       context.setMappingsModified();
     }
+ else {
+      mapper.parse(context);
+    }
   }
-  if (newMapper) {
-    mapper.traverse(context.newFieldMappers());
-  }
-  mapper.parse(context);
 }

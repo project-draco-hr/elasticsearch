@@ -16,11 +16,9 @@
       throw new StrictDynamicMappingException(fullPath,currentFieldName);
     }
  else     if (dynamic == Dynamic.TRUE) {
-      boolean newMapper=false;
 synchronized (mutex) {
         objectMapper=mappers.get(currentFieldName);
         if (objectMapper == null) {
-          newMapper=true;
           context.path().remove();
           Mapper.Builder builder=context.root().findTemplateBuilder(context,currentFieldName,"object");
           if (builder == null) {
@@ -31,16 +29,32 @@ synchronized (mutex) {
           }
           BuilderContext builderContext=new BuilderContext(context.indexSettings(),context.path());
           objectMapper=builder.build(builderContext);
-          putMapper(objectMapper);
           context.path().add(currentFieldName);
           context.setMappingsModified();
+          if (context.isWithinNewMapper()) {
+            objectMapper.parse(context);
+          }
+ else {
+            context.setWithinNewMapper();
+            try {
+              objectMapper.parse(context);
+              FieldMapperListener.Aggregator newFields=new FieldMapperListener.Aggregator();
+              ObjectMapperListener.Aggregator newObjects=new ObjectMapperListener.Aggregator();
+              objectMapper.traverse(newFields);
+              objectMapper.traverse(newObjects);
+              context.docMapper().addFieldMappers(newFields.mappers);
+              context.docMapper().addObjectMappers(newObjects.mappers);
+            }
+  finally {
+              context.clearWithinNewMapper();
+            }
+          }
+          putMapper(objectMapper);
+        }
+ else {
+          objectMapper.parse(context);
         }
       }
-      if (newMapper) {
-        objectMapper.traverse(context.newFieldMappers());
-        objectMapper.traverse(context.newObjectMappers());
-      }
-      objectMapper.parse(context);
     }
  else {
       context.parser().skipChildren();
