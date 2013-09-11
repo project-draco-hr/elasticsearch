@@ -1,19 +1,18 @@
 {
   final ClusterState clusterState=clusterService.state();
   clusterState.blocks().globalBlockedRaiseException(ClusterBlockLevel.READ);
-  final AtomicReferenceArray<Object> percolateRequests=new AtomicReferenceArray<Object>(request.requests().size());
-  TIntArrayList getRequestSlots=new TIntArrayList();
+  final List<Object> percolateRequests=new ArrayList<Object>(request.requests().size());
+  final TIntArrayList getRequestSlots=new TIntArrayList();
   List<GetRequest> existingDocsRequests=new ArrayList<GetRequest>();
-  for (int i=0; i < request.requests().size(); i++) {
-    PercolateRequest percolateRequest=request.requests().get(i);
+  for (int slot=0; slot < request.requests().size(); slot++) {
+    PercolateRequest percolateRequest=request.requests().get(slot);
     percolateRequest.startTime=System.currentTimeMillis();
-    percolateRequests.set(i,percolateRequest);
+    percolateRequests.add(percolateRequest);
     if (percolateRequest.getRequest() != null) {
       existingDocsRequests.add(percolateRequest.getRequest());
-      getRequestSlots.add(i);
+      getRequestSlots.add(slot);
     }
   }
-  final AtomicIntegerArray percolateRequestSlotsWithGet=new AtomicIntegerArray(getRequestSlots.toArray());
   if (!existingDocsRequests.isEmpty()) {
     final MultiGetRequest multiGetRequest=new MultiGetRequest();
     for (    GetRequest getRequest : existingDocsRequests) {
@@ -23,7 +22,7 @@
       @Override public void onResponse(      MultiGetResponse multiGetItemResponses){
         for (int i=0; i < multiGetItemResponses.getResponses().length; i++) {
           MultiGetItemResponse itemResponse=multiGetItemResponses.getResponses()[i];
-          int slot=percolateRequestSlotsWithGet.get(i);
+          int slot=getRequestSlots.get(i);
           if (!itemResponse.isFailed()) {
             GetResponse getResponse=itemResponse.getResponse();
             if (getResponse.isExists()) {
@@ -31,10 +30,12 @@
               percolateRequests.set(slot,new PercolateRequest(originalRequest,getResponse.getSourceAsBytesRef()));
             }
  else {
+              logger.trace("mpercolate existing doc, item[{}] doesn't exist",slot);
               percolateRequests.set(slot,new DocumentMissingException(null,getResponse.getType(),getResponse.getId()));
             }
           }
  else {
+            logger.trace("mpercolate existing doc, item[{}] failure {}",slot,itemResponse.getFailure());
             percolateRequests.set(slot,itemResponse.getFailure());
           }
         }
