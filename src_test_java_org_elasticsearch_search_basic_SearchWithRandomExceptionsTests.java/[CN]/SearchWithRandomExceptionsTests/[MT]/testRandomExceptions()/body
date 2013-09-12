@@ -1,0 +1,19 @@
+{
+  final int numShards=between(1,5);
+  String mapping=XContentFactory.jsonBuilder().startObject().startObject("type").startObject("properties").startObject("test").field("type","string").endObject().endObject().endObject().endObject().string();
+  client().admin().indices().prepareCreate("test").setSettings(settingsBuilder().put("index.number_of_shards",numShards).put("index.number_of_replicas",randomIntBetween(0,1)).put(MockDirectoryHelper.RANDOM_IO_EXCEPTION_RATE,randomBoolean() ? 1.0 / between(10,100) : 0.0).put(MockDirectoryHelper.RANDOM_IO_EXCEPTION_RATE_ON_OPEN,randomBoolean() ? 1.0 / between(10,100) : 0.0).put(MockDirectoryHelper.CHECK_INDEX_ON_CLOSE,true)).addMapping("type",mapping).execute().actionGet();
+  client().admin().cluster().health(Requests.clusterHealthRequest().waitForGreenStatus().timeout(TimeValue.timeValueMillis(100))).get();
+  int numDocs=between(10,100);
+  for (int i=0; i < numDocs; i++) {
+    try {
+      client().prepareIndex("test","type","" + i).setSource("test",English.intToEnglish(i)).get();
+    }
+ catch (    ElasticSearchException ex) {
+    }
+  }
+  client().admin().indices().prepareRefresh("test").execute().get();
+  int numSearches=atLeast(10);
+  for (int i=0; i < numSearches; i++) {
+    client().prepareSearch().setQuery(QueryBuilders.matchQuery("test",English.intToEnglish(between(0,numDocs)))).get();
+  }
+}

@@ -7,19 +7,29 @@
     directory=distributor.any();
   }
   IndexOutput out=directory.createOutput(name,context);
+  boolean success=false;
+  try {
 synchronized (mutex) {
-    StoreFileMetaData metaData=new StoreFileMetaData(name,-1,null,directory);
-    filesMetadata=MapBuilder.newMapBuilder(filesMetadata).put(name,metaData).immutableMap();
-    files=filesMetadata.keySet().toArray(new String[filesMetadata.size()]);
-    boolean computeChecksum=!raw;
-    if (computeChecksum) {
-      if ("segments.gen".equals(name) || name.startsWith("segments")) {
-        computeChecksum=false;
+      StoreFileMetaData metaData=new StoreFileMetaData(name,-1,null,directory);
+      filesMetadata=MapBuilder.newMapBuilder(filesMetadata).put(name,metaData).immutableMap();
+      files=filesMetadata.keySet().toArray(new String[filesMetadata.size()]);
+      boolean computeChecksum=!raw;
+      if (computeChecksum) {
+        if ("segments.gen".equals(name) || name.startsWith("segments")) {
+          computeChecksum=false;
+        }
       }
+      if (computeChecksum) {
+        out=new BufferedChecksumIndexOutput(out,new Adler32());
+      }
+      final StoreIndexOutput storeIndexOutput=new StoreIndexOutput(metaData,out,name);
+      success=true;
+      return storeIndexOutput;
     }
-    if (computeChecksum) {
-      out=new BufferedChecksumIndexOutput(out,new Adler32());
+  }
+  finally {
+    if (!success) {
+      IOUtils.closeWhileHandlingException(out);
     }
-    return new StoreIndexOutput(metaData,out,name);
   }
 }
