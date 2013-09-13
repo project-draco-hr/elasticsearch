@@ -8,7 +8,7 @@
     return facet;
   }
   InternalLongTermsFacet first=null;
-  Recycler.V<TLongIntHashMap> aggregated=context.cacheRecycler().longIntMap(-1);
+  Recycler.V<LongIntOpenHashMap> aggregated=context.cacheRecycler().longIntMap(-1);
   long missing=0;
   long total=0;
   for (  Facet facet : facets) {
@@ -19,13 +19,18 @@
     missing+=termsFacet.getMissingCount();
     total+=termsFacet.getTotalCount();
     for (    Entry entry : termsFacet.getEntries()) {
-      aggregated.v().adjustOrPutValue(((LongEntry)entry).term,entry.getCount(),entry.getCount());
+      aggregated.v().addTo(((LongEntry)entry).term,entry.getCount());
     }
   }
   BoundedTreeSet<LongEntry> ordered=new BoundedTreeSet<LongEntry>(first.comparatorType.comparator(),first.requiredSize);
-  for (TLongIntIterator it=aggregated.v().iterator(); it.hasNext(); ) {
-    it.advance();
-    ordered.add(new LongEntry(it.key(),it.value()));
+  LongIntOpenHashMap entries=aggregated.v();
+  final boolean[] states=aggregated.v().allocated;
+  final long[] keys=aggregated.v().keys;
+  final int[] values=aggregated.v().values;
+  for (int i=0; i < entries.allocated.length; i++) {
+    if (states[i]) {
+      ordered.add(new LongEntry(keys[i],values[i]));
+    }
   }
   first.entries=ordered;
   first.missing=missing;

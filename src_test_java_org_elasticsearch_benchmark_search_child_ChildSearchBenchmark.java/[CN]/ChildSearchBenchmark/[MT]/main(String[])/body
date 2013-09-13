@@ -125,6 +125,60 @@
     totalQueryTime+=searchResponse.getTookInMillis();
   }
   System.out.println("--> has_child filter with exponential parent results Query Avg: " + (totalQueryTime / QUERY_COUNT) + "ms");
+  for (int j=0; j < QUERY_WARMUP; j++) {
+    SearchResponse searchResponse=client.prepareSearch(indexName).setQuery(filteredQuery(matchAllQuery(),hasParentFilter("parent",termQuery("name","test1")))).execute().actionGet();
+    if (searchResponse.getFailedShards() > 0) {
+      System.err.println("Search Failures " + Arrays.toString(searchResponse.getShardFailures()));
+    }
+    if (searchResponse.getHits().totalHits() != CHILD_COUNT) {
+      System.err.println("--> mismatch on hits [" + j + "], got ["+ searchResponse.getHits().totalHits()+ "], expected ["+ CHILD_COUNT+ "]");
+    }
+  }
+  totalQueryTime=0;
+  for (int j=1; j <= QUERY_COUNT; j++) {
+    SearchResponse searchResponse=client.prepareSearch(indexName).setQuery(filteredQuery(matchAllQuery(),hasParentFilter("parent",termQuery("name","test1")))).execute().actionGet();
+    if (searchResponse.getFailedShards() > 0) {
+      System.err.println("Search Failures " + Arrays.toString(searchResponse.getShardFailures()));
+    }
+    if (searchResponse.getHits().totalHits() != CHILD_COUNT) {
+      System.err.println("--> mismatch on hits [" + j + "], got ["+ searchResponse.getHits().totalHits()+ "], expected ["+ CHILD_COUNT+ "]");
+    }
+    totalQueryTime+=searchResponse.getTookInMillis();
+  }
+  System.out.println("--> has_parent filter Query Avg: " + (totalQueryTime / QUERY_COUNT) + "ms");
+  System.out.println("--> Running has_parent filter with match_all parent query ");
+  totalQueryTime=0;
+  for (int j=1; j <= QUERY_COUNT; j++) {
+    SearchResponse searchResponse=client.prepareSearch(indexName).setQuery(filteredQuery(matchAllQuery(),hasParentFilter("parent",matchAllQuery()))).execute().actionGet();
+    if (searchResponse.getFailedShards() > 0) {
+      System.err.println("Search Failures " + Arrays.toString(searchResponse.getShardFailures()));
+    }
+    if (searchResponse.getHits().totalHits() != 5000000) {
+      System.err.println("--> mismatch on hits [" + j + "], got ["+ searchResponse.getHits().totalHits()+ "], expected ["+ 5000000+ "]");
+    }
+    totalQueryTime+=searchResponse.getTookInMillis();
+  }
+  System.out.println("--> has_parent filter with match_all parent query, Query Avg: " + (totalQueryTime / QUERY_COUNT) + "ms");
+  System.out.println("--> Running top_children query");
+  for (int j=0; j < QUERY_WARMUP; j++) {
+    SearchResponse searchResponse=client.prepareSearch(indexName).setQuery(topChildrenQuery("child",termQuery("tag","tag1"))).execute().actionGet();
+  }
+  totalQueryTime=0;
+  for (int j=0; j < QUERY_COUNT; j++) {
+    SearchResponse searchResponse=client.prepareSearch(indexName).setQuery(topChildrenQuery("child",termQuery("tag","tag1"))).execute().actionGet();
+    totalQueryTime+=searchResponse.getTookInMillis();
+  }
+  System.out.println("--> top_children Query Avg: " + (totalQueryTime / QUERY_COUNT) + "ms");
+  System.out.println("--> Running top_children query, with match_all as child query");
+  for (int j=0; j < QUERY_WARMUP; j++) {
+    SearchResponse searchResponse=client.prepareSearch(indexName).setQuery(topChildrenQuery("child",matchAllQuery())).execute().actionGet();
+  }
+  totalQueryTime=0;
+  for (int j=0; j < QUERY_COUNT; j++) {
+    SearchResponse searchResponse=client.prepareSearch(indexName).setQuery(topChildrenQuery("child",matchAllQuery())).execute().actionGet();
+    totalQueryTime+=searchResponse.getTookInMillis();
+  }
+  System.out.println("--> top_children, with match_all Query Avg: " + (totalQueryTime / QUERY_COUNT) + "ms");
   statsResponse=client.admin().cluster().prepareNodesStats().setJvm(true).setIndices(true).execute().actionGet();
   System.out.println("--> Id cache size: " + statsResponse.getNodes()[0].getIndices().getIdCache().getMemorySize());
   System.out.println("--> Used heap size: " + statsResponse.getNodes()[0].getJvm().getMem().getHeapUsed());

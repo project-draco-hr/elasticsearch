@@ -1,0 +1,52 @@
+{
+  StringField id=new StringField("_id","",Field.Store.NO);
+  for (int i=0; i < values.size(); ++i) {
+    Document doc=new Document();
+    id.setStringValue("" + i);
+    doc.add(id);
+    final LongOpenHashSet v=values.get(i);
+    final boolean[] states=v.allocated;
+    final long[] keys=v.keys;
+    for (int j=0; j < states.length; j++) {
+      if (states[j]) {
+        LongField value=new LongField("value",keys[j],Field.Store.NO);
+        doc.add(value);
+      }
+    }
+    writer.addDocument(doc);
+  }
+  writer.forceMerge(1);
+  final IndexNumericFieldData indexFieldData=getForField("value");
+  final AtomicNumericFieldData atomicFieldData=indexFieldData.load(refreshReader());
+  final LongValues data=atomicFieldData.getLongValues();
+  final DoubleValues doubleData=atomicFieldData.getDoubleValues();
+  final LongOpenHashSet set=new LongOpenHashSet();
+  final DoubleOpenHashSet doubleSet=new DoubleOpenHashSet();
+  for (int i=0; i < values.size(); ++i) {
+    final LongOpenHashSet v=values.get(i);
+    assertThat(data.hasValue(i),equalTo(!v.isEmpty()));
+    assertThat(doubleData.hasValue(i),equalTo(!v.isEmpty()));
+    if (v.isEmpty()) {
+      assertThat(data.getValue(i),equalTo(0L));
+      assertThat(doubleData.getValue(i),equalTo(0d));
+    }
+    set.clear();
+    for (LongValues.Iter iter=data.getIter(i); iter.hasNext(); ) {
+      set.add(iter.next());
+    }
+    assertThat(set,equalTo(v));
+    final DoubleOpenHashSet doubleV=new DoubleOpenHashSet();
+    final boolean[] states=v.allocated;
+    final long[] keys=v.keys;
+    for (int j=0; j < states.length; j++) {
+      if (states[j]) {
+        doubleV.add((double)keys[j]);
+      }
+    }
+    doubleSet.clear();
+    for (DoubleValues.Iter iter=doubleData.getIter(i); iter.hasNext(); ) {
+      doubleSet.add(iter.next());
+    }
+    assertThat(doubleSet,equalTo(doubleV));
+  }
+}
