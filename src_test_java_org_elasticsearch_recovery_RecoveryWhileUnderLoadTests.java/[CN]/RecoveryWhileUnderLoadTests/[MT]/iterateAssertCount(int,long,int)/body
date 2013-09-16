@@ -10,12 +10,19 @@
     }
   }
   if (error) {
-    logger.info("--> refreshing again");
-    refresh();
-    for (int i=0; i < iterations; i++) {
-      SearchResponse searchResponse=client().prepareSearch().setSearchType(SearchType.COUNT).setQuery(matchAllQuery()).execute().actionGet();
-      logSearchResponse(numberOfShards,numberOfDocs,i,searchResponse);
+    IndicesStatsResponse indicesStatsResponse=client().admin().indices().prepareStats().get();
+    for (    ShardStats shardStats : indicesStatsResponse.getShards()) {
+      DocsStats docsStats=shardStats.getStats().docs;
+      logger.info("Shard [{}] - count {}, primary {}",shardStats.getShardId(),docsStats.getCount(),shardStats.getShardRouting().primary());
     }
+    logger.info("--> trying to wait");
+    assertThat(awaitBusy(new Predicate<Object>(){
+      @Override public boolean apply(      Object o){
+        SearchResponse searchResponse=client().prepareSearch().setSearchType(SearchType.COUNT).setQuery(matchAllQuery()).get();
+        return searchResponse.getHits().totalHits() == numberOfDocs;
+      }
+    }
+,30,TimeUnit.SECONDS),equalTo(true));
   }
   for (int i=0; i < iterations; i++) {
     assertHitCount(iterationResults[i],numberOfDocs);
