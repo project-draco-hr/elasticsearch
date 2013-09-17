@@ -1,23 +1,23 @@
 {
   Settings commonSettings=ImmutableSettings.settingsBuilder().put("cluster.routing.schedule","10ms").put("cluster.routing.allocation.awareness.attributes","rack_id").build();
   logger.info("--> starting 2 nodes on the same rack");
-  startNode("node1",ImmutableSettings.settingsBuilder().put(commonSettings).put("node.rack_id","rack_1"));
-  startNode("node2",ImmutableSettings.settingsBuilder().put(commonSettings).put("node.rack_id","rack_1"));
-  client("node1").admin().indices().prepareCreate("test1").execute().actionGet();
-  client("node1").admin().indices().prepareCreate("test2").execute().actionGet();
-  ClusterHealthResponse health=client("node1").admin().cluster().prepareHealth().setWaitForEvents(Priority.LANGUID).setWaitForGreenStatus().execute().actionGet();
+  cluster().startNode(ImmutableSettings.settingsBuilder().put(commonSettings).put("node.rack_id","rack_1").build());
+  cluster().startNode(ImmutableSettings.settingsBuilder().put(commonSettings).put("node.rack_id","rack_1").build());
+  client().admin().indices().prepareCreate("test1").execute().actionGet();
+  client().admin().indices().prepareCreate("test2").execute().actionGet();
+  ClusterHealthResponse health=client().admin().cluster().prepareHealth().setWaitForEvents(Priority.LANGUID).setWaitForGreenStatus().execute().actionGet();
   assertThat(health.isTimedOut(),equalTo(false));
   logger.info("--> starting 1 node on a different rack");
-  startNode("node3",ImmutableSettings.settingsBuilder().put(commonSettings).put("node.rack_id","rack_2"));
+  String node3=cluster().startNode(ImmutableSettings.settingsBuilder().put(commonSettings).put("node.rack_id","rack_2").build());
   long start=System.currentTimeMillis();
   TObjectIntHashMap<String> counts;
   do {
     Thread.sleep(100);
     logger.info("--> waiting for no relocation");
-    health=client("node1").admin().cluster().prepareHealth().setWaitForEvents(Priority.LANGUID).setWaitForGreenStatus().setWaitForNodes("3").setWaitForRelocatingShards(0).execute().actionGet();
+    health=client().admin().cluster().prepareHealth().setWaitForEvents(Priority.LANGUID).setWaitForGreenStatus().setWaitForNodes("3").setWaitForRelocatingShards(0).execute().actionGet();
     assertThat(health.isTimedOut(),equalTo(false));
     logger.info("--> checking current state");
-    ClusterState clusterState=client("node1").admin().cluster().prepareState().execute().actionGet().getState();
+    ClusterState clusterState=client().admin().cluster().prepareState().execute().actionGet().getState();
     counts=new TObjectIntHashMap<String>();
     for (    IndexRoutingTable indexRoutingTable : clusterState.routingTable()) {
       for (      IndexShardRoutingTable indexShardRoutingTable : indexRoutingTable) {
@@ -27,6 +27,6 @@
       }
     }
   }
- while (counts.get("node3") != 10 && (System.currentTimeMillis() - start) < 10000);
-  assertThat(counts.get("node3"),equalTo(10));
+ while (counts.get(node3) != 10 && (System.currentTimeMillis() - start) < 10000);
+  assertThat(counts.get(node3),equalTo(10));
 }
