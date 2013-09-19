@@ -1,8 +1,10 @@
 {
   DiscoveryNode localNode=nodesProvider.nodes().localNode();
   Map<Version,BytesReference> serializedStates=Maps.newHashMap();
+  final CountDownLatch latch=new CountDownLatch(clusterState.nodes().size());
   for (  final DiscoveryNode node : clusterState.nodes()) {
     if (node.equals(localNode)) {
+      latch.countDown();
       continue;
     }
     BytesReference bytes=serializedStates.get(node.version());
@@ -16,16 +18,38 @@
         bytes=bStream.bytes();
         serializedStates.put(node.version(),bytes);
       }
- catch (      Exception e) {
-        logger.warn("failed to serialize cluster_state before publishing it to nodes",e);
-        return;
+ catch (      Throwable e) {
+        logger.warn("failed to serialize cluster_state before publishing it to node {}",e,node);
+        latch.countDown();
+        continue;
       }
     }
-    transportService.sendRequest(node,PublishClusterStateRequestHandler.ACTION,new PublishClusterStateRequest(bytes,node.version()),TransportRequestOptions.options().withHighType().withCompress(false),new EmptyTransportResponseHandler(ThreadPool.Names.SAME){
-      @Override public void handleException(      TransportException exp){
-        logger.debug("failed to send cluster state to [{}], should be detected as failed soon...",exp,node);
+    try {
+      TransportRequestOptions options=TransportRequestOptions.options().withHighType().withCompress(false);
+      transportService.sendRequest(node,PublishClusterStateRequestHandler.ACTION,new PublishClusterStateRequest(bytes,node.version()),options,new EmptyTransportResponseHandler(ThreadPool.Names.SAME){
+        @Override public void handleResponse(        TransportResponse.Empty response){
+          latch.countDown();
+        }
+        @Override public void handleException(        TransportException exp){
+          logger.debug("failed to send cluster state to [{}]",exp,node);
+          latch.countDown();
+        }
       }
-    }
 );
+    }
+ catch (    Throwable t) {
+      latch.countDown();
+    }
+  }
+  if (publishTimeout.millis() > 0) {
+    try {
+      boolean awaited=latch.await(publishTimeout.millis(),TimeUnit.MILLISECONDS);
+      if (!awaited) {
+        logger.debug("awaiting all nodes to process published state {} timed out, timeout {}",clusterState.version(),publishTimeout);
+      }
+    }
+ catch (    InterruptedException e) {
+      Thread.currentThread().interrupt();
+    }
   }
 }
