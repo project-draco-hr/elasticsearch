@@ -28,6 +28,7 @@
     return;
   }
   try {
+    Discovery.AckListener ackListener=new NoOpAckListener();
     if (newClusterState.nodes().localNodeMaster()) {
       Builder builder=ClusterState.builder().state(newClusterState).version(newClusterState.version() + 1);
       if (previousClusterState.routingTable() != newClusterState.routingTable()) {
@@ -37,6 +38,18 @@
         builder.metaData(MetaData.builder().metaData(newClusterState.metaData()).version(newClusterState.metaData().version() + 1));
       }
       newClusterState=builder.build();
+      if (updateTask instanceof AckedClusterStateUpdateTask) {
+        final AckedClusterStateUpdateTask ackedUpdateTask=(AckedClusterStateUpdateTask)updateTask;
+        try {
+          ackListener=new AckCountDownListener(ackedUpdateTask,newClusterState.version(),newClusterState.nodes(),threadPool);
+        }
+ catch (        EsRejectedExecutionException ex) {
+          if (logger.isDebugEnabled()) {
+            logger.debug("Couldn't schedule timeout thread - node might be shutting down",ex);
+          }
+          ackedUpdateTask.onAckTimeout();
+        }
+      }
     }
  else {
       if (previousClusterState.blocks().hasGlobalBlock(Discovery.NO_MASTER_BLOCK) && !newClusterState.blocks().hasGlobalBlock(Discovery.NO_MASTER_BLOCK)) {
@@ -82,7 +95,7 @@
     }
     if (newClusterState.nodes().localNodeMaster()) {
       logger.debug("publishing cluster state version {}",newClusterState.version());
-      discoveryService.publish(newClusterState);
+      discoveryService.publish(newClusterState,ackListener);
     }
     clusterState=newClusterState;
     logger.debug("set local cluster state to version {}",newClusterState.version());
@@ -105,16 +118,24 @@
       }
 );
     }
+    if (newClusterState.nodes().localNodeMaster()) {
+      try {
+        ackListener.onNodeAck(localNode(),null);
+      }
+ catch (      Throwable t) {
+        logger.debug("error while processing ack for master node [{}]",t,newClusterState.nodes().localNode());
+      }
+    }
     if (updateTask instanceof ProcessedClusterStateUpdateTask) {
       ((ProcessedClusterStateUpdateTask)updateTask).clusterStateProcessed(source,previousClusterState,newClusterState);
     }
     logger.debug("processing [{}]: done applying updated cluster_state (version: {})",source,newClusterState.version());
   }
- catch (  Exception e) {
+ catch (  Throwable t) {
     StringBuilder sb=new StringBuilder("failed to apply updated cluster state:\nversion [").append(newClusterState.version()).append("], source [").append(source).append("]\n");
     sb.append(newClusterState.nodes().prettyPrint());
     sb.append(newClusterState.routingTable().prettyPrint());
     sb.append(newClusterState.readOnlyRoutingNodes().prettyPrint());
-    logger.warn(sb.toString(),e);
+    logger.warn(sb.toString(),t);
   }
 }

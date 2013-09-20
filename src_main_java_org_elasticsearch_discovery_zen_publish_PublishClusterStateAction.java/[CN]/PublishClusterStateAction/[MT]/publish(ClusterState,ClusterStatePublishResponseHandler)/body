@@ -1,0 +1,54 @@
+{
+  DiscoveryNode localNode=nodesProvider.nodes().localNode();
+  Map<Version,BytesReference> serializedStates=Maps.newHashMap();
+  for (  final DiscoveryNode node : clusterState.nodes()) {
+    if (node.equals(localNode)) {
+      continue;
+    }
+    BytesReference bytes=serializedStates.get(node.version());
+    if (bytes == null) {
+      try {
+        BytesStreamOutput bStream=new BytesStreamOutput();
+        StreamOutput stream=new HandlesStreamOutput(CompressorFactory.defaultCompressor().streamOutput(bStream));
+        stream.setVersion(node.version());
+        ClusterState.Builder.writeTo(clusterState,stream);
+        stream.close();
+        bytes=bStream.bytes();
+        serializedStates.put(node.version(),bytes);
+      }
+ catch (      Throwable e) {
+        logger.warn("failed to serialize cluster_state before publishing it to node {}",e,node);
+        publishResponseHandler.onFailure(node,e);
+        continue;
+      }
+    }
+    try {
+      TransportRequestOptions options=TransportRequestOptions.options().withHighType().withCompress(false);
+      transportService.sendRequest(node,PublishClusterStateRequestHandler.ACTION,new PublishClusterStateRequest(bytes,node.version()),options,new EmptyTransportResponseHandler(ThreadPool.Names.SAME){
+        @Override public void handleResponse(        TransportResponse.Empty response){
+          publishResponseHandler.onResponse(node);
+        }
+        @Override public void handleException(        TransportException exp){
+          logger.debug("failed to send cluster state to [{}]",exp,node);
+          publishResponseHandler.onFailure(node,exp);
+        }
+      }
+);
+    }
+ catch (    Throwable t) {
+      logger.debug("error sending cluster state to [{}]",t,node);
+      publishResponseHandler.onFailure(node,t);
+    }
+  }
+  if (publishTimeout.millis() > 0) {
+    try {
+      boolean awaited=publishResponseHandler.awaitAllNodes(publishTimeout);
+      if (!awaited) {
+        logger.debug("awaiting all nodes to process published state {} timed out, timeout {}",clusterState.version(),publishTimeout);
+      }
+    }
+ catch (    InterruptedException e) {
+      Thread.currentThread().interrupt();
+    }
+  }
+}
