@@ -1,35 +1,35 @@
 {
-  Settings settings=settingsBuilder().put("discovery.zen.minimum_master_nodes",1).put("discovery.zen.ping_timeout","200ms").put("discovery.initial_state_timeout","500ms").put("plugin.types",TestPlugin.class.getName()).build();
-  InternalNode node1=(InternalNode)startNode("node1",settings);
-  ClusterService clusterService1=node1.injector().getInstance(ClusterService.class);
-  MasterAwareService testService1=node1.injector().getInstance(MasterAwareService.class);
+  Settings settings=settingsBuilder().put("discovery.type","zen").put("discovery.zen.minimum_master_nodes",1).put("discovery.zen.ping_timeout","200ms").put("discovery.initial_state_timeout","500ms").put("plugin.types",TestPlugin.class.getName()).build();
+  cluster().startNode(settings);
+  ClusterService clusterService1=cluster().getInstance(ClusterService.class);
+  MasterAwareService testService1=cluster().getInstance(MasterAwareService.class);
   assertThat(clusterService1.state().nodes().masterNode(),notNullValue());
   assertThat(clusterService1.state().nodes().localNodeMaster(),is(true));
   assertThat(testService1.master(),is(true));
-  InternalNode node2=(InternalNode)startNode("node2",settings);
-  ClusterService clusterService2=node2.injector().getInstance(ClusterService.class);
-  MasterAwareService testService2=node2.injector().getInstance(MasterAwareService.class);
-  ClusterHealthResponse clusterHealth=node2.client().admin().cluster().prepareHealth().setWaitForEvents(Priority.LANGUID).setWaitForNodes("2").execute().actionGet();
+  String node_1=cluster().startNode(settings);
+  ClusterService clusterService2=cluster().getInstance(ClusterService.class,node_1);
+  MasterAwareService testService2=cluster().getInstance(MasterAwareService.class,node_1);
+  ClusterHealthResponse clusterHealth=client().admin().cluster().prepareHealth().setWaitForEvents(Priority.LANGUID).setWaitForNodes("2").execute().actionGet();
   assertThat(clusterHealth.isTimedOut(),equalTo(false));
   assertThat(clusterService2.state().nodes().localNodeMaster(),is(false));
   assertThat(testService2.master(),is(false));
-  closeNode("node1");
-  clusterHealth=node2.client().admin().cluster().prepareHealth().setWaitForEvents(Priority.LANGUID).setWaitForNodes("1").execute().actionGet();
+  cluster().stopCurrentMasterNode();
+  clusterHealth=client().admin().cluster().prepareHealth().setWaitForEvents(Priority.LANGUID).setWaitForNodes("1").execute().actionGet();
   assertThat(clusterHealth.isTimedOut(),equalTo(false));
   assertThat(clusterService2.state().nodes().localNodeMaster(),is(true));
   assertThat(testService2.master(),is(true));
-  Settings newSettings=settingsBuilder().put("discovery.zen.minimum_master_nodes",2).build();
-  node2.client().admin().cluster().prepareUpdateSettings().setTransientSettings(newSettings).execute().actionGet();
+  Settings newSettings=settingsBuilder().put("discovery.zen.minimum_master_nodes",2).put("discovery.type","zen").build();
+  client().admin().cluster().prepareUpdateSettings().setTransientSettings(newSettings).execute().actionGet();
   Thread.sleep(200);
   assertThat(clusterService2.state().nodes().masterNode(),is(nullValue()));
   assertThat(testService2.master(),is(false));
-  node1=(InternalNode)startNode("node1",settings);
-  clusterService1=node1.injector().getInstance(ClusterService.class);
-  testService1=node1.injector().getInstance(MasterAwareService.class);
-  assertThat(node2.client().admin().cluster().prepareHealth().setWaitForEvents(Priority.LANGUID).setLocal(true).setWaitForNodes("2").execute().actionGet().isTimedOut(),is(false));
-  assertThat(node1.client().admin().cluster().prepareHealth().setWaitForEvents(Priority.LANGUID).setLocal(true).setWaitForNodes("2").execute().actionGet().isTimedOut(),is(false));
+  String node_2=cluster().startNode(settings);
+  clusterService1=cluster().getInstance(ClusterService.class,node_2);
+  testService1=cluster().getInstance(MasterAwareService.class,node_2);
+  assertThat(client().admin().cluster().prepareHealth().setWaitForEvents(Priority.LANGUID).setLocal(true).setWaitForNodes("2").execute().actionGet().isTimedOut(),is(false));
+  assertThat(client().admin().cluster().prepareHealth().setWaitForEvents(Priority.LANGUID).setLocal(true).setWaitForNodes("2").execute().actionGet().isTimedOut(),is(false));
   assertThat(clusterService1.state().nodes().masterNode(),is(notNullValue()));
-  if ("node1".equals(clusterService1.state().nodes().masterNode().name())) {
+  if (node_2.equals(clusterService1.state().nodes().masterNode().name())) {
     assertThat(testService1.master(),is(true));
     assertThat(testService2.master(),is(false));
   }

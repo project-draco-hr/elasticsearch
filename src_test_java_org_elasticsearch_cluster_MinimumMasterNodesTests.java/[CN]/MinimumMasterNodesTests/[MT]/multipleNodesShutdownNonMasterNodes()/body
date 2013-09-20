@@ -1,96 +1,76 @@
 {
-  logger.info("--> cleaning nodes");
-  buildNode("node1",settingsBuilder().put("gateway.type","local"));
-  buildNode("node2",settingsBuilder().put("gateway.type","local"));
-  buildNode("node3",settingsBuilder().put("gateway.type","local"));
-  buildNode("node4",settingsBuilder().put("gateway.type","local"));
-  cleanAndCloseNodes();
   Settings settings=settingsBuilder().put("discovery.type","zen").put("discovery.zen.minimum_master_nodes",3).put("discovery.zen.ping_timeout","200ms").put("discovery.initial_state_timeout","500ms").put("gateway.type","local").build();
   logger.info("--> start first 2 nodes");
-  startNode("node1",settings);
-  startNode("node2",settings);
+  cluster().startNode(settings);
+  cluster().startNode(settings);
   ClusterState state;
   awaitBusy(new Predicate<Object>(){
     public boolean apply(    Object obj){
-      ClusterState state=client("node1").admin().cluster().prepareState().setLocal(true).execute().actionGet().getState();
+      ClusterState state=client().admin().cluster().prepareState().setLocal(true).execute().actionGet().getState();
       return state.blocks().hasGlobalBlock(Discovery.NO_MASTER_BLOCK);
     }
   }
 );
   awaitBusy(new Predicate<Object>(){
     public boolean apply(    Object obj){
-      ClusterState state=client("node2").admin().cluster().prepareState().setLocal(true).execute().actionGet().getState();
+      ClusterState state=client().admin().cluster().prepareState().setLocal(true).execute().actionGet().getState();
       return state.blocks().hasGlobalBlock(Discovery.NO_MASTER_BLOCK);
     }
   }
 );
-  state=client("node1").admin().cluster().prepareState().setLocal(true).execute().actionGet().getState();
+  state=client().admin().cluster().prepareState().setLocal(true).execute().actionGet().getState();
   assertThat(state.blocks().hasGlobalBlock(Discovery.NO_MASTER_BLOCK),equalTo(true));
-  state=client("node2").admin().cluster().prepareState().setLocal(true).execute().actionGet().getState();
+  state=client().admin().cluster().prepareState().setLocal(true).execute().actionGet().getState();
   assertThat(state.blocks().hasGlobalBlock(Discovery.NO_MASTER_BLOCK),equalTo(true));
   logger.info("--> start two more nodes");
-  startNode("node3",settings);
-  startNode("node4",settings);
-  ClusterHealthResponse clusterHealthResponse=client("node1").admin().cluster().prepareHealth().setWaitForEvents(Priority.LANGUID).setWaitForNodes("4").execute().actionGet();
+  cluster().startNode(settings);
+  cluster().startNode(settings);
+  ClusterHealthResponse clusterHealthResponse=client().admin().cluster().prepareHealth().setWaitForEvents(Priority.LANGUID).setWaitForNodes("4").execute().actionGet();
   assertThat(clusterHealthResponse.isTimedOut(),equalTo(false));
-  state=client("node1").admin().cluster().prepareState().execute().actionGet().getState();
+  state=client().admin().cluster().prepareState().execute().actionGet().getState();
   assertThat(state.nodes().size(),equalTo(4));
-  final String masterNode=state.nodes().masterNode().name();
-  LinkedList<String> nonMasterNodes=new LinkedList<String>();
-  for (  DiscoveryNode node : state.nodes()) {
-    if (!node.name().equals(masterNode)) {
-      nonMasterNodes.add(node.name());
-    }
-  }
   logger.info("--> indexing some data");
   for (int i=0; i < 100; i++) {
-    client("node1").prepareIndex("test","type1",Integer.toString(i)).setSource("field","value").execute().actionGet();
+    client().prepareIndex("test","type1",Integer.toString(i)).setSource("field","value").execute().actionGet();
   }
-  assertThat(client("node1").admin().cluster().prepareHealth("test").setWaitForActiveShards(10).execute().actionGet().isTimedOut(),equalTo(false));
-  client("node1").admin().indices().prepareFlush().execute().actionGet();
-  client("node1").admin().indices().prepareRefresh().execute().actionGet();
+  assertThat(client().admin().cluster().prepareHealth("test").setWaitForActiveShards(10).execute().actionGet().isTimedOut(),equalTo(false));
+  client().admin().indices().prepareFlush().execute().actionGet();
+  client().admin().indices().prepareRefresh().execute().actionGet();
   logger.info("--> verify we the data back");
   for (int i=0; i < 10; i++) {
-    assertThat(client("node1").prepareCount().setQuery(QueryBuilders.matchAllQuery()).execute().actionGet().getCount(),equalTo(100l));
+    assertThat(client().prepareCount().setQuery(QueryBuilders.matchAllQuery()).execute().actionGet().getCount(),equalTo(100l));
   }
-  Set<String> nodesToShutdown=Sets.newHashSet();
-  nodesToShutdown.add(nonMasterNodes.removeLast());
-  nodesToShutdown.add(nonMasterNodes.removeLast());
-  logger.info("--> shutting down two master nodes {}",nodesToShutdown);
-  for (  String nodeToShutdown : nodesToShutdown) {
-    closeNode(nodeToShutdown);
-  }
-  final String lastNonMasterNodeUp=nonMasterNodes.removeLast();
+  cluster().stopRandomNonMasterNode();
+  cluster().stopRandomNonMasterNode();
   logger.info("--> verify that there is no master anymore on remaining nodes");
-  awaitBusy(new Predicate<Object>(){
+  assertThat(awaitBusy(new Predicate<Object>(){
     public boolean apply(    Object obj){
-      ClusterState state=client(masterNode).admin().cluster().prepareState().setLocal(true).execute().actionGet().getState();
-      boolean firstNoMasterLock=state.blocks().hasGlobalBlock(Discovery.NO_MASTER_BLOCK);
-      state=client(lastNonMasterNodeUp).admin().cluster().prepareState().setLocal(true).execute().actionGet().getState();
-      boolean secondNoMasterLock=state.blocks().hasGlobalBlock(Discovery.NO_MASTER_BLOCK);
-      return firstNoMasterLock && secondNoMasterLock;
+      boolean success=true;
+      for (      Client client : cluster()) {
+        ClusterState state=client.admin().cluster().prepareState().setLocal(true).execute().actionGet().getState();
+        success&=state.blocks().hasGlobalBlock(Discovery.NO_MASTER_BLOCK);
+        if (logger.isDebugEnabled()) {
+          logger.debug("Checking for NO_MASTER_BLOCL on client: {} NO_MASTER_BLOCK: [{}]",client,state.blocks().hasGlobalBlock(Discovery.NO_MASTER_BLOCK));
+        }
+      }
+      return success;
     }
   }
-,20,TimeUnit.SECONDS);
-  state=client(masterNode).admin().cluster().prepareState().setLocal(true).execute().actionGet().getState();
-  assertThat(state.blocks().hasGlobalBlock(Discovery.NO_MASTER_BLOCK),equalTo(true));
-  state=client(lastNonMasterNodeUp).admin().cluster().prepareState().setLocal(true).execute().actionGet().getState();
-  assertThat(state.blocks().hasGlobalBlock(Discovery.NO_MASTER_BLOCK),equalTo(true));
-  logger.info("--> start back the nodes {}",nodesToShutdown);
-  for (  String nodeToShutdown : nodesToShutdown) {
-    startNode(nodeToShutdown,settings);
-  }
-  clusterHealthResponse=client("node1").admin().cluster().prepareHealth().setWaitForEvents(Priority.LANGUID).setWaitForNodes("4").execute().actionGet();
+,20,TimeUnit.SECONDS),equalTo(true));
+  logger.info("--> start back the 2 nodes ");
+  cluster().startNode(settings);
+  cluster().startNode(settings);
+  clusterHealthResponse=client().admin().cluster().prepareHealth().setWaitForEvents(Priority.LANGUID).setWaitForNodes("4").execute().actionGet();
   assertThat(clusterHealthResponse.isTimedOut(),equalTo(false));
   logger.info("Running Cluster Health");
-  ClusterHealthResponse clusterHealth=client("node1").admin().cluster().health(clusterHealthRequest().waitForGreenStatus()).actionGet();
+  ClusterHealthResponse clusterHealth=client().admin().cluster().health(clusterHealthRequest().waitForGreenStatus()).actionGet();
   logger.info("Done Cluster Health, status " + clusterHealth.getStatus());
   assertThat(clusterHealth.isTimedOut(),equalTo(false));
   assertThat(clusterHealth.getStatus(),equalTo(ClusterHealthStatus.GREEN));
-  state=client("node1").admin().cluster().prepareState().execute().actionGet().getState();
+  state=client().admin().cluster().prepareState().execute().actionGet().getState();
   assertThat(state.nodes().size(),equalTo(4));
   logger.info("--> verify we the data back");
   for (int i=0; i < 10; i++) {
-    assertThat(client("node1").prepareCount().setQuery(QueryBuilders.matchAllQuery()).execute().actionGet().getCount(),equalTo(100l));
+    assertThat(client().prepareCount().setQuery(QueryBuilders.matchAllQuery()).execute().actionGet().getCount(),equalTo(100l));
   }
 }
