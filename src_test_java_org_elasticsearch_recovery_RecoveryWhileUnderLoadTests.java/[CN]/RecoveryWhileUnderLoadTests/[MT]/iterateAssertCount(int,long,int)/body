@@ -13,16 +13,22 @@
     IndicesStatsResponse indicesStatsResponse=client().admin().indices().prepareStats().get();
     for (    ShardStats shardStats : indicesStatsResponse.getShards()) {
       DocsStats docsStats=shardStats.getStats().docs;
-      logger.info("Shard [{}] - count {}, primary {}",shardStats.getShardId(),docsStats.getCount(),shardStats.getShardRouting().primary());
+      logger.info("shard [{}] - count {}, primary {}",shardStats.getShardId(),docsStats.getCount(),shardStats.getShardRouting().primary());
     }
     logger.info("--> trying to wait");
     assertThat(awaitBusy(new Predicate<Object>(){
       @Override public boolean apply(      Object o){
-        SearchResponse searchResponse=client().prepareSearch().setSearchType(SearchType.COUNT).setQuery(matchAllQuery()).get();
-        return searchResponse.getHits().totalHits() == numberOfDocs;
+        boolean error=false;
+        for (int i=0; i < iterations; i++) {
+          SearchResponse searchResponse=client().prepareSearch().setSearchType(SearchType.COUNT).setQuery(matchAllQuery()).get();
+          if (searchResponse.getHits().totalHits() != numberOfDocs) {
+            error=true;
+          }
+        }
+        return !error;
       }
     }
-,30,TimeUnit.SECONDS),equalTo(true));
+,5,TimeUnit.MINUTES),equalTo(true));
   }
   for (int i=0; i < iterations; i++) {
     assertHitCount(iterationResults[i],numberOfDocs);
