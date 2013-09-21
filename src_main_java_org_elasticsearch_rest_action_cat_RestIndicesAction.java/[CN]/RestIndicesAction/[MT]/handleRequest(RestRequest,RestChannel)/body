@@ -1,11 +1,12 @@
 {
   final String[] indices=Strings.splitStringByCommaToArray(request.param("index"));
   final ClusterStateRequest clusterStateRequest=new ClusterStateRequest();
-  clusterStateRequest.filterMetaData(true).filteredIndices(indices);
+  clusterStateRequest.filteredIndices(indices);
   clusterStateRequest.local(request.paramAsBoolean("local",clusterStateRequest.local()));
   clusterStateRequest.masterNodeTimeout(request.paramAsTime("master_timeout",clusterStateRequest.masterNodeTimeout()));
   client.admin().cluster().state(clusterStateRequest,new ActionListener<ClusterStateResponse>(){
     @Override public void onResponse(    final ClusterStateResponse clusterStateResponse){
+      final String[] concreteIndices=clusterStateResponse.getState().metaData().concreteIndicesIgnoreMissing(indices);
       ClusterHealthRequest clusterHealthRequest=Requests.clusterHealthRequest(indices);
       clusterHealthRequest.local(request.paramAsBoolean("local",clusterHealthRequest.local()));
       clusterHealthRequest.indices(indices);
@@ -16,7 +17,8 @@
           client.admin().indices().stats(indicesStatsRequest,new ActionListener<IndicesStatsResponse>(){
             @Override public void onResponse(            IndicesStatsResponse indicesStatsResponse){
               try {
-                channel.sendResponse(RestTable.buildResponse(buildTable(clusterStateResponse,clusterHealthResponse,indicesStatsResponse),request,channel));
+                Table tab=buildTable(concreteIndices,clusterHealthResponse,indicesStatsResponse);
+                channel.sendResponse(RestTable.buildResponse(tab,request,channel));
               }
  catch (              Throwable e) {
                 onFailure(e);
