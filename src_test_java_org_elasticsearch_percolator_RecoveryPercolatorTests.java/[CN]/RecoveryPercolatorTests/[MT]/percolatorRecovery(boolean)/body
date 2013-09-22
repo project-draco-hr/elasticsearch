@@ -1,14 +1,19 @@
 {
-  Settings settings=settingsBuilder().put("gateway.type","none").build();
-  logger.info("--> starting 3 nodes");
-  startNode("node1",settings);
-  startNode("node2",settings);
-  startNode("node3",settings);
-  final Client client=client("node1");
-  client.admin().indices().prepareDelete().execute().actionGet();
-  ensureGreen(client);
-  client.admin().indices().prepareCreate("test").setSettings(settingsBuilder().put("index.number_of_shards",2).put("index.number_of_replicas",2)).execute().actionGet();
-  ensureGreen(client);
+  logger.info("--> ensuring exactly 2 nodes");
+  cluster().ensureAtLeastNumNodes(2);
+  cluster().ensureAtMostNumNodes(2);
+  logger.info("--> Adding 3th node");
+  cluster().startNode(settingsBuilder().put("node.stay",true));
+  client().admin().indices().prepareDelete().execute().actionGet();
+  ensureGreen();
+  client().admin().indices().prepareCreate("test").setSettings(settingsBuilder().put("index.number_of_shards",2).put("index.number_of_replicas",2)).execute().actionGet();
+  ensureGreen();
+  final Client client=cluster().client(new Predicate<Settings>(){
+    @Override public boolean apply(    Settings input){
+      return input.getAsBoolean("node.stay",false);
+    }
+  }
+);
   final int numQueries=randomIntBetween(50,100);
   logger.info("--> register a queries");
   for (int i=0; i < numQueries; i++) {
@@ -97,18 +102,24 @@
   }
 ;
   new Thread(r).start();
+  Predicate<Settings> nodePredicate=new Predicate<Settings>(){
+    @Override public boolean apply(    Settings input){
+      return !input.getAsBoolean("node.stay",false);
+    }
+  }
+;
   try {
     for (int i=0; i < 4; i++) {
-      closeNode("node3");
+      cluster().stopRandomNode(nodePredicate);
       client.admin().cluster().prepareHealth("test").setWaitForEvents(Priority.LANGUID).setTimeout(TimeValue.timeValueMinutes(2)).setWaitForYellowStatus().setWaitForActiveShards(4).execute().actionGet();
       assertThat(error.get(),nullValue());
-      closeNode("node2");
+      cluster().stopRandomNode(nodePredicate);
       client.admin().cluster().prepareHealth("test").setWaitForEvents(Priority.LANGUID).setTimeout(TimeValue.timeValueMinutes(2)).setWaitForYellowStatus().setWaitForActiveShards(2).execute().actionGet();
       assertThat(error.get(),nullValue());
-      startNode("node3");
+      cluster().startNode();
       client.admin().cluster().prepareHealth("test").setWaitForEvents(Priority.LANGUID).setTimeout(TimeValue.timeValueMinutes(2)).setWaitForYellowStatus().setWaitForActiveShards(4).execute().actionGet();
       assertThat(error.get(),nullValue());
-      startNode("node2");
+      cluster().startNode();
       client.admin().cluster().prepareHealth("test").setWaitForEvents(Priority.LANGUID).setTimeout(TimeValue.timeValueMinutes(2)).setWaitForGreenStatus().setWaitForActiveShards(6).execute().actionGet();
       assertThat(error.get(),nullValue());
     }
