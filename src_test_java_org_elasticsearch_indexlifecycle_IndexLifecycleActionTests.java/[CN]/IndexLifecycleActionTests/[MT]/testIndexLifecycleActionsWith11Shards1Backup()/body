@@ -1,14 +1,13 @@
 {
   Settings settings=settingsBuilder().put(SETTING_NUMBER_OF_SHARDS,11).put(SETTING_NUMBER_OF_REPLICAS,1).put("cluster.routing.schedule","20ms").build();
   logger.info("Starting sever1");
-  startNode("server1",settings);
-  final String node1=getLocalNodeId("server1");
-  wipeIndices(client());
+  final String server_1=cluster().startNode(settings);
+  final String node1=getLocalNodeId(server_1);
   logger.info("Creating index [test]");
-  CreateIndexResponse createIndexResponse=client("server1").admin().indices().create(createIndexRequest("test")).actionGet();
+  CreateIndexResponse createIndexResponse=client().admin().indices().create(createIndexRequest("test")).actionGet();
   assertThat(createIndexResponse.isAcknowledged(),equalTo(true));
   logger.info("Running Cluster Health");
-  ClusterHealthResponse clusterHealth=client("server1").admin().cluster().prepareHealth().setWaitForEvents(Priority.LANGUID).setWaitForYellowStatus().execute().actionGet();
+  ClusterHealthResponse clusterHealth=client().admin().cluster().prepareHealth().setWaitForEvents(Priority.LANGUID).setWaitForYellowStatus().execute().actionGet();
   logger.info("Done Cluster Health, status " + clusterHealth.getStatus());
   assertThat(clusterHealth.isTimedOut(),equalTo(false));
   assertThat(clusterHealth.getStatus(),equalTo(ClusterHealthStatus.YELLOW));
@@ -16,15 +15,15 @@
   RoutingNode routingNodeEntry1=clusterState.readOnlyRoutingNodes().nodesToShards().get(node1);
   assertThat(routingNodeEntry1.numberOfShardsWithState(STARTED),equalTo(11));
   logger.info("Starting server2");
-  startNode("server2",settings);
+  String server_2=cluster().startNode(settings);
   logger.info("Running Cluster Health");
-  clusterHealth=client("server1").admin().cluster().health(clusterHealthRequest().waitForGreenStatus().waitForNodes("2")).actionGet();
+  clusterHealth=client().admin().cluster().health(clusterHealthRequest().waitForGreenStatus().waitForNodes("2")).actionGet();
   logger.info("Done Cluster Health, status " + clusterHealth.getStatus());
   assertThat(clusterHealth.isTimedOut(),equalTo(false));
   assertThat(clusterHealth.getStatus(),equalTo(ClusterHealthStatus.GREEN));
-  final String node2=getLocalNodeId("server2");
-  client("server1").admin().cluster().prepareReroute().execute().actionGet();
-  clusterHealth=client("server1").admin().cluster().health(clusterHealthRequest().waitForGreenStatus().waitForNodes("2").waitForRelocatingShards(0)).actionGet();
+  final String node2=getLocalNodeId(server_2);
+  client().admin().cluster().prepareReroute().execute().actionGet();
+  clusterHealth=client().admin().cluster().health(clusterHealthRequest().waitForGreenStatus().waitForNodes("2").waitForRelocatingShards(0)).actionGet();
   assertThat(clusterHealth.isTimedOut(),equalTo(false));
   assertThat(clusterHealth.getStatus(),equalTo(ClusterHealthStatus.GREEN));
   assertThat(clusterHealth.getNumberOfDataNodes(),equalTo(2));
@@ -42,13 +41,13 @@
   assertThat(routingNodeEntry2.numberOfShardsWithState(INITIALIZING),equalTo(0));
   assertThat(routingNodeEntry2.numberOfShardsWithState(STARTED),equalTo(11));
   logger.info("Starting server3");
-  startNode("server3",settings);
-  clusterHealth=client("server1").admin().cluster().health(clusterHealthRequest().waitForGreenStatus().waitForNodes("3")).actionGet();
+  String server_3=cluster().startNode(settings);
+  clusterHealth=client().admin().cluster().health(clusterHealthRequest().waitForGreenStatus().waitForNodes("3")).actionGet();
   assertThat(clusterHealth.isTimedOut(),equalTo(false));
   assertThat(clusterHealth.getStatus(),equalTo(ClusterHealthStatus.GREEN));
-  final String node3=getLocalNodeId("server3");
-  client("server1").admin().cluster().prepareReroute().execute().actionGet();
-  clusterHealth=client("server1").admin().cluster().health(clusterHealthRequest().waitForGreenStatus().waitForNodes("3").waitForRelocatingShards(0)).actionGet();
+  final String node3=getLocalNodeId(server_3);
+  client().admin().cluster().prepareReroute().execute().actionGet();
+  clusterHealth=client().admin().cluster().health(clusterHealthRequest().waitForGreenStatus().waitForNodes("3").waitForRelocatingShards(0)).actionGet();
   assertThat(clusterHealth.isTimedOut(),equalTo(false));
   assertThat(clusterHealth.getStatus(),equalTo(ClusterHealthStatus.GREEN));
   assertThat(clusterHealth.getNumberOfDataNodes(),equalTo(3));
@@ -70,14 +69,19 @@
   assertThat(routingNodeEntry3.numberOfShardsWithState(INITIALIZING),equalTo(0));
   assertThat(routingNodeEntry3.numberOfShardsWithState(STARTED),equalTo(7));
   logger.info("Closing server1");
-  closeNode("server1");
+  cluster().stopRandomNode(new Predicate<Settings>(){
+    public boolean apply(    Settings settings){
+      return server_1.equals(settings.get("name"));
+    }
+  }
+);
   logger.info("Running Cluster Health");
-  clusterHealth=client("server2").admin().cluster().health(clusterHealthRequest().waitForGreenStatus().waitForNodes("2")).actionGet();
+  clusterHealth=client().admin().cluster().health(clusterHealthRequest().waitForGreenStatus().waitForNodes("2")).actionGet();
   logger.info("Done Cluster Health, status " + clusterHealth.getStatus());
   assertThat(clusterHealth.isTimedOut(),equalTo(false));
   assertThat(clusterHealth.getStatus(),equalTo(ClusterHealthStatus.GREEN));
   client().admin().cluster().prepareReroute().get();
-  clusterHealth=client("server2").admin().cluster().health(clusterHealthRequest().waitForGreenStatus().waitForRelocatingShards(0).waitForNodes("2")).actionGet();
+  clusterHealth=client().admin().cluster().health(clusterHealthRequest().waitForGreenStatus().waitForRelocatingShards(0).waitForNodes("2")).actionGet();
   assertThat(clusterHealth.isTimedOut(),equalTo(false));
   assertThat(clusterHealth.getStatus(),equalTo(ClusterHealthStatus.GREEN));
   assertThat(clusterHealth.getRelocatingShards(),equalTo(0));
@@ -93,7 +97,7 @@
   assertThat(routingNodeEntry3.numberOfShardsWithState(RELOCATING),equalTo(0));
   assertThat(routingNodeEntry3.numberOfShardsWithState(STARTED),equalTo(11));
   logger.info("Deleting index [test]");
-  DeleteIndexResponse deleteIndexResponse=client("server2").admin().indices().prepareDelete("test").execute().actionGet();
+  DeleteIndexResponse deleteIndexResponse=client().admin().indices().prepareDelete("test").execute().actionGet();
   assertThat(deleteIndexResponse.isAcknowledged(),equalTo(true));
   clusterState=client().admin().cluster().prepareState().get().getState();
   assertNodesPresent(clusterState.readOnlyRoutingNodes().nodesToShards(),node3,node2);
