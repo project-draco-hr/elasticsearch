@@ -1,7 +1,5 @@
 {
-  if (indexWriter == null) {
-    throw new EngineClosedException(shardId,failedEngine);
-  }
+  ensureOpen();
   if (flush.type() == Flush.Type.NEW_WRITER || flush.type() == Flush.Type.COMMIT_TRANSLOG) {
     if (onGoingRecoveries.get() > 0) {
       throw new FlushNotAllowedEngineException(shardId,"recovery is in progress, flush [" + flush.type() + "] is not allowed");
@@ -17,9 +15,7 @@
     if (flush.type() == Flush.Type.NEW_WRITER) {
       rwl.writeLock().lock();
       try {
-        if (indexWriter == null) {
-          throw new EngineClosedException(shardId,failedEngine);
-        }
+        ensureOpen();
         if (onGoingRecoveries.get() > 0) {
           throw new FlushNotAllowedEngineException(shardId,"Recovery is in progress, flush is not allowed");
         }
@@ -65,9 +61,7 @@ catch (        Throwable e) {
  else     if (flush.type() == Flush.Type.COMMIT_TRANSLOG) {
       rwl.readLock().lock();
       try {
-        if (indexWriter == null) {
-          throw new EngineClosedException(shardId,failedEngine);
-        }
+        ensureOpen();
         if (onGoingRecoveries.get() > 0) {
           throw new FlushNotAllowedEngineException(shardId,"Recovery is in progress, flush is not allowed");
         }
@@ -105,9 +99,7 @@ catch (          Throwable e) {
  else     if (flush.type() == Flush.Type.COMMIT) {
       rwl.readLock().lock();
       try {
-        if (indexWriter == null) {
-          throw new EngineClosedException(shardId,failedEngine);
-        }
+        ensureOpen();
         try {
           long translogId=translog.currentId();
           indexWriter.setCommitData(MapBuilder.<String,String>newMapBuilder().put(Translog.TRANSLOG_ID_KEY,Long.toString(translogId)).map());
@@ -135,15 +127,18 @@ catch (        Throwable e) {
  else {
       throw new ElasticSearchIllegalStateException("flush type [" + flush.type() + "] not supported");
     }
+    rwl.readLock().lock();
     try {
-      SegmentInfos infos=new SegmentInfos();
-      infos.read(store.directory());
-      lastCommittedSegmentInfos=infos;
+      ensureOpen();
+      readLastCommittedSegmentsInfo();
     }
  catch (    Throwable e) {
       if (!closed) {
         logger.warn("failed to read latest segment infos on flush",e);
       }
+    }
+ finally {
+      rwl.readLock().unlock();
     }
   }
   finally {
