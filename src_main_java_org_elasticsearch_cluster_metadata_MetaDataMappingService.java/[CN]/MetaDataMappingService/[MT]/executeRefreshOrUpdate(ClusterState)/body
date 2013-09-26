@@ -1,45 +1,41 @@
 {
-  List<Object> allTasks=new ArrayList<Object>();
+  List<MappingTask> allTasks=new ArrayList<MappingTask>();
   refreshOrUpdateQueue.drainTo(allTasks);
   if (allTasks.isEmpty()) {
     return currentState;
   }
-  Map<String,List<Object>> tasksPerIndex=Maps.newHashMap();
-  for (  Object task : allTasks) {
-    String index=null;
-    if (task instanceof UpdateTask) {
-      index=((UpdateTask)task).index;
+  Map<String,List<MappingTask>> tasksPerIndex=Maps.newHashMap();
+  for (  MappingTask task : allTasks) {
+    if (task.index == null) {
+      logger.debug("ignoring a mapping task of type [{}] with a null index.",task);
     }
- else     if (task instanceof RefreshTask) {
-      index=((RefreshTask)task).index;
+    List<MappingTask> indexTasks=tasksPerIndex.get(task.index);
+    if (indexTasks == null) {
+      indexTasks=new ArrayList<MappingTask>();
+      tasksPerIndex.put(task.index,indexTasks);
     }
- else {
-      logger.warn("illegal state, got wrong mapping task type [{}]",task);
-    }
-    if (index != null) {
-      List<Object> indexTasks=tasksPerIndex.get(index);
-      if (indexTasks == null) {
-        indexTasks=new ArrayList<Object>();
-        tasksPerIndex.put(index,indexTasks);
-      }
-      indexTasks.add(task);
-    }
+    indexTasks.add(task);
   }
   boolean dirty=false;
   MetaData.Builder mdBuilder=newMetaDataBuilder().metaData(currentState.metaData());
-  for (  Map.Entry<String,List<Object>> entry : tasksPerIndex.entrySet()) {
+  for (  Map.Entry<String,List<MappingTask>> entry : tasksPerIndex.entrySet()) {
     String index=entry.getKey();
-    List<Object> tasks=entry.getValue();
+    List<MappingTask> tasks=entry.getValue();
     boolean removeIndex=false;
     Set<String> processedRefreshes=Sets.newHashSet();
     try {
-      for (      Object task : tasks) {
+      for (      MappingTask task : tasks) {
+        final IndexMetaData indexMetaData=mdBuilder.get(index);
+        if (indexMetaData == null) {
+          logger.debug("[{}] ignoring task [{}] - index meta data doesn't exist",index,task);
+          continue;
+        }
+        if (!indexMetaData.isSameUUID(task.indexUUID)) {
+          logger.debug("[{}] ignoring task [{}] - index meta data doesn't match task uuid",index,task);
+          continue;
+        }
         if (task instanceof RefreshTask) {
           RefreshTask refreshTask=(RefreshTask)task;
-          final IndexMetaData indexMetaData=mdBuilder.get(index);
-          if (indexMetaData == null) {
-            continue;
-          }
           IndexService indexService=indicesService.indexService(index);
           if (indexService == null) {
             indexService=indicesService.createIndex(indexMetaData.index(),indexMetaData.settings(),currentState.nodes().localNode().id());
@@ -74,11 +70,8 @@
           UpdateTask updateTask=(UpdateTask)task;
           String type=updateTask.type;
           CompressedString mappingSource=updateTask.mappingSource;
-          final IndexMetaData indexMetaData=mdBuilder.get(index);
-          if (indexMetaData == null) {
-            continue;
-          }
           if (indexMetaData.mappings().containsKey(type) && indexMetaData.mapping(type).source().equals(mappingSource)) {
+            logger.debug("[{}] update_mapping [{}] ignoring mapping update task as it's source is equal to ours",index,updateTask.type);
             continue;
           }
           IndexService indexService=indicesService.indexService(index);
@@ -92,14 +85,11 @@
           DocumentMapper updatedMapper=indexService.mapperService().merge(type,mappingSource.string(),false);
           processedRefreshes.add(type);
           if (indexMetaData.mappings().containsKey(type) && indexMetaData.mapping(type).source().equals(updatedMapper.mappingSource())) {
+            logger.debug("[{}] update_mapping [{}] ignoring mapping update task as it results in the same source as what we have",index,updateTask.type);
             continue;
           }
           if (logger.isDebugEnabled()) {
-            try {
-              logger.debug("[{}] update_mapping [{}] (dynamic) with source [{}]",index,type,updatedMapper.mappingSource().string());
-            }
- catch (            Exception e) {
-            }
+            logger.debug("[{}] update_mapping [{}] (dynamic) with source [{}]",index,type,updatedMapper.mappingSource());
           }
  else           if (logger.isInfoEnabled()) {
             logger.info("[{}] update_mapping [{}] (dynamic)",index,type);

@@ -1,0 +1,34 @@
+{
+  final CountDownLatch latch=new CountDownLatch(1);
+  try {
+    final MapperService mapperService=indicesService.indexServiceSafe(request.index()).mapperService();
+    final DocumentMapper documentMapper=mapperService.documentMapper(request.type());
+    if (documentMapper == null) {
+      return;
+    }
+    documentMapper.refreshSource();
+    final MappingUpdatedAction.MappingUpdatedRequest mappingRequest=new MappingUpdatedAction.MappingUpdatedRequest(request.index(),indexMetaData.uuid(),request.type(),documentMapper.mappingSource());
+    logger.trace("Sending mapping updated to master: {}",mappingRequest);
+    mappingUpdatedAction.execute(mappingRequest,new ActionListener<MappingUpdatedAction.MappingUpdatedResponse>(){
+      @Override public void onResponse(      MappingUpdatedAction.MappingUpdatedResponse mappingUpdatedResponse){
+        latch.countDown();
+      }
+      @Override public void onFailure(      Throwable e){
+        latch.countDown();
+        logger.warn("Failed to update master on updated mapping for {}",e,mappingRequest);
+      }
+    }
+);
+  }
+ catch (  Exception e) {
+    latch.countDown();
+    logger.warn("Failed to update master on updated mapping for index [" + request.index() + "], type ["+ request.type()+ "]",e);
+  }
+  if (waitForMappingChange) {
+    try {
+      latch.await(5,TimeUnit.SECONDS);
+    }
+ catch (    InterruptedException e) {
+    }
+  }
+}
