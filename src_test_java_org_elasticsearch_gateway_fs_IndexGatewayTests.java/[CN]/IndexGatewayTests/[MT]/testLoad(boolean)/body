@@ -1,52 +1,52 @@
 {
   logger.info("Running with fullRecover [{}]",fullRecovery);
-  startNode("server1");
+  cluster().startNode(nodeSettings(0));
   logger.info("Running Cluster Health (waiting for node to startup properly)");
-  ClusterHealthResponse clusterHealth=client("server1").admin().cluster().health(clusterHealthRequest().waitForGreenStatus()).actionGet();
+  ClusterHealthResponse clusterHealth=client().admin().cluster().health(clusterHealthRequest().waitForGreenStatus()).actionGet();
   logger.info("Done Cluster Health, status " + clusterHealth.getStatus());
   assertThat(clusterHealth.isTimedOut(),equalTo(false));
   assertThat(clusterHealth.getStatus(),equalTo(ClusterHealthStatus.GREEN));
-  Environment environment=((InternalNode)node("server1")).injector().getInstance(Environment.class);
+  Environment environment=cluster().getInstance(Environment.class);
   logger.info("--> creating test index ...");
-  client("server1").admin().indices().prepareCreate("test").execute().actionGet();
+  client().admin().indices().prepareCreate("test").execute().actionGet();
   logger.info("Running Cluster Health (wait for the shards to startup)");
-  clusterHealth=client("server1").admin().cluster().health(clusterHealthRequest().waitForYellowStatus().waitForActiveShards(1)).actionGet();
+  clusterHealth=client().admin().cluster().health(clusterHealthRequest().waitForYellowStatus().waitForActiveShards(1)).actionGet();
   logger.info("Done Cluster Health, status " + clusterHealth.getStatus());
   assertThat(clusterHealth.isTimedOut(),equalTo(false));
   assertThat(clusterHealth.getStatus(),equalTo(ClusterHealthStatus.YELLOW));
   logger.info("--> refreshing and checking count");
-  client("server1").admin().indices().prepareRefresh().execute().actionGet();
-  assertThat(client("server1").prepareCount().setQuery(matchAllQuery()).execute().actionGet().getCount(),equalTo(0l));
+  client().admin().indices().prepareRefresh().execute().actionGet();
+  assertThat(client().prepareCount().setQuery(matchAllQuery()).execute().actionGet().getCount(),equalTo(0l));
   logger.info("--> indexing 1234 docs");
   for (long i=0; i < 1234; i++) {
-    client("server1").prepareIndex("test","type1",Long.toString(i)).setCreate(true).setSource(MapBuilder.<String,Object>newMapBuilder().put("test","value" + i).map()).execute().actionGet();
+    client().prepareIndex("test","type1",Long.toString(i)).setCreate(true).setSource(MapBuilder.<String,Object>newMapBuilder().put("test","value" + i).map()).execute().actionGet();
     if ((i % 11) == 0) {
-      client("server1").admin().indices().prepareGatewaySnapshot().execute().actionGet();
+      client().admin().indices().prepareGatewaySnapshot().execute().actionGet();
     }
     if ((i % 55) == 0) {
-      client("server1").admin().indices().prepareFlush().execute().actionGet();
+      client().admin().indices().prepareFlush().execute().actionGet();
     }
   }
   logger.info("--> refreshing and checking count");
-  client("server1").admin().indices().prepareRefresh().execute().actionGet();
-  assertThat(client("server1").prepareCount().setQuery(matchAllQuery()).execute().actionGet().getCount(),equalTo(1234l));
+  client().admin().indices().prepareRefresh().execute().actionGet();
+  assertThat(client().prepareCount().setQuery(matchAllQuery()).execute().actionGet().getCount(),equalTo(1234l));
   logger.info("--> closing the server");
-  closeNode("server1");
+  cluster().stopRandomNode();
   if (fullRecovery) {
     logger.info("Clearing cluster data dir, so there will be a full recovery from the gateway");
     FileSystemUtils.deleteRecursively(environment.dataWithClusterFiles());
     logger.info("Starting the server, should recover from the gateway (both index and translog) without reusing work dir");
   }
-  startNode("server1");
+  cluster().startNode(nodeSettings(0));
   logger.info("--> running Cluster Health (wait for the shards to startup)");
-  clusterHealth=client("server1").admin().cluster().health(clusterHealthRequest().waitForYellowStatus().waitForActiveShards(1)).actionGet();
+  clusterHealth=client().admin().cluster().health(clusterHealthRequest().waitForYellowStatus().waitForActiveShards(1)).actionGet();
   logger.info("--> done Cluster Health, status " + clusterHealth.getStatus());
   assertThat(clusterHealth.isTimedOut(),equalTo(false));
   assertThat(clusterHealth.getStatus(),equalTo(ClusterHealthStatus.YELLOW));
   logger.info("--> checking count");
-  assertThat(client("server1").prepareCount().setQuery(matchAllQuery()).execute().actionGet().getCount(),equalTo(1234l));
+  assertThat(client().prepareCount().setQuery(matchAllQuery()).execute().actionGet().getCount(),equalTo(1234l));
   logger.info("--> checking reuse / recovery status");
-  IndicesStatusResponse statusResponse=client("server1").admin().indices().prepareStatus().setRecovery(true).execute().actionGet();
+  IndicesStatusResponse statusResponse=client().admin().indices().prepareStatus().setRecovery(true).execute().actionGet();
   for (  IndexShardStatus indexShardStatus : statusResponse.getIndex("test")) {
     for (    ShardStatus shardStatus : indexShardStatus) {
       if (shardStatus.getShardRouting().primary()) {

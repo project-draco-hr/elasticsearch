@@ -1,46 +1,46 @@
 {
-  buildNode("node1");
-  buildNode("node2");
-  cleanAndCloseNodes();
-  Node node1=startNode("node1",settingsBuilder().put("index.number_of_shards",1).put("gateway.recover_after_nodes",2).build());
-  Node node2=startNode("node2",settingsBuilder().put("index.number_of_shards",1).put("gateway.recover_after_nodes",2).build());
-  node1.client().prepareIndex("test","type1","1").setSource(jsonBuilder().startObject().field("field","value1").endObject()).execute().actionGet();
-  node1.client().admin().indices().prepareFlush().execute().actionGet();
-  node1.client().prepareIndex("test","type1","2").setSource(jsonBuilder().startObject().field("field","value2").endObject()).execute().actionGet();
-  node1.client().admin().indices().prepareRefresh().execute().actionGet();
+  cluster().startNode(settingsBuilder().put("index.number_of_shards",1).put("gateway.recover_after_nodes",2).build());
+  cluster().startNode(settingsBuilder().put("index.number_of_shards",1).put("gateway.recover_after_nodes",2).build());
+  client().prepareIndex("test","type1","1").setSource(jsonBuilder().startObject().field("field","value1").endObject()).execute().actionGet();
+  client().admin().indices().prepareFlush().execute().actionGet();
+  client().prepareIndex("test","type1","2").setSource(jsonBuilder().startObject().field("field","value2").endObject()).execute().actionGet();
+  client().admin().indices().prepareRefresh().execute().actionGet();
   logger.info("--> running cluster_health (wait for the shards to startup)");
-  ClusterHealthResponse clusterHealth=client("node1").admin().cluster().health(clusterHealthRequest().waitForGreenStatus().waitForActiveShards(2)).actionGet();
+  ClusterHealthResponse clusterHealth=client().admin().cluster().health(clusterHealthRequest().waitForGreenStatus().waitForActiveShards(2)).actionGet();
   logger.info("--> done cluster_health, status " + clusterHealth.getStatus());
   assertThat(clusterHealth.isTimedOut(),equalTo(false));
   assertThat(clusterHealth.getStatus(),equalTo(ClusterHealthStatus.GREEN));
   for (int i=0; i < 10; i++) {
-    assertHitCount(node1.client().prepareCount().setQuery(matchAllQuery()).execute().actionGet(),2);
+    assertHitCount(client().prepareCount().setQuery(matchAllQuery()).execute().actionGet(),2);
   }
   logger.info("--> closing first node, and indexing more data to the second node");
-  closeNode("node1");
-  node2.client().prepareIndex("test","type1","3").setSource(jsonBuilder().startObject().field("field","value3").endObject()).execute().actionGet();
-  node2.client().admin().indices().prepareRefresh().execute().actionGet();
-  for (int i=0; i < 10; i++) {
-    assertHitCount(node2.client().prepareCount().setQuery(matchAllQuery()).execute().actionGet(),3);
+  cluster().fullRestart(new RestartCallback(){
+    @Override public void doAfterNodes(    int numNodes,    Client client) throws Exception {
+      if (numNodes == 1) {
+        logger.info("--> one node is closed - start indexing data into the second one");
+        client.prepareIndex("test","type1","3").setSource(jsonBuilder().startObject().field("field","value3").endObject()).execute().actionGet();
+        client.admin().indices().prepareRefresh().execute().actionGet();
+        for (int i=0; i < 10; i++) {
+          assertHitCount(client.prepareCount().setQuery(matchAllQuery()).execute().actionGet(),3);
+        }
+        logger.info("--> add some metadata, additional type and template");
+        client.admin().indices().preparePutMapping("test").setType("type2").setSource(jsonBuilder().startObject().startObject("type1").startObject("_source").field("enabled",false).endObject().endObject().endObject()).execute().actionGet();
+        client.admin().indices().preparePutTemplate("template_1").setTemplate("te*").setOrder(0).addMapping("type1",XContentFactory.jsonBuilder().startObject().startObject("type1").startObject("properties").startObject("field1").field("type","string").field("store","yes").endObject().startObject("field2").field("type","string").field("store","yes").field("index","not_analyzed").endObject().endObject().endObject().endObject()).execute().actionGet();
+        client.admin().indices().prepareAliases().addAlias("test","test_alias",FilterBuilders.termFilter("field","value")).execute().actionGet();
+        logger.info("--> starting two nodes back, verifying we got the latest version");
+      }
+    }
   }
-  logger.info("--> add some metadata, additional type and template");
-  node2.client().admin().indices().preparePutMapping("test").setType("type2").setSource(jsonBuilder().startObject().startObject("type1").startObject("_source").field("enabled",false).endObject().endObject().endObject()).execute().actionGet();
-  node2.client().admin().indices().preparePutTemplate("template_1").setTemplate("te*").setOrder(0).addMapping("type1",XContentFactory.jsonBuilder().startObject().startObject("type1").startObject("properties").startObject("field1").field("type","string").field("store","yes").endObject().startObject("field2").field("type","string").field("store","yes").field("index","not_analyzed").endObject().endObject().endObject().endObject()).execute().actionGet();
-  node2.client().admin().indices().prepareAliases().addAlias("test","test_alias",FilterBuilders.termFilter("field","value")).execute().actionGet();
-  logger.info("--> closing the second node");
-  closeNode("node2");
-  logger.info("--> starting two nodes back, verifying we got the latest version");
-  node1=startNode("node1",settingsBuilder().put("gateway.recover_after_nodes",2).build());
-  node2=startNode("node2",settingsBuilder().put("gateway.recover_after_nodes",2).build());
+);
   logger.info("--> running cluster_health (wait for the shards to startup)");
-  clusterHealth=client("node1").admin().cluster().health(clusterHealthRequest().waitForGreenStatus().waitForActiveShards(2)).actionGet();
+  clusterHealth=client().admin().cluster().health(clusterHealthRequest().waitForGreenStatus().waitForActiveShards(2)).actionGet();
   logger.info("--> done cluster_health, status " + clusterHealth.getStatus());
   assertThat(clusterHealth.isTimedOut(),equalTo(false));
   assertThat(clusterHealth.getStatus(),equalTo(ClusterHealthStatus.GREEN));
   for (int i=0; i < 10; i++) {
-    assertHitCount(node1.client().prepareCount().setQuery(matchAllQuery()).execute().actionGet(),3);
+    assertHitCount(client().prepareCount().setQuery(matchAllQuery()).execute().actionGet(),3);
   }
-  ClusterState state=node1.client().admin().cluster().prepareState().execute().actionGet().getState();
+  ClusterState state=client().admin().cluster().prepareState().execute().actionGet().getState();
   assertThat(state.metaData().index("test").mapping("type2"),notNullValue());
   assertThat(state.metaData().templates().get("template_1").template(),equalTo("te*"));
   assertThat(state.metaData().index("test").aliases().get("test_alias"),notNullValue());

@@ -1,17 +1,17 @@
 {
-  buildNode("node1",settingsBuilder().put("path.data","data/data1").build());
-  buildNode("node2",settingsBuilder().put("path.data","data/data2").build());
-  cleanAndCloseNodes();
-  startNode("node1",settingsBuilder().put("path.data","data/data1").build());
-  client("node1").prepareIndex("test","type1","1").setSource("field","value").execute().actionGet();
-  startNode("node2",settingsBuilder().put("path.data","data/data2").build());
-  ClusterHealthResponse health=client("node2").admin().cluster().prepareHealth().setWaitForEvents(Priority.LANGUID).setWaitForGreenStatus().execute().actionGet();
+  final String node_1=cluster().startNode(settingsBuilder().put("path.data","data/data1").build());
+  client().prepareIndex("test","type1","1").setSource("field","value").execute().actionGet();
+  cluster().startNode(settingsBuilder().put("path.data","data/data2").build());
+  ClusterHealthResponse health=client().admin().cluster().prepareHealth().setWaitForEvents(Priority.LANGUID).setWaitForGreenStatus().execute().actionGet();
   assertThat(health.isTimedOut(),equalTo(false));
-  closeNode("node1");
-  closeNode("node2");
-  startNode("node2",settingsBuilder().put("path.data","data/data2").build());
-  health=client("node2").admin().cluster().prepareHealth().setWaitForEvents(Priority.LANGUID).setWaitForYellowStatus().execute().actionGet();
+  cluster().fullRestart(new RestartCallback(){
+    @Override public boolean doRestart(    String nodeName){
+      return !node_1.equals(nodeName);
+    }
+  }
+);
+  health=client().admin().cluster().prepareHealth().setWaitForEvents(Priority.LANGUID).setWaitForYellowStatus().execute().actionGet();
   assertThat(health.isTimedOut(),equalTo(false));
-  assertThat(client("node2").admin().indices().prepareExists("test").execute().actionGet().isExists(),equalTo(true));
-  assertHitCount(client("node2").prepareCount("test").setQuery(QueryBuilders.matchAllQuery()).execute().actionGet(),1);
+  assertThat(client().admin().indices().prepareExists("test").execute().actionGet().isExists(),equalTo(true));
+  assertHitCount(client().prepareCount("test").setQuery(QueryBuilders.matchAllQuery()).execute().actionGet(),1);
 }
