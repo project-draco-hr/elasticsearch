@@ -4,8 +4,6 @@
   boolean queryFound=false;
   String childType=null;
   int shortCircuitParentDocSet=8192;
-  boolean cache=false;
-  CacheKeyFilter.Key cacheKey=null;
   String filterName=null;
   String currentFieldName=null;
   XContentParser.Token token;
@@ -50,10 +48,8 @@
         filterName=parser.text();
       }
  else       if ("_cache".equals(currentFieldName)) {
-        cache=parser.booleanValue();
       }
  else       if ("_cache_key".equals(currentFieldName) || "_cacheKey".equals(currentFieldName)) {
-        cacheKey=new CacheKeyFilter.Key(parser.text());
       }
  else       if ("short_circuit_cutoff".equals(currentFieldName)) {
         shortCircuitParentDocSet=parser.intValue();
@@ -81,23 +77,20 @@
   }
   String parentType=childDocMapper.parentFieldMapper().type();
   query=new XFilteredQuery(query,parseContext.cacheFilter(childDocMapper.typeFilter(),null));
-  SearchContext searchContext=SearchContext.current();
-  if (searchContext == null) {
-    throw new ElasticSearchIllegalStateException("[has_child] Can't execute, search context not set.");
-  }
   DocumentMapper parentDocMapper=parseContext.mapperService().documentMapper(parentType);
   if (parentDocMapper == null) {
     throw new QueryParsingException(parseContext.index(),"[has_child]  Type [" + childType + "] points to a non existent parent type ["+ parentType+ "]");
   }
   Filter parentFilter=parseContext.cacheFilter(parentDocMapper.typeFilter(),null);
-  HasChildFilter childFilter=new HasChildFilter(query,parentType,childType,parentFilter,searchContext,shortCircuitParentDocSet);
-  searchContext.addRewrite(childFilter);
-  Filter filter=childFilter;
-  if (cache) {
-    filter=parseContext.cacheFilter(filter,cacheKey);
-  }
+  Query childrenConstantScoreQuery=new ChildrenConstantScoreQuery(query,parentType,childType,parentFilter,shortCircuitParentDocSet,false);
   if (filterName != null) {
-    parseContext.addNamedFilter(filterName,filter);
+    parseContext.addNamedQuery(filterName,childrenConstantScoreQuery);
   }
-  return filter;
+  boolean deleteByQuery="delete_by_query".equals(SearchContext.current().source());
+  if (deleteByQuery) {
+    return new DeleteByQueryWrappingFilter(childrenConstantScoreQuery);
+  }
+ else {
+    return new CustomQueryWrappingFilter(childrenConstantScoreQuery);
+  }
 }

@@ -1,7 +1,17 @@
 {
   ShardDeleteByQueryRequest request=shardRequest.request;
-  IndexShard indexShard=indicesService.indexServiceSafe(shardRequest.request.index()).shardSafe(shardRequest.shardId);
-  Engine.DeleteByQuery deleteByQuery=indexShard.prepareDeleteByQuery(request.querySource(),request.filteringAliases(),request.types()).origin(Engine.Operation.Origin.PRIMARY);
-  indexShard.deleteByQuery(deleteByQuery);
+  IndexService indexService=indicesService.indexServiceSafe(shardRequest.request.index());
+  IndexShard indexShard=indexService.shardSafe(shardRequest.shardId);
+  SearchContext.setCurrent(new DefaultSearchContext(0,new ShardSearchRequest().types(request.types()),null,indexShard.acquireSearcher("delete_by_query"),indexService,indexShard,scriptService,cacheRecycler));
+  try {
+    Engine.DeleteByQuery deleteByQuery=indexShard.prepareDeleteByQuery(request.querySource(),request.filteringAliases(),request.types()).origin(Engine.Operation.Origin.PRIMARY);
+    SearchContext.current().parsedQuery(new ParsedQuery(deleteByQuery.query(),ImmutableMap.<String,Filter>of()));
+    indexShard.deleteByQuery(deleteByQuery);
+  }
+  finally {
+    SearchContext searchContext=SearchContext.current();
+    searchContext.clearAndRelease();
+    SearchContext.removeCurrent();
+  }
   return new PrimaryResponse<ShardDeleteByQueryResponse,ShardDeleteByQueryRequest>(shardRequest.request,new ShardDeleteByQueryResponse(),null);
 }

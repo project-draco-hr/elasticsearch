@@ -83,21 +83,17 @@
   if (parentDocMapper == null) {
     throw new QueryParsingException(parseContext.index(),"[has_child]  Type [" + childType + "] points to a non existent parent type ["+ parentType+ "]");
   }
-  SearchContext searchContext=SearchContext.current();
-  if (searchContext == null) {
-    throw new ElasticSearchIllegalStateException("[has_child] Can't execute, search context not set.");
-  }
+  boolean deleteByQuery="delete_by_query".equals(SearchContext.current().source());
   Query query;
   Filter parentFilter=parseContext.cacheFilter(parentDocMapper.typeFilter(),null);
-  if (scoreType != null) {
-    ChildrenQuery childrenQuery=new ChildrenQuery(searchContext,parentType,childType,parentFilter,innerQuery,scoreType,shortCircuitParentDocSet);
-    searchContext.addRewrite(childrenQuery);
-    query=childrenQuery;
+  if (!deleteByQuery && scoreType != null) {
+    query=new ChildrenQuery(parentType,childType,parentFilter,innerQuery,scoreType,shortCircuitParentDocSet);
   }
  else {
-    HasChildFilter hasChildFilter=new HasChildFilter(innerQuery,parentType,childType,parentFilter,searchContext,shortCircuitParentDocSet);
-    searchContext.addRewrite(hasChildFilter);
-    query=new XConstantScoreQuery(hasChildFilter);
+    query=new ChildrenConstantScoreQuery(innerQuery,parentType,childType,parentFilter,shortCircuitParentDocSet,true);
+    if (deleteByQuery) {
+      query=new XConstantScoreQuery(new DeleteByQueryWrappingFilter(query));
+    }
   }
   if (queryName != null) {
     parseContext.addNamedQuery(queryName,query);

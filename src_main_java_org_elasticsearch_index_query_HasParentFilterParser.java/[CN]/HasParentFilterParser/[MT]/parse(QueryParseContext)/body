@@ -73,16 +73,12 @@
     throw new QueryParsingException(parseContext.index(),"[has_parent] filter configured 'parent_type' [" + parentType + "] is not a valid type");
   }
   query=new XFilteredQuery(query,parseContext.cacheFilter(parentDocMapper.typeFilter(),null));
-  SearchContext searchContext=SearchContext.current();
-  if (searchContext == null) {
-    throw new ElasticSearchIllegalStateException("[has_parent] Can't execute, search context not set");
-  }
   Set<String> parentTypes=new HashSet<String>(5);
   parentTypes.add(parentType);
   for (  DocumentMapper documentMapper : parseContext.mapperService()) {
     ParentFieldMapper parentFieldMapper=documentMapper.parentFieldMapper();
     if (parentFieldMapper != null) {
-      DocumentMapper parentTypeDocumentMapper=searchContext.mapperService().documentMapper(parentFieldMapper.type());
+      DocumentMapper parentTypeDocumentMapper=parseContext.mapperService().documentMapper(parentFieldMapper.type());
       if (parentTypeDocumentMapper == null) {
         parentTypes.add(parentFieldMapper.type());
       }
@@ -103,14 +99,15 @@
     parentFilter=parentsFilter;
   }
   Filter childrenFilter=parseContext.cacheFilter(new NotFilter(parentFilter),null);
-  HasParentFilter hasParentFilter=new HasParentFilter(query,parentType,searchContext,childrenFilter);
-  searchContext.addRewrite(hasParentFilter);
-  Filter filter=hasParentFilter;
-  if (cache) {
-    filter=parseContext.cacheFilter(filter,cacheKey);
-  }
+  Query parentConstantScoreQuery=new ParentConstantScoreQuery(query,parentType,childrenFilter,false);
   if (filterName != null) {
-    parseContext.addNamedFilter(filterName,filter);
+    parseContext.addNamedQuery(filterName,parentConstantScoreQuery);
   }
-  return filter;
+  boolean deleteByQuery="delete_by_query".equals(SearchContext.current().source());
+  if (deleteByQuery) {
+    return new DeleteByQueryWrappingFilter(parentConstantScoreQuery);
+  }
+ else {
+    return new CustomQueryWrappingFilter(parentConstantScoreQuery);
+  }
 }
