@@ -5,7 +5,19 @@
         listener.onFailure(new ElasticSearchException("search failed with failed shards: " + Arrays.toString(searchResponse.getShardFailures())));
         return;
       }
-      clusterService.submitStateUpdateTask("put_warmer [" + request.name() + "]",new TimeoutClusterStateUpdateTask(){
+      clusterService.submitStateUpdateTask("put_warmer [" + request.name() + "]",new AckedClusterStateUpdateTask(){
+        @Override public boolean mustAck(        DiscoveryNode discoveryNode){
+          return true;
+        }
+        @Override public void onAllNodesAcked(        @Nullable Throwable t){
+          listener.onResponse(new PutWarmerResponse(true));
+        }
+        @Override public void onAckTimeout(){
+          listener.onResponse(new PutWarmerResponse(false));
+        }
+        @Override public TimeValue ackTimeout(){
+          return request.timeout();
+        }
         @Override public TimeValue timeout(){
           return request.masterNodeTimeout();
         }
@@ -61,7 +73,6 @@
           return ClusterState.builder().state(currentState).metaData(mdBuilder).build();
         }
         @Override public void clusterStateProcessed(        String source,        ClusterState oldState,        ClusterState newState){
-          listener.onResponse(new PutWarmerResponse(true));
         }
       }
 );
