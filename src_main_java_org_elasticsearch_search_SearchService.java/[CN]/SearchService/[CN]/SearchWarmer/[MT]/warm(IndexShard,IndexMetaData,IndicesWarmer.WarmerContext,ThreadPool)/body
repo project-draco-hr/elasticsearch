@@ -1,0 +1,45 @@
+{
+  IndexWarmersMetaData custom=indexMetaData.custom(IndexWarmersMetaData.TYPE);
+  if (custom == null) {
+    return;
+  }
+  final CountDownLatch latch=new CountDownLatch(custom.entries().size());
+  for (  final IndexWarmersMetaData.Entry entry : custom.entries()) {
+    threadPool.executor(executor()).execute(new Runnable(){
+      @Override public void run(){
+        SearchContext context=null;
+        try {
+          long now=System.nanoTime();
+          ShardSearchRequest request=new ShardSearchRequest(indexShard.shardId().index().name(),indexShard.shardId().id(),indexMetaData.numberOfShards(),SearchType.QUERY_THEN_FETCH).source(entry.source()).types(entry.types());
+          context=createContext(request,warmerContext.newSearcher());
+          queryPhase.execute(context);
+          long took=System.nanoTime() - now;
+          if (indexShard.warmerService().logger().isTraceEnabled()) {
+            indexShard.warmerService().logger().trace("warmed [{}], took [{}]",entry.name(),TimeValue.timeValueNanos(took));
+          }
+        }
+ catch (        Throwable t) {
+          indexShard.warmerService().logger().warn("warmer [{}] failed",t,entry.name());
+        }
+ finally {
+          try {
+            if (context != null) {
+              freeContext(context);
+              cleanContext(context);
+            }
+          }
+  finally {
+            latch.countDown();
+          }
+        }
+      }
+    }
+);
+  }
+  try {
+    latch.await();
+  }
+ catch (  InterruptedException e) {
+    Thread.currentThread().interrupt();
+  }
+}
