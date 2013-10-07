@@ -1,8 +1,9 @@
 {
   if (request.indices().length == 0) {
     listener.onResponse(new DeleteIndexResponse(true));
+    return;
   }
-  final AtomicInteger count=new AtomicInteger(request.indices().length);
+  final CountDown count=new CountDown(request.indices().length);
   for (  final String index : request.indices()) {
     deleteIndexService.deleteIndex(new MetaDataDeleteIndexService.Request(index).timeout(request.timeout()).masterTimeout(request.masterNodeTimeout()),new MetaDataDeleteIndexService.Listener(){
       private volatile Throwable lastFailure;
@@ -11,7 +12,7 @@
         if (!response.acknowledged()) {
           ack=false;
         }
-        if (count.decrementAndGet() == 0) {
+        if (count.countDown()) {
           if (lastFailure != null) {
             listener.onFailure(lastFailure);
           }
@@ -23,7 +24,7 @@
       @Override public void onFailure(      Throwable t){
         logger.debug("[{}] failed to delete index",t,index);
         lastFailure=t;
-        if (count.decrementAndGet() == 0) {
+        if (count.countDown()) {
           listener.onFailure(t);
         }
       }
