@@ -1,19 +1,21 @@
 {
   String geohash=randomhash(10);
   logger.info("Testing geohash_cell filter for [{}]",geohash);
-  List<String> neighbors=GeoHashUtils.neighbors(geohash);
-  List<String> parentNeighbors=GeoHashUtils.neighbors(geohash.substring(0,geohash.length() - 1));
+  Collection<? extends CharSequence> neighbors=GeoHashUtils.neighbors(geohash);
+  Collection<? extends CharSequence> parentNeighbors=GeoHashUtils.neighbors(geohash.substring(0,geohash.length() - 1));
   logger.info("Neighbors {}",neighbors);
   logger.info("Parent Neighbors {}",parentNeighbors);
   ensureYellow();
   client().admin().indices().prepareCreate("locations").addMapping("location","pin","type=geo_point,geohash_prefix=true,latlon=false").execute().actionGet();
   client().prepareIndex("locations","location","1").setCreate(true).setSource("pin",geohash).execute().actionGet();
-  for (int i=0; i < neighbors.size(); i++) {
-    client().prepareIndex("locations","location","N" + i).setCreate(true).setSource("pin",neighbors.get(i)).execute().actionGet();
+  Iterator<? extends CharSequence> iterator=neighbors.iterator();
+  for (int i=0; iterator.hasNext(); i++) {
+    client().prepareIndex("locations","location","N" + i).setCreate(true).setSource("pin",iterator.next()).execute().actionGet();
   }
   client().prepareIndex("locations","location","p").setCreate(true).setSource("pin",geohash.substring(0,geohash.length() - 1)).execute().actionGet();
-  for (int i=0; i < parentNeighbors.size(); i++) {
-    client().prepareIndex("locations","location","p" + i).setCreate(true).setSource("pin",parentNeighbors.get(i)).execute().actionGet();
+  iterator=parentNeighbors.iterator();
+  for (int i=0; iterator.hasNext(); i++) {
+    client().prepareIndex("locations","location","p" + i).setCreate(true).setSource("pin",iterator.next()).execute().actionGet();
   }
   client().admin().indices().prepareRefresh("locations").execute().actionGet();
   SearchResponse results1=client().prepareSearch("locations").setQuery(QueryBuilders.matchAllQuery()).setPostFilter("{\"geohash_cell\": {\"pin\": \"" + geohash + "\", \"neighbors\": false}}").execute().actionGet();

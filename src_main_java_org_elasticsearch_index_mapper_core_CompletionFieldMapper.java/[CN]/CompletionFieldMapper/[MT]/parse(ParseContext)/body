@@ -5,6 +5,7 @@
   BytesRef payload=null;
   long weight=-1;
   List<String> inputs=Lists.newArrayListWithExpectedSize(4);
+  SortedMap<String,ContextConfig> contextConfig=null;
   if (token == XContentParser.Token.VALUE_STRING) {
     inputs.add(parser.text());
     multiFields.parse(this,context);
@@ -16,6 +17,30 @@
         currentFieldName=parser.currentName();
         if (!ALLOWED_CONTENT_FIELD_NAMES.contains(currentFieldName)) {
           throw new ElasticsearchIllegalArgumentException("Unknown field name[" + currentFieldName + "], must be one of "+ ALLOWED_CONTENT_FIELD_NAMES);
+        }
+      }
+ else       if (Fields.CONTEXT.equals(currentFieldName)) {
+        SortedMap<String,ContextConfig> configs=Maps.newTreeMap();
+        if (token == Token.START_OBJECT) {
+          while ((token=parser.nextToken()) != Token.END_OBJECT) {
+            String name=parser.text();
+            ContextMapping mapping=contextMapping.get(name);
+            if (mapping == null) {
+              throw new ElasticsearchParseException("context [" + name + "] is not defined");
+            }
+ else {
+              token=parser.nextToken();
+              configs.put(name,mapping.parseContext(context,parser));
+            }
+          }
+          contextConfig=Maps.newTreeMap();
+          for (          ContextMapping mapping : contextMapping.values()) {
+            ContextConfig config=configs.get(mapping.name());
+            contextConfig.put(mapping.name(),config == null ? mapping.defaultConfig() : config);
+          }
+        }
+ else {
+          throw new ElasticsearchParseException("context must be an object");
         }
       }
  else       if (Fields.CONTENT_FIELD_NAME_PAYLOAD.equals(currentFieldName)) {
@@ -63,17 +88,24 @@
       }
     }
   }
+  if (contextConfig == null) {
+    contextConfig=Maps.newTreeMap();
+    for (    ContextMapping mapping : contextMapping.values()) {
+      contextConfig.put(mapping.name(),mapping.defaultConfig());
+    }
+  }
+  final ContextMapping.Context ctx=new ContextMapping.Context(contextConfig,context.doc());
   payload=payload == null ? EMPTY : payload;
   if (surfaceForm == null) {
     for (    String input : inputs) {
       BytesRef suggestPayload=analyzingSuggestLookupProvider.buildPayload(new BytesRef(input),weight,payload);
-      context.doc().add(getCompletionField(input,suggestPayload));
+      context.doc().add(getCompletionField(ctx,input,suggestPayload));
     }
   }
  else {
     BytesRef suggestPayload=analyzingSuggestLookupProvider.buildPayload(new BytesRef(surfaceForm),weight,payload);
     for (    String input : inputs) {
-      context.doc().add(getCompletionField(input,suggestPayload));
+      context.doc().add(getCompletionField(ctx,input,suggestPayload));
     }
   }
 }

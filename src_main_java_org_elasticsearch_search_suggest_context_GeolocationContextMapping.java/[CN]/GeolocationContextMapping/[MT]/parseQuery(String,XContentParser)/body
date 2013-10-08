@@ -1,0 +1,72 @@
+{
+  if (parser.currentToken() == Token.START_OBJECT) {
+    double lat=Double.NaN;
+    double lon=Double.NaN;
+    GeoPoint point=null;
+    int[] precision=null;
+    while (parser.nextToken() != Token.END_OBJECT) {
+      final String fieldName=parser.text();
+      if ("lat".equals(fieldName)) {
+        if (point == null) {
+          if (parser.nextToken() == Token.VALUE_NUMBER) {
+            lat=parser.doubleValue();
+          }
+ else {
+            throw new ElasticsearchParseException("latitude must be a number");
+          }
+        }
+ else {
+          throw new ElasticsearchParseException("only lat/lon or [" + FIELD_VALUE + "] is allowed");
+        }
+      }
+ else       if ("lon".equals(fieldName)) {
+        if (point == null) {
+          if (parser.nextToken() == Token.VALUE_NUMBER) {
+            lon=parser.doubleValue();
+          }
+ else {
+            throw new ElasticsearchParseException("longitude must be a number");
+          }
+        }
+ else {
+          throw new ElasticsearchParseException("only lat/lon or [" + FIELD_VALUE + "] is allowed");
+        }
+      }
+ else       if (FIELD_PRECISION.equals(fieldName)) {
+        if (parser.nextToken() == Token.START_ARRAY) {
+          IntOpenHashSet precisions=new IntOpenHashSet();
+          while (parser.nextToken() != Token.END_ARRAY) {
+            precisions.add(parsePrecision(parser));
+          }
+          precision=precisions.toArray();
+        }
+ else {
+          precision=new int[]{parsePrecision(parser)};
+        }
+      }
+ else       if (FIELD_VALUE.equals(fieldName)) {
+        if (lat == Double.NaN && lon == Double.NaN) {
+          point=GeoPoint.parse(parser);
+        }
+ else {
+          throw new ElasticsearchParseException("only lat/lon or [" + FIELD_VALUE + "] is allowed");
+        }
+      }
+ else {
+        throw new ElasticsearchParseException("unexpected fieldname [" + fieldName + "]");
+      }
+    }
+    if (point == null) {
+      if (lat == Double.NaN || lon == Double.NaN) {
+        throw new ElasticsearchParseException("location is missing");
+      }
+ else {
+        point=new GeoPoint(lat,lon);
+      }
+    }
+    return new GeoQuery(name,point.geohash(),precision);
+  }
+ else {
+    return new GeoQuery(name,GeoPoint.parse(parser).getGeohash(),precision);
+  }
+}
