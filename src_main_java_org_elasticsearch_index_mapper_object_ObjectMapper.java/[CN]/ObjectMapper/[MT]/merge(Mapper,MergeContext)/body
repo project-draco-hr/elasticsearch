@@ -22,14 +22,17 @@
     }
   }
   doMerge(mergeWithObject,mergeContext);
-  List<Mapper> mappersToTraverse=new ArrayList<Mapper>();
+  List<Mapper> mappersToPut=new ArrayList<Mapper>();
+  FieldMapperListener.Aggregator newFieldMappers=new FieldMapperListener.Aggregator();
+  ObjectMapperListener.Aggregator newObjectMappers=new ObjectMapperListener.Aggregator();
 synchronized (mutex) {
     for (    Mapper mergeWithMapper : mergeWithObject.mappers.values()) {
       Mapper mergeIntoMapper=mappers.get(mergeWithMapper.name());
       if (mergeIntoMapper == null) {
         if (!mergeContext.mergeFlags().simulate()) {
-          putMapper(mergeWithMapper);
-          mappersToTraverse.add(mergeWithMapper);
+          mappersToPut.add(mergeWithMapper);
+          mergeWithMapper.traverse(newFieldMappers);
+          mergeWithMapper.traverse(newObjectMappers);
         }
       }
  else {
@@ -37,9 +40,10 @@ synchronized (mutex) {
           MultiFieldMapper mergeWithMultiField=(MultiFieldMapper)mergeWithMapper;
           mergeWithMultiField.merge(mergeIntoMapper,mergeContext);
           if (!mergeContext.mergeFlags().simulate()) {
-            putMapper(mergeWithMultiField);
+            mappersToPut.add(mergeWithMultiField);
             for (            Mapper mapper : mergeWithMultiField.mappers().values()) {
-              mappersToTraverse.add(mapper);
+              mapper.traverse(newFieldMappers);
+              mapper.traverse(newObjectMappers);
             }
           }
         }
@@ -48,9 +52,14 @@ synchronized (mutex) {
         }
       }
     }
-  }
-  for (  Mapper mapper : mappersToTraverse) {
-    mapper.traverse(mergeContext.newFieldMappers());
-    mapper.traverse(mergeContext.newObjectMappers());
+    if (!newFieldMappers.mappers.isEmpty()) {
+      mergeContext.docMapper().addFieldMappers(newFieldMappers.mappers);
+    }
+    if (!newObjectMappers.mappers.isEmpty()) {
+      mergeContext.docMapper().addObjectMappers(newObjectMappers.mappers);
+    }
+    for (    Mapper mapper : mappersToPut) {
+      putMapper(mapper);
+    }
   }
 }

@@ -7,18 +7,24 @@ synchronized (mutex) {
     if (mergeWith instanceof AbstractFieldMapper) {
       if (defaultMapper == null) {
         if (!mergeContext.mergeFlags().simulate()) {
+          mergeContext.docMapper().addFieldMappers((FieldMapper)defaultMapper);
           defaultMapper=mergeWith;
-          mergeContext.newFieldMappers().mappers.add((FieldMapper)defaultMapper);
         }
       }
     }
  else {
       MultiFieldMapper mergeWithMultiField=(MultiFieldMapper)mergeWith;
+      List<FieldMapper> newFieldMappers=null;
+      MapBuilder<String,Mapper> newMappersBuilder=null;
+      Mapper newDefaultMapper=null;
       if (defaultMapper == null) {
         if (mergeWithMultiField.defaultMapper != null) {
           if (!mergeContext.mergeFlags().simulate()) {
-            defaultMapper=mergeWithMultiField.defaultMapper;
-            mergeContext.newFieldMappers().mappers.add((FieldMapper)defaultMapper);
+            if (newFieldMappers == null) {
+              newFieldMappers=new ArrayList<FieldMapper>();
+            }
+            newFieldMappers.add((FieldMapper)defaultMapper);
+            newDefaultMapper=mergeWithMultiField.defaultMapper;
           }
         }
       }
@@ -34,15 +40,30 @@ synchronized (mutex) {
             if (mergeWithMapper instanceof AllFieldMapper.IncludeInAll) {
               ((AllFieldMapper.IncludeInAll)mergeWithMapper).includeInAll(false);
             }
-            mappers=newMapBuilder(mappers).put(mergeWithMapper.name(),mergeWithMapper).immutableMap();
+            if (newMappersBuilder == null) {
+              newMappersBuilder=newMapBuilder(mappers);
+            }
+            newMappersBuilder.put(mergeWithMapper.name(),mergeWithMapper);
             if (mergeWithMapper instanceof AbstractFieldMapper) {
-              mergeContext.newFieldMappers().mappers.add((FieldMapper)mergeWithMapper);
+              if (newFieldMappers == null) {
+                newFieldMappers=new ArrayList<FieldMapper>();
+              }
+              newFieldMappers.add((FieldMapper)mergeWithMapper);
             }
           }
         }
  else {
           mergeIntoMapper.merge(mergeWithMapper,mergeContext);
         }
+      }
+      if (newFieldMappers != null && !newFieldMappers.isEmpty()) {
+        mergeContext.docMapper().addFieldMappers(newFieldMappers);
+      }
+      if (newDefaultMapper != null) {
+        defaultMapper=newDefaultMapper;
+      }
+      if (newMappersBuilder != null) {
+        mappers=newMappersBuilder.immutableMap();
       }
     }
   }
