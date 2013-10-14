@@ -13,7 +13,7 @@
   final CopyOnWriteArrayList<Tuple<IndexRequestBuilder,Throwable>> errors=new CopyOnWriteArrayList<Tuple<IndexRequestBuilder,Throwable>>();
   List<CountDownLatch> latches=new ArrayList<CountDownLatch>();
   if (frequently()) {
-    logger.info("Index [{}] docs async: [{}]",list.size(),true);
+    logger.info("Index [{}] docs async: [{}] bulk: [{}]",list.size(),true,false);
     final CountDownLatch latch=new CountDownLatch(list.size());
     latches.add(latch);
     for (    IndexRequestBuilder indexRequestBuilder : list) {
@@ -31,8 +31,8 @@
       }
     }
   }
- else {
-    logger.info("Index [{}] docs async: [{}]",list.size(),false);
+ else   if (randomBoolean()) {
+    logger.info("Index [{}] docs async: [{}] bulk: [{}]",list.size(),false,false);
     for (    IndexRequestBuilder indexRequestBuilder : list) {
       indexRequestBuilder.execute().actionGet();
       if (rarely()) {
@@ -47,6 +47,15 @@
         }
       }
     }
+  }
+ else {
+    logger.info("Index [{}] docs async: [{}] bulk: [{}]",list.size(),false,true);
+    BulkRequestBuilder bulkBuilder=client().prepareBulk();
+    for (    IndexRequestBuilder indexRequestBuilder : list) {
+      bulkBuilder.add(indexRequestBuilder);
+    }
+    BulkResponse actionGet=bulkBuilder.execute().actionGet();
+    assertThat(actionGet.hasFailures() ? actionGet.buildFailureMessage() : "",actionGet.hasFailures(),equalTo(false));
   }
   for (  CountDownLatch countDownLatch : latches) {
     countDownLatch.await();
