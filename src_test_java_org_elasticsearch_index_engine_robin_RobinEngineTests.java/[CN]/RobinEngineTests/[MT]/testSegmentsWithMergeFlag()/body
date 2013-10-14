@@ -1,0 +1,57 @@
+{
+  MergeSchedulerProvider mergeSchedulerProvider=new ConcurrentMergeSchedulerProvider(shardId,EMPTY_SETTINGS,threadPool);
+  final AtomicReference<CountDownLatch> waitTillMerge=new AtomicReference<CountDownLatch>();
+  final AtomicReference<CountDownLatch> waitForMerge=new AtomicReference<CountDownLatch>();
+  mergeSchedulerProvider.addListener(new MergeSchedulerProvider.Listener(){
+    @Override public void beforeMerge(    OnGoingMerge merge){
+      try {
+        if (waitTillMerge.get() != null) {
+          waitTillMerge.get().countDown();
+        }
+        if (waitForMerge.get() != null) {
+          waitForMerge.get().await();
+        }
+      }
+ catch (      InterruptedException e) {
+        throw ExceptionsHelper.convertToRuntime(e);
+      }
+    }
+    @Override public void afterMerge(    OnGoingMerge merge){
+    }
+  }
+);
+  Engine engine=createEngine(engineSettingsService,store,createTranslog(),mergeSchedulerProvider);
+  engine.start();
+  ParsedDocument doc=testParsedDocument("1","1","test",null,-1,-1,testDocument(),Lucene.STANDARD_ANALYZER,B_1,false);
+  Engine.Index index=new Engine.Index(null,newUid("1"),doc);
+  engine.index(index);
+  engine.flush(new Engine.Flush());
+  assertThat(engine.segments().size(),equalTo(1));
+  index=new Engine.Index(null,newUid("2"),doc);
+  engine.index(index);
+  engine.flush(new Engine.Flush());
+  assertThat(engine.segments().size(),equalTo(2));
+  for (  Segment segment : engine.segments()) {
+    assertThat(segment.getMergeId(),nullValue());
+  }
+  index=new Engine.Index(null,newUid("3"),doc);
+  engine.index(index);
+  engine.flush(new Engine.Flush());
+  assertThat(engine.segments().size(),equalTo(3));
+  for (  Segment segment : engine.segments()) {
+    assertThat(segment.getMergeId(),nullValue());
+  }
+  waitTillMerge.set(new CountDownLatch(1));
+  waitForMerge.set(new CountDownLatch(1));
+  engine.optimize(new Engine.Optimize().maxNumSegments(1).waitForMerge(false));
+  waitTillMerge.get().await();
+  for (  Segment segment : engine.segments()) {
+    assertThat(segment.getMergeId(),notNullValue());
+  }
+  waitForMerge.get().countDown();
+  engine.optimize(new Engine.Optimize().maxNumSegments(1).waitForMerge(true));
+  for (  Segment segment : engine.segments()) {
+    assertThat(segment.getMergeId(),nullValue());
+  }
+  engine.close();
+}
