@@ -8,7 +8,33 @@
     }
     final TransportRequest request=handler.newInstance();
     request.readFrom(stream);
-    handler.messageReceived(request,transportChannel);
+    if (handler.executor() == ThreadPool.Names.SAME) {
+      handler.messageReceived(request,transportChannel);
+    }
+ else {
+      threadPool.executor(handler.executor()).execute(new AbstractRunnable(){
+        @Override public void run(){
+          try {
+            handler.messageReceived(request,transportChannel);
+          }
+ catch (          Throwable e) {
+            if (lifecycleState() == Lifecycle.State.STARTED) {
+              try {
+                transportChannel.sendResponse(e);
+              }
+ catch (              Throwable e1) {
+                logger.warn("Failed to send error message back to client for action [" + action + "]",e1);
+                logger.warn("Actual Exception",e);
+              }
+            }
+          }
+        }
+        @Override public boolean isForceExecution(){
+          return handler.isForceExecution();
+        }
+      }
+);
+    }
   }
  catch (  Throwable e) {
     try {
