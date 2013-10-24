@@ -2,7 +2,9 @@
   byte[] content=null;
   String contentType=null;
   int indexedChars=defaultIndexedChars;
+  boolean langDetect=defaultLangDetect;
   String name=null;
+  String language=null;
   XContentParser parser=context.parser();
   XContentParser.Token token=parser.currentToken();
   if (token == XContentParser.Token.VALUE_STRING) {
@@ -24,10 +26,18 @@
  else         if ("_name".equals(currentFieldName)) {
           name=parser.text();
         }
+ else         if ("language".equals(currentFieldName)) {
+          language=parser.text();
+        }
       }
  else       if (token == XContentParser.Token.VALUE_NUMBER) {
         if ("_indexed_chars".equals(currentFieldName) || "_indexedChars".equals(currentFieldName)) {
           indexedChars=parser.intValue();
+        }
+      }
+ else       if (token == XContentParser.Token.VALUE_BOOLEAN) {
+        if ("_detect_language".equals(currentFieldName) || "_detectLanguage".equals(currentFieldName)) {
+          langDetect=parser.booleanValue();
         }
       }
     }
@@ -52,6 +62,22 @@
   }
   context.externalValue(parsedContent);
   contentMapper.parse(context);
+  if (langDetect) {
+    try {
+      if (language != null) {
+        metadata.add(Metadata.CONTENT_LANGUAGE,language);
+      }
+ else {
+        LanguageIdentifier identifier=new LanguageIdentifier(parsedContent);
+        language=identifier.getLanguage();
+      }
+      context.externalValue(language);
+      languageMapper.parse(context);
+    }
+ catch (    Throwable t) {
+      logger.warn("Cannot detect language: {}",t.getMessage());
+    }
+  }
   try {
     context.externalValue(name);
     nameMapper.parse(context);
