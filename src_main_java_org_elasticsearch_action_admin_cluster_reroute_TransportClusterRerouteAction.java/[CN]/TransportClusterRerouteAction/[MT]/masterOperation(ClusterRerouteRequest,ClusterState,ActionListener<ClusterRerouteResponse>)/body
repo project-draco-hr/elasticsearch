@@ -1,6 +1,18 @@
 {
-  clusterService.submitStateUpdateTask("cluster_reroute (api)",Priority.URGENT,new TimeoutClusterStateUpdateTask(){
+  clusterService.submitStateUpdateTask("cluster_reroute (api)",Priority.URGENT,new AckedClusterStateUpdateTask(){
     private volatile ClusterState clusterStateToSend;
+    @Override public boolean mustAck(    DiscoveryNode discoveryNode){
+      return true;
+    }
+    @Override public void onAllNodesAcked(    @Nullable Throwable t){
+      listener.onResponse(new ClusterRerouteResponse(true,clusterStateToSend));
+    }
+    @Override public void onAckTimeout(){
+      listener.onResponse(new ClusterRerouteResponse(false,clusterStateToSend));
+    }
+    @Override public TimeValue ackTimeout(){
+      return request.timeout();
+    }
     @Override public TimeValue timeout(){
       return request.masterNodeTimeout();
     }
@@ -18,7 +30,6 @@
       return newState;
     }
     @Override public void clusterStateProcessed(    String source,    ClusterState oldState,    ClusterState newState){
-      listener.onResponse(new ClusterRerouteResponse(clusterStateToSend));
     }
   }
 );
