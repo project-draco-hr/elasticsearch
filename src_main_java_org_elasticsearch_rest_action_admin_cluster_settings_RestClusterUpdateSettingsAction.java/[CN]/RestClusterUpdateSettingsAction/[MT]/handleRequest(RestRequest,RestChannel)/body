@@ -1,6 +1,7 @@
 {
   final ClusterUpdateSettingsRequest clusterUpdateSettingsRequest=Requests.clusterUpdateSettingsRequest();
   clusterUpdateSettingsRequest.listenerThreaded(false);
+  clusterUpdateSettingsRequest.timeout(request.paramAsTime("timeout",clusterUpdateSettingsRequest.timeout()));
   clusterUpdateSettingsRequest.masterNodeTimeout(request.paramAsTime("master_timeout",clusterUpdateSettingsRequest.masterNodeTimeout()));
   try {
     Map<String,Object> source=XContentFactory.xContent(request.content()).createParser(request.content()).mapAndClose();
@@ -20,38 +21,24 @@
     }
     return;
   }
-  client.admin().cluster().updateSettings(clusterUpdateSettingsRequest,new ActionListener<ClusterUpdateSettingsResponse>(){
-    @Override public void onResponse(    ClusterUpdateSettingsResponse response){
-      try {
-        XContentBuilder builder=RestXContentBuilder.restContentBuilder(request);
-        builder.startObject();
-        builder.startObject("persistent");
-        for (        Map.Entry<String,String> entry : response.getPersistentSettings().getAsMap().entrySet()) {
-          builder.field(entry.getKey(),entry.getValue());
-        }
-        builder.endObject();
-        builder.startObject("transient");
-        for (        Map.Entry<String,String> entry : response.getTransientSettings().getAsMap().entrySet()) {
-          builder.field(entry.getKey(),entry.getValue());
-        }
-        builder.endObject();
-        builder.endObject();
-        channel.sendResponse(new XContentRestResponse(request,RestStatus.OK,builder));
+  client.admin().cluster().updateSettings(clusterUpdateSettingsRequest,new AcknowledgedRestResponseActionListener<ClusterUpdateSettingsResponse>(request,channel,logger){
+    @Override protected void addCustomFields(    XContentBuilder builder,    ClusterUpdateSettingsResponse response) throws IOException {
+      builder.startObject("persistent");
+      for (      Map.Entry<String,String> entry : response.getPersistentSettings().getAsMap().entrySet()) {
+        builder.field(entry.getKey(),entry.getValue());
       }
- catch (      Throwable e) {
-        onFailure(e);
+      builder.endObject();
+      builder.startObject("transient");
+      for (      Map.Entry<String,String> entry : response.getTransientSettings().getAsMap().entrySet()) {
+        builder.field(entry.getKey(),entry.getValue());
       }
+      builder.endObject();
     }
     @Override public void onFailure(    Throwable e){
       if (logger.isDebugEnabled()) {
         logger.debug("failed to handle cluster state",e);
       }
-      try {
-        channel.sendResponse(new XContentThrowableRestResponse(request,e));
-      }
- catch (      IOException e1) {
-        logger.error("Failed to send failure response",e1);
-      }
+      super.onFailure(e);
     }
   }
 );

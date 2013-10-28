@@ -1,7 +1,62 @@
 {
   final ImmutableSettings.Builder transientUpdates=ImmutableSettings.settingsBuilder();
   final ImmutableSettings.Builder persistentUpdates=ImmutableSettings.settingsBuilder();
-  clusterService.submitStateUpdateTask("cluster_update_settings",Priority.URGENT,new TimeoutClusterStateUpdateTask(){
+  clusterService.submitStateUpdateTask("cluster_update_settings",Priority.URGENT,new AckedClusterStateUpdateTask(){
+    private volatile boolean changed=false;
+    @Override public boolean mustAck(    DiscoveryNode discoveryNode){
+      return true;
+    }
+    @Override public void onAllNodesAcked(    @Nullable Throwable t){
+      if (changed) {
+        reroute(true);
+      }
+ else {
+        listener.onResponse(new ClusterUpdateSettingsResponse(true,transientUpdates.build(),persistentUpdates.build()));
+      }
+    }
+    @Override public void onAckTimeout(){
+      if (changed) {
+        reroute(false);
+      }
+ else {
+        listener.onResponse(new ClusterUpdateSettingsResponse(false,transientUpdates.build(),persistentUpdates.build()));
+      }
+    }
+    private void reroute(    final boolean updateSettingsAcked){
+      clusterService.submitStateUpdateTask("reroute_after_cluster_update_settings",Priority.URGENT,new AckedClusterStateUpdateTask(){
+        @Override public boolean mustAck(        DiscoveryNode discoveryNode){
+          return updateSettingsAcked;
+        }
+        @Override public void onAllNodesAcked(        @Nullable Throwable t){
+          listener.onResponse(new ClusterUpdateSettingsResponse(updateSettingsAcked,transientUpdates.build(),persistentUpdates.build()));
+        }
+        @Override public void onAckTimeout(){
+          listener.onResponse(new ClusterUpdateSettingsResponse(false,transientUpdates.build(),persistentUpdates.build()));
+        }
+        @Override public TimeValue ackTimeout(){
+          return request.timeout();
+        }
+        @Override public TimeValue timeout(){
+          return request.masterNodeTimeout();
+        }
+        @Override public void onFailure(        String source,        Throwable t){
+          logger.debug("failed to perform [{}]",t,source);
+        }
+        @Override public ClusterState execute(        final ClusterState currentState){
+          RoutingAllocation.Result routingResult=allocationService.reroute(currentState);
+          if (!routingResult.changed()) {
+            return currentState;
+          }
+          return newClusterStateBuilder().state(currentState).routingResult(routingResult).build();
+        }
+        @Override public void clusterStateProcessed(        String source,        ClusterState oldState,        ClusterState newState){
+        }
+      }
+);
+    }
+    @Override public TimeValue ackTimeout(){
+      return request.timeout();
+    }
     @Override public TimeValue timeout(){
       return request.masterNodeTimeout();
     }
@@ -10,7 +65,6 @@
       listener.onFailure(t);
     }
     @Override public ClusterState execute(    final ClusterState currentState){
-      boolean changed=false;
       ImmutableSettings.Builder transientSettings=ImmutableSettings.settingsBuilder();
       transientSettings.put(currentState.metaData().transientSettings());
       for (      Map.Entry<String,String> entry : request.transientSettings().getAsMap().entrySet()) {
@@ -59,32 +113,9 @@
  else {
         blocks.removeGlobalBlock(MetaData.CLUSTER_READ_ONLY_BLOCK);
       }
-      return ClusterState.builder().state(currentState).metaData(metaData).blocks(blocks).build();
+      return builder().state(currentState).metaData(metaData).blocks(blocks).build();
     }
     @Override public void clusterStateProcessed(    String source,    ClusterState oldState,    ClusterState newState){
-      if (oldState == newState) {
-        listener.onResponse(new ClusterUpdateSettingsResponse(transientUpdates.build(),persistentUpdates.build()));
-        return;
-      }
-      clusterService.submitStateUpdateTask("reroute_after_cluster_update_settings",Priority.URGENT,new ClusterStateUpdateTask(){
-        @Override public ClusterState execute(        final ClusterState currentState){
-          try {
-            RoutingAllocation.Result routingResult=allocationService.reroute(currentState);
-            if (!routingResult.changed()) {
-              return currentState;
-            }
-            return newClusterStateBuilder().state(currentState).routingResult(routingResult).build();
-          }
-  finally {
-            listener.onResponse(new ClusterUpdateSettingsResponse(transientUpdates.build(),persistentUpdates.build()));
-          }
-        }
-        @Override public void onFailure(        String source,        Throwable t){
-          logger.warn("unexpected failure during [{}]",t,source);
-          listener.onResponse(new ClusterUpdateSettingsResponse(transientUpdates.build(),persistentUpdates.build()));
-        }
-      }
-);
     }
   }
 );
