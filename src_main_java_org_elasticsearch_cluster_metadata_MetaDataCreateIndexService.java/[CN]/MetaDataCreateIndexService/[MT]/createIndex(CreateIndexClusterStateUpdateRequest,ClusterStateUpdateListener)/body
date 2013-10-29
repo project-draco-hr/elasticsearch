@@ -1,0 +1,34 @@
+{
+  ImmutableSettings.Builder updatedSettingsBuilder=ImmutableSettings.settingsBuilder();
+  for (  Map.Entry<String,String> entry : request.settings().getAsMap().entrySet()) {
+    if (!entry.getKey().startsWith("index.")) {
+      updatedSettingsBuilder.put("index." + entry.getKey(),entry.getValue());
+    }
+ else {
+      updatedSettingsBuilder.put(entry.getKey(),entry.getValue());
+    }
+  }
+  request.settings(updatedSettingsBuilder.build());
+  final Semaphore mdLock=metaDataService.indexMetaDataLock(request.index());
+  if (mdLock.tryAcquire()) {
+    createIndex(request,listener,mdLock);
+    return;
+  }
+  threadPool.executor(ThreadPool.Names.MANAGEMENT).execute(new Runnable(){
+    @Override public void run(){
+      try {
+        if (!mdLock.tryAcquire(request.masterNodeTimeout().nanos(),TimeUnit.NANOSECONDS)) {
+          listener.onFailure(new ProcessClusterEventTimeoutException(request.masterNodeTimeout(),"acquire index lock"));
+          return;
+        }
+      }
+ catch (      InterruptedException e) {
+        Thread.interrupted();
+        listener.onFailure(e);
+        return;
+      }
+      createIndex(request,listener,mdLock);
+    }
+  }
+);
+}
