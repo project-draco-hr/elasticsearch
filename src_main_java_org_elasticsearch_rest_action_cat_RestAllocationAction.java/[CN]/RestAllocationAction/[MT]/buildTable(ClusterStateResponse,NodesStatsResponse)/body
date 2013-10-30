@@ -1,0 +1,58 @@
+{
+  final ObjectIntOpenHashMap<String> allocs=new ObjectIntOpenHashMap<String>();
+  for (  ShardRouting shard : state.getState().routingTable().allShards()) {
+    String nodeId="UNASSIGNED";
+    if (shard.assignedToNode()) {
+      nodeId=shard.currentNodeId();
+    }
+    allocs.addTo(nodeId,1);
+  }
+  final Table table=new Table();
+  table.startHeaders();
+  table.addCell("shards","text-align:right;");
+  table.addCell("diskUsed","text-align:right;");
+  table.addCell("diskAvail","text-align:right;");
+  table.addCell("diskRatio","text-align:right;");
+  table.addCell("ip");
+  table.addCell("node");
+  table.endHeaders();
+  for (  NodeStats nodeStats : stats.getNodes()) {
+    DiscoveryNode node=nodeStats.getNode();
+    long used=-1;
+    long avail=-1;
+    Iterator<FsStats.Info> diskIter=nodeStats.getFs().iterator();
+    while (diskIter.hasNext()) {
+      FsStats.Info disk=diskIter.next();
+      used+=disk.getTotal().bytes() - disk.getAvailable().bytes();
+      avail+=disk.getAvailable().bytes();
+    }
+    String nodeId=node.id();
+    int shardCount=-1;
+    if (allocs.containsKey(nodeId)) {
+      shardCount=allocs.lget();
+    }
+    float ratio=-1;
+    if (used >= 0 && avail > 0) {
+      ratio=used / (float)avail;
+    }
+    table.startRow();
+    table.addCell(shardCount < 0 ? null : shardCount);
+    table.addCell(used < 0 ? null : new ByteSizeValue(used));
+    table.addCell(avail < 0 ? null : new ByteSizeValue(avail));
+    table.addCell(ratio < 0 ? null : String.format(Locale.ROOT,"%.1f%%",ratio * 100.0));
+    table.addCell(node == null ? null : ((InetSocketTransportAddress)node.address()).address().getAddress().getHostAddress());
+    table.addCell(node == null ? "UNASSIGNED" : node.name());
+    table.endRow();
+  }
+  if (allocs.containsKey("UNASSIGNED")) {
+    table.startRow();
+    table.addCell(allocs.lget());
+    table.addCell(null);
+    table.addCell(null);
+    table.addCell(null);
+    table.addCell(null);
+    table.addCell("UNASSIGNED");
+    table.endRow();
+  }
+  return table;
+}
