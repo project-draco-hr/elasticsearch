@@ -1,12 +1,16 @@
 {
+  final int numShards=between(5,10);
+  final int numReplicas=0;
+  cluster().ensureAtLeastNumNodes(3);
   logger.info("--> creating test index ...");
-  assertAcked(prepareCreate("test",1));
+  int allowNodes=2;
+  assertAcked(prepareCreate("test").setSettings(randomSettingsBuilder().put("number_of_shards",numShards).put("number_of_replicas",numReplicas).build()));
   final AtomicLong idGenerator=new AtomicLong();
   final AtomicLong indexCounter=new AtomicLong();
   final AtomicBoolean stop=new AtomicBoolean(false);
   Thread[] writers=new Thread[5];
-  logger.info("--> starting {} indexing threads",writers.length);
   final CountDownLatch stopLatch=new CountDownLatch(writers.length);
+  logger.info("--> starting {} indexing threads",writers.length);
   for (int i=0; i < writers.length; i++) {
     final int indexerId=i;
     final Client client=client();
@@ -16,7 +20,7 @@
           logger.info("**** starting indexing thread {}",indexerId);
           while (!stop.get()) {
             long id=idGenerator.incrementAndGet();
-            client.prepareIndex("test","type1",Long.toString(id)).setSource(MapBuilder.<String,Object>newMapBuilder().put("test","value" + id).map()).execute().actionGet();
+            client.prepareIndex("test","type1",Long.toString(id) + "-" + indexerId).setSource(MapBuilder.<String,Object>newMapBuilder().put("test","value" + id).map()).execute().actionGet();
             indexCounter.incrementAndGet();
           }
           logger.info("**** done indexing thread {}",indexerId);
@@ -32,27 +36,20 @@
 ;
     writers[i].start();
   }
-  logger.info("--> waiting for 2000 docs to be indexed ...");
-  waitForDocs(2000);
-  logger.info("--> 2000 docs indexed");
-  logger.info("--> flushing the index ....");
-  client().admin().indices().prepareFlush().execute().actionGet();
-  logger.info("--> waiting for 4000 docs to be indexed ...");
-  waitForDocs(4000);
-  logger.info("--> 4000 docs indexed");
-  logger.info("--> allow 4 nodes for index [test] ...");
-  allowNodes("test",4);
-  logger.info("--> waiting for GREEN health status ...");
-  assertThat(client().admin().cluster().prepareHealth().setWaitForEvents(Priority.LANGUID).setTimeout("1m").setWaitForGreenStatus().setWaitForNodes(">=4").execute().actionGet().isTimedOut(),equalTo(false));
-  logger.info("--> waiting for 15000 docs to be indexed ...");
-  waitForDocs(15000);
-  logger.info("--> 15000 docs indexed");
-  stop.set(true);
-  stopLatch.await();
+  for (int i=0; i < 100000; i+=1000) {
+    logger.info("--> waiting for {} docs to be indexed ...",i);
+    waitForDocs(i);
+    logger.info("--> {} docs indexed",i);
+    allowNodes=2 / allowNodes;
+    allowNodes("test",allowNodes);
+    logger.info("--> waiting for GREEN health status ...");
+    assertThat(client().admin().cluster().prepareHealth().setWaitForEvents(Priority.LANGUID).setTimeout("1m").setWaitForGreenStatus().execute().actionGet().isTimedOut(),equalTo(false));
+  }
   logger.info("--> marking and waiting for indexing threads to stop ...");
   stop.set(true);
   stopLatch.await();
   logger.info("--> indexing threads stopped");
+  assertThat(client().admin().cluster().prepareHealth().setWaitForEvents(Priority.LANGUID).setTimeout("1m").setWaitForYellowStatus().execute().actionGet().isTimedOut(),equalTo(false));
   logger.info("--> refreshing the index");
   refreshAndAssert();
   logger.info("--> verifying indexed content");
