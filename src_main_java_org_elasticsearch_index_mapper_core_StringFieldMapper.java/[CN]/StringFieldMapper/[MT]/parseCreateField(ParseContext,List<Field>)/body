@@ -1,56 +1,23 @@
 {
-  String value=nullValue;
-  float boost=this.boost;
-  if (context.externalValueSet()) {
-    value=(String)context.externalValue();
-  }
- else {
-    XContentParser parser=context.parser();
-    if (parser.currentToken() == XContentParser.Token.VALUE_NULL) {
-      value=nullValue;
-    }
- else     if (parser.currentToken() == XContentParser.Token.START_OBJECT) {
-      XContentParser.Token token;
-      String currentFieldName=null;
-      while ((token=parser.nextToken()) != XContentParser.Token.END_OBJECT) {
-        if (token == XContentParser.Token.FIELD_NAME) {
-          currentFieldName=parser.currentName();
-        }
- else {
-          if ("value".equals(currentFieldName) || "_value".equals(currentFieldName)) {
-            value=parser.textOrNull();
-          }
- else           if ("boost".equals(currentFieldName) || "_boost".equals(currentFieldName)) {
-            boost=parser.floatValue();
-          }
- else {
-            throw new ElasticSearchIllegalArgumentException("unknown property [" + currentFieldName + "]");
-          }
-        }
-      }
-    }
- else {
-      value=parser.textOrNull();
-    }
-  }
-  if (value == null) {
+  ValueAndBoost valueAndBoost=parseCreateFieldForString(context,nullValue,boost);
+  if (valueAndBoost.value() == null) {
     return;
   }
-  if (ignoreAbove > 0 && value.length() > ignoreAbove) {
+  if (ignoreAbove > 0 && valueAndBoost.value().length() > ignoreAbove) {
     return;
   }
   if (context.includeInAll(includeInAll,this)) {
-    context.allEntries().addText(names.fullName(),value,boost);
+    context.allEntries().addText(names.fullName(),valueAndBoost.value(),valueAndBoost.boost());
   }
   if (fieldType.indexed() || fieldType.stored()) {
-    Field field=new StringField(names.indexName(),value,fieldType);
-    field.setBoost(boost);
+    Field field=new StringField(names.indexName(),valueAndBoost.value(),fieldType);
+    field.setBoost(valueAndBoost.boost());
     fields.add(field);
   }
   if (hasDocValues()) {
-    fields.add(new SortedSetDocValuesField(names.indexName(),new BytesRef(value)));
+    fields.add(new SortedSetDocValuesField(names.indexName(),new BytesRef(valueAndBoost.value())));
   }
   if (fields.isEmpty()) {
-    context.ignoredValue(names.indexName(),value);
+    context.ignoredValue(names.indexName(),valueAndBoost.value());
   }
 }
