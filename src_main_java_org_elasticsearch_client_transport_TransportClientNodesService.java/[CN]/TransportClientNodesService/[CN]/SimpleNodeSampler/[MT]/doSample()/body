@@ -1,33 +1,39 @@
 {
   HashSet<DiscoveryNode> newNodes=new HashSet<DiscoveryNode>();
-  for (  DiscoveryNode node : listedNodes) {
-    if (!transportService.nodeConnected(node)) {
+  for (  DiscoveryNode listedNode : listedNodes) {
+    if (!transportService.nodeConnected(listedNode)) {
       try {
-        transportService.connectToNode(node);
+        logger.trace("connecting to listed node (light) [{}]",listedNode);
+        transportService.connectToNodeLight(listedNode);
       }
  catch (      Throwable e) {
-        logger.debug("failed to connect to node [{}], removed from nodes list",e,node);
+        logger.debug("failed to connect to node [{}], removed from nodes list",e,listedNode);
         continue;
       }
     }
     try {
-      NodesInfoResponse nodeInfo=transportService.submitRequest(node,NodesInfoAction.NAME,Requests.nodesInfoRequest("_local"),TransportRequestOptions.options().withType(TransportRequestOptions.Type.STATE).withTimeout(pingTimeout),new FutureTransportResponseHandler<NodesInfoResponse>(){
+      NodesInfoResponse nodeInfo=transportService.submitRequest(listedNode,NodesInfoAction.NAME,Requests.nodesInfoRequest("_local"),TransportRequestOptions.options().withType(TransportRequestOptions.Type.STATE).withTimeout(pingTimeout),new FutureTransportResponseHandler<NodesInfoResponse>(){
         @Override public NodesInfoResponse newInstance(){
           return new NodesInfoResponse();
         }
       }
 ).txGet();
       if (!ignoreClusterName && !clusterName.equals(nodeInfo.getClusterName())) {
-        logger.warn("node {} not part of the cluster {}, ignoring...",node,clusterName);
+        logger.warn("node {} not part of the cluster {}, ignoring...",listedNode,clusterName);
+      }
+ else       if (nodeInfo.getNodes().length != 0) {
+        DiscoveryNode nodeWithInfo=nodeInfo.getNodes()[0].getNode();
+        newNodes.add(new DiscoveryNode(nodeWithInfo.name(),nodeWithInfo.id(),listedNode.address(),nodeWithInfo.attributes(),nodeWithInfo.version()));
       }
  else {
-        newNodes.add(node);
+        logger.debug("node {} didn't return any discovery info, temporarily using transport discovery node",listedNode);
+        newNodes.add(listedNode);
       }
     }
  catch (    Exception e) {
-      logger.info("failed to get node info for {}, disconnecting...",e,node);
-      transportService.disconnectFromNode(node);
+      logger.info("failed to get node info for {}, disconnecting...",e,listedNode);
+      transportService.disconnectFromNode(listedNode);
     }
   }
-  nodes=new ImmutableList.Builder<DiscoveryNode>().addAll(newNodes).build();
+  nodes=validateNewNodes(newNodes);
 }
