@@ -1,0 +1,39 @@
+def smoke_test_release(release, files):
+    for release_file in files:
+        if (not os.path.isfile(release_file)):
+            raise RuntimeError(('Smoketest failed missing file %s' % release_file))
+        tmp_dir = tempfile.mkdtemp()
+        if release_file.endswith('tar.gz'):
+            run(('tar -xzf %s -C %s' % (release_file, tmp_dir)))
+        elif release_file.endswith('zip'):
+            run(('unzip %s -d %s' % (release_file, tmp_dir)))
+        else:
+            continue
+        es_run_path = os.path.join(tmp_dir, ('elasticsearch-%s' % release), 'bin/elasticsearch')
+        print ('  Smoke testing package [%s]' % release_file)
+        print ('  Starting elasticsearch deamon from [%s]' % os.path.join(tmp_dir, ('elasticsearch-%s' % release)))
+        run(('%s; %s -Des.node.name=smoke_tester' % (java_exe(), es_run_path)))
+        conn = HTTPConnection('127.0.0.1', 9200, 20)
+        wait_for_node_startup()
+        try:
+            try:
+                conn.request('GET', '')
+                res = conn.getresponse()
+                if (res.status == 200):
+                    version = json.loads(res.read().decode('utf-8'))['version']
+                    if (release != version['number']):
+                        raise RuntimeError(('Expected version [%s] but was [%s]' % (release, version['number'])))
+                    if version['build_snapshot']:
+                        raise RuntimeError('Expected non snapshot version')
+                    if (version['build_hash'].strip() != get_head_hash()):
+                        raise RuntimeError(('HEAD hash does not match expected [%s] but got [%s]' % (get_head_hash(), version['build_hash'])))
+                else:
+                    raise RuntimeError(('Expected HTTP 200 but got %s' % res.status))
+            finally:
+                conn.request('POST', '/_cluster/nodes/_local/_shutdown')
+                time.sleep(1)
+                if (conn.getresponse().status != 200):
+                    raise RuntimeError(('Expected HTTP 200 but got %s on node shutdown' % res.status))
+        finally:
+            conn.close()
+        shutil.rmtree(tmp_dir)

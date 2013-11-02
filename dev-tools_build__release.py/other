@@ -1,0 +1,97 @@
+import re
+import tempfile
+import shutil
+import os
+import datetime
+import json
+import time
+import sys
+import argparse
+import hmac
+import urllib
+from http.client import HTTPConnection
+LOG = '/tmp/release.log'
+env = os.environ
+try:
+    JAVA_HOME = env['JAVA_HOME']
+except KeyError:
+    raise RuntimeError("\n  Please set JAVA_HOME in the env before running release tool\n  On OSX use: export JAVA_HOME=`/usr/libexec/java_home -v '1.6*'`")
+try:
+    JAVA_HOME = env['JAVA6_HOME']
+except KeyError:
+    pass
+try:
+    MVN = 'mvn'
+    run('mvn3 --version', quiet=True)
+    MVN = 'mvn3'
+except RuntimeError:
+    pass
+verify_java_version('1.6')
+verify_mvn_java_version('1.6', MVN)
+VERSION_FILE = 'src/main/java/org/elasticsearch/Version.java'
+POM_FILE = 'pom.xml'
+print_sonartype_notice()
+if (__name__ == '__main__'):
+    parser = argparse.ArgumentParser(description='Builds and publishes a Elasticsearch Release')
+    parser.add_argument('--branch', '-b', metavar='master', default=get_current_branch(), help='The branch to release from. Defaults to the current branch.')
+    parser.add_argument('--cpus', '-c', metavar='1', default=1, help='The number of cpus to use for running the test. Default is [1]')
+    parser.add_argument('--skiptests', '-t', dest='tests', action='store_false', help='Skips tests before release. Tests are run by default.')
+    parser.set_defaults(tests=True)
+    parser.add_argument('--remote', '-r', metavar='origin', default='origin', help='The remote to push the release commit and tag to. Default is [origin]')
+    parser.add_argument('--publish', '-d', dest='dryrun', action='store_false', help='Publishes the release. Disable by default.')
+    parser.set_defaults(dryrun=True)
+    args = parser.parse_args()
+    src_branch = args.branch
+    remote = args.remote
+    run_tests = args.tests
+    dry_run = args.dryrun
+    cpus = args.cpus
+    if (not dry_run):
+        check_s3_credentials()
+        print 'WARNING: dryrun is set to "false" - this will push and publish the release'
+        input('Press Enter to continue...')
+    print ''.join(['-' for _ in range(80)])
+    print ('Preparing Release from branch [%s] running tests: [%s] dryrun: [%s]' % (src_branch, run_tests, dry_run))
+    print ('  JAVA_HOME is [%s]' % JAVA_HOME)
+    print ('  Running with maven command: [%s] ' % MVN)
+    release_version = find_release_version(src_branch)
+    head_hash = get_head_hash()
+    run_mvn('clean')
+    print ('  Release version: [%s]' % release_version)
+    create_release_branch(remote, src_branch, release_version)
+    print ('  Created release branch [%s]' % release_branch(release_version))
+    success = False
+    try:
+        remove_maven_snapshot(POM_FILE, release_version)
+        remove_version_snapshot(VERSION_FILE, release_version)
+        print '  Done removing snapshot version'
+        add_pending_files(VERSION_FILE, POM_FILE)
+        commit_release(release_version)
+        print ('  Committed release version [%s]' % release_version)
+        print ''.join(['-' for _ in range(80)])
+        print 'Building Release candidate'
+        input('Press Enter to continue...')
+        print ('  Running maven builds now - run-tests [%s]' % run_tests)
+        build_release(run_tests=run_tests, dry_run=True, cpus=cpus)
+        artifacts = get_artifacts(release_version)
+        artifacts_and_checksum = generate_checksums(artifacts)
+        smoke_test_release(release_version, artifacts)
+        print ''.join(['-' for _ in range(80)])
+        print ('Finish Release -- dry_run: %s' % dry_run)
+        input('Press Enter to continue...')
+        print ('  merge release branch, tag and push to %s %s -- dry_run: %s' % (remote, src_branch, dry_run))
+        merge_tag_push(remote, src_branch, release_version, dry_run)
+        print ('  publish artifacts to S3 -- dry_run: %s' % dry_run)
+        publish_artifacts(artifacts_and_checksum, dry_run=dry_run)
+        print ('  publish maven artifacts -- dry_run: %s' % dry_run)
+        if (not dry_run):
+            build_release(run_tests=False, dry_run=dry_run)
+        success = True
+    finally:
+        if (not success):
+            run('git reset --hard HEAD')
+            run(('git checkout %s' % src_branch))
+        elif dry_run:
+            run(('git reset --hard %s' % head_hash))
+            run(('git tag -d v%s' % release_version))
+        run(('git branch -D %s' % release_branch(release_version)))
