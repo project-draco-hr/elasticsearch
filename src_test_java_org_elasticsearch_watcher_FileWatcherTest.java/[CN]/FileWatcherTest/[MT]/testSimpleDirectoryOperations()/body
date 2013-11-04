@@ -1,0 +1,45 @@
+{
+  File tempDir=newTempDir(LifecycleScope.TEST);
+  RecordingChangeListener changes=new RecordingChangeListener(tempDir);
+  File testDir=new File(tempDir,"test-dir");
+  testDir.mkdir();
+  touch(new File(testDir,"test.txt"));
+  touch(new File(testDir,"test0.txt"));
+  FileWatcher fileWatcher=new FileWatcher(testDir);
+  fileWatcher.addListener(changes);
+  fileWatcher.init();
+  assertThat(changes.notifications(),contains(equalTo("onDirectoryInit: test-dir/"),equalTo("onFileInit: test-dir/test.txt"),equalTo("onFileInit: test-dir/test0.txt")));
+  changes.notifications().clear();
+  fileWatcher.checkAndNotify();
+  assertThat(changes.notifications(),hasSize(0));
+  for (int i=0; i < 4; i++) {
+    touch(new File(testDir,"test" + i + ".txt"));
+  }
+  append("Test",new File(testDir,"test0.txt"),Charset.defaultCharset());
+  fileWatcher.checkAndNotify();
+  assertThat(changes.notifications(),contains(equalTo("onFileChanged: test-dir/test0.txt"),equalTo("onFileCreated: test-dir/test1.txt"),equalTo("onFileCreated: test-dir/test2.txt"),equalTo("onFileCreated: test-dir/test3.txt")));
+  changes.notifications().clear();
+  fileWatcher.checkAndNotify();
+  assertThat(changes.notifications(),hasSize(0));
+  new File(testDir,"test1.txt").delete();
+  new File(testDir,"test2.txt").delete();
+  fileWatcher.checkAndNotify();
+  assertThat(changes.notifications(),contains(equalTo("onFileDeleted: test-dir/test1.txt"),equalTo("onFileDeleted: test-dir/test2.txt")));
+  changes.notifications().clear();
+  fileWatcher.checkAndNotify();
+  assertThat(changes.notifications(),hasSize(0));
+  new File(testDir,"test0.txt").delete();
+  touch(new File(testDir,"test2.txt"));
+  touch(new File(testDir,"test4.txt"));
+  fileWatcher.checkAndNotify();
+  assertThat(changes.notifications(),contains(equalTo("onFileDeleted: test-dir/test0.txt"),equalTo("onFileCreated: test-dir/test2.txt"),equalTo("onFileCreated: test-dir/test4.txt")));
+  changes.notifications().clear();
+  new File(testDir,"test3.txt").delete();
+  new File(testDir,"test4.txt").delete();
+  fileWatcher.checkAndNotify();
+  assertThat(changes.notifications(),contains(equalTo("onFileDeleted: test-dir/test3.txt"),equalTo("onFileDeleted: test-dir/test4.txt")));
+  changes.notifications().clear();
+  deleteRecursively(testDir);
+  fileWatcher.checkAndNotify();
+  assertThat(changes.notifications(),contains(equalTo("onFileDeleted: test-dir/test.txt"),equalTo("onFileDeleted: test-dir/test2.txt"),equalTo("onDirectoryDeleted: test-dir")));
+}
