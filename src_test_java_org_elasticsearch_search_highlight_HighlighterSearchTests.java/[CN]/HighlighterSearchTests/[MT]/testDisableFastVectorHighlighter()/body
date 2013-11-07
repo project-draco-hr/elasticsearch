@@ -1,29 +1,21 @@
 {
-  client().admin().indices().prepareCreate("test").setSettings(ImmutableSettings.settingsBuilder().put("index.number_of_shards",2)).addMapping("type1",jsonBuilder().startObject().startObject("type1").startObject("properties").startObject("title").field("type","string").field("store","yes").field("term_vector","with_positions_offsets").field("analyzer","classic").endObject().endObject().endObject().endObject()).execute().actionGet();
+  assertAcked(client().admin().indices().prepareCreate("test").setSettings(ImmutableSettings.settingsBuilder().put("index.number_of_shards",2)).addMapping("type1","title","type=string,store=yes,term_vector=with_positions_offsets,analyzer=classic"));
   ensureGreen();
-  for (int i=0; i < 5; i++) {
-    client().prepareIndex("test","type1",Integer.toString(i)).setSource("title","This is a test for the workaround for the fast vector highlighting SOLR-3724").execute().actionGet();
+  IndexRequestBuilder[] indexRequestBuilders=new IndexRequestBuilder[5];
+  for (int i=0; i < indexRequestBuilders.length; i++) {
+    indexRequestBuilders[i]=client().prepareIndex("test","type1",Integer.toString(i)).setSource("title","This is a test for the workaround for the fast vector highlighting SOLR-3724");
   }
-  refresh();
-  SearchResponse search=client().prepareSearch().setQuery(matchPhraseQuery("title","test for the workaround")).addHighlightedField("title",50,1,10).execute().actionGet();
-  assertThat(Arrays.toString(search.getShardFailures()),search.getFailedShards(),equalTo(0));
-  assertThat(search.getHits().totalHits(),equalTo(5l));
-  assertThat(search.getHits().hits().length,equalTo(5));
-  for (  SearchHit hit : search.getHits()) {
-    assertThat(hit.highlightFields().isEmpty(),equalTo(true));
+  indexRandom(true,indexRequestBuilders);
+  SearchResponse search=client().prepareSearch().setQuery(matchPhraseQuery("title","test for the workaround")).addHighlightedField("title",50,1,10).get();
+  for (int i=0; i < indexRequestBuilders.length; i++) {
+    assertNotHighlighted(search,i,"title");
   }
-  search=client().prepareSearch().setQuery(matchPhraseQuery("title","test for the workaround")).addHighlightedField("title",50,1,10).setHighlighterType("highlighter").execute().actionGet();
-  assertThat(Arrays.toString(search.getShardFailures()),search.getFailedShards(),equalTo(0));
-  assertThat(search.getHits().totalHits(),equalTo(5l));
-  assertThat(search.getHits().hits().length,equalTo(5));
-  for (  SearchHit hit : search.getHits()) {
-    assertThat(hit.highlightFields().get("title").fragments()[0].string(),equalTo("This is a <em>test</em> for the <em>workaround</em> for the fast vector highlighting SOLR-3724"));
+  search=client().prepareSearch().setQuery(matchPhraseQuery("title","test for the workaround")).addHighlightedField("title",50,1,10).setHighlighterType("highlighter").get();
+  for (int i=0; i < indexRequestBuilders.length; i++) {
+    assertHighlight(search,i,"title",0,1,equalTo("This is a <em>test</em> for the <em>workaround</em> for the fast vector highlighting SOLR-3724"));
   }
-  search=client().prepareSearch().setQuery(matchPhraseQuery("title","test for the workaround")).addHighlightedField(new HighlightBuilder.Field("title").highlighterType("highlighter")).setHighlighterType("highlighter").execute().actionGet();
-  assertThat(Arrays.toString(search.getShardFailures()),search.getFailedShards(),equalTo(0));
-  assertThat(search.getHits().totalHits(),equalTo(5l));
-  assertThat(search.getHits().hits().length,equalTo(5));
-  for (  SearchHit hit : search.getHits()) {
-    assertThat(hit.highlightFields().get("title").fragments()[0].string(),equalTo("This is a <em>test</em> for the <em>workaround</em> for the fast vector highlighting SOLR-3724"));
+  search=client().prepareSearch().setQuery(matchPhraseQuery("title","test for the workaround")).addHighlightedField(new HighlightBuilder.Field("title").highlighterType("highlighter")).setHighlighterType("highlighter").get();
+  for (int i=0; i < indexRequestBuilders.length; i++) {
+    assertHighlight(search,i,"title",0,1,equalTo("This is a <em>test</em> for the <em>workaround</em> for the fast vector highlighting SOLR-3724"));
   }
 }

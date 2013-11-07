@@ -1,12 +1,11 @@
 {
   createIndex("test");
-  client().admin().cluster().prepareHealth("test").setWaitForGreenStatus().execute().actionGet();
-  client().prepareIndex("test","type1").setSource("field1","this is a test","field2","this is another test").setRefresh(true).execute().actionGet();
+  ensureGreen();
+  client().prepareIndex("test","type1").setSource("field1","this is a test","field2","this is another test").get();
+  refresh();
   logger.info("--> highlighting and searching on field*");
   SearchSourceBuilder source=searchSource().query(termQuery("field1","test")).from(0).size(60).explain(true).highlight(highlight().field("field*").order("score").preTags("<xxx>").postTags("</xxx>"));
   SearchResponse searchResponse=client().search(searchRequest("test").source(source).searchType(QUERY_THEN_FETCH)).actionGet();
-  assertNoFailures(searchResponse);
-  assertThat(searchResponse.getHits().totalHits(),equalTo(1l));
-  assertThat(searchResponse.getHits().getAt(0).highlightFields().get("field1").fragments()[0].string(),equalTo("this is a <xxx>test</xxx>"));
-  assertThat(searchResponse.getHits().getAt(0).highlightFields().get("field2").fragments()[0].string(),equalTo("this is another <xxx>test</xxx>"));
+  assertHighlight(searchResponse,0,"field1",0,1,equalTo("this is a <xxx>test</xxx>"));
+  assertHighlight(searchResponse,0,"field2",0,1,equalTo("this is another <xxx>test</xxx>"));
 }

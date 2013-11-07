@@ -1,11 +1,12 @@
 {
-  client().admin().indices().prepareCreate("test").setSettings(ImmutableSettings.settingsBuilder().put("index.number_of_shards",2)).addMapping("type1",jsonBuilder().startObject().startObject("type1").startObject("properties").startObject("title").field("type","string").field("store","yes").field("term_vector","no").endObject().endObject().endObject().endObject()).execute().actionGet();
+  assertAcked(client().admin().indices().prepareCreate("test").setSettings(ImmutableSettings.settingsBuilder().put("index.number_of_shards",2)).addMapping("type1","title","type=string,store=yes,term_vector=no"));
   ensureGreen();
+  IndexRequestBuilder[] indexRequestBuilders=new IndexRequestBuilder[5];
   for (int i=0; i < 5; i++) {
-    client().prepareIndex("test","type1",Integer.toString(i)).setSource("title","This is a test for the enabling fast vector highlighter").setRefresh(true).execute().actionGet();
+    indexRequestBuilders[i]=client().prepareIndex("test","type1",Integer.toString(i)).setSource("title","This is a test for the enabling fast vector highlighter");
   }
-  refresh();
-  SearchResponse search=client().prepareSearch().setQuery(matchPhraseQuery("title","this is a test")).addHighlightedField("title",50,1,10).execute().actionGet();
+  indexRandom(true,indexRequestBuilders);
+  SearchResponse search=client().prepareSearch().setQuery(matchPhraseQuery("title","this is a test")).addHighlightedField("title",50,1,10).get();
   assertNoFailures(search);
   search=client().prepareSearch().setQuery(matchPhraseQuery("title","this is a test")).addHighlightedField("title",50,1,10).setHighlighterType("fast-vector-highlighter").execute().actionGet();
   assertThat(search.getFailedShards(),equalTo(2));
