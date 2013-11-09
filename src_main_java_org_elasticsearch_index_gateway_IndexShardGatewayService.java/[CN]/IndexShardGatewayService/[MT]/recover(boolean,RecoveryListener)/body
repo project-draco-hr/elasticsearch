@@ -8,7 +8,12 @@
     return;
   }
   try {
-    indexShard.recovering("from gateway");
+    if (indexShard.routingEntry().restoreSource() != null) {
+      indexShard.recovering("from snapshot");
+    }
+ else {
+      indexShard.recovering("from gateway");
+    }
   }
  catch (  IllegalIndexShardStateException e) {
     listener.onIgnoreRecovery("already in recovering process, " + e.getMessage());
@@ -19,8 +24,14 @@
       recoveryStatus=new RecoveryStatus();
       recoveryStatus.updateStage(RecoveryStatus.Stage.INIT);
       try {
-        logger.debug("starting recovery from {} ...",shardGateway);
-        shardGateway.recover(indexShouldExists,recoveryStatus);
+        if (indexShard.routingEntry().restoreSource() != null) {
+          logger.debug("restoring from {} ...",indexShard.routingEntry().restoreSource());
+          snapshotService.restore(recoveryStatus);
+        }
+ else {
+          logger.debug("starting recovery from {} ...",shardGateway);
+          shardGateway.recover(indexShouldExists,recoveryStatus);
+        }
         lastIndexVersion=recoveryStatus.index().version();
         lastTranslogId=-1;
         lastTranslogLength=0;

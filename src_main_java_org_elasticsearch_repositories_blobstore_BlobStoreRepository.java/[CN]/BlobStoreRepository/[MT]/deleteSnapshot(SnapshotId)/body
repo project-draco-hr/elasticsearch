@@ -1,0 +1,26 @@
+{
+  Snapshot snapshot=readSnapshot(snapshotId);
+  MetaData metaData=readSnapshotMetaData(snapshotId,snapshot.indices());
+  try {
+    String blobName=snapshotBlobName(snapshotId);
+    snapshotsBlobContainer.deleteBlob(blobName);
+    snapshotsBlobContainer.deleteBlob(metaDataBlobName(snapshotId));
+    for (    String index : snapshot.indices()) {
+      BlobPath indexPath=basePath.add("indices").add(index);
+      ImmutableBlobContainer indexMetaDataBlobContainer=blobStore().immutableBlobContainer(indexPath);
+      try {
+        indexMetaDataBlobContainer.deleteBlob(blobName);
+      }
+ catch (      IOException ex) {
+        throw new SnapshotException(snapshotId,"failed to delete metadata",ex);
+      }
+      IndexMetaData indexMetaData=metaData.index(index);
+      for (int i=0; i < indexMetaData.getNumberOfShards(); i++) {
+        indexShardRepository.delete(snapshotId,new ShardId(index,i));
+      }
+    }
+  }
+ catch (  IOException ex) {
+    throw new RepositoryException(this.repositoryName,"failed to update snapshot in repository",ex);
+  }
+}

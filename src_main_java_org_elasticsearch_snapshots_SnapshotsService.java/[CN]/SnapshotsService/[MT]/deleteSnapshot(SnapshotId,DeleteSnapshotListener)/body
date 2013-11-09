@@ -1,0 +1,67 @@
+{
+  clusterService.submitStateUpdateTask("delete snapshot",new ProcessedClusterStateUpdateTask(){
+    boolean waitForSnapshot=false;
+    @Override public ClusterState execute(    ClusterState currentState) throws Exception {
+      MetaData metaData=currentState.metaData();
+      MetaData.Builder mdBuilder=MetaData.builder(currentState.metaData());
+      SnapshotMetaData snapshots=metaData.custom(SnapshotMetaData.TYPE);
+      if (snapshots == null) {
+        return currentState;
+      }
+      SnapshotMetaData.Entry snapshot=snapshots.snapshot(snapshotId);
+      if (snapshot == null) {
+        if (!snapshots.entries().isEmpty()) {
+          throw new ConcurrentSnapshotExecutionException(snapshotId,"another snapshot is currently running cannot delete");
+        }
+        return currentState;
+      }
+ else {
+        waitForSnapshot=true;
+        ImmutableMap<ShardId,ShardSnapshotStatus> shards;
+        if (snapshot.state() == State.STARTED && snapshot.shards() != null) {
+          ImmutableMap.Builder<ShardId,ShardSnapshotStatus> shardsBuilder=ImmutableMap.builder();
+          for (          ImmutableMap.Entry<ShardId,ShardSnapshotStatus> shardEntry : snapshot.shards().entrySet()) {
+            ShardSnapshotStatus status=shardEntry.getValue();
+            if (!status.state().completed()) {
+              shardsBuilder.put(shardEntry.getKey(),new ShardSnapshotStatus(status.nodeId(),State.ABORTED));
+            }
+ else {
+              shardsBuilder.put(shardEntry.getKey(),status);
+            }
+          }
+          shards=shardsBuilder.build();
+        }
+ else {
+          shards=snapshot.shards();
+          endSnapshot(snapshot);
+        }
+        SnapshotMetaData.Entry newSnapshot=new SnapshotMetaData.Entry(snapshotId,snapshot.includeGlobalState(),State.ABORTED,snapshot.indices(),shards);
+        snapshots=new SnapshotMetaData(newSnapshot);
+        mdBuilder.putCustom(SnapshotMetaData.TYPE,snapshots);
+        return ClusterState.builder(currentState).metaData(mdBuilder).build();
+      }
+    }
+    @Override public void onFailure(    String source,    Throwable t){
+      listener.onFailure(t);
+    }
+    @Override public void clusterStateProcessed(    String source,    ClusterState oldState,    ClusterState newState){
+      if (waitForSnapshot) {
+        addListener(new SnapshotCompletionListener(){
+          @Override public void onSnapshotCompletion(          SnapshotId snapshotId,          SnapshotInfo snapshot){
+            removeListener(this);
+            deleteSnapshotFromRepository(snapshotId,listener);
+          }
+          @Override public void onSnapshotFailure(          SnapshotId snapshotId,          Throwable t){
+            removeListener(this);
+            deleteSnapshotFromRepository(snapshotId,listener);
+          }
+        }
+);
+      }
+ else {
+        deleteSnapshotFromRepository(snapshotId,listener);
+      }
+    }
+  }
+);
+}

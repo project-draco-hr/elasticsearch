@@ -1,0 +1,74 @@
+{
+  if (removedNodesCleanupNeeded(event)) {
+    final boolean newMaster=!event.previousState().nodes().localNodeMaster();
+    clusterService.submitStateUpdateTask("update snapshot state after node removal",new ClusterStateUpdateTask(){
+      @Override public ClusterState execute(      ClusterState currentState) throws Exception {
+        DiscoveryNodes nodes=currentState.nodes();
+        MetaData metaData=currentState.metaData();
+        MetaData.Builder mdBuilder=MetaData.builder(currentState.metaData());
+        SnapshotMetaData snapshots=metaData.custom(SnapshotMetaData.TYPE);
+        if (snapshots == null) {
+          return currentState;
+        }
+        boolean changed=false;
+        ArrayList<SnapshotMetaData.Entry> entries=newArrayList();
+        for (        final SnapshotMetaData.Entry snapshot : snapshots.entries()) {
+          SnapshotMetaData.Entry updatedSnapshot=snapshot;
+          boolean snapshotChanged=false;
+          if (snapshot.state() == State.STARTED) {
+            ImmutableMap.Builder<ShardId,ShardSnapshotStatus> shards=ImmutableMap.builder();
+            for (            ImmutableMap.Entry<ShardId,ShardSnapshotStatus> shardEntry : snapshot.shards().entrySet()) {
+              ShardSnapshotStatus shardStatus=shardEntry.getValue();
+              if (!shardStatus.state().completed() && shardStatus.nodeId() != null) {
+                if (nodes.nodeExists(shardStatus.nodeId())) {
+                  shards.put(shardEntry);
+                }
+ else {
+                  snapshotChanged=true;
+                  logger.warn("failing snapshot of shard [{}] on closed node [{}]",shardEntry.getKey(),shardStatus.nodeId());
+                  shards.put(shardEntry.getKey(),new ShardSnapshotStatus(shardStatus.nodeId(),State.FAILED,"node shutdown"));
+                }
+              }
+            }
+            if (snapshotChanged) {
+              changed=true;
+              ImmutableMap<ShardId,ShardSnapshotStatus> shardsMap=shards.build();
+              if (!snapshot.state().completed() && completed(shardsMap.values())) {
+                updatedSnapshot=new SnapshotMetaData.Entry(snapshot.snapshotId(),snapshot.includeGlobalState(),State.SUCCESS,snapshot.indices(),shardsMap);
+                endSnapshot(updatedSnapshot);
+              }
+ else {
+                updatedSnapshot=new SnapshotMetaData.Entry(snapshot.snapshotId(),snapshot.includeGlobalState(),snapshot.state(),snapshot.indices(),shardsMap);
+              }
+            }
+            entries.add(updatedSnapshot);
+          }
+ else           if (snapshot.state() == State.INIT && newMaster) {
+            deleteSnapshot(snapshot.snapshotId(),new DeleteSnapshotListener(){
+              @Override public void onResponse(){
+                logger.debug("cleaned up abandoned snapshot {} in INIT state",snapshot.snapshotId());
+              }
+              @Override public void onFailure(              Throwable t){
+                logger.warn("failed to clean up abandoned snapshot {} in INIT state",snapshot.snapshotId());
+              }
+            }
+);
+          }
+ else           if (snapshot.state() == State.SUCCESS && newMaster) {
+            endSnapshot(snapshot);
+          }
+        }
+        if (changed) {
+          snapshots=new SnapshotMetaData(entries.toArray(new SnapshotMetaData.Entry[entries.size()]));
+          mdBuilder.putCustom(SnapshotMetaData.TYPE,snapshots);
+          return ClusterState.builder(currentState).metaData(mdBuilder).build();
+        }
+        return null;
+      }
+      @Override public void onFailure(      String source,      Throwable t){
+        logger.warn("failed to update snapshot state after node removal");
+      }
+    }
+);
+  }
+}

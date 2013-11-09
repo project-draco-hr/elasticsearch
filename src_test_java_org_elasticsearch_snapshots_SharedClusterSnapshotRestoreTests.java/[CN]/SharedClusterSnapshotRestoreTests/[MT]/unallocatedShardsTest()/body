@@ -1,0 +1,14 @@
+{
+  Client client=client();
+  logger.info("-->  creating repository");
+  PutRepositoryResponse putRepositoryResponse=run(client.admin().cluster().preparePutRepository("test-repo").setType("fs").setSettings(ImmutableSettings.settingsBuilder().put("location",newTempDir(LifecycleScope.SUITE))));
+  assertThat(putRepositoryResponse.isAcknowledged(),equalTo(true));
+  logger.info("-->  creating index that cannot be allocated");
+  run(prepareCreate("test-idx",2,ImmutableSettings.builder().put(FilterAllocationDecider.INDEX_ROUTING_INCLUDE_GROUP + ".tag","nowhere").put("index.number_of_shards",3)));
+  logger.info("--> snapshot");
+  CreateSnapshotResponse createSnapshotResponse=run(client.admin().cluster().prepareCreateSnapshot("test-repo","test-snap").setWaitForCompletion(true).setIndices("test-idx"));
+  assertThat(createSnapshotResponse.getSnapshotInfo().successfulShards(),equalTo(0));
+  assertThat(createSnapshotResponse.getSnapshotInfo().totalShards(),equalTo(3));
+  assertThat(createSnapshotResponse.getSnapshotInfo().shardFailures().size(),equalTo(3));
+  assertThat(createSnapshotResponse.getSnapshotInfo().shardFailures().get(0).reason(),startsWith("primary shard is not allocated"));
+}

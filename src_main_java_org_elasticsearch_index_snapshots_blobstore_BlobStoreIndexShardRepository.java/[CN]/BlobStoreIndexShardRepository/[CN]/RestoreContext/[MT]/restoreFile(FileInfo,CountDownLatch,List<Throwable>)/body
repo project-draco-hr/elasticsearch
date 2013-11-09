@@ -1,0 +1,46 @@
+{
+  final IndexOutput indexOutput;
+  try {
+    indexOutput=store.createOutputRaw(fileInfo.physicalName());
+  }
+ catch (  IOException e) {
+    failures.add(e);
+    latch.countDown();
+    return;
+  }
+  String firstFileToRecover=fileInfo.partName(0);
+  final AtomicInteger partIndex=new AtomicInteger();
+  blobContainer.readBlob(firstFileToRecover,new BlobContainer.ReadBlobListener(){
+    @Override public synchronized void onPartial(    byte[] data,    int offset,    int size) throws IOException {
+      recoveryStatus.index().addCurrentFilesSize(size);
+      indexOutput.writeBytes(data,offset,size);
+    }
+    @Override public synchronized void onCompleted(){
+      int part=partIndex.incrementAndGet();
+      if (part < fileInfo.numberOfParts()) {
+        String partName=fileInfo.partName(part);
+        blobContainer.readBlob(partName,this);
+        return;
+      }
+ else {
+        try {
+          indexOutput.close();
+          if (fileInfo.checksum() != null) {
+            store.writeChecksum(fileInfo.physicalName(),fileInfo.checksum());
+          }
+          store.directory().sync(Collections.singleton(fileInfo.physicalName()));
+        }
+ catch (        IOException e) {
+          onFailure(e);
+          return;
+        }
+      }
+      latch.countDown();
+    }
+    @Override public void onFailure(    Throwable t){
+      failures.add(t);
+      latch.countDown();
+    }
+  }
+);
+}

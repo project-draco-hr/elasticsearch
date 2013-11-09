@@ -1,0 +1,33 @@
+{
+  final AtomicLong counter=new AtomicLong(fileInfo.numberOfParts());
+  for (long i=0; i < fileInfo.numberOfParts(); i++) {
+    IndexInput indexInput=null;
+    try {
+      indexInput=store.openInputRaw(fileInfo.physicalName(),IOContext.READONCE);
+      indexInput.seek(i * fileInfo.partBytes());
+      InputStreamIndexInput is=new ThreadSafeInputStreamIndexInput(indexInput,fileInfo.partBytes());
+      final IndexInput fIndexInput=indexInput;
+      blobContainer.writeBlob(fileInfo.partName(i),is,is.actualSizeToRead(),new ImmutableBlobContainer.WriterListener(){
+        @Override public void onCompleted(){
+          IOUtils.closeWhileHandlingException(fIndexInput);
+          if (counter.decrementAndGet() == 0) {
+            latch.countDown();
+          }
+        }
+        @Override public void onFailure(        Throwable t){
+          IOUtils.closeWhileHandlingException(fIndexInput);
+          failures.add(t);
+          if (counter.decrementAndGet() == 0) {
+            latch.countDown();
+          }
+        }
+      }
+);
+    }
+ catch (    Throwable e) {
+      IOUtils.closeWhileHandlingException(indexInput);
+      failures.add(e);
+      latch.countDown();
+    }
+  }
+}

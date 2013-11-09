@@ -1,0 +1,25 @@
+{
+  ImmutableMap.Builder<ShardId,SnapshotMetaData.ShardSnapshotStatus> builder=ImmutableMap.builder();
+  MetaData metaData=clusterState.metaData();
+  for (  String index : indices) {
+    IndexMetaData indexMetaData=metaData.index(index);
+    IndexRoutingTable indexRoutingTable=clusterState.getRoutingTable().index(index);
+    if (indexRoutingTable == null) {
+      throw new SnapshotCreationException(snapshotId,"Missing routing table for index [" + index + "]");
+    }
+    for (int i=0; i < indexMetaData.numberOfShards(); i++) {
+      ShardId shardId=new ShardId(index,i);
+      ShardRouting primary=indexRoutingTable.shard(i).primaryShard();
+      if (primary == null || !primary.assignedToNode()) {
+        builder.put(shardId,new SnapshotMetaData.ShardSnapshotStatus(primary.currentNodeId(),State.FAILED,"primary shard is not allocated"));
+      }
+ else       if (!primary.started()) {
+        builder.put(shardId,new SnapshotMetaData.ShardSnapshotStatus(primary.currentNodeId(),State.FAILED,"primary shard hasn't been started yet"));
+      }
+ else {
+        builder.put(shardId,new SnapshotMetaData.ShardSnapshotStatus(primary.currentNodeId()));
+      }
+    }
+  }
+  return builder.build();
+}

@@ -1,4 +1,5 @@
 {
+  boolean globalPersistentOnly=params.paramAsBoolean(GLOBAL_PERSISTENT_ONLY_PARAM,false);
   builder.startObject("meta-data");
   builder.field("version",metaData.version());
   if (!metaData.persistentSettings().getAsMap().isEmpty()) {
@@ -8,12 +9,19 @@
     }
     builder.endObject();
   }
+  if (!globalPersistentOnly && !metaData.transientSettings().getAsMap().isEmpty()) {
+    builder.startObject("transient_settings");
+    for (    Map.Entry<String,String> entry : metaData.transientSettings().getAsMap().entrySet()) {
+      builder.field(entry.getKey(),entry.getValue());
+    }
+    builder.endObject();
+  }
   builder.startObject("templates");
   for (  IndexTemplateMetaData template : metaData.templates().values()) {
     IndexTemplateMetaData.Builder.toXContent(template,builder,params);
   }
   builder.endObject();
-  if (!metaData.indices().isEmpty()) {
+  if (!globalPersistentOnly && !metaData.indices().isEmpty()) {
     builder.startObject("indices");
     for (    IndexMetaData indexMetaData : metaData) {
       IndexMetaData.Builder.toXContent(indexMetaData,builder,params);
@@ -21,9 +29,12 @@
     builder.endObject();
   }
   for (  Map.Entry<String,Custom> entry : metaData.customs().entrySet()) {
-    builder.startObject(entry.getKey());
-    lookupFactorySafe(entry.getKey()).toXContent(entry.getValue(),builder,params);
-    builder.endObject();
+    Custom.Factory factory=lookupFactorySafe(entry.getKey());
+    if (!globalPersistentOnly || factory.isPersistent()) {
+      builder.startObject(entry.getKey());
+      factory.toXContent(entry.getValue(),builder,params);
+      builder.endObject();
+    }
   }
   builder.endObject();
 }

@@ -1,0 +1,43 @@
+{
+  threadPool.executor(ThreadPool.Names.SNAPSHOT).execute(new Runnable(){
+    @Override public void run(){
+      SnapshotId snapshotId=entry.snapshotId();
+      try {
+        final Repository repository=repositoriesService.repository(snapshotId.getRepository());
+        logger.trace("[{}] finalizing snapshot in repository",snapshotId);
+        ArrayList<ShardSearchFailure> failures=newArrayList();
+        ArrayList<SnapshotShardFailure> shardFailures=newArrayList();
+        for (        Map.Entry<ShardId,ShardSnapshotStatus> shardStatus : entry.shards().entrySet()) {
+          ShardId shardId=shardStatus.getKey();
+          ShardSnapshotStatus status=shardStatus.getValue();
+          if (status.state() == State.FAILED) {
+            failures.add(new ShardSearchFailure(status.reason(),new SearchShardTarget(status.nodeId(),shardId.getIndex(),shardId.id())));
+            shardFailures.add(new SnapshotShardFailure(status.nodeId(),shardId.getIndex(),shardId.id(),status.reason()));
+          }
+        }
+        Snapshot snapshot=repository.finalizeSnapshot(snapshotId,null,entry.shards().size(),ImmutableList.copyOf(shardFailures));
+        for (        SnapshotCompletionListener listener : snapshotCompletionListeners) {
+          try {
+            listener.onSnapshotCompletion(snapshotId,new SnapshotInfo(snapshot));
+          }
+ catch (          Throwable t) {
+            logger.warn("failed to refresh settings for [{}]",t,listener);
+          }
+        }
+      }
+ catch (      Throwable t) {
+        logger.warn("[{}] failed to finalize snapshot",t,snapshotId);
+        for (        SnapshotCompletionListener listener : snapshotCompletionListeners) {
+          try {
+            listener.onSnapshotFailure(snapshotId,t);
+          }
+ catch (          Throwable t2) {
+            logger.warn("failed to update snapshot status for [{}]",t2,listener);
+          }
+        }
+      }
+      removeSnapshotFromClusterState(snapshotId);
+    }
+  }
+);
+}

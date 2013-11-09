@@ -1,0 +1,91 @@
+{
+  logger.debug("[{}] [{}] restoring to [{}] ...",snapshotId,repositoryName,shardId);
+  BlobStoreIndexShardSnapshot snapshot;
+  try {
+    snapshot=readSnapshot(blobContainer.readBlobFully(snapshotBlobName(snapshotId)));
+  }
+ catch (  IOException ex) {
+    throw new IndexShardRestoreFailedException(shardId,"failed to read shard snapshot file",ex);
+  }
+  recoveryStatus.updateStage(RecoveryStatus.Stage.INDEX);
+  int numberOfFiles=0;
+  long totalSize=0;
+  int numberOfReusedFiles=0;
+  long reusedTotalSize=0;
+  List<FileInfo> filesToRecover=Lists.newArrayList();
+  for (  FileInfo fileInfo : snapshot.indexFiles()) {
+    String fileName=fileInfo.physicalName();
+    StoreFileMetaData md=null;
+    try {
+      md=store.metaData(fileName);
+    }
+ catch (    IOException e) {
+    }
+    numberOfFiles++;
+    if (!fileName.startsWith("segments") && md != null && fileInfo.isSame(md)) {
+      totalSize+=md.length();
+      numberOfReusedFiles++;
+      reusedTotalSize+=md.length();
+      if (logger.isTraceEnabled()) {
+        logger.trace("not_recovering [{}], exists in local store and is same",fileInfo.physicalName());
+      }
+    }
+ else {
+      totalSize+=fileInfo.length();
+      filesToRecover.add(fileInfo);
+      if (logger.isTraceEnabled()) {
+        if (md == null) {
+          logger.trace("recovering [{}], does not exists in local store",fileInfo.physicalName());
+        }
+ else {
+          logger.trace("recovering [{}], exists in local store but is different",fileInfo.physicalName());
+        }
+      }
+    }
+  }
+  recoveryStatus.index().files(numberOfFiles,totalSize,numberOfReusedFiles,reusedTotalSize);
+  if (filesToRecover.isEmpty()) {
+    logger.trace("no files to recover, all exists within the local store");
+  }
+  if (logger.isTraceEnabled()) {
+    logger.trace("[{}] [{}] recovering_files [{}] with total_size [{}], reusing_files [{}] with reused_size [{}]",shardId,snapshotId,numberOfFiles,new ByteSizeValue(totalSize),numberOfReusedFiles,new ByteSizeValue(reusedTotalSize));
+  }
+  final CountDownLatch latch=new CountDownLatch(filesToRecover.size());
+  final CopyOnWriteArrayList<Throwable> failures=new CopyOnWriteArrayList<Throwable>();
+  for (  final FileInfo fileToRecover : filesToRecover) {
+    logger.trace("[{}] [{}] restoring file [{}]",shardId,snapshotId,fileToRecover.name());
+    restoreFile(fileToRecover,latch,failures);
+  }
+  try {
+    latch.await();
+  }
+ catch (  InterruptedException e) {
+    Thread.currentThread().interrupt();
+  }
+  if (!failures.isEmpty()) {
+    throw new IndexShardRestoreFailedException(shardId,"Failed to recover index",failures.get(0));
+  }
+  long version=-1;
+  try {
+    if (Lucene.indexExists(store.directory())) {
+      version=Lucene.readSegmentInfos(store.directory()).getVersion();
+    }
+  }
+ catch (  IOException e) {
+    throw new IndexShardRestoreFailedException(shardId,"Failed to fetch index version after copying it over",e);
+  }
+  recoveryStatus.index().updateVersion(version);
+  try {
+    for (    String storeFile : store.directory().listAll()) {
+      if (!snapshot.containPhysicalIndexFile(storeFile)) {
+        try {
+          store.directory().deleteFile(storeFile);
+        }
+ catch (        IOException e) {
+        }
+      }
+    }
+  }
+ catch (  IOException e) {
+  }
+}

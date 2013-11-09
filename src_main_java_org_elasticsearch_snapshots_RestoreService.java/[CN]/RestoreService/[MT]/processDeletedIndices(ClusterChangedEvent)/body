@@ -1,0 +1,28 @@
+{
+  MetaData metaData=event.state().metaData();
+  RestoreMetaData restore=metaData.custom(RestoreMetaData.TYPE);
+  if (restore == null) {
+    return;
+  }
+  if (!event.indicesDeleted().isEmpty()) {
+    for (    RestoreMetaData.Entry entry : restore.entries()) {
+      List<ShardId> shardsToFail=null;
+      for (      ImmutableMap.Entry<ShardId,ShardRestoreStatus> shard : entry.shards().entrySet()) {
+        if (!shard.getValue().state().completed()) {
+          if (!event.state().metaData().hasIndex(shard.getKey().getIndex())) {
+            if (shardsToFail == null) {
+              shardsToFail=newArrayList();
+            }
+            shardsToFail.add(shard.getKey());
+          }
+        }
+      }
+      if (shardsToFail != null) {
+        for (        ShardId shardId : shardsToFail) {
+          logger.trace("[{}] failing running shard restore [{}]",entry.snapshotId(),shardId);
+          innerUpdateRestoreState(new UpdateIndexShardRestoreStatusRequest(entry.snapshotId(),shardId,new ShardRestoreStatus(null,RestoreMetaData.State.FAILURE,"index was deleted")));
+        }
+      }
+    }
+  }
+}

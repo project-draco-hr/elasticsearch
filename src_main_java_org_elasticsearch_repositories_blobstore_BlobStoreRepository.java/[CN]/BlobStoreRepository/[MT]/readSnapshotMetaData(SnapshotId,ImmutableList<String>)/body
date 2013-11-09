@@ -1,0 +1,41 @@
+{
+  MetaData metaData;
+  try {
+    byte[] data=snapshotsBlobContainer.readBlobFully(metaDataBlobName(snapshotId));
+    metaData=readMetaData(data);
+  }
+ catch (  FileNotFoundException ex) {
+    throw new SnapshotMissingException(snapshotId,ex);
+  }
+catch (  IOException ex) {
+    throw new SnapshotException(snapshotId,"failed to get snapshots",ex);
+  }
+  MetaData.Builder metaDataBuilder=MetaData.builder(metaData);
+  for (  String index : indices) {
+    BlobPath indexPath=basePath.add("indices").add(index);
+    ImmutableBlobContainer indexMetaDataBlobContainer=blobStore().immutableBlobContainer(indexPath);
+    XContentParser parser=null;
+    try {
+      byte[] data=indexMetaDataBlobContainer.readBlobFully(snapshotBlobName(snapshotId));
+      parser=XContentHelper.createParser(data,0,data.length);
+      XContentParser.Token token;
+      if ((token=parser.nextToken()) == XContentParser.Token.START_OBJECT) {
+        IndexMetaData indexMetaData=IndexMetaData.Builder.fromXContent(parser);
+        if ((token=parser.nextToken()) == XContentParser.Token.END_OBJECT) {
+          metaDataBuilder.put(indexMetaData,false);
+          continue;
+        }
+      }
+      throw new ElasticSearchParseException("unexpected token  [" + token + "]");
+    }
+ catch (    IOException ex) {
+      throw new SnapshotException(snapshotId,"failed to read metadata",ex);
+    }
+ finally {
+      if (parser != null) {
+        parser.close();
+      }
+    }
+  }
+  return metaDataBuilder.build();
+}

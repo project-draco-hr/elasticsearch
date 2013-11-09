@@ -1,0 +1,43 @@
+{
+  clusterService.submitStateUpdateTask("update snapshot state",new ClusterStateUpdateTask(){
+    @Override public ClusterState execute(    ClusterState currentState){
+      MetaData metaData=currentState.metaData();
+      MetaData.Builder mdBuilder=MetaData.builder(currentState.metaData());
+      SnapshotMetaData snapshots=metaData.custom(SnapshotMetaData.TYPE);
+      if (snapshots != null) {
+        boolean changed=false;
+        ArrayList<SnapshotMetaData.Entry> entries=newArrayList();
+        for (        SnapshotMetaData.Entry entry : snapshots.entries()) {
+          if (entry.snapshotId().equals(request.snapshotId())) {
+            HashMap<ShardId,ShardSnapshotStatus> shards=newHashMap(entry.shards());
+            logger.trace("[{}] Updating shard [{}] with status [{}]",request.snapshotId(),request.shardId(),request.status().state());
+            shards.put(request.shardId(),request.status());
+            if (!completed(shards.values())) {
+              entries.add(new SnapshotMetaData.Entry(entry.snapshotId(),entry.includeGlobalState(),entry.state(),entry.indices(),ImmutableMap.copyOf(shards)));
+            }
+ else {
+              SnapshotMetaData.Entry updatedEntry=new SnapshotMetaData.Entry(entry.snapshotId(),entry.includeGlobalState(),State.SUCCESS,entry.indices(),ImmutableMap.copyOf(shards));
+              entries.add(updatedEntry);
+              endSnapshot(updatedEntry);
+              logger.info("snapshot [{}] is done",updatedEntry.snapshotId());
+            }
+            changed=true;
+          }
+ else {
+            entries.add(entry);
+          }
+        }
+        if (changed) {
+          snapshots=new SnapshotMetaData(entries.toArray(new SnapshotMetaData.Entry[entries.size()]));
+          mdBuilder.putCustom(SnapshotMetaData.TYPE,snapshots);
+          return ClusterState.builder(currentState).metaData(mdBuilder).build();
+        }
+      }
+      return currentState;
+    }
+    @Override public void onFailure(    String source,    Throwable t){
+      logger.warn("[{}][{}] failed to update snapshot status to [{}]",t,request.snapshotId(),request.shardId(),request.status());
+    }
+  }
+);
+}

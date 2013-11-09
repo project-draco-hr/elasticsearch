@@ -1,0 +1,25 @@
+{
+  logger.info("--> start node");
+  cluster().startNode(settingsBuilder().put("gateway.type","local"));
+  Client client=cluster().client();
+  wipeIndices();
+  wipeRepositories();
+  logger.info("--> set test persistent setting");
+  String settingValue="test-" + randomInt();
+  client.admin().cluster().prepareUpdateSettings().setPersistentSettings(ImmutableSettings.settingsBuilder().put(ThreadPool.THREADPOOL_GROUP + "dummy.value",settingValue)).execute().actionGet();
+  assertThat(client.admin().cluster().prepareState().setFilterRoutingTable(true).setFilterNodes(true).execute().actionGet().getState().getMetaData().persistentSettings().get(ThreadPool.THREADPOOL_GROUP + "dummy.value"),equalTo(settingValue));
+  logger.info("--> create repository");
+  PutRepositoryResponse putRepositoryResponse=client.admin().cluster().preparePutRepository("test-repo").setType("fs").setSettings(ImmutableSettings.settingsBuilder().put("location",newTempDir())).execute().actionGet();
+  assertThat(putRepositoryResponse.isAcknowledged(),equalTo(true));
+  logger.info("--> start snapshot");
+  CreateSnapshotResponse createSnapshotResponse=client.admin().cluster().prepareCreateSnapshot("test-repo","test-snap").setWaitForCompletion(true).execute().actionGet();
+  assertThat(createSnapshotResponse.getSnapshotInfo().totalShards(),equalTo(0));
+  assertThat(createSnapshotResponse.getSnapshotInfo().successfulShards(),equalTo(0));
+  assertThat(client.admin().cluster().prepareGetSnapshots("test-repo").setSnapshots("test-snap").execute().actionGet().getSnapshots().get(0).state(),equalTo(SnapshotState.SUCCESS));
+  logger.info("--> clean the test persistent setting");
+  client.admin().cluster().prepareUpdateSettings().setPersistentSettings(ImmutableSettings.settingsBuilder().put(ThreadPool.THREADPOOL_GROUP + "dummy.value","")).execute().actionGet();
+  assertThat(client.admin().cluster().prepareState().setFilterRoutingTable(true).setFilterNodes(true).execute().actionGet().getState().getMetaData().persistentSettings().get(ThreadPool.THREADPOOL_GROUP + "dummy.value"),equalTo(""));
+  logger.info("--> restore snapshot");
+  client.admin().cluster().prepareRestoreSnapshot("test-repo","test-snap").setRestoreGlobalState(true).setWaitForCompletion(true).execute().actionGet();
+  assertThat(client.admin().cluster().prepareState().setFilterRoutingTable(true).setFilterNodes(true).execute().actionGet().getState().getMetaData().persistentSettings().get(ThreadPool.THREADPOOL_GROUP + "dummy.value"),equalTo(settingValue));
+}

@@ -1,0 +1,69 @@
+{
+  Map<SnapshotId,SnapshotShards> survivors=newHashMap();
+  for (  Map.Entry<SnapshotId,SnapshotShards> entry : shardSnapshots.entrySet()) {
+    if (snapshotMetaData != null && snapshotMetaData.snapshot(entry.getKey()) != null) {
+      survivors.put(entry.getKey(),entry.getValue());
+    }
+  }
+  HashMap<SnapshotId,SnapshotShards> newSnapshots=null;
+  final String localNodeId=clusterService.localNode().id();
+  for (  SnapshotMetaData.Entry entry : snapshotMetaData.entries()) {
+    HashMap<ShardId,IndexShardSnapshotStatus> startedShards=null;
+    for (    Map.Entry<ShardId,SnapshotMetaData.ShardSnapshotStatus> shard : entry.shards().entrySet()) {
+      if (localNodeId.equals(shard.getValue().nodeId())) {
+        if (entry.state() == State.STARTED) {
+          if (startedShards == null) {
+            startedShards=newHashMap();
+          }
+          startedShards.put(shard.getKey(),new IndexShardSnapshotStatus());
+        }
+ else         if (entry.state() == State.ABORTED) {
+          SnapshotShards snapshotShards=shardSnapshots.get(entry.snapshotId());
+          if (snapshotShards != null) {
+            IndexShardSnapshotStatus snapshotStatus=snapshotShards.shards.get(shard.getKey());
+            if (snapshotStatus != null) {
+              snapshotStatus.abort();
+            }
+          }
+        }
+      }
+    }
+    if (startedShards != null) {
+      if (!survivors.containsKey(entry.snapshotId())) {
+        if (newSnapshots == null) {
+          newSnapshots=newHashMapWithExpectedSize(2);
+        }
+        newSnapshots.put(entry.snapshotId(),new SnapshotShards(ImmutableMap.copyOf(startedShards)));
+      }
+    }
+  }
+  if (newSnapshots != null) {
+    survivors.putAll(newSnapshots);
+  }
+  shardSnapshots=ImmutableMap.copyOf(survivors);
+  if (newSnapshots != null) {
+    for (    final Map.Entry<SnapshotId,SnapshotShards> entry : newSnapshots.entrySet()) {
+      for (      final Map.Entry<ShardId,IndexShardSnapshotStatus> shardEntry : entry.getValue().shards.entrySet()) {
+        try {
+          final IndexShardSnapshotAndRestoreService shardSnapshotService=indicesService.indexServiceSafe(shardEntry.getKey().getIndex()).shardInjectorSafe(shardEntry.getKey().id()).getInstance(IndexShardSnapshotAndRestoreService.class);
+          threadPool.executor(ThreadPool.Names.SNAPSHOT).execute(new Runnable(){
+            @Override public void run(){
+              try {
+                shardSnapshotService.snapshot(entry.getKey(),shardEntry.getValue());
+                updateIndexShardSnapshotStatus(new UpdateIndexShardSnapshotStatusRequest(entry.getKey(),shardEntry.getKey(),new ShardSnapshotStatus(localNodeId,SnapshotMetaData.State.SUCCESS)));
+              }
+ catch (              Throwable t) {
+                logger.warn("[{}] [{}] failed to create snapshot",t,shardEntry.getKey(),entry.getKey());
+                updateIndexShardSnapshotStatus(new UpdateIndexShardSnapshotStatusRequest(entry.getKey(),shardEntry.getKey(),new ShardSnapshotStatus(localNodeId,SnapshotMetaData.State.FAILED,ExceptionsHelper.detailedMessage(t))));
+              }
+            }
+          }
+);
+        }
+ catch (        Throwable t) {
+          updateIndexShardSnapshotStatus(new UpdateIndexShardSnapshotStatusRequest(entry.getKey(),shardEntry.getKey(),new ShardSnapshotStatus(localNodeId,SnapshotMetaData.State.FAILED,ExceptionsHelper.detailedMessage(t))));
+        }
+      }
+    }
+  }
+}

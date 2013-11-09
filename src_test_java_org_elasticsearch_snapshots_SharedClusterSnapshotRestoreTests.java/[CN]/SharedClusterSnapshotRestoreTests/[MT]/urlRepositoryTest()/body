@@ -1,0 +1,36 @@
+{
+  Client client=client();
+  logger.info("-->  creating repository");
+  File repositoryLocation=newTempDir(LifecycleScope.SUITE);
+  PutRepositoryResponse putRepositoryResponse=run(client.admin().cluster().preparePutRepository("test-repo").setType("fs").setSettings(ImmutableSettings.settingsBuilder().put("location",repositoryLocation).put("compress",randomBoolean()).put("chunk_size",randomIntBetween(5,100))));
+  assertThat(putRepositoryResponse.isAcknowledged(),equalTo(true));
+  createIndex("test-idx");
+  ensureGreen();
+  logger.info("--> indexing some data");
+  for (int i=0; i < 100; i++) {
+    index("test-idx","doc",Integer.toString(i),"foo","bar" + i);
+  }
+  refresh();
+  assertThat(run(client.prepareCount("test-idx")).getCount(),equalTo(100L));
+  logger.info("--> snapshot");
+  CreateSnapshotResponse createSnapshotResponse=run(client.admin().cluster().prepareCreateSnapshot("test-repo","test-snap").setWaitForCompletion(true).setIndices("test-idx"));
+  assertThat(createSnapshotResponse.getSnapshotInfo().successfulShards(),greaterThan(0));
+  assertThat(createSnapshotResponse.getSnapshotInfo().successfulShards(),equalTo(createSnapshotResponse.getSnapshotInfo().totalShards()));
+  assertThat(run(client.admin().cluster().prepareGetSnapshots("test-repo").setSnapshots("test-snap")).getSnapshots().get(0).state(),equalTo(SnapshotState.SUCCESS));
+  logger.info("--> delete index");
+  wipeIndices("test-idx");
+  logger.info("--> delete file system repository");
+  wipeRepositories("test-repo");
+  logger.info("--> create read-only URL repository");
+  putRepositoryResponse=run(client.admin().cluster().preparePutRepository("url-repo").setType("url").setSettings(ImmutableSettings.settingsBuilder().put("url",repositoryLocation.toURI().toURL())));
+  assertThat(putRepositoryResponse.isAcknowledged(),equalTo(true));
+  logger.info("--> restore index after deletion");
+  RestoreSnapshotResponse restoreSnapshotResponse=client.admin().cluster().prepareRestoreSnapshot("url-repo","test-snap").setWaitForCompletion(true).setIndices("test-idx").execute().actionGet();
+  assertThat(restoreSnapshotResponse.getRestoreInfo().totalShards(),greaterThan(0));
+  ensureGreen();
+  assertThat(run(client.prepareCount("test-idx")).getCount(),equalTo(100L));
+  logger.info("--> list available shapshots");
+  GetSnapshotsResponse getSnapshotsResponse=run(client.admin().cluster().prepareGetSnapshots("url-repo"));
+  assertThat(getSnapshotsResponse.getSnapshots(),notNullValue());
+  assertThat(getSnapshotsResponse.getSnapshots().size(),equalTo(1));
+}

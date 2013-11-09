@@ -1,0 +1,52 @@
+{
+  Client client=client();
+  logger.info("-->  creating repository");
+  PutRepositoryResponse putRepositoryResponse=run(client.admin().cluster().preparePutRepository("test-repo").setType("fs").setSettings(ImmutableSettings.settingsBuilder().put("location",newTempDir(LifecycleScope.SUITE))));
+  assertThat(putRepositoryResponse.isAcknowledged(),equalTo(true));
+  createIndex("test-idx-1","test-idx-2");
+  ensureGreen();
+  logger.info("--> indexing some data");
+  for (int i=0; i < 100; i++) {
+    index("test-idx-1","doc",Integer.toString(i),"foo","bar" + i);
+    index("test-idx-2","doc",Integer.toString(i),"foo","bar" + i);
+  }
+  refresh();
+  assertThat(run(client.prepareCount("test-idx-1")).getCount(),equalTo(100L));
+  assertThat(run(client.prepareCount("test-idx-2")).getCount(),equalTo(100L));
+  logger.info("--> snapshot");
+  CreateSnapshotResponse createSnapshotResponse=run(client.admin().cluster().prepareCreateSnapshot("test-repo","test-snap").setWaitForCompletion(true).setIndices("test-idx-1","test-idx-2"));
+  assertThat(createSnapshotResponse.getSnapshotInfo().successfulShards(),greaterThan(0));
+  assertThat(createSnapshotResponse.getSnapshotInfo().successfulShards(),equalTo(createSnapshotResponse.getSnapshotInfo().totalShards()));
+  logger.info("--> restore indices with different names");
+  RestoreSnapshotResponse restoreSnapshotResponse=client.admin().cluster().prepareRestoreSnapshot("test-repo","test-snap").setRenamePattern("(.+)").setRenameReplacement("$1-copy").setWaitForCompletion(true).execute().actionGet();
+  assertThat(restoreSnapshotResponse.getRestoreInfo().totalShards(),greaterThan(0));
+  ensureGreen();
+  assertThat(run(client.prepareCount("test-idx-1-copy")).getCount(),equalTo(100L));
+  assertThat(run(client.prepareCount("test-idx-2-copy")).getCount(),equalTo(100L));
+  logger.info("--> close indices");
+  run(client.admin().indices().prepareClose("test-idx-1","test-idx-2-copy"));
+  logger.info("--> restore indices with different names");
+  restoreSnapshotResponse=client.admin().cluster().prepareRestoreSnapshot("test-repo","test-snap").setRenamePattern("(.+-2)").setRenameReplacement("$1-copy").setWaitForCompletion(true).execute().actionGet();
+  assertThat(restoreSnapshotResponse.getRestoreInfo().totalShards(),greaterThan(0));
+  logger.info("--> try renaming indices using the same name");
+  try {
+    client.admin().cluster().prepareRestoreSnapshot("test-repo","test-snap").setRenamePattern("(.+)").setRenameReplacement("same-name").setWaitForCompletion(true).execute().actionGet();
+    fail("Shouldn't be here");
+  }
+ catch (  SnapshotRestoreException ex) {
+  }
+  logger.info("--> try renaming indices using the same name");
+  try {
+    client.admin().cluster().prepareRestoreSnapshot("test-repo","test-snap").setRenamePattern("test-idx-2").setRenameReplacement("test-idx-1").setWaitForCompletion(true).execute().actionGet();
+    fail("Shouldn't be here");
+  }
+ catch (  SnapshotRestoreException ex) {
+  }
+  logger.info("--> try renaming indices using invalid index name");
+  try {
+    client.admin().cluster().prepareRestoreSnapshot("test-repo","test-snap").setIndices("test-idx-1").setRenamePattern(".+").setRenameReplacement("__WRONG__").setWaitForCompletion(true).execute().actionGet();
+    fail("Shouldn't be here");
+  }
+ catch (  InvalidIndexNameException ex) {
+  }
+}

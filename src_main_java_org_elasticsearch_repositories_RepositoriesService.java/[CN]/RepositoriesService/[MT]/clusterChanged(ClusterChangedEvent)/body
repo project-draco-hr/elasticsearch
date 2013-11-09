@@ -1,0 +1,38 @@
+{
+  try {
+    RepositoriesMetaData oldMetaData=event.previousState().getMetaData().custom(RepositoriesMetaData.TYPE);
+    RepositoriesMetaData newMetaData=event.state().getMetaData().custom(RepositoriesMetaData.TYPE);
+    if ((oldMetaData == null && newMetaData == null) || (oldMetaData != null && oldMetaData.equals(newMetaData))) {
+      return;
+    }
+    Map<String,RepositoryHolder> survivors=newHashMap();
+    for (    Map.Entry<String,RepositoryHolder> entry : repositories.entrySet()) {
+      if (newMetaData == null || newMetaData.repository(entry.getKey()) == null) {
+        closeRepository(entry.getKey(),entry.getValue());
+      }
+ else {
+        survivors.put(entry.getKey(),entry.getValue());
+      }
+    }
+    ImmutableMap.Builder<String,RepositoryHolder> builder=ImmutableMap.builder();
+    for (    RepositoryMetaData repositoryMetaData : newMetaData.repositories()) {
+      RepositoryHolder holder=survivors.get(repositoryMetaData.name());
+      if (holder != null) {
+        if (!holder.type.equals(repositoryMetaData.type()) || !holder.settings.equals(repositoryMetaData.settings())) {
+          closeRepository(repositoryMetaData.name(),holder);
+          holder=createRepositoryHolder(repositoryMetaData);
+        }
+      }
+ else {
+        holder=createRepositoryHolder(repositoryMetaData);
+      }
+      if (holder != null) {
+        builder.put(repositoryMetaData.name(),holder);
+      }
+    }
+    repositories=builder.build();
+  }
+ catch (  Throwable ex) {
+    logger.warn("failure updating cluster state ",ex);
+  }
+}
