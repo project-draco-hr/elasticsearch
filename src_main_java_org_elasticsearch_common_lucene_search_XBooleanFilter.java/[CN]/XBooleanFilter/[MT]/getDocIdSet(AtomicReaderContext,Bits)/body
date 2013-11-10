@@ -56,6 +56,7 @@
   }
   hasNonEmptyShouldClause=false;
   boolean hasBits=false;
+  List<ResultClause> fastOrClauses=new ArrayList<ResultClause>();
   for (int i=0; i < results.size(); i++) {
     ResultClause clause=results.get(i);
     if (clause.bits != null) {
@@ -63,15 +64,24 @@
       continue;
     }
     if (clause.clause.getOccur() == Occur.SHOULD) {
-      DocIdSetIterator it=clause.docIdSet.iterator();
-      if (it == null) {
-        continue;
+      if (hasMustClauses || hasMustNotClauses) {
+        fastOrClauses.add(clause);
       }
-      hasNonEmptyShouldClause=true;
-      if (res == null) {
-        res=new FixedBitSet(reader.maxDoc());
+ else       if (res == null) {
+        DocIdSetIterator it=clause.docIdSet.iterator();
+        if (it != null) {
+          hasNonEmptyShouldClause=true;
+          res=new FixedBitSet(reader.maxDoc());
+          res.or(it);
+        }
       }
-      res.or(it);
+ else {
+        DocIdSetIterator it=clause.docIdSet.iterator();
+        if (it != null) {
+          hasNonEmptyShouldClause=true;
+          res.or(it);
+        }
+      }
     }
   }
   for (int i=0; i < results.size(); i++) {
@@ -107,6 +117,22 @@
     }
   }
   if (!hasBits) {
+    if (!fastOrClauses.isEmpty()) {
+      DocIdSetIterator it=res.iterator();
+      at_least_one_should_clause_iter:       for (int setDoc=it.nextDoc(); setDoc != DocIdSetIterator.NO_MORE_DOCS; setDoc=it.nextDoc()) {
+        for (        ResultClause fastOrClause : fastOrClauses) {
+          DocIdSetIterator clauseIterator=fastOrClause.iterator();
+          if (clauseIterator == null) {
+            continue;
+          }
+          if (iteratorMatch(clauseIterator,setDoc)) {
+            hasNonEmptyShouldClause=true;
+            continue at_least_one_should_clause_iter;
+          }
+        }
+        res.clear(setDoc);
+      }
+    }
     if (hasShouldClauses && !hasNonEmptyShouldClause) {
       return null;
     }
@@ -114,7 +140,7 @@
       return res;
     }
   }
-  List<ResultClause> orClauses=new ArrayList<ResultClause>();
+  List<ResultClause> slowOrClauses=new ArrayList<ResultClause>();
   for (int i=0; i < results.size(); i++) {
     ResultClause clause=results.get(i);
     if (clause.bits == null) {
@@ -122,7 +148,7 @@
     }
     if (clause.clause.getOccur() == Occur.SHOULD) {
       if (hasMustClauses || hasMustNotClauses) {
-        orClauses.add(clause);
+        slowOrClauses.add(clause);
       }
  else {
         if (res == null) {
@@ -134,7 +160,7 @@
           res=new FixedBitSet(reader.maxDoc());
           res.or(it);
         }
- else         if (!hasMustNotClauses && !hasMustClauses) {
+ else {
           for (int doc=0; doc < reader.maxDoc(); doc++) {
             if (!res.get(doc) && clause.bits.get(doc)) {
               hasNonEmptyShouldClause=true;
@@ -183,13 +209,23 @@
       }
     }
   }
-  if (!orClauses.isEmpty()) {
+  if (!slowOrClauses.isEmpty() || !fastOrClauses.isEmpty()) {
     DocIdSetIterator it=res.iterator();
-    res:     for (int setDoc=it.nextDoc(); setDoc != DocIdSetIterator.NO_MORE_DOCS; setDoc=it.nextDoc()) {
-      for (      ResultClause orClause : orClauses) {
-        if (orClause.bits.get(setDoc)) {
+    at_least_one_should_clause_iter:     for (int setDoc=it.nextDoc(); setDoc != DocIdSetIterator.NO_MORE_DOCS; setDoc=it.nextDoc()) {
+      for (      ResultClause fastOrClause : fastOrClauses) {
+        DocIdSetIterator clauseIterator=fastOrClause.iterator();
+        if (it == null) {
+          continue;
+        }
+        if (iteratorMatch(clauseIterator,setDoc)) {
           hasNonEmptyShouldClause=true;
-          continue res;
+          continue at_least_one_should_clause_iter;
+        }
+      }
+      for (      ResultClause slowOrClause : slowOrClauses) {
+        if (slowOrClause.bits.get(setDoc)) {
+          hasNonEmptyShouldClause=true;
+          continue at_least_one_should_clause_iter;
         }
       }
       res.clear(setDoc);
