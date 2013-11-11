@@ -2,7 +2,7 @@
   Client client=client();
   File repositoryLocation=newTempDir(LifecycleScope.TEST);
   logger.info("-->  creating repository");
-  PutRepositoryResponse putRepositoryResponse=run(client.admin().cluster().preparePutRepository("test-repo").setType(MockRepositoryModule.class.getCanonicalName()).setSettings(ImmutableSettings.settingsBuilder().put("location",repositoryLocation).put("random",randomAsciiOfLength(10)).put("random_data_file_blocking_rate",0.1).put("wait_after_unblock",200)));
+  PutRepositoryResponse putRepositoryResponse=client.admin().cluster().preparePutRepository("test-repo").setType(MockRepositoryModule.class.getCanonicalName()).setSettings(ImmutableSettings.settingsBuilder().put("location",repositoryLocation).put("random",randomAsciiOfLength(10)).put("random_data_file_blocking_rate",0.1).put("wait_after_unblock",200)).get();
   assertThat(putRepositoryResponse.isAcknowledged(),equalTo(true));
   assertAcked(prepareCreate("test-idx",2,ImmutableSettings.builder().put("number_of_replicas",0)));
   logger.info("--> indexing some data");
@@ -10,14 +10,14 @@
     index("test-idx","doc",Integer.toString(i),"foo","bar" + i);
   }
   refresh();
-  assertThat(run(client.prepareCount("test-idx")).getCount(),equalTo(100L));
+  assertThat(client.prepareCount("test-idx").get().getCount(),equalTo(100L));
   logger.info("--> snapshot");
-  run(client.admin().cluster().prepareCreateSnapshot("test-repo","test-snap").setWaitForCompletion(false).setIndices("test-idx"));
+  client.admin().cluster().prepareCreateSnapshot("test-repo","test-snap").setWaitForCompletion(false).setIndices("test-idx").get();
   String blockedNode=waitForCompletionOrBlock(cluster().nodesInclude("test-idx"),"test-repo","test-snap",TimeValue.timeValueSeconds(60));
   if (blockedNode != null) {
     logger.info("--> move shards away from the node");
     ImmutableSettings.Builder excludeSettings=ImmutableSettings.builder().put("index.routing.allocation.exclude._name",blockedNode);
-    run(client().admin().indices().prepareUpdateSettings("test-idx").setSettings(excludeSettings));
+    client().admin().indices().prepareUpdateSettings("test-idx").setSettings(excludeSettings).get();
     logger.info("--> execution was blocked on node [{}], moving shards away from this node",blockedNode);
     unblock("test-repo");
     logger.info("--> waiting for completion");
@@ -28,18 +28,18 @@
  else {
     logger.info("--> done without blocks");
   }
-  ImmutableList<SnapshotInfo> snapshotInfos=run(client().admin().cluster().prepareGetSnapshots("test-repo").setSnapshots("test-snap")).getSnapshots();
+  ImmutableList<SnapshotInfo> snapshotInfos=client().admin().cluster().prepareGetSnapshots("test-repo").setSnapshots("test-snap").get().getSnapshots();
   assertThat(snapshotInfos.size(),equalTo(1));
   assertThat(snapshotInfos.get(0).state(),equalTo(SnapshotState.SUCCESS));
   assertThat(snapshotInfos.get(0).shardFailures().size(),equalTo(0));
   logger.info("--> delete index");
-  wipeIndex("test-idx");
+  wipeIndices("test-idx");
   logger.info("--> replace mock repository with real one at the same location");
-  putRepositoryResponse=run(client.admin().cluster().preparePutRepository("test-repo").setType("fs").setSettings(ImmutableSettings.settingsBuilder().put("location",repositoryLocation)));
+  putRepositoryResponse=client.admin().cluster().preparePutRepository("test-repo").setType("fs").setSettings(ImmutableSettings.settingsBuilder().put("location",repositoryLocation)).get();
   assertThat(putRepositoryResponse.isAcknowledged(),equalTo(true));
   logger.info("--> restore index");
   RestoreSnapshotResponse restoreSnapshotResponse=client.admin().cluster().prepareRestoreSnapshot("test-repo","test-snap").setWaitForCompletion(true).execute().actionGet();
   assertThat(restoreSnapshotResponse.getRestoreInfo().totalShards(),greaterThan(0));
   ensureGreen();
-  assertThat(run(client.prepareCount("test-idx")).getCount(),equalTo(100L));
+  assertThat(client.prepareCount("test-idx").get().getCount(),equalTo(100L));
 }
