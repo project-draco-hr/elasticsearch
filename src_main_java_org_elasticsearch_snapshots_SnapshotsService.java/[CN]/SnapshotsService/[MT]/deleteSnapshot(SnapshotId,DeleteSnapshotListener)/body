@@ -31,9 +31,13 @@
           }
           shards=shardsBuilder.build();
         }
- else {
+ else         if (snapshot.state() == State.INIT) {
           shards=snapshot.shards();
           endSnapshot(snapshot);
+        }
+ else {
+          logger.trace("trying to delete completed snapshot - save to delete");
+          return currentState;
         }
         SnapshotMetaData.Entry newSnapshot=new SnapshotMetaData.Entry(snapshotId,snapshot.includeGlobalState(),State.ABORTED,snapshot.indices(),shards);
         snapshots=new SnapshotMetaData(newSnapshot);
@@ -46,12 +50,15 @@
     }
     @Override public void clusterStateProcessed(    String source,    ClusterState oldState,    ClusterState newState){
       if (waitForSnapshot) {
+        logger.trace("adding snapshot completion listener to wait for deleted snapshot to finish");
         addListener(new SnapshotCompletionListener(){
           @Override public void onSnapshotCompletion(          SnapshotId snapshotId,          SnapshotInfo snapshot){
+            logger.trace("deleted snapshot completed - deleting files");
             removeListener(this);
             deleteSnapshotFromRepository(snapshotId,listener);
           }
           @Override public void onSnapshotFailure(          SnapshotId snapshotId,          Throwable t){
+            logger.trace("deleted snapshot failed - deleting files",t);
             removeListener(this);
             deleteSnapshotFromRepository(snapshotId,listener);
           }
@@ -59,6 +66,7 @@
 );
       }
  else {
+        logger.trace("deleted snapshot is not running - deleting files");
         deleteSnapshotFromRepository(snapshotId,listener);
       }
     }
