@@ -2,17 +2,16 @@
   client().admin().indices().prepareCreate("test").setSettings(settingsBuilder().put("number_of_shards",atLeast(cluster().size())).put("number_of_replicas",0)).get();
   ensureGreen();
   MoveAllocationCommand moveAllocationCommand=getAllocationCommand();
-  ClusterRerouteResponse clusterRerouteResponse=client().admin().cluster().prepareReroute().add(moveAllocationCommand).get();
-  assertThat(clusterRerouteResponse.isAcknowledged(),equalTo(true));
+  assertAcked(client().admin().cluster().prepareReroute().add(moveAllocationCommand));
   for (  Client client : clients()) {
-    ClusterStateResponse clusterStateResponse=client.admin().cluster().prepareState().setLocal(true).get();
-    RoutingNode routingNode=clusterStateResponse.getState().routingNodes().nodesToShards().get(moveAllocationCommand.fromNode());
+    ClusterState clusterState=getLocalClusterState(client);
+    RoutingNode routingNode=clusterState.routingNodes().nodesToShards().get(moveAllocationCommand.fromNode());
     for (    MutableShardRouting mutableShardRouting : routingNode) {
       if (mutableShardRouting.shardId().equals(moveAllocationCommand.shardId())) {
         assertThat(mutableShardRouting.relocating(),equalTo(true));
       }
     }
-    routingNode=clusterStateResponse.getState().routingNodes().nodesToShards().get(moveAllocationCommand.toNode());
+    routingNode=clusterState.routingNodes().nodesToShards().get(moveAllocationCommand.toNode());
     boolean found=false;
     for (    MutableShardRouting mutableShardRouting : routingNode) {
       if (mutableShardRouting.shardId().equals(moveAllocationCommand.shardId())) {
