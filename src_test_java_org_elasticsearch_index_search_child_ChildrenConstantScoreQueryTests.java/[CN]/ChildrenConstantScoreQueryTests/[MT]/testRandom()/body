@@ -1,0 +1,94 @@
+{
+  Directory directory=newDirectory();
+  RandomIndexWriter indexWriter=new RandomIndexWriter(random(),directory);
+  int numUniqueChildValues=1 + random().nextInt(TEST_NIGHTLY ? 50000 : 1000);
+  String[] childValues=new String[numUniqueChildValues];
+  for (int i=0; i < numUniqueChildValues; i++) {
+    childValues[i]=Integer.toString(i);
+  }
+  ObjectObjectOpenHashMap<String,NavigableSet<String>> childValueToParentIds=new ObjectObjectOpenHashMap<String,NavigableSet<String>>();
+  int childDocId=0;
+  int numParentDocs=1 + random().nextInt(TEST_NIGHTLY ? 50000 : 1000);
+  for (int parentDocId=0; parentDocId < numParentDocs; parentDocId++) {
+    boolean markParentAsDeleted=rarely();
+    String parent=Integer.toString(parentDocId);
+    Document document=new Document();
+    document.add(new StringField(UidFieldMapper.NAME,Uid.createUid("parent",parent),Field.Store.YES));
+    document.add(new StringField(TypeFieldMapper.NAME,"parent",Field.Store.NO));
+    if (markParentAsDeleted) {
+      document.add(new StringField("delete","me",Field.Store.NO));
+    }
+    indexWriter.addDocument(document);
+    int numChildDocs=random().nextInt(TEST_NIGHTLY ? 100 : 25);
+    for (int i=0; i < numChildDocs; i++) {
+      boolean markChildAsDeleted=rarely();
+      String childValue=childValues[random().nextInt(childValues.length)];
+      document=new Document();
+      document.add(new StringField(UidFieldMapper.NAME,Uid.createUid("child",Integer.toString(childDocId)),Field.Store.NO));
+      document.add(new StringField(TypeFieldMapper.NAME,"child",Field.Store.NO));
+      document.add(new StringField(ParentFieldMapper.NAME,Uid.createUid("parent",parent),Field.Store.NO));
+      document.add(new StringField("field1",childValue,Field.Store.NO));
+      if (markChildAsDeleted) {
+        document.add(new StringField("delete","me",Field.Store.NO));
+      }
+      indexWriter.addDocument(document);
+      if (!markChildAsDeleted) {
+        NavigableSet<String> parentIds;
+        if (childValueToParentIds.containsKey(childValue)) {
+          parentIds=childValueToParentIds.lget();
+        }
+ else {
+          childValueToParentIds.put(childValue,parentIds=new TreeSet<String>());
+        }
+        if (!markParentAsDeleted) {
+          parentIds.add(parent);
+        }
+      }
+    }
+  }
+  indexWriter.deleteDocuments(new Term("delete","me"));
+  indexWriter.close();
+  IndexReader indexReader=DirectoryReader.open(directory);
+  IndexSearcher searcher=new IndexSearcher(indexReader);
+  Engine.Searcher engineSearcher=new Engine.SimpleSearcher(ChildrenConstantScoreQueryTests.class.getSimpleName(),searcher);
+  contextIndexSearcher=new ContextIndexSearcher(SearchContext.current(),engineSearcher);
+  TermFilter parentFilter=new TermFilter(new Term(TypeFieldMapper.NAME,"parent"));
+  for (  String childValue : childValues) {
+    TermQuery childQuery=new TermQuery(new Term("field1",childValue));
+    int shortCircuitParentDocSet=random().nextInt(numParentDocs);
+    Query query;
+    boolean applyAcceptedDocs=random().nextBoolean();
+    if (applyAcceptedDocs) {
+      query=new ChildrenConstantScoreQuery(childQuery,"parent","child",parentFilter,shortCircuitParentDocSet,applyAcceptedDocs);
+    }
+ else {
+      query=new XConstantScoreQuery(new CustomQueryWrappingFilter(new ChildrenConstantScoreQuery(childQuery,"parent","child",parentFilter,shortCircuitParentDocSet,applyAcceptedDocs)));
+    }
+    BitSetCollector collector=new BitSetCollector(indexReader.maxDoc());
+    searcher.search(query,collector);
+    FixedBitSet actualResult=collector.getResult();
+    FixedBitSet expectedResult=new FixedBitSet(indexReader.maxDoc());
+    if (childValueToParentIds.containsKey(childValue)) {
+      AtomicReader slowAtomicReader=SlowCompositeReaderWrapper.wrap(indexReader);
+      Terms terms=slowAtomicReader.terms(UidFieldMapper.NAME);
+      if (terms != null) {
+        NavigableSet<String> parentIds=childValueToParentIds.lget();
+        TermsEnum termsEnum=terms.iterator(null);
+        DocsEnum docsEnum=null;
+        for (        String id : parentIds) {
+          TermsEnum.SeekStatus seekStatus=termsEnum.seekCeil(Uid.createUidAsBytes("parent",id));
+          if (seekStatus == TermsEnum.SeekStatus.FOUND) {
+            docsEnum=termsEnum.docs(slowAtomicReader.getLiveDocs(),docsEnum,DocsEnum.FLAG_NONE);
+            expectedResult.set(docsEnum.nextDoc());
+          }
+ else           if (seekStatus == TermsEnum.SeekStatus.END) {
+            break;
+          }
+        }
+      }
+    }
+    assertEquals(actualResult,expectedResult,searcher);
+  }
+  indexReader.close();
+  directory.close();
+}
