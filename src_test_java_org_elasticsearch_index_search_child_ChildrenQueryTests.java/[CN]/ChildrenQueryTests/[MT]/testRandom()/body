@@ -1,0 +1,100 @@
+{
+  Directory directory=newDirectory();
+  RandomIndexWriter indexWriter=new RandomIndexWriter(random(),directory);
+  int numUniqueChildValues=1 + random().nextInt(TEST_NIGHTLY ? 6000 : 600);
+  String[] childValues=new String[numUniqueChildValues];
+  for (int i=0; i < numUniqueChildValues; i++) {
+    childValues[i]=Integer.toString(i);
+  }
+  int childDocId=0;
+  int numParentDocs=1 + random().nextInt(TEST_NIGHTLY ? 20000 : 1000);
+  ObjectObjectOpenHashMap<String,NavigableMap<String,FloatArrayList>> childValueToParentIds=new ObjectObjectOpenHashMap<String,NavigableMap<String,FloatArrayList>>();
+  for (int parentDocId=0; parentDocId < numParentDocs; parentDocId++) {
+    boolean markParentAsDeleted=rarely();
+    String parent=Integer.toString(parentDocId);
+    Document document=new Document();
+    document.add(new StringField(UidFieldMapper.NAME,Uid.createUid("parent",parent),Field.Store.YES));
+    document.add(new StringField(TypeFieldMapper.NAME,"parent",Field.Store.NO));
+    if (markParentAsDeleted) {
+      document.add(new StringField("delete","me",Field.Store.NO));
+    }
+    indexWriter.addDocument(document);
+    int numChildDocs=random().nextInt(TEST_NIGHTLY ? 100 : 25);
+    for (int i=0; i < numChildDocs; i++) {
+      boolean markChildAsDeleted=rarely();
+      String childValue=childValues[random().nextInt(childValues.length)];
+      document=new Document();
+      document.add(new StringField(UidFieldMapper.NAME,Uid.createUid("child",Integer.toString(childDocId)),Field.Store.NO));
+      document.add(new StringField(TypeFieldMapper.NAME,"child",Field.Store.NO));
+      document.add(new StringField(ParentFieldMapper.NAME,Uid.createUid("parent",parent),Field.Store.NO));
+      document.add(new StringField("field1",childValue,Field.Store.NO));
+      if (markChildAsDeleted) {
+        document.add(new StringField("delete","me",Field.Store.NO));
+      }
+      indexWriter.addDocument(document);
+      if (!markChildAsDeleted) {
+        NavigableMap<String,FloatArrayList> parentIdToChildScores;
+        if (childValueToParentIds.containsKey(childValue)) {
+          parentIdToChildScores=childValueToParentIds.lget();
+        }
+ else {
+          childValueToParentIds.put(childValue,parentIdToChildScores=new TreeMap<String,FloatArrayList>());
+        }
+        if (!markParentAsDeleted) {
+          FloatArrayList childScores=parentIdToChildScores.get(parent);
+          if (childScores == null) {
+            parentIdToChildScores.put(parent,childScores=new FloatArrayList());
+          }
+          childScores.add(1f);
+        }
+      }
+    }
+  }
+  indexWriter.deleteDocuments(new Term("delete","me"));
+  indexWriter.close();
+  IndexReader indexReader=DirectoryReader.open(directory);
+  IndexSearcher searcher=new IndexSearcher(indexReader);
+  Engine.Searcher engineSearcher=new Engine.SimpleSearcher(ChildrenQueryTests.class.getSimpleName(),searcher);
+  ((TestSearchContext)SearchContext.current()).setSearcher(new ContextIndexSearcher(SearchContext.current(),engineSearcher));
+  TermFilter parentFilter=new TermFilter(new Term(TypeFieldMapper.NAME,"parent"));
+  for (  String childValue : childValues) {
+    Query childQuery=new ConstantScoreQuery(new TermQuery(new Term("field1",childValue)));
+    int shortCircuitParentDocSet=random().nextInt(numParentDocs);
+    ScoreType scoreType=ScoreType.values()[random().nextInt(ScoreType.values().length)];
+    Query query=new ChildrenQuery("parent","child",parentFilter,childQuery,scoreType,shortCircuitParentDocSet);
+    BitSetCollector collector=new BitSetCollector(indexReader.maxDoc());
+    int numHits=1 + random().nextInt(25);
+    TopScoreDocCollector actualTopDocsCollector=TopScoreDocCollector.create(numHits,false);
+    searcher.search(query,MultiCollector.wrap(collector,actualTopDocsCollector));
+    FixedBitSet actualResult=collector.getResult();
+    FixedBitSet expectedResult=new FixedBitSet(indexReader.maxDoc());
+    MockScorer mockScorer=new MockScorer(scoreType);
+    TopScoreDocCollector expectedTopDocsCollector=TopScoreDocCollector.create(numHits,false);
+    expectedTopDocsCollector.setScorer(mockScorer);
+    if (childValueToParentIds.containsKey(childValue)) {
+      AtomicReader slowAtomicReader=SlowCompositeReaderWrapper.wrap(indexReader);
+      Terms terms=slowAtomicReader.terms(UidFieldMapper.NAME);
+      if (terms != null) {
+        NavigableMap<String,FloatArrayList> parentIdToChildScores=childValueToParentIds.lget();
+        TermsEnum termsEnum=terms.iterator(null);
+        DocsEnum docsEnum=null;
+        for (        Map.Entry<String,FloatArrayList> entry : parentIdToChildScores.entrySet()) {
+          TermsEnum.SeekStatus seekStatus=termsEnum.seekCeil(Uid.createUidAsBytes("parent",entry.getKey()));
+          if (seekStatus == TermsEnum.SeekStatus.FOUND) {
+            docsEnum=termsEnum.docs(slowAtomicReader.getLiveDocs(),docsEnum,DocsEnum.FLAG_NONE);
+            expectedResult.set(docsEnum.nextDoc());
+            mockScorer.scores=entry.getValue();
+            expectedTopDocsCollector.collect(docsEnum.docID());
+          }
+ else           if (seekStatus == TermsEnum.SeekStatus.END) {
+            break;
+          }
+        }
+      }
+    }
+    assertBitSet(actualResult,expectedResult,searcher);
+    assertTopDocs(actualTopDocsCollector.topDocs(),expectedTopDocsCollector.topDocs());
+  }
+  indexReader.close();
+  directory.close();
+}
