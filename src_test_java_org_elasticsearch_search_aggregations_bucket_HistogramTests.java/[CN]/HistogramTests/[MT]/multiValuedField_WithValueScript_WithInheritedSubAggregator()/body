@@ -1,0 +1,34 @@
+{
+  SearchResponse response=client().prepareSearch("idx").addAggregation(histogram("histo").field("values").script("_value + 1").interval(interval).subAggregation(terms("values").order(Terms.Order.TERM_ASC))).execute().actionGet();
+  assertThat(response.getFailedShards(),equalTo(0));
+  final int numBuckets=(numDocs + 2) / interval - 2 / interval + 1;
+  final long[] counts=new long[(numDocs + 2) / interval + 1];
+  for (int i=0; i < numDocs; ++i) {
+    final int bucket1=(i + 2) / interval;
+    final int bucket2=(i + 3) / interval;
+    ++counts[bucket1];
+    if (bucket1 != bucket2) {
+      ++counts[bucket2];
+    }
+  }
+  Histogram histo=response.getAggregations().get("histo");
+  assertThat(histo,notNullValue());
+  assertThat(histo.getName(),equalTo("histo"));
+  assertThat(histo.buckets().size(),equalTo(numBuckets));
+  for (int i=2 / interval; i < (numDocs + 2) / interval; ++i) {
+    Histogram.Bucket bucket=histo.getByKey(i * interval);
+    assertThat(bucket,notNullValue());
+    assertThat(bucket.getKey(),equalTo((long)i * interval));
+    assertThat(bucket.getDocCount(),equalTo(counts[i]));
+    Terms terms=bucket.getAggregations().get("values");
+    assertThat(terms,notNullValue());
+    assertThat(terms.getName(),equalTo("values"));
+    int minTerm=Math.max(2,i * interval - 1);
+    int maxTerm=Math.min(numDocs + 2,(i + 1) * interval);
+    assertThat(terms.buckets().size(),equalTo(maxTerm - minTerm + 1));
+    Iterator<Terms.Bucket> iter=terms.iterator();
+    for (int j=minTerm; j <= maxTerm; ++j) {
+      assertThat(iter.next().getKeyAsNumber().longValue(),equalTo((long)j));
+    }
+  }
+}

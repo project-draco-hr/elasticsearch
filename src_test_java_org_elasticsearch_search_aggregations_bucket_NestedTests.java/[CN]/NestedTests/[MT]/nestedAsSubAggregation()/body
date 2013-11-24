@@ -1,0 +1,18 @@
+{
+  SearchResponse response=client().prepareSearch("idx").addAggregation(terms("top_values").field("value").size(100).subAggregation(nested("nested").path("nested").subAggregation(max("max_value").field("nested.value")))).execute().actionGet();
+  assertThat(response.getFailedShards(),equalTo(0));
+  LongTerms values=response.getAggregations().get("top_values");
+  assertThat(values,notNullValue());
+  assertThat(values.getName(),equalTo("top_values"));
+  assertThat(values.buckets(),notNullValue());
+  assertThat(values.buckets().size(),equalTo(numParents));
+  for (int i=0; i < numParents; i++) {
+    String topValue="" + (i + 1);
+    assertThat(values.getByTerm(topValue),notNullValue());
+    Nested nested=values.getByTerm(topValue).getAggregations().get("nested");
+    assertThat(nested,notNullValue());
+    Max max=nested.getAggregations().get("max_value");
+    assertThat(max,notNullValue());
+    assertThat(max.getValue(),equalTo(numChildren[i] == 0 ? Double.NEGATIVE_INFINITY : (double)i + numChildren[i]));
+  }
+}

@@ -1,0 +1,20 @@
+{
+  SearchResponse response=client().prepareSearch("idx").addAggregation(histogram("histo").field("value").interval(interval).order(Histogram.Order.COUNT_DESC)).execute().actionGet();
+  assertThat(response.getFailedShards(),equalTo(0));
+  Histogram histo=response.getAggregations().get("histo");
+  assertThat(histo,notNullValue());
+  assertThat(histo.getName(),equalTo("histo"));
+  assertThat(histo.buckets().size(),equalTo(numValueBuckets));
+  LongOpenHashSet buckets=new LongOpenHashSet();
+  long previousCount=Long.MAX_VALUE;
+  for (int i=0; i < numValueBuckets; ++i) {
+    Histogram.Bucket bucket=histo.buckets().get(i);
+    assertThat(bucket,notNullValue());
+    long key=bucket.getKey();
+    assertEquals(0,key % interval);
+    assertTrue(buckets.add(key));
+    assertThat(bucket.getDocCount(),equalTo(valueCounts[(int)(key / interval)]));
+    assertThat(bucket.getDocCount(),lessThanOrEqualTo(previousCount));
+    previousCount=bucket.getDocCount();
+  }
+}

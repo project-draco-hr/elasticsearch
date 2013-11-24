@@ -1,0 +1,111 @@
+{
+  String field=null;
+  String script=null;
+  String scriptLang=null;
+  Map<String,Object> scriptParams=null;
+  Terms.ValueType valueType=null;
+  int requiredSize=10;
+  String orderKey="_count";
+  boolean orderAsc=false;
+  String format=null;
+  boolean assumeUnique=false;
+  XContentParser.Token token;
+  String currentFieldName=null;
+  while ((token=parser.nextToken()) != XContentParser.Token.END_OBJECT) {
+    if (token == XContentParser.Token.FIELD_NAME) {
+      currentFieldName=parser.currentName();
+    }
+ else     if (token == XContentParser.Token.VALUE_STRING) {
+      if ("field".equals(currentFieldName)) {
+        field=parser.text();
+      }
+ else       if ("script".equals(currentFieldName)) {
+        script=parser.text();
+      }
+ else       if ("script_lang".equals(currentFieldName) || "scriptLang".equals(currentFieldName)) {
+        scriptLang=parser.text();
+      }
+ else       if ("value_type".equals(currentFieldName) || "valueType".equals(currentFieldName)) {
+        valueType=Terms.ValueType.resolveType(parser.text());
+      }
+ else       if ("format".equals(currentFieldName)) {
+        format=parser.text();
+      }
+    }
+ else     if (token == XContentParser.Token.VALUE_BOOLEAN) {
+      if ("script_values_unique".equals(currentFieldName)) {
+        assumeUnique=parser.booleanValue();
+      }
+    }
+ else     if (token == XContentParser.Token.VALUE_NUMBER) {
+      if ("size".equals(currentFieldName)) {
+        requiredSize=parser.intValue();
+      }
+    }
+ else     if (token == XContentParser.Token.START_OBJECT) {
+      if ("params".equals(currentFieldName)) {
+        scriptParams=parser.map();
+      }
+ else       if ("order".equals(currentFieldName)) {
+        while ((token=parser.nextToken()) != XContentParser.Token.END_OBJECT) {
+          if (token == XContentParser.Token.FIELD_NAME) {
+            orderKey=parser.currentName();
+          }
+ else           if (token == XContentParser.Token.VALUE_STRING) {
+            String dir=parser.text();
+            orderAsc="asc".equalsIgnoreCase(dir);
+          }
+        }
+      }
+    }
+  }
+  InternalOrder order=resolveOrder(orderKey,orderAsc);
+  SearchScript searchScript=null;
+  if (script != null) {
+    searchScript=context.scriptService().search(context.lookup(),scriptLang,script,scriptParams);
+  }
+  if (field == null) {
+    Class<? extends ValuesSource> valueSourceType=script == null ? ValuesSource.class : valueType != null ? valueType.scriptValueType.getValuesSourceType() : BytesValuesSource.class;
+    ValuesSourceConfig<?> config=new ValuesSourceConfig(valueSourceType);
+    if (valueType != null) {
+      config.scriptValueType(valueType.scriptValueType);
+    }
+    config.script(searchScript);
+    if (!assumeUnique) {
+      config.ensureUnique(true);
+    }
+    return new TermsAggregatorFactory(aggregationName,config,order,requiredSize);
+  }
+  FieldMapper<?> mapper=context.smartNameFieldMapper(field);
+  if (mapper == null) {
+    ValuesSourceConfig<?> config=new ValuesSourceConfig<BytesValuesSource>(BytesValuesSource.class);
+    config.unmapped(true);
+    return new TermsAggregatorFactory(aggregationName,config,order,requiredSize);
+  }
+  IndexFieldData<?> indexFieldData=context.fieldData().getForField(mapper);
+  ValuesSourceConfig<?> config;
+  if (mapper instanceof DateFieldMapper) {
+    DateFieldMapper dateMapper=(DateFieldMapper)mapper;
+    ValueFormatter formatter=format == null ? new ValueFormatter.DateTime(dateMapper.dateTimeFormatter()) : new ValueFormatter.DateTime(format);
+    config=new ValuesSourceConfig<NumericValuesSource>(NumericValuesSource.class).formatter(formatter).parser(new ValueParser.DateMath(dateMapper.dateMathParser()));
+  }
+ else   if (mapper instanceof IpFieldMapper) {
+    config=new ValuesSourceConfig<NumericValuesSource>(NumericValuesSource.class).formatter(ValueFormatter.IPv4).parser(ValueParser.IPv4);
+  }
+ else   if (indexFieldData instanceof IndexNumericFieldData) {
+    config=new ValuesSourceConfig<NumericValuesSource>(NumericValuesSource.class);
+    if (format != null) {
+      config.formatter(new ValueFormatter.Number.Pattern(format));
+    }
+  }
+ else {
+    config=new ValuesSourceConfig<BytesValuesSource>(BytesValuesSource.class);
+    config.needsHashes(true);
+  }
+  config.script(searchScript);
+  config.fieldContext(new FieldContext(field,indexFieldData));
+  if (!assumeUnique) {
+    config.ensureUnique(true);
+  }
+  return new TermsAggregatorFactory(aggregationName,config,order,requiredSize);
+}

@@ -1,0 +1,40 @@
+{
+  List<InternalAggregation> aggregations=reduceContext.aggregations();
+  if (aggregations.size() == 1) {
+    return (InternalTerms)aggregations.get(0);
+  }
+  InternalTerms reduced=null;
+  Map<Text,List<InternalTerms.Bucket>> buckets=new HashMap<Text,List<InternalTerms.Bucket>>(requiredSize);
+  for (  InternalAggregation aggregation : aggregations) {
+    InternalTerms terms=(InternalTerms)aggregation;
+    if (terms instanceof UnmappedTerms) {
+      continue;
+    }
+    if (reduced == null) {
+      reduced=terms;
+    }
+    for (    Bucket bucket : terms.buckets) {
+      List<Bucket> existingBuckets=buckets.get(bucket.getKey());
+      if (existingBuckets == null) {
+        existingBuckets=new ArrayList<Bucket>(aggregations.size());
+        buckets.put(bucket.getKey(),existingBuckets);
+      }
+      existingBuckets.add(bucket);
+    }
+  }
+  if (reduced == null) {
+    return (UnmappedTerms)aggregations.get(0);
+  }
+  final int size=Math.min(requiredSize,buckets.size());
+  BucketPriorityQueue ordered=new BucketPriorityQueue(size,order.comparator());
+  for (  Map.Entry<Text,List<Bucket>> entry : buckets.entrySet()) {
+    List<Bucket> sameTermBuckets=entry.getValue();
+    ordered.insertWithOverflow(sameTermBuckets.get(0).reduce(sameTermBuckets,reduceContext.cacheRecycler()));
+  }
+  Bucket[] list=new Bucket[ordered.size()];
+  for (int i=ordered.size() - 1; i >= 0; i--) {
+    list[i]=(Bucket)ordered.pop();
+  }
+  reduced.buckets=Arrays.asList(list);
+  return reduced;
+}

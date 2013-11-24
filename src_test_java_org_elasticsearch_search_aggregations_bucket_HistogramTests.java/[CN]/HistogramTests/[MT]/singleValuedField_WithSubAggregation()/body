@@ -1,0 +1,24 @@
+{
+  SearchResponse response=client().prepareSearch("idx").addAggregation(histogram("histo").field("value").interval(interval).subAggregation(sum("sum").field("value"))).execute().actionGet();
+  assertThat(response.getFailedShards(),equalTo(0));
+  Histogram histo=response.getAggregations().get("histo");
+  assertThat(histo,notNullValue());
+  assertThat(histo.getName(),equalTo("histo"));
+  assertThat(histo.buckets().size(),equalTo(numValueBuckets));
+  for (int i=0; i < numValueBuckets; ++i) {
+    Histogram.Bucket bucket=histo.buckets().get(i);
+    assertThat(bucket,notNullValue());
+    assertThat(bucket.getKey(),equalTo((long)i * interval));
+    assertThat(bucket.getDocCount(),equalTo(valueCounts[i]));
+    assertThat(bucket.getAggregations().asList().isEmpty(),is(false));
+    Sum sum=bucket.getAggregations().get("sum");
+    assertThat(sum,notNullValue());
+    long s=0;
+    for (int j=0; j < numDocs; ++j) {
+      if ((j + 1) / interval == i) {
+        s+=j + 1;
+      }
+    }
+    assertThat(sum.getValue(),equalTo((double)s));
+  }
+}

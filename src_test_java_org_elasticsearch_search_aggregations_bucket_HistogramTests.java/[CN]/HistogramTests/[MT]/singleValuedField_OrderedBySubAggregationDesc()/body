@@ -1,0 +1,30 @@
+{
+  SearchResponse response=client().prepareSearch("idx").addAggregation(histogram("histo").field("value").interval(interval).order(Histogram.Order.aggregation("sum",false)).subAggregation(sum("sum").field("value"))).execute().actionGet();
+  assertThat(response.getFailedShards(),equalTo(0));
+  Histogram histo=response.getAggregations().get("histo");
+  assertThat(histo,notNullValue());
+  assertThat(histo.getName(),equalTo("histo"));
+  assertThat(histo.buckets().size(),equalTo(numValueBuckets));
+  LongOpenHashSet visited=new LongOpenHashSet();
+  double previousSum=Double.POSITIVE_INFINITY;
+  for (int i=0; i < numValueBuckets; ++i) {
+    Histogram.Bucket bucket=histo.buckets().get(i);
+    assertThat(bucket,notNullValue());
+    long key=bucket.getKey();
+    assertTrue(visited.add(key));
+    int b=(int)(key / interval);
+    assertThat(bucket.getDocCount(),equalTo(valueCounts[b]));
+    assertThat(bucket.getAggregations().asList().isEmpty(),is(false));
+    Sum sum=bucket.getAggregations().get("sum");
+    assertThat(sum,notNullValue());
+    long s=0;
+    for (int j=0; j < numDocs; ++j) {
+      if ((j + 1) / interval == b) {
+        s+=j + 1;
+      }
+    }
+    assertThat(sum.getValue(),equalTo((double)s));
+    assertThat(sum.getValue(),lessThanOrEqualTo(previousSum));
+    previousSum=s;
+  }
+}

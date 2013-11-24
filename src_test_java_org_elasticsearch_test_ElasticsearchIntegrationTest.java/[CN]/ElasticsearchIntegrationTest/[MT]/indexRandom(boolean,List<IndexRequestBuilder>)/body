@@ -1,0 +1,75 @@
+{
+  if (builders.size() == 0) {
+    return;
+  }
+  Random random=getRandom();
+  Set<String> indicesSet=new HashSet<String>();
+  for (  IndexRequestBuilder builder : builders) {
+    indicesSet.add(builder.request().index());
+  }
+  final String[] indices=indicesSet.toArray(new String[0]);
+  Collections.shuffle(builders,random);
+  final CopyOnWriteArrayList<Tuple<IndexRequestBuilder,Throwable>> errors=new CopyOnWriteArrayList<Tuple<IndexRequestBuilder,Throwable>>();
+  List<CountDownLatch> latches=new ArrayList<CountDownLatch>();
+  if (frequently()) {
+    logger.info("Index [{}] docs async: [{}] bulk: [{}]",builders.size(),true,false);
+    final CountDownLatch latch=new CountDownLatch(builders.size());
+    latches.add(latch);
+    for (    IndexRequestBuilder indexRequestBuilder : builders) {
+      indexRequestBuilder.execute(new PayloadLatchedActionListener<IndexResponse,IndexRequestBuilder>(indexRequestBuilder,latch,errors));
+      if (rarely()) {
+        if (rarely()) {
+          client().admin().indices().prepareRefresh(indices).setIgnoreIndices(IgnoreIndices.MISSING).execute(new LatchedActionListener<RefreshResponse>(newLatch(latches)));
+        }
+ else         if (rarely()) {
+          client().admin().indices().prepareFlush(indices).setIgnoreIndices(IgnoreIndices.MISSING).execute(new LatchedActionListener<FlushResponse>(newLatch(latches)));
+        }
+ else         if (rarely()) {
+          client().admin().indices().prepareOptimize(indices).setIgnoreIndices(IgnoreIndices.MISSING).setMaxNumSegments(between(1,10)).setFlush(random.nextBoolean()).execute(new LatchedActionListener<OptimizeResponse>(newLatch(latches)));
+        }
+      }
+    }
+  }
+ else   if (randomBoolean()) {
+    logger.info("Index [{}] docs async: [{}] bulk: [{}]",builders.size(),false,false);
+    for (    IndexRequestBuilder indexRequestBuilder : builders) {
+      indexRequestBuilder.execute().actionGet();
+      if (rarely()) {
+        if (rarely()) {
+          client().admin().indices().prepareRefresh(indices).setIgnoreIndices(IgnoreIndices.MISSING).execute(new LatchedActionListener<RefreshResponse>(newLatch(latches)));
+        }
+ else         if (rarely()) {
+          client().admin().indices().prepareFlush(indices).setIgnoreIndices(IgnoreIndices.MISSING).execute(new LatchedActionListener<FlushResponse>(newLatch(latches)));
+        }
+ else         if (rarely()) {
+          client().admin().indices().prepareOptimize(indices).setIgnoreIndices(IgnoreIndices.MISSING).setMaxNumSegments(between(1,10)).setFlush(random.nextBoolean()).execute(new LatchedActionListener<OptimizeResponse>(newLatch(latches)));
+        }
+      }
+    }
+  }
+ else {
+    logger.info("Index [{}] docs async: [{}] bulk: [{}]",builders.size(),false,true);
+    BulkRequestBuilder bulkBuilder=client().prepareBulk();
+    for (    IndexRequestBuilder indexRequestBuilder : builders) {
+      bulkBuilder.add(indexRequestBuilder);
+    }
+    BulkResponse actionGet=bulkBuilder.execute().actionGet();
+    assertThat(actionGet.hasFailures() ? actionGet.buildFailureMessage() : "",actionGet.hasFailures(),equalTo(false));
+  }
+  for (  CountDownLatch countDownLatch : latches) {
+    countDownLatch.await();
+  }
+  final List<Throwable> actualErrors=new ArrayList<Throwable>();
+  for (  Tuple<IndexRequestBuilder,Throwable> tuple : errors) {
+    if (ExceptionsHelper.unwrapCause(tuple.v2()) instanceof EsRejectedExecutionException) {
+      tuple.v1().execute().actionGet();
+    }
+ else {
+      actualErrors.add(tuple.v2());
+    }
+  }
+  assertThat(actualErrors,emptyIterable());
+  if (forceRefresh) {
+    assertNoFailures(client().admin().indices().prepareRefresh(indices).setIgnoreIndices(IgnoreIndices.MISSING).execute().get());
+  }
+}

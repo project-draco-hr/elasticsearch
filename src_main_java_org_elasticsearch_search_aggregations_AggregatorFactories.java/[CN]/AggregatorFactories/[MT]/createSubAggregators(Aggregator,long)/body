@@ -1,0 +1,49 @@
+{
+  Aggregator[] aggregators=new Aggregator[count()];
+  for (int i=0; i < factories.length; ++i) {
+    final AggregatorFactory factory=factories[i];
+    final Aggregator first=factory.create(parent.context(),parent,estimatedBucketsCount);
+    if (first.bucketAggregationMode() == BucketAggregationMode.MULTI_BUCKETS) {
+      aggregators[i]=first;
+      continue;
+    }
+    aggregators[i]=new Aggregator(first.name(),BucketAggregationMode.MULTI_BUCKETS,AggregatorFactories.EMPTY,1,first.context(),first.parent()){
+      ObjectArray<Aggregator> aggregators;
+{
+        aggregators=BigArrays.newObjectArray(estimatedBucketsCount);
+        aggregators.set(0,first);
+        for (long i=1; i < estimatedBucketsCount; ++i) {
+          aggregators.set(i,factory.create(parent.context(),parent,estimatedBucketsCount));
+        }
+      }
+      @Override public boolean shouldCollect(){
+        return first.shouldCollect();
+      }
+      @Override protected void doPostCollection(){
+        for (long i=0; i < aggregators.size(); ++i) {
+          final Aggregator aggregator=aggregators.get(i);
+          if (aggregator != null) {
+            aggregator.postCollection();
+          }
+        }
+      }
+      @Override public void collect(      int doc,      long owningBucketOrdinal) throws IOException {
+        aggregators=BigArrays.grow(aggregators,owningBucketOrdinal + 1);
+        Aggregator aggregator=aggregators.get(owningBucketOrdinal);
+        if (aggregator == null) {
+          aggregator=factory.create(parent.context(),parent,estimatedBucketsCount);
+          aggregators.set(owningBucketOrdinal,aggregator);
+        }
+        aggregator.collect(doc,0);
+      }
+      @Override public InternalAggregation buildAggregation(      long owningBucketOrdinal){
+        return aggregators.get(owningBucketOrdinal).buildAggregation(0);
+      }
+      @Override public InternalAggregation buildEmptyAggregation(){
+        return first.buildEmptyAggregation();
+      }
+    }
+;
+  }
+  return aggregators;
+}

@@ -1,0 +1,22 @@
+{
+  prepareCreate("empty_bucket_idx").addMapping("type","value","type=integer","ip","type=ip").execute().actionGet();
+  List<IndexRequestBuilder> builders=new ArrayList<IndexRequestBuilder>();
+  for (int i=0; i < 2; i++) {
+    builders.add(client().prepareIndex("empty_bucket_idx","type","" + i).setSource(jsonBuilder().startObject().field("value",i * 2).field("ip","10.0.0.5").endObject()));
+  }
+  indexRandom(true,builders.toArray(new IndexRequestBuilder[builders.size()]));
+  SearchResponse searchResponse=client().prepareSearch("empty_bucket_idx").setQuery(matchAllQuery()).addAggregation(histogram("histo").field("value").interval(1l).emptyBuckets(true).subAggregation(ipRange("ip_range").field("ip").addRange("r1","10.0.0.1","10.0.0.10"))).execute().actionGet();
+  assertThat(searchResponse.getHits().getTotalHits(),equalTo(2l));
+  Histogram histo=searchResponse.getAggregations().get("histo");
+  assertThat(histo,Matchers.notNullValue());
+  Histogram.Bucket bucket=histo.getByKey(1l);
+  assertThat(bucket,Matchers.notNullValue());
+  IPv4Range range=bucket.getAggregations().get("ip_range");
+  assertThat(range,Matchers.notNullValue());
+  assertThat(range.getName(),equalTo("ip_range"));
+  assertThat(range.buckets().size(),is(1));
+  assertThat(range.buckets().get(0).getKey(),equalTo("r1"));
+  assertThat(range.buckets().get(0).getFromAsString(),equalTo("10.0.0.1"));
+  assertThat(range.buckets().get(0).getToAsString(),equalTo("10.0.0.10"));
+  assertThat(range.buckets().get(0).getDocCount(),equalTo(0l));
+}

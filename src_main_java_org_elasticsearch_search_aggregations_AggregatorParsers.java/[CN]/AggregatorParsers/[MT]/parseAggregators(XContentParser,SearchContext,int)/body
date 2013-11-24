@@ -1,0 +1,45 @@
+{
+  XContentParser.Token token=null;
+  String currentFieldName=null;
+  AggregatorFactories.Builder factories=new AggregatorFactories.Builder();
+  String aggregationName=null;
+  while ((token=parser.nextToken()) != XContentParser.Token.END_OBJECT) {
+    if (token == XContentParser.Token.FIELD_NAME) {
+      aggregationName=parser.currentName();
+    }
+ else     if (token == XContentParser.Token.START_OBJECT) {
+      String aggregatorType=null;
+      AggregatorFactory factory=null;
+      AggregatorFactories subFactories=null;
+      while ((token=parser.nextToken()) != XContentParser.Token.END_OBJECT) {
+        if (token == XContentParser.Token.FIELD_NAME) {
+          currentFieldName=parser.currentName();
+        }
+ else         if (token == XContentParser.Token.START_OBJECT) {
+          if ("aggregations".equals(currentFieldName) || "aggs".equals(currentFieldName)) {
+            subFactories=parseAggregators(parser,context,level + 1);
+          }
+ else {
+            aggregatorType=currentFieldName;
+            Aggregator.Parser aggregatorParser=parser(aggregatorType);
+            if (aggregatorParser == null) {
+              throw new SearchParseException(context,"Could not find aggregator type [" + currentFieldName + "]");
+            }
+            factory=aggregatorParser.parse(aggregationName,parser,context);
+          }
+        }
+      }
+      if (factory == null) {
+        continue;
+      }
+      if (subFactories != null) {
+        factory.subFactories(subFactories);
+      }
+      if (level == 0) {
+        factory.validate();
+      }
+      factories.add(factory);
+    }
+  }
+  return factories.build();
+}

@@ -1,0 +1,45 @@
+{
+  final int numDocs=atLeast(1000);
+  final int maxNumTerms=randomIntBetween(10,10000);
+  final IntOpenHashSet valuesSet=new IntOpenHashSet();
+  wipeIndices("idx");
+  prepareCreate("idx").addMapping("type",jsonBuilder().startObject().startObject("type").startObject("properties").startObject("string_values").field("type","string").field("index","not_analyzed").endObject().startObject("long_values").field("type","long").endObject().startObject("double_values").field("type","double").endObject().endObject().endObject()).execute().actionGet();
+  for (int i=0; i < numDocs; ++i) {
+    final int[] values=new int[randomInt(4)];
+    for (int j=0; j < values.length; ++j) {
+      values[j]=randomInt(maxNumTerms - 1) - 1000;
+      valuesSet.add(values[j]);
+    }
+    XContentBuilder source=jsonBuilder().startObject().field("num",randomDouble()).startArray("long_values");
+    for (int j=0; j < values.length; ++j) {
+      source=source.value(values[j]);
+    }
+    source=source.endArray().startArray("double_values");
+    for (int j=0; j < values.length; ++j) {
+      source=source.value((double)values[j]);
+    }
+    source=source.endArray().startArray("string_values");
+    for (int j=0; j < values.length; ++j) {
+      source=source.value(Integer.toString(values[j]));
+    }
+    source=source.endArray().endObject();
+    client().prepareIndex("idx","type").setSource(source).execute().actionGet();
+  }
+  assertNoFailures(client().admin().indices().prepareRefresh("idx").setIgnoreIndices(IgnoreIndices.MISSING).execute().get());
+  SearchResponse resp=client().prepareSearch("idx").addAggregation(terms("long").field("long_values").size(maxNumTerms).subAggregation(min("min").field("num"))).addAggregation(terms("double").field("double_values").size(maxNumTerms).subAggregation(max("max").field("num"))).addAggregation(terms("string").field("string_values").size(maxNumTerms).subAggregation(stats("stats").field("num"))).execute().actionGet();
+  assertEquals(0,resp.getFailedShards());
+  final Terms longTerms=resp.getAggregations().get("long");
+  final Terms doubleTerms=resp.getAggregations().get("double");
+  final Terms stringTerms=resp.getAggregations().get("string");
+  assertEquals(valuesSet.size(),longTerms.buckets().size());
+  assertEquals(valuesSet.size(),doubleTerms.buckets().size());
+  assertEquals(valuesSet.size(),stringTerms.buckets().size());
+  for (  Terms.Bucket bucket : longTerms.buckets()) {
+    final Terms.Bucket doubleBucket=doubleTerms.getByTerm(Double.toString(Long.parseLong(bucket.getKey().string())));
+    final Terms.Bucket stringBucket=stringTerms.getByTerm(bucket.getKey().string());
+    assertNotNull(doubleBucket);
+    assertNotNull(stringBucket);
+    assertEquals(bucket.getDocCount(),doubleBucket.getDocCount());
+    assertEquals(bucket.getDocCount(),stringBucket.getDocCount());
+  }
+}
