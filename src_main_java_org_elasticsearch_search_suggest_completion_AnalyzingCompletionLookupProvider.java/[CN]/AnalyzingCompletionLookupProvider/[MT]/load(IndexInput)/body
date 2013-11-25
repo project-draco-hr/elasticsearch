@@ -1,5 +1,5 @@
 {
-  CodecUtil.checkHeader(input,CODEC_NAME,CODEC_VERSION,CODEC_VERSION);
+  int version=CodecUtil.checkHeader(input,CODEC_NAME,CODEC_VERSION_START,CODEC_VERSION_LATEST);
   final Map<String,AnalyzingSuggestHolder> lookupMap=new HashMap<String,AnalyzingSuggestHolder>();
   input.seek(input.length() - 8);
   long metaPointer=input.readLong();
@@ -21,7 +21,19 @@
     boolean preserveSep=(options & SERIALIZE_PRESERVE_SEPERATORS) != 0;
     boolean hasPayloads=(options & SERIALIZE_HAS_PAYLOADS) != 0;
     boolean preservePositionIncrements=(options & SERIALIZE_PRESERVE_POSITION_INCREMENTS) != 0;
-    lookupMap.put(entry.getValue(),new AnalyzingSuggestHolder(preserveSep,preservePositionIncrements,maxSurfaceFormsPerAnalyzedForm,maxGraphExpansions,hasPayloads,maxAnalyzedPathsForOneInput,fst));
+    int sepLabel, payloadSep, endByte;
+    if (version == CODEC_VERSION_START) {
+      sepLabel=0xFF;
+      payloadSep='\u001f';
+      endByte=0x0;
+    }
+ else {
+      sepLabel=input.readVInt();
+      endByte=input.readVInt();
+      payloadSep=input.readVInt();
+    }
+    AnalyzingSuggestHolder holder=new AnalyzingSuggestHolder(preserveSep,preservePositionIncrements,maxSurfaceFormsPerAnalyzedForm,maxGraphExpansions,hasPayloads,maxAnalyzedPathsForOneInput,fst,sepLabel,payloadSep,endByte);
+    lookupMap.put(entry.getValue(),holder);
   }
   return new LookupFactory(){
     @Override public Lookup getLookup(    FieldMapper<?> mapper,    CompletionSuggestionContext suggestionContext){
@@ -32,12 +44,11 @@
       int flags=analyzingSuggestHolder.preserveSep ? XAnalyzingSuggester.PRESERVE_SEP : 0;
       XAnalyzingSuggester suggester;
       if (suggestionContext.isFuzzy()) {
-        suggester=new XFuzzySuggester(mapper.indexAnalyzer(),mapper.searchAnalyzer(),flags,analyzingSuggestHolder.maxSurfaceFormsPerAnalyzedForm,analyzingSuggestHolder.maxGraphExpansions,suggestionContext.getFuzzyEditDistance(),suggestionContext.isFuzzyTranspositions(),suggestionContext.getFuzzyPrefixLength(),suggestionContext.getFuzzyMinLength(),analyzingSuggestHolder.fst,analyzingSuggestHolder.hasPayloads,analyzingSuggestHolder.maxAnalyzedPathsForOneInput);
+        suggester=new XFuzzySuggester(mapper.indexAnalyzer(),mapper.searchAnalyzer(),flags,analyzingSuggestHolder.maxSurfaceFormsPerAnalyzedForm,analyzingSuggestHolder.maxGraphExpansions,suggestionContext.getFuzzyEditDistance(),suggestionContext.isFuzzyTranspositions(),suggestionContext.getFuzzyPrefixLength(),suggestionContext.getFuzzyMinLength(),suggestionContext.isFuzzyUnicodeAware(),analyzingSuggestHolder.fst,analyzingSuggestHolder.hasPayloads,analyzingSuggestHolder.maxAnalyzedPathsForOneInput,analyzingSuggestHolder.sepLabel,analyzingSuggestHolder.payloadSep,analyzingSuggestHolder.endByte);
       }
  else {
-        suggester=new XAnalyzingSuggester(mapper.indexAnalyzer(),mapper.searchAnalyzer(),flags,analyzingSuggestHolder.maxSurfaceFormsPerAnalyzedForm,analyzingSuggestHolder.maxGraphExpansions,analyzingSuggestHolder.fst,analyzingSuggestHolder.hasPayloads,analyzingSuggestHolder.maxAnalyzedPathsForOneInput);
+        suggester=new XAnalyzingSuggester(mapper.indexAnalyzer(),mapper.searchAnalyzer(),flags,analyzingSuggestHolder.maxSurfaceFormsPerAnalyzedForm,analyzingSuggestHolder.maxGraphExpansions,analyzingSuggestHolder.preservePositionIncrements,analyzingSuggestHolder.fst,analyzingSuggestHolder.hasPayloads,analyzingSuggestHolder.maxAnalyzedPathsForOneInput,analyzingSuggestHolder.sepLabel,analyzingSuggestHolder.payloadSep,analyzingSuggestHolder.endByte);
       }
-      suggester.setPreservePositionIncrements(analyzingSuggestHolder.preservePositionIncrements);
       return suggester;
     }
     @Override public CompletionStats stats(    String... fields){
@@ -59,6 +70,9 @@
         }
       }
       return new CompletionStats(sizeInBytes,completionFields);
+    }
+    @Override AnalyzingSuggestHolder getAnalyzingSuggestHolder(    FieldMapper<?> mapper){
+      return lookupMap.get(mapper.names().indexName());
     }
   }
 ;
