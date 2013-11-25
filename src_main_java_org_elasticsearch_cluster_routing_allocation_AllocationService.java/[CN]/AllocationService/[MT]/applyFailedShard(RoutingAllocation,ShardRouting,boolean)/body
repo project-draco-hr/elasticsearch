@@ -4,17 +4,18 @@
   if (indexRoutingTable == null) {
     return false;
   }
+  RoutingNodes routingNodes=allocation.routingNodes();
   if (failedShard.relocatingNodeId() != null) {
     if (failedShard.state() == INITIALIZING) {
       boolean dirty=false;
-      RoutingNode initializingNode=allocation.routingNodes().node(failedShard.currentNodeId());
+      RoutingNode initializingNode=routingNodes.node(failedShard.currentNodeId());
       if (initializingNode != null) {
         for (Iterator<MutableShardRouting> it=initializingNode.iterator(); it.hasNext(); ) {
           MutableShardRouting shardRouting=it.next();
           if (shardRouting.equals(failedShard)) {
             dirty=true;
             it.remove();
-            shardRouting.deassignNode();
+            routingNodes.deassignShard(shardRouting);
             if (addToIgnoreList) {
               allocation.addIgnoreShardForNode(failedShard.shardId(),failedShard.currentNodeId());
             }
@@ -23,13 +24,13 @@
         }
       }
       if (dirty) {
-        RoutingNode relocatingFromNode=allocation.routingNodes().node(failedShard.relocatingNodeId());
+        RoutingNode relocatingFromNode=routingNodes.node(failedShard.relocatingNodeId());
         if (relocatingFromNode != null) {
           for (Iterator<MutableShardRouting> it=relocatingFromNode.iterator(); it.hasNext(); ) {
             MutableShardRouting shardRouting=it.next();
             if (shardRouting.shardId().equals(failedShard.shardId()) && shardRouting.state() == RELOCATING) {
               dirty=true;
-              shardRouting.cancelRelocation();
+              routingNodes.cancelRelocationForShard(shardRouting);
               break;
             }
           }
@@ -39,30 +40,30 @@
     }
  else     if (failedShard.state() == RELOCATING) {
       boolean dirty=false;
-      RoutingNode relocatingFromNode=allocation.routingNodes().node(failedShard.currentNodeId());
+      RoutingNode relocatingFromNode=routingNodes.node(failedShard.currentNodeId());
       if (relocatingFromNode != null) {
         for (Iterator<MutableShardRouting> it=relocatingFromNode.iterator(); it.hasNext(); ) {
           MutableShardRouting shardRouting=it.next();
           if (shardRouting.equals(failedShard)) {
             dirty=true;
-            shardRouting.cancelRelocation();
+            routingNodes.cancelRelocationForShard(shardRouting);
             it.remove();
             if (addToIgnoreList) {
               allocation.addIgnoreShardForNode(failedShard.shardId(),failedShard.currentNodeId());
             }
-            allocation.routingNodes().unassigned().add(new MutableShardRouting(failedShard.index(),failedShard.id(),null,failedShard.primary(),ShardRoutingState.UNASSIGNED,failedShard.version() + 1));
+            routingNodes.unassigned().add(new MutableShardRouting(failedShard.index(),failedShard.id(),null,failedShard.primary(),ShardRoutingState.UNASSIGNED,failedShard.version() + 1));
             break;
           }
         }
       }
       if (dirty) {
-        RoutingNode initializingNode=allocation.routingNodes().node(failedShard.relocatingNodeId());
+        RoutingNode initializingNode=routingNodes.node(failedShard.relocatingNodeId());
         if (initializingNode != null) {
           for (Iterator<MutableShardRouting> it=initializingNode.iterator(); it.hasNext(); ) {
             MutableShardRouting shardRouting=it.next();
             if (shardRouting.shardId().equals(failedShard.shardId()) && shardRouting.state() == INITIALIZING) {
               dirty=true;
-              shardRouting.deassignNode();
+              routingNodes.deassignShard(shardRouting);
               it.remove();
             }
           }
@@ -76,7 +77,7 @@
   }
  else {
     boolean dirty=false;
-    RoutingNode node=allocation.routingNodes().node(failedShard.currentNodeId());
+    RoutingNode node=routingNodes.node(failedShard.currentNodeId());
     if (node != null) {
       for (Iterator<MutableShardRouting> it=node.iterator(); it.hasNext(); ) {
         MutableShardRouting shardRouting=it.next();
@@ -87,7 +88,7 @@
           }
           it.remove();
           List<MutableShardRouting> shardsToMove=Lists.newArrayList();
-          for (Iterator<MutableShardRouting> unassignedIt=allocation.routingNodes().unassigned().iterator(); unassignedIt.hasNext(); ) {
+          for (Iterator<MutableShardRouting> unassignedIt=routingNodes.unassigned().iterator(); unassignedIt.hasNext(); ) {
             MutableShardRouting unassignedShardRouting=unassignedIt.next();
             if (unassignedShardRouting.shardId().equals(failedShard.shardId())) {
               unassignedIt.remove();
@@ -95,9 +96,9 @@
             }
           }
           if (!shardsToMove.isEmpty()) {
-            allocation.routingNodes().unassigned().addAll(shardsToMove);
+            routingNodes.unassigned().addAll(shardsToMove);
           }
-          allocation.routingNodes().unassigned().add(new MutableShardRouting(failedShard.index(),failedShard.id(),null,null,failedShard.restoreSource(),failedShard.primary(),ShardRoutingState.UNASSIGNED,failedShard.version() + 1));
+          routingNodes.unassigned().add(new MutableShardRouting(failedShard.index(),failedShard.id(),null,null,failedShard.restoreSource(),failedShard.primary(),ShardRoutingState.UNASSIGNED,failedShard.version() + 1));
           break;
         }
       }
