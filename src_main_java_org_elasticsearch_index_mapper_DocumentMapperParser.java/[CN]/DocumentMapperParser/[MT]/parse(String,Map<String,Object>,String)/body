@@ -1,0 +1,69 @@
+{
+  if (type == null) {
+    throw new MapperParsingException("Failed to derive type");
+  }
+  if (defaultSource != null) {
+    Tuple<String,Map<String,Object>> t=extractMapping(MapperService.DEFAULT_MAPPING,defaultSource);
+    if (t.v2() != null) {
+      XContentHelper.mergeDefaults(mapping,t.v2());
+    }
+  }
+  Mapper.TypeParser.ParserContext parserContext=new Mapper.TypeParser.ParserContext(postingsFormatService,docValuesFormatService,analysisService,similarityLookupService,typeParsers);
+  DocumentMapper.Builder docBuilder=doc(index.name(),indexSettings,(RootObjectMapper.Builder)rootObjectTypeParser.parse(type,mapping,parserContext));
+  for (  Map.Entry<String,Object> entry : mapping.entrySet()) {
+    String fieldName=Strings.toUnderscoreCase(entry.getKey());
+    Object fieldNode=entry.getValue();
+    if ("index_analyzer".equals(fieldName)) {
+      NamedAnalyzer analyzer=analysisService.analyzer(fieldNode.toString());
+      if (analyzer == null) {
+        throw new MapperParsingException("Analyzer [" + fieldNode.toString() + "] not found for index_analyzer setting on root type ["+ type+ "]");
+      }
+      docBuilder.indexAnalyzer(analyzer);
+    }
+ else     if ("search_analyzer".equals(fieldName)) {
+      NamedAnalyzer analyzer=analysisService.analyzer(fieldNode.toString());
+      if (analyzer == null) {
+        throw new MapperParsingException("Analyzer [" + fieldNode.toString() + "] not found for search_analyzer setting on root type ["+ type+ "]");
+      }
+      docBuilder.searchAnalyzer(analyzer);
+    }
+ else     if ("search_quote_analyzer".equals(fieldName)) {
+      NamedAnalyzer analyzer=analysisService.analyzer(fieldNode.toString());
+      if (analyzer == null) {
+        throw new MapperParsingException("Analyzer [" + fieldNode.toString() + "] not found for search_analyzer setting on root type ["+ type+ "]");
+      }
+      docBuilder.searchQuoteAnalyzer(analyzer);
+    }
+ else     if ("analyzer".equals(fieldName)) {
+      NamedAnalyzer analyzer=analysisService.analyzer(fieldNode.toString());
+      if (analyzer == null) {
+        throw new MapperParsingException("Analyzer [" + fieldNode.toString() + "] not found for analyzer setting on root type ["+ type+ "]");
+      }
+      docBuilder.indexAnalyzer(analyzer);
+      docBuilder.searchAnalyzer(analyzer);
+    }
+ else {
+      Mapper.TypeParser typeParser=rootTypeParsers.get(fieldName);
+      if (typeParser != null) {
+        docBuilder.put(typeParser.parse(fieldName,(Map<String,Object>)fieldNode,parserContext));
+      }
+    }
+  }
+  if (!docBuilder.hasIndexAnalyzer()) {
+    docBuilder.indexAnalyzer(analysisService.defaultIndexAnalyzer());
+  }
+  if (!docBuilder.hasSearchAnalyzer()) {
+    docBuilder.searchAnalyzer(analysisService.defaultSearchAnalyzer());
+  }
+  if (!docBuilder.hasSearchQuoteAnalyzer()) {
+    docBuilder.searchAnalyzer(analysisService.defaultSearchQuoteAnalyzer());
+  }
+  ImmutableMap<String,Object> attributes=ImmutableMap.of();
+  if (mapping.containsKey("_meta")) {
+    attributes=ImmutableMap.copyOf((Map<String,Object>)mapping.get("_meta"));
+  }
+  docBuilder.meta(attributes);
+  DocumentMapper documentMapper=docBuilder.build(this);
+  documentMapper.refreshSource();
+  return documentMapper;
+}
