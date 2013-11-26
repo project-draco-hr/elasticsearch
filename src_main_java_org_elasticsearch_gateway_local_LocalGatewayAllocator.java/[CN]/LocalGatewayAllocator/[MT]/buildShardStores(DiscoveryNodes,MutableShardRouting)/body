@@ -1,27 +1,29 @@
 {
   Map<DiscoveryNode,TransportNodesListShardStoreMetaData.StoreFilesMetaData> shardStores=cachedStores.get(shard.shardId());
-  Set<String> nodesIds;
+  ObjectOpenHashSet<String> nodesIds;
   if (shardStores == null) {
     shardStores=Maps.newHashMap();
     cachedStores.put(shard.shardId(),shardStores);
-    nodesIds=nodes.dataNodes().keySet();
+    nodesIds=ObjectOpenHashSet.from(nodes.dataNodes().keys());
   }
  else {
-    nodesIds=Sets.newHashSet();
+    nodesIds=ObjectOpenHashSet.newInstance();
     for (Iterator<DiscoveryNode> it=shardStores.keySet().iterator(); it.hasNext(); ) {
       DiscoveryNode node=it.next();
       if (!nodes.nodeExists(node.id())) {
         it.remove();
       }
     }
-    for (    DiscoveryNode node : nodes.dataNodes().values()) {
+    for (    ObjectCursor<DiscoveryNode> cursor : nodes.dataNodes().values()) {
+      DiscoveryNode node=cursor.value;
       if (!shardStores.containsKey(node)) {
         nodesIds.add(node.id());
       }
     }
   }
   if (!nodesIds.isEmpty()) {
-    TransportNodesListShardStoreMetaData.NodesStoreFilesMetaData nodesStoreFilesMetaData=listShardStoreMetaData.list(shard.shardId(),false,nodesIds,listTimeout).actionGet();
+    String[] nodesIdsArray=nodesIds.toArray(String.class);
+    TransportNodesListShardStoreMetaData.NodesStoreFilesMetaData nodesStoreFilesMetaData=listShardStoreMetaData.list(shard.shardId(),false,nodesIdsArray,listTimeout).actionGet();
     if (logger.isTraceEnabled()) {
       if (nodesStoreFilesMetaData.failures().length > 0) {
         StringBuilder sb=new StringBuilder(shard + ": failures when trying to list stores on nodes:");
