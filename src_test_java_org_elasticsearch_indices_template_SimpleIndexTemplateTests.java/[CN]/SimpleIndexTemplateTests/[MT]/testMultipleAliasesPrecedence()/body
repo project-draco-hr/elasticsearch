@@ -1,0 +1,22 @@
+{
+  client().admin().indices().preparePutTemplate("template1").setTemplate("*").setOrder(0).addAlias(new Alias("alias1")).addAlias(new Alias("{index}-alias")).addAlias(new Alias("alias3").filter(FilterBuilders.missingFilter("test"))).addAlias(new Alias("alias4")).get();
+  client().admin().indices().preparePutTemplate("template2").setTemplate("te*").setOrder(1).addAlias(new Alias("alias1").routing("test")).addAlias(new Alias("alias3")).get();
+  assertAcked(prepareCreate("test").addAlias(new Alias("test-alias").searchRouting("test-routing")));
+  ensureGreen();
+  GetAliasesResponse getAliasesResponse=client().admin().indices().prepareGetAliases().addIndices("test").get();
+  assertThat(getAliasesResponse.getAliases().get("test").size(),equalTo(4));
+  for (  AliasMetaData aliasMetaData : getAliasesResponse.getAliases().get("test")) {
+    assertThat(aliasMetaData.alias(),anyOf(equalTo("alias1"),equalTo("test-alias"),equalTo("alias3"),equalTo("alias4")));
+    if ("alias1".equals(aliasMetaData.alias())) {
+      assertThat(aliasMetaData.indexRouting(),equalTo("test"));
+      assertThat(aliasMetaData.searchRouting(),equalTo("test"));
+    }
+ else     if ("alias3".equals(aliasMetaData.alias())) {
+      assertThat(aliasMetaData.filter(),nullValue());
+    }
+ else     if ("test-alias".equals(aliasMetaData.alias())) {
+      assertThat(aliasMetaData.indexRouting(),nullValue());
+      assertThat(aliasMetaData.searchRouting(),equalTo("test-routing"));
+    }
+  }
+}

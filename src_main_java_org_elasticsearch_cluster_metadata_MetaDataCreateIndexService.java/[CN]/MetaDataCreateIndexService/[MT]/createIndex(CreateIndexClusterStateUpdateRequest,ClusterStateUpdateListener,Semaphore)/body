@@ -32,6 +32,7 @@
         List<IndexTemplateMetaData> templates=findTemplates(request,currentState);
         Map<String,Custom> customs=Maps.newHashMap();
         Map<String,Map<String,Object>> mappings=Maps.newHashMap();
+        Map<String,AliasMetaData> templatesAliases=Maps.newHashMap();
         for (        Map.Entry<String,String> entry : request.mappings().entrySet()) {
           mappings.put(entry.getKey(),parseMapping(entry.getValue()));
         }
@@ -58,6 +59,21 @@
               IndexMetaData.Custom merged=IndexMetaData.lookupFactorySafe(type).merge(existing,custom);
               customs.put(type,merged);
             }
+          }
+          for (          ObjectObjectCursor<String,AliasMetaData> cursor : template.aliases()) {
+            AliasMetaData aliasMetaData=cursor.value;
+            if (request.aliases().contains(new Alias(aliasMetaData.alias()))) {
+              continue;
+            }
+            if (templatesAliases.containsKey(cursor.key)) {
+              continue;
+            }
+            if (aliasMetaData.alias().contains("{index}")) {
+              String templatedAlias=aliasMetaData.alias().replace("{index}",request.index());
+              aliasMetaData=AliasMetaData.newAliasMetaData(aliasMetaData,templatedAlias);
+            }
+            aliasValidator.validateAliasMetaData(aliasMetaData,request.index(),currentState.metaData());
+            templatesAliases.put(aliasMetaData.alias(),aliasMetaData);
           }
         }
         File mappingsDir=new File(environment.configFile(),"mappings");
@@ -131,6 +147,11 @@
             aliasValidator.validateAliasFilter(alias.name(),alias.filter(),indexQueryParserService);
           }
         }
+        for (        AliasMetaData aliasMetaData : templatesAliases.values()) {
+          if (aliasMetaData.filter() != null) {
+            aliasValidator.validateAliasFilter(aliasMetaData.alias(),aliasMetaData.filter().uncompressed(),indexQueryParserService);
+          }
+        }
         Map<String,MappingMetaData> mappingsMetaData=Maps.newHashMap();
         for (        DocumentMapper mapper : mapperService) {
           MappingMetaData mappingMd=new MappingMetaData(mapper);
@@ -139,6 +160,9 @@
         final IndexMetaData.Builder indexMetaDataBuilder=IndexMetaData.builder(request.index()).settings(actualIndexSettings);
         for (        MappingMetaData mappingMd : mappingsMetaData.values()) {
           indexMetaDataBuilder.putMapping(mappingMd);
+        }
+        for (        AliasMetaData aliasMetaData : templatesAliases.values()) {
+          indexMetaDataBuilder.putAlias(aliasMetaData);
         }
         for (        Alias alias : request.aliases()) {
           AliasMetaData aliasMetaData=AliasMetaData.builder(alias.name()).filter(alias.filter()).indexRouting(alias.indexRouting()).searchRouting(alias.searchRouting()).build();

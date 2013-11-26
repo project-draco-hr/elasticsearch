@@ -1,0 +1,29 @@
+{
+  client().admin().indices().preparePutTemplate("template_with_aliases").setTemplate("te*").addAlias(new Alias("simple_alias")).addAlias(new Alias("templated_alias-{index}")).addAlias(new Alias("filtered_alias").filter("{\"type\":{\"value\":\"type2\"}}")).addAlias(new Alias("complex_filtered_alias").filter(FilterBuilders.termsFilter("_type","typeX","typeY","typeZ").execution("bool").cache(true))).get();
+  client().prepareIndex("test_index","type1","1").setSource("field","A value").get();
+  client().prepareIndex("test_index","type2","2").setSource("field","B value").get();
+  client().prepareIndex("test_index","typeX","3").setSource("field","C value").get();
+  client().prepareIndex("test_index","typeY","4").setSource("field","D value").get();
+  client().prepareIndex("test_index","typeZ","5").setSource("field","E value").get();
+  GetAliasesResponse getAliasesResponse=client().admin().indices().prepareGetAliases().setIndices("test_index").get();
+  assertThat(getAliasesResponse.getAliases().size(),equalTo(1));
+  assertThat(getAliasesResponse.getAliases().get("test_index").size(),equalTo(4));
+  refresh();
+  SearchResponse searchResponse=client().prepareSearch("test_index").get();
+  assertHitCount(searchResponse,5l);
+  searchResponse=client().prepareSearch("simple_alias").get();
+  assertHitCount(searchResponse,5l);
+  searchResponse=client().prepareSearch("templated_alias-test_index").get();
+  assertHitCount(searchResponse,5l);
+  searchResponse=client().prepareSearch("filtered_alias").get();
+  assertHitCount(searchResponse,1l);
+  assertThat(searchResponse.getHits().getAt(0).type(),equalTo("type2"));
+  searchResponse=client().prepareSearch("complex_filtered_alias").get();
+  assertHitCount(searchResponse,3l);
+  Set<String> types=Sets.newHashSet();
+  for (  SearchHit searchHit : searchResponse.getHits().getHits()) {
+    types.add(searchHit.getType());
+  }
+  assertThat(types.size(),equalTo(3));
+  assertThat(types,containsInAnyOrder("typeX","typeY","typeZ"));
+}
