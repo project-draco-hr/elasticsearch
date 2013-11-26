@@ -21,5 +21,33 @@
       facetCollectors.add(collector);
     }
   }
-  facetCollector=facetCollectors.isEmpty() ? null : MultiCollector.wrap(facetCollectors.toArray(new Collector[facetCollectors.size()]));
+  List<Collector> collectors=new ArrayList<Collector>(facetCollectors);
+  if (context.aggregations() != null) {
+    AggregationContext aggregationContext=new AggregationContext(context);
+    context.aggregations().aggregationContext(aggregationContext);
+    List<Aggregator> aggregatorCollectors=new ArrayList<Aggregator>();
+    Aggregator[] aggregators=context.aggregations().factories().createTopLevelAggregators(aggregationContext);
+    for (int i=0; i < aggregators.length; i++) {
+      if (!(aggregators[i] instanceof GlobalAggregator)) {
+        Aggregator aggregator=aggregators[i];
+        if (aggregator.shouldCollect()) {
+          aggregatorCollectors.add(aggregator);
+        }
+      }
+    }
+    context.aggregations().aggregators(aggregators);
+    if (!aggregatorCollectors.isEmpty()) {
+      collectors.add(new AggregationPhase.AggregationsCollector(aggregatorCollectors,aggregationContext));
+    }
+  }
+  int size=collectors.size();
+  if (size == 0) {
+    facetAndAggregatorCollector=null;
+  }
+ else   if (size == 1) {
+    facetAndAggregatorCollector=collectors.get(0);
+  }
+ else {
+    facetAndAggregatorCollector=MultiCollector.wrap(collectors.toArray(new Collector[collectors.size()]));
+  }
 }
