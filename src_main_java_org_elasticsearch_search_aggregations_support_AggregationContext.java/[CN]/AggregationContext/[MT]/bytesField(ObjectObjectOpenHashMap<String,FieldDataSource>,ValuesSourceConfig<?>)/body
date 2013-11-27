@@ -1,7 +1,13 @@
 {
   FieldDataSource dataSource=fieldDataSources.get(config.fieldContext.field());
   if (dataSource == null) {
-    dataSource=new FieldDataSource.Bytes.FieldData(config.fieldContext.indexFieldData());
+    final IndexFieldData<?> indexFieldData=config.fieldContext.indexFieldData();
+    if (indexFieldData instanceof IndexFieldData.WithOrdinals<?>) {
+      dataSource=new FieldDataSource.Bytes.WithOrdinals.FieldData((IndexFieldData.WithOrdinals<?>)indexFieldData);
+    }
+ else {
+      dataSource=new FieldDataSource.Bytes.FieldData(indexFieldData);
+    }
     setReaderIfNeeded((ReaderContextAware)dataSource);
     readerAwares.add((ReaderContextAware)dataSource);
     fieldDataSources.put(config.fieldContext.field(),dataSource);
@@ -13,12 +19,17 @@
     readerAwares.add(config.script);
     dataSource=new FieldDataSource.WithScript(dataSource,config.script);
   }
-  if ((config.ensureUnique && !(dataSource instanceof FieldDataSource.Bytes.FieldData)) || config.ensureSorted) {
+  if ((config.ensureUnique && dataSource.getUniqueness() != Uniqueness.UNIQUE) || config.ensureSorted) {
     dataSource=new FieldDataSource.Bytes.SortedAndUnique(dataSource);
     readerAwares.add((ReaderContextAware)dataSource);
   }
   if (config.needsHashes) {
     dataSource.setNeedsHashes(true);
   }
-  return new BytesValuesSource(dataSource);
+  if (dataSource instanceof FieldDataSource.Bytes.WithOrdinals) {
+    return new BytesValuesSource.WithOrdinals((FieldDataSource.Bytes.WithOrdinals)dataSource);
+  }
+ else {
+    return new BytesValuesSource(dataSource);
+  }
 }
