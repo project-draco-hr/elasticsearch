@@ -21,59 +21,62 @@
     boolean preserveSep=(options & SERIALIZE_PRESERVE_SEPERATORS) != 0;
     boolean hasPayloads=(options & SERIALIZE_HAS_PAYLOADS) != 0;
     boolean preservePositionIncrements=(options & SERIALIZE_PRESERVE_POSITION_INCREMENTS) != 0;
-    int sepLabel, payloadSep, endByte;
-    if (version == CODEC_VERSION_START) {
+    int sepLabel, payloadSep, endByte, holeCharacter;
+switch (version) {
+case CODEC_VERSION_START:
       sepLabel=0xFF;
-      payloadSep='\u001f';
-      endByte=0x0;
-    }
+    payloadSep='\u001f';
+  endByte=0x0;
+holeCharacter='\u001E';
+break;
+default :
+sepLabel=input.readVInt();
+endByte=input.readVInt();
+payloadSep=input.readVInt();
+holeCharacter=input.readVInt();
+}
+AnalyzingSuggestHolder holder=new AnalyzingSuggestHolder(preserveSep,preservePositionIncrements,maxSurfaceFormsPerAnalyzedForm,maxGraphExpansions,hasPayloads,maxAnalyzedPathsForOneInput,fst,sepLabel,payloadSep,endByte,holeCharacter);
+lookupMap.put(entry.getValue(),holder);
+}
+return new LookupFactory(){
+@Override public Lookup getLookup(FieldMapper<?> mapper,CompletionSuggestionContext suggestionContext){
+AnalyzingSuggestHolder analyzingSuggestHolder=lookupMap.get(mapper.names().indexName());
+if (analyzingSuggestHolder == null) {
+return null;
+}
+int flags=analyzingSuggestHolder.preserveSep ? XAnalyzingSuggester.PRESERVE_SEP : 0;
+XAnalyzingSuggester suggester;
+if (suggestionContext.isFuzzy()) {
+suggester=new XFuzzySuggester(mapper.indexAnalyzer(),mapper.searchAnalyzer(),flags,analyzingSuggestHolder.maxSurfaceFormsPerAnalyzedForm,analyzingSuggestHolder.maxGraphExpansions,suggestionContext.getFuzzyEditDistance(),suggestionContext.isFuzzyTranspositions(),suggestionContext.getFuzzyPrefixLength(),suggestionContext.getFuzzyMinLength(),suggestionContext.isFuzzyUnicodeAware(),analyzingSuggestHolder.fst,analyzingSuggestHolder.hasPayloads,analyzingSuggestHolder.maxAnalyzedPathsForOneInput,analyzingSuggestHolder.sepLabel,analyzingSuggestHolder.payloadSep,analyzingSuggestHolder.endByte,analyzingSuggestHolder.holeCharacter);
+}
  else {
-      sepLabel=input.readVInt();
-      endByte=input.readVInt();
-      payloadSep=input.readVInt();
-    }
-    AnalyzingSuggestHolder holder=new AnalyzingSuggestHolder(preserveSep,preservePositionIncrements,maxSurfaceFormsPerAnalyzedForm,maxGraphExpansions,hasPayloads,maxAnalyzedPathsForOneInput,fst,sepLabel,payloadSep,endByte);
-    lookupMap.put(entry.getValue(),holder);
-  }
-  return new LookupFactory(){
-    @Override public Lookup getLookup(    FieldMapper<?> mapper,    CompletionSuggestionContext suggestionContext){
-      AnalyzingSuggestHolder analyzingSuggestHolder=lookupMap.get(mapper.names().indexName());
-      if (analyzingSuggestHolder == null) {
-        return null;
-      }
-      int flags=analyzingSuggestHolder.preserveSep ? XAnalyzingSuggester.PRESERVE_SEP : 0;
-      XAnalyzingSuggester suggester;
-      if (suggestionContext.isFuzzy()) {
-        suggester=new XFuzzySuggester(mapper.indexAnalyzer(),mapper.searchAnalyzer(),flags,analyzingSuggestHolder.maxSurfaceFormsPerAnalyzedForm,analyzingSuggestHolder.maxGraphExpansions,suggestionContext.getFuzzyEditDistance(),suggestionContext.isFuzzyTranspositions(),suggestionContext.getFuzzyPrefixLength(),suggestionContext.getFuzzyMinLength(),suggestionContext.isFuzzyUnicodeAware(),analyzingSuggestHolder.fst,analyzingSuggestHolder.hasPayloads,analyzingSuggestHolder.maxAnalyzedPathsForOneInput,analyzingSuggestHolder.sepLabel,analyzingSuggestHolder.payloadSep,analyzingSuggestHolder.endByte);
-      }
- else {
-        suggester=new XAnalyzingSuggester(mapper.indexAnalyzer(),mapper.searchAnalyzer(),flags,analyzingSuggestHolder.maxSurfaceFormsPerAnalyzedForm,analyzingSuggestHolder.maxGraphExpansions,analyzingSuggestHolder.preservePositionIncrements,analyzingSuggestHolder.fst,analyzingSuggestHolder.hasPayloads,analyzingSuggestHolder.maxAnalyzedPathsForOneInput,analyzingSuggestHolder.sepLabel,analyzingSuggestHolder.payloadSep,analyzingSuggestHolder.endByte);
-      }
-      return suggester;
-    }
-    @Override public CompletionStats stats(    String... fields){
-      long sizeInBytes=0;
-      ObjectLongOpenHashMap<String> completionFields=null;
-      if (fields != null && fields.length > 0) {
-        completionFields=new ObjectLongOpenHashMap<String>(fields.length);
-      }
-      for (      Map.Entry<String,AnalyzingSuggestHolder> entry : lookupMap.entrySet()) {
-        sizeInBytes+=entry.getValue().fst.sizeInBytes();
-        if (fields == null || fields.length == 0) {
-          continue;
-        }
-        for (        String field : fields) {
-          if (Regex.simpleMatch(field,entry.getKey())) {
-            long fstSize=entry.getValue().fst.sizeInBytes();
-            completionFields.addTo(field,fstSize);
-          }
-        }
-      }
-      return new CompletionStats(sizeInBytes,completionFields);
-    }
-    @Override AnalyzingSuggestHolder getAnalyzingSuggestHolder(    FieldMapper<?> mapper){
-      return lookupMap.get(mapper.names().indexName());
-    }
-  }
+suggester=new XAnalyzingSuggester(mapper.indexAnalyzer(),mapper.searchAnalyzer(),flags,analyzingSuggestHolder.maxSurfaceFormsPerAnalyzedForm,analyzingSuggestHolder.maxGraphExpansions,analyzingSuggestHolder.preservePositionIncrements,analyzingSuggestHolder.fst,analyzingSuggestHolder.hasPayloads,analyzingSuggestHolder.maxAnalyzedPathsForOneInput,analyzingSuggestHolder.sepLabel,analyzingSuggestHolder.payloadSep,analyzingSuggestHolder.endByte,analyzingSuggestHolder.holeCharacter);
+}
+return suggester;
+}
+@Override public CompletionStats stats(String... fields){
+long sizeInBytes=0;
+ObjectLongOpenHashMap<String> completionFields=null;
+if (fields != null && fields.length > 0) {
+completionFields=new ObjectLongOpenHashMap<String>(fields.length);
+}
+for (Map.Entry<String,AnalyzingSuggestHolder> entry : lookupMap.entrySet()) {
+sizeInBytes+=entry.getValue().fst.sizeInBytes();
+if (fields == null || fields.length == 0) {
+continue;
+}
+for (String field : fields) {
+if (Regex.simpleMatch(field,entry.getKey())) {
+long fstSize=entry.getValue().fst.sizeInBytes();
+completionFields.addTo(field,fstSize);
+}
+}
+}
+return new CompletionStats(sizeInBytes,completionFields);
+}
+@Override AnalyzingSuggestHolder getAnalyzingSuggestHolder(FieldMapper<?> mapper){
+return lookupMap.get(mapper.names().indexName());
+}
+}
 ;
 }
