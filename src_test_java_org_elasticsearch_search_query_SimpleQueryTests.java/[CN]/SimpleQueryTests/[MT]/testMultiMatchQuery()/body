@@ -1,47 +1,41 @@
 {
-  client().admin().indices().prepareCreate("test").setSettings(ImmutableSettings.settingsBuilder().put("index.number_of_shards",1)).execute().actionGet();
-  client().prepareIndex("test","type1","1").setSource("field1","value1","field2","value4","field3","value3").execute().actionGet();
-  client().prepareIndex("test","type1","2").setSource("field1","value2","field2","value5","field3","value2").execute().actionGet();
-  client().prepareIndex("test","type1","3").setSource("field1","value3","field2","value6","field3","value1").execute().actionGet();
-  client().admin().indices().prepareRefresh("test").execute().actionGet();
-  MultiMatchQueryBuilder builder=QueryBuilders.multiMatchQuery("value1 value2 value4","field1","field2");
-  SearchResponse searchResponse=client().prepareSearch().setQuery(builder).addFacet(FacetBuilders.termsFacet("field1").field("field1")).execute().actionGet();
-  assertThat(searchResponse.getHits().totalHits(),equalTo(2l));
+  assertAcked(client().admin().indices().prepareCreate("test").setSettings(SETTING_NUMBER_OF_SHARDS,1));
+  indexRandom(true,client().prepareIndex("test","type1","1").setSource("field1","value1","field2","value4","field3","value3"),client().prepareIndex("test","type1","2").setSource("field1","value2","field2","value5","field3","value2"),client().prepareIndex("test","type1","3").setSource("field1","value3","field2","value6","field3","value1"));
+  MultiMatchQueryBuilder builder=multiMatchQuery("value1 value2 value4","field1","field2");
+  SearchResponse searchResponse=client().prepareSearch().setQuery(builder).addFacet(FacetBuilders.termsFacet("field1").field("field1")).get();
+  assertHitCount(searchResponse,2l);
   assertSearchHits(searchResponse,"1","2");
   builder.useDisMax(false);
-  searchResponse=client().prepareSearch().setQuery(builder).execute().actionGet();
-  assertThat(searchResponse.getHits().totalHits(),equalTo(2l));
-  assertThat("1",equalTo(searchResponse.getHits().getAt(0).id()));
-  assertThat("2",equalTo(searchResponse.getHits().getAt(1).id()));
-  client().admin().indices().prepareRefresh("test").execute().actionGet();
-  builder=QueryBuilders.multiMatchQuery("value1","field1","field2").operator(MatchQueryBuilder.Operator.AND);
-  searchResponse=client().prepareSearch().setQuery(builder).execute().actionGet();
-  assertThat(searchResponse.getHits().totalHits(),equalTo(1l));
-  assertThat("1",equalTo(searchResponse.getHits().getAt(0).id()));
-  client().admin().indices().prepareRefresh("test").execute().actionGet();
-  builder=QueryBuilders.multiMatchQuery("value1","field1","field3^1.5").operator(MatchQueryBuilder.Operator.AND);
-  searchResponse=client().prepareSearch().setQuery(builder).execute().actionGet();
-  assertThat(searchResponse.getHits().totalHits(),equalTo(2l));
-  assertThat("3",equalTo(searchResponse.getHits().getAt(0).id()));
-  assertThat("1",equalTo(searchResponse.getHits().getAt(1).id()));
-  client().admin().indices().prepareRefresh("test").execute().actionGet();
-  builder=QueryBuilders.multiMatchQuery("value1").field("field1").field("field3",1.5f).operator(MatchQueryBuilder.Operator.AND);
-  searchResponse=client().prepareSearch().setQuery(builder).execute().actionGet();
-  assertThat(searchResponse.getHits().totalHits(),equalTo(2l));
-  assertThat("3",equalTo(searchResponse.getHits().getAt(0).id()));
-  assertThat("1",equalTo(searchResponse.getHits().getAt(1).id()));
-  client().prepareIndex("test","type1","3").setSource("field1","value7","field2","value8","field4",5).execute().actionGet();
-  client().admin().indices().prepareRefresh("test").execute().actionGet();
-  builder=QueryBuilders.multiMatchQuery("value1","field1","field2","field4");
+  searchResponse=client().prepareSearch().setQuery(builder).get();
+  assertHitCount(searchResponse,2l);
+  assertSearchHits(searchResponse,"1","2");
+  client().admin().indices().prepareRefresh("test").get();
+  builder=multiMatchQuery("value1","field1","field2").operator(MatchQueryBuilder.Operator.AND);
+  searchResponse=client().prepareSearch().setQuery(builder).get();
+  assertHitCount(searchResponse,1l);
+  assertFirstHit(searchResponse,hasId("1"));
+  refresh();
+  builder=multiMatchQuery("value1","field1","field3^1.5").operator(MatchQueryBuilder.Operator.AND);
+  searchResponse=client().prepareSearch().setQuery(builder).get();
+  assertHitCount(searchResponse,2l);
+  assertSearchHits(searchResponse,"3","1");
+  client().admin().indices().prepareRefresh("test").get();
+  builder=multiMatchQuery("value1").field("field1").field("field3",1.5f).operator(MatchQueryBuilder.Operator.AND);
+  searchResponse=client().prepareSearch().setQuery(builder).get();
+  assertHitCount(searchResponse,2l);
+  assertSearchHits(searchResponse,"3","1");
+  client().prepareIndex("test","type1","3").setSource("field1","value7","field2","value8","field4",5).get();
+  refresh();
+  builder=multiMatchQuery("value1","field1","field2","field4");
   try {
-    client().prepareSearch().setQuery(builder).execute().actionGet();
+    client().prepareSearch().setQuery(builder).get();
     fail("Exception expected");
   }
  catch (  SearchPhaseExecutionException e) {
     assertThat(e.shardFailures()[0].status(),equalTo(RestStatus.BAD_REQUEST));
   }
   builder.lenient(true);
-  searchResponse=client().prepareSearch().setQuery(builder).execute().actionGet();
-  assertThat(searchResponse.getHits().totalHits(),equalTo(1l));
-  assertThat("1",equalTo(searchResponse.getHits().getAt(0).id()));
+  searchResponse=client().prepareSearch().setQuery(builder).get();
+  assertHitCount(searchResponse,1l);
+  assertFirstHit(searchResponse,hasId("1"));
 }
