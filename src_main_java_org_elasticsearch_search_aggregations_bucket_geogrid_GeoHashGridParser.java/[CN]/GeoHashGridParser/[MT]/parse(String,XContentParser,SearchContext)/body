@@ -1,0 +1,47 @@
+{
+  String field=null;
+  int precision=DEFAULT_PRECISION;
+  int requiredSize=DEFAULT_MAX_NUM_CELLS;
+  int shardSize=0;
+  XContentParser.Token token;
+  String currentFieldName=null;
+  while ((token=parser.nextToken()) != XContentParser.Token.END_OBJECT) {
+    if (token == XContentParser.Token.FIELD_NAME) {
+      currentFieldName=parser.currentName();
+    }
+ else     if (token == XContentParser.Token.VALUE_STRING) {
+      if ("field".equals(currentFieldName)) {
+        field=parser.text();
+      }
+    }
+ else     if (token == XContentParser.Token.VALUE_NUMBER) {
+      if ("precision".equals(currentFieldName)) {
+        precision=parser.intValue();
+      }
+ else       if ("size".equals(currentFieldName)) {
+        requiredSize=parser.intValue();
+      }
+ else       if ("shard_size".equals(currentFieldName)) {
+        shardSize=parser.intValue();
+      }
+ else       if ("shardSize".equals(currentFieldName)) {
+        shardSize=parser.intValue();
+      }
+    }
+  }
+  if (shardSize == 0) {
+    shardSize=BucketUtils.suggestShardSideQueueSize(requiredSize,context.numberOfShards());
+  }
+  ValuesSourceConfig<GeoPointValuesSource> config=new ValuesSourceConfig<GeoPointValuesSource>(GeoPointValuesSource.class);
+  if (field == null) {
+    return new GeoGridFactory(aggregationName,config,precision,requiredSize,shardSize);
+  }
+  FieldMapper<?> mapper=context.smartNameFieldMapper(field);
+  if (mapper == null) {
+    config.unmapped(true);
+    return new GeoGridFactory(aggregationName,config,precision,requiredSize,shardSize);
+  }
+  IndexFieldData<?> indexFieldData=context.fieldData().getForField(mapper);
+  config.fieldContext(new FieldContext(field,indexFieldData));
+  return new GeoGridFactory(aggregationName,config,precision,requiredSize,shardSize);
+}

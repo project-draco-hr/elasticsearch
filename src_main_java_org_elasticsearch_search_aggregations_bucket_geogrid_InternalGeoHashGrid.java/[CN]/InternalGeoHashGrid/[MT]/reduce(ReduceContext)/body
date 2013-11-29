@@ -1,0 +1,47 @@
+{
+  List<InternalAggregation> aggregations=reduceContext.aggregations();
+  if (aggregations.size() == 1) {
+    InternalGeoHashGrid grid=(InternalGeoHashGrid)aggregations.get(0);
+    grid.trimExcessEntries();
+    return grid;
+  }
+  InternalGeoHashGrid reduced=null;
+  Recycler.V<LongObjectOpenHashMap<List<Bucket>>> buckets=null;
+  for (  InternalAggregation aggregation : aggregations) {
+    InternalGeoHashGrid grid=(InternalGeoHashGrid)aggregation;
+    if (reduced == null) {
+      reduced=grid;
+    }
+    if (buckets == null) {
+      buckets=reduceContext.cacheRecycler().longObjectMap(grid.buckets.size());
+    }
+    for (    Bucket bucket : grid.buckets) {
+      List<Bucket> existingBuckets=buckets.v().get(bucket.geohashAsLong);
+      if (existingBuckets == null) {
+        existingBuckets=new ArrayList<Bucket>(aggregations.size());
+        buckets.v().put(bucket.geohashAsLong,existingBuckets);
+      }
+      existingBuckets.add(bucket);
+    }
+  }
+  if (reduced == null) {
+    return (InternalGeoHashGrid)aggregations.get(0);
+  }
+  final int size=Math.min(requiredSize,buckets.v().size());
+  BucketPriorityQueue ordered=new BucketPriorityQueue(size);
+  Object[] internalBuckets=buckets.v().values;
+  boolean[] states=buckets.v().allocated;
+  for (int i=0; i < states.length; i++) {
+    if (states[i]) {
+      List<Bucket> sameCellBuckets=(List<Bucket>)internalBuckets[i];
+      ordered.insertWithOverflow(sameCellBuckets.get(0).reduce(sameCellBuckets,reduceContext.cacheRecycler()));
+    }
+  }
+  buckets.release();
+  Bucket[] list=new Bucket[ordered.size()];
+  for (int i=ordered.size() - 1; i >= 0; i--) {
+    list[i]=(Bucket)ordered.pop();
+  }
+  reduced.buckets=Arrays.asList(list);
+  return reduced;
+}
