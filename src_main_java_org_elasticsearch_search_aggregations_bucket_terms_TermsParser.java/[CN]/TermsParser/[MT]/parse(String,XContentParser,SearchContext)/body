@@ -10,6 +10,10 @@
   boolean orderAsc=false;
   String format=null;
   boolean assumeUnique=false;
+  String include=null;
+  int includeFlags=0;
+  String exclude=null;
+  int excludeFlags=0;
   XContentParser.Token token;
   String currentFieldName=null;
   while ((token=parser.nextToken()) != XContentParser.Token.END_OBJECT) {
@@ -31,6 +35,12 @@
       }
  else       if ("format".equals(currentFieldName)) {
         format=parser.text();
+      }
+ else       if ("include".equals(currentFieldName)) {
+        include=parser.text();
+      }
+ else       if ("exclude".equals(currentFieldName)) {
+        exclude=parser.text();
       }
     }
  else     if (token == XContentParser.Token.VALUE_BOOLEAN) {
@@ -57,7 +67,55 @@
           }
  else           if (token == XContentParser.Token.VALUE_STRING) {
             String dir=parser.text();
-            orderAsc="asc".equalsIgnoreCase(dir);
+            if ("asc".equalsIgnoreCase(dir)) {
+              orderAsc=true;
+            }
+ else             if ("desc".equalsIgnoreCase(dir)) {
+              orderAsc=false;
+            }
+ else {
+              throw new SearchParseException(context,"Unknown terms order direction [" + dir + "] in terms aggregation ["+ aggregationName+ "]");
+            }
+          }
+        }
+      }
+ else       if ("include".equals(currentFieldName)) {
+        while ((token=parser.nextToken()) != XContentParser.Token.END_OBJECT) {
+          if (token == XContentParser.Token.FIELD_NAME) {
+            currentFieldName=parser.currentName();
+          }
+ else           if (token == XContentParser.Token.VALUE_STRING) {
+            if ("pattern".equals(currentFieldName)) {
+              include=parser.text();
+            }
+ else             if ("flags".equals(currentFieldName)) {
+              includeFlags=Regex.flagsFromString(parser.text());
+            }
+          }
+ else           if (token == XContentParser.Token.VALUE_NUMBER) {
+            if ("flags".equals(currentFieldName)) {
+              includeFlags=parser.intValue();
+            }
+          }
+        }
+      }
+ else       if ("exclude".equals(currentFieldName)) {
+        while ((token=parser.nextToken()) != XContentParser.Token.END_OBJECT) {
+          if (token == XContentParser.Token.FIELD_NAME) {
+            currentFieldName=parser.currentName();
+          }
+ else           if (token == XContentParser.Token.VALUE_STRING) {
+            if ("pattern".equals(currentFieldName)) {
+              exclude=parser.text();
+            }
+ else             if ("flags".equals(currentFieldName)) {
+              excludeFlags=Regex.flagsFromString(parser.text());
+            }
+          }
+ else           if (token == XContentParser.Token.VALUE_NUMBER) {
+            if ("flags".equals(currentFieldName)) {
+              excludeFlags=parser.intValue();
+            }
           }
         }
       }
@@ -65,6 +123,12 @@
   }
   if (shardSize < requiredSize) {
     shardSize=requiredSize;
+  }
+  IncludeExclude includeExclude=null;
+  if (include != null || exclude != null) {
+    Pattern includePattern=include != null ? Pattern.compile(include,includeFlags) : null;
+    Pattern excludePattern=exclude != null ? Pattern.compile(exclude,excludeFlags) : null;
+    includeExclude=new IncludeExclude(includePattern,excludePattern);
   }
   InternalOrder order=resolveOrder(orderKey,orderAsc);
   SearchScript searchScript=null;
@@ -81,13 +145,13 @@
     if (!assumeUnique) {
       config.ensureUnique(true);
     }
-    return new TermsAggregatorFactory(aggregationName,config,order,requiredSize,shardSize);
+    return new TermsAggregatorFactory(aggregationName,config,order,requiredSize,shardSize,includeExclude);
   }
   FieldMapper<?> mapper=context.smartNameFieldMapper(field);
   if (mapper == null) {
     ValuesSourceConfig<?> config=new ValuesSourceConfig<BytesValuesSource>(BytesValuesSource.class);
     config.unmapped(true);
-    return new TermsAggregatorFactory(aggregationName,config,order,requiredSize,shardSize);
+    return new TermsAggregatorFactory(aggregationName,config,order,requiredSize,shardSize,includeExclude);
   }
   IndexFieldData<?> indexFieldData=context.fieldData().getForField(mapper);
   ValuesSourceConfig<?> config;
@@ -114,5 +178,5 @@
   if (!assumeUnique) {
     config.ensureUnique(true);
   }
-  return new TermsAggregatorFactory(aggregationName,config,order,requiredSize,shardSize);
+  return new TermsAggregatorFactory(aggregationName,config,order,requiredSize,shardSize,includeExclude);
 }
