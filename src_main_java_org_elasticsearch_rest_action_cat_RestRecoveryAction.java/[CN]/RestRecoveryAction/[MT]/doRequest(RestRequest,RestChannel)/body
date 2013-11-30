@@ -1,0 +1,57 @@
+{
+  final String[] indices=Strings.splitStringByCommaToArray(request.param("index"));
+  final ClusterStateRequest clusterStateRequest=new ClusterStateRequest();
+  clusterStateRequest.filterMetaData(true);
+  clusterStateRequest.local(request.paramAsBoolean("local",clusterStateRequest.local()));
+  clusterStateRequest.masterNodeTimeout(request.paramAsTime("master_timeout",clusterStateRequest.masterNodeTimeout()));
+  client.admin().cluster().state(clusterStateRequest,new ActionListener<ClusterStateResponse>(){
+    @Override public void onResponse(    final ClusterStateResponse clusterStateResponse){
+      IndicesStatusRequest indicesStatusRequest=new IndicesStatusRequest(indices);
+      indicesStatusRequest.recovery(true);
+      indicesStatusRequest.operationThreading(BroadcastOperationThreading.SINGLE_THREAD);
+      client.admin().indices().status(indicesStatusRequest,new ActionListener<IndicesStatusResponse>(){
+        @Override public void onResponse(        IndicesStatusResponse indicesStatusResponse){
+          Map<String,Long> primarySizes=new HashMap<String,Long>();
+          Set<ShardStatus> replicas=new HashSet<ShardStatus>();
+          for (          ShardStatus shardStatus : indicesStatusResponse.getShards()) {
+            if (shardStatus.getShardRouting().primary()) {
+              primarySizes.put(shardStatus.getShardRouting().getIndex() + shardStatus.getShardRouting().getId(),shardStatus.getStoreSize().bytes());
+            }
+ else             if (shardStatus.getState() == IndexShardState.RECOVERING) {
+              replicas.add(shardStatus);
+            }
+          }
+          try {
+            channel.sendResponse(RestTable.buildResponse(buildRecoveryTable(request,clusterStateResponse,primarySizes,replicas),request,channel));
+          }
+ catch (          Throwable e) {
+            try {
+              channel.sendResponse(new XContentThrowableRestResponse(request,e));
+            }
+ catch (            IOException e2) {
+              logger.error("Unable to send recovery status response",e2);
+            }
+          }
+        }
+        @Override public void onFailure(        Throwable e){
+          try {
+            channel.sendResponse(new XContentThrowableRestResponse(request,e));
+          }
+ catch (          IOException e1) {
+            logger.error("Failed to send failure response",e1);
+          }
+        }
+      }
+);
+    }
+    @Override public void onFailure(    Throwable e){
+      try {
+        channel.sendResponse(new XContentThrowableRestResponse(request,e));
+      }
+ catch (      IOException e1) {
+        logger.error("Failed to send failure response",e1);
+      }
+    }
+  }
+);
+}
