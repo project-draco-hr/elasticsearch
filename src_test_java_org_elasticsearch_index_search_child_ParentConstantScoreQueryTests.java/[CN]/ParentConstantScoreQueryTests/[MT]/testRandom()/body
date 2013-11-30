@@ -9,6 +9,7 @@
   int childDocId=0;
   int numParentDocs=1 + random().nextInt(TEST_NIGHTLY ? 10000 : 1000);
   ObjectObjectOpenHashMap<String,NavigableSet<String>> parentValueToChildDocIds=new ObjectObjectOpenHashMap<String,NavigableSet<String>>();
+  IntIntOpenHashMap childIdToParentId=new IntIntOpenHashMap();
   for (int parentDocId=0; parentDocId < numParentDocs; parentDocId++) {
     boolean markParentAsDeleted=rarely();
     String parentValue=parentValues[random().nextInt(parentValues.length)];
@@ -48,29 +49,56 @@
           parentValueToChildDocIds.put(parentValue,childIds=new TreeSet<String>());
         }
         if (!markParentAsDeleted) {
+          childIdToParentId.put(Integer.valueOf(child),parentDocId);
           childIds.add(child);
         }
       }
     }
   }
   indexWriter.deleteDocuments(new Term("delete","me"));
-  indexWriter.close();
+  indexWriter.commit();
   IndexReader indexReader=DirectoryReader.open(directory);
   IndexSearcher searcher=new IndexSearcher(indexReader);
   Engine.Searcher engineSearcher=new Engine.SimpleSearcher(ParentConstantScoreQuery.class.getSimpleName(),searcher);
   ((TestSearchContext)SearchContext.current()).setSearcher(new ContextIndexSearcher(SearchContext.current(),engineSearcher));
-  TermFilter childrenFilter=new TermFilter(new Term(TypeFieldMapper.NAME,"child"));
+  TermFilter rawChildrenFilter=new TermFilter(new Term(TypeFieldMapper.NAME,"child"));
   int max=numUniqueParentValues / 4;
   for (int i=0; i < max; i++) {
+    Filter childrenFilter;
+    if (random().nextBoolean()) {
+      childrenFilter=SearchContext.current().filterCache().cache(rawChildrenFilter);
+    }
+ else {
+      childrenFilter=rawChildrenFilter;
+    }
+    if (random().nextBoolean()) {
+      int numberOfUpdates=1 + random().nextInt(TEST_NIGHTLY ? 25 : 5);
+      int[] childIds=childIdToParentId.keys().toArray();
+      for (int j=0; j < numberOfUpdates; j++) {
+        int childId=childIds[random().nextInt(childIds.length)];
+        String childUid=Uid.createUid("child",Integer.toString(childId));
+        indexWriter.deleteDocuments(new Term(UidFieldMapper.NAME,childUid));
+        Document document=new Document();
+        document.add(new StringField(UidFieldMapper.NAME,childUid,Field.Store.YES));
+        document.add(new StringField(TypeFieldMapper.NAME,"child",Field.Store.NO));
+        String parentUid=Uid.createUid("parent",Integer.toString(childIdToParentId.get(childId)));
+        document.add(new StringField(ParentFieldMapper.NAME,parentUid,Field.Store.NO));
+        indexWriter.addDocument(document);
+      }
+      indexReader.close();
+      indexReader=DirectoryReader.open(indexWriter.w,true);
+      searcher=new IndexSearcher(indexReader);
+      engineSearcher=new Engine.SimpleSearcher(ParentConstantScoreQueryTests.class.getSimpleName(),searcher);
+      ((TestSearchContext)SearchContext.current()).setSearcher(new ContextIndexSearcher(SearchContext.current(),engineSearcher));
+    }
     String parentValue=parentValues[random().nextInt(numUniqueParentValues)];
     TermQuery parentQuery=new TermQuery(new Term("field1",parentValue));
     Query query;
-    boolean applyAcceptedDocs=random().nextBoolean();
-    if (applyAcceptedDocs) {
-      query=new ParentConstantScoreQuery(parentQuery,"parent",childrenFilter,applyAcceptedDocs);
+    if (random().nextBoolean()) {
+      query=new ParentConstantScoreQuery(parentQuery,"parent",childrenFilter);
     }
  else {
-      query=new XConstantScoreQuery(new CustomQueryWrappingFilter(new ParentConstantScoreQuery(parentQuery,"parent",childrenFilter,applyAcceptedDocs)));
+      query=new XConstantScoreQuery(new CustomQueryWrappingFilter(new ParentConstantScoreQuery(parentQuery,"parent",childrenFilter)));
     }
     BitSetCollector collector=new BitSetCollector(indexReader.maxDoc());
     searcher.search(query,collector);
@@ -97,6 +125,7 @@
     }
     assertBitSet(actualResult,expectedResult,searcher);
   }
+  indexWriter.close();
   indexReader.close();
   directory.close();
 }

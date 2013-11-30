@@ -2,23 +2,27 @@
   if (remaining == 0) {
     return null;
   }
-  if (!applyAcceptedDocs) {
-    acceptDocs=null;
-  }
   if (shortCircuitFilter != null) {
-    return ConstantScorer.create(shortCircuitFilter.getDocIdSet(context,acceptDocs),this,queryWeight);
+    DocIdSet docIdSet=shortCircuitFilter.getDocIdSet(context,acceptDocs);
+    if (!DocIdSets.isEmpty(docIdSet)) {
+      DocIdSetIterator iterator=docIdSet.iterator();
+      if (iterator != null) {
+        return ConstantScorer.create(iterator,this,queryWeight);
+      }
+    }
+    return null;
   }
   DocIdSet parentDocIdSet=this.parentFilter.getDocIdSet(context,acceptDocs);
   if (DocIdSets.isEmpty(parentDocIdSet)) {
     return null;
   }
-  Bits parentsBits=DocIdSets.toSafeBits(context.reader(),parentDocIdSet);
   IdReaderTypeCache idReaderTypeCache=searchContext.idCache().reader(context.reader()).type(parentType);
   if (idReaderTypeCache != null) {
-    DocIdSet docIdSet=new ParentDocSet(context.reader(),parentsBits,collectedUids.v(),idReaderTypeCache);
-    return ConstantScorer.create(docIdSet,this,queryWeight);
+    DocIdSetIterator innerIterator=parentDocIdSet.iterator();
+    if (innerIterator != null) {
+      ParentDocIdIterator parentDocIdIterator=new ParentDocIdIterator(innerIterator,collectedUids.v(),idReaderTypeCache);
+      return ConstantScorer.create(parentDocIdIterator,this,queryWeight);
+    }
   }
- else {
-    return null;
-  }
+  return null;
 }
