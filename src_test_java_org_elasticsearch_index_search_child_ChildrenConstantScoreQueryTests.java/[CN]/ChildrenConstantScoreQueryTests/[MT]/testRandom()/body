@@ -6,19 +6,24 @@
   for (int i=0; i < numUniqueChildValues; i++) {
     childValues[i]=Integer.toString(i);
   }
-  IntOpenHashSet initialDeletedParentIds=new IntOpenHashSet();
+  IntOpenHashSet filteredOrDeletedDocs=new IntOpenHashSet();
   int childDocId=0;
   int numParentDocs=1 + random().nextInt(TEST_NIGHTLY ? 20000 : 1000);
   ObjectObjectOpenHashMap<String,NavigableSet<String>> childValueToParentIds=new ObjectObjectOpenHashMap<String,NavigableSet<String>>();
   for (int parentDocId=0; parentDocId < numParentDocs; parentDocId++) {
     boolean markParentAsDeleted=rarely();
+    boolean filterMe=rarely();
     String parent=Integer.toString(parentDocId);
     Document document=new Document();
     document.add(new StringField(UidFieldMapper.NAME,Uid.createUid("parent",parent),Field.Store.YES));
     document.add(new StringField(TypeFieldMapper.NAME,"parent",Field.Store.NO));
     if (markParentAsDeleted) {
-      initialDeletedParentIds.add(parentDocId);
+      filteredOrDeletedDocs.add(parentDocId);
       document.add(new StringField("delete","me",Field.Store.NO));
+    }
+    if (filterMe) {
+      filteredOrDeletedDocs.add(parentDocId);
+      document.add(new StringField("filter","me",Field.Store.NO));
     }
     indexWriter.addDocument(document);
     int numChildDocs;
@@ -48,7 +53,7 @@
  else {
           childValueToParentIds.put(childValue,parentIds=new TreeSet<String>());
         }
-        if (!markParentAsDeleted) {
+        if (!markParentAsDeleted && !filterMe) {
           parentIds.add(parent);
         }
       }
@@ -61,6 +66,7 @@
   Engine.Searcher engineSearcher=new Engine.SimpleSearcher(ChildrenConstantScoreQueryTests.class.getSimpleName(),searcher);
   ((TestSearchContext)SearchContext.current()).setSearcher(new ContextIndexSearcher(SearchContext.current(),engineSearcher));
   Filter rawParentFilter=new TermFilter(new Term(TypeFieldMapper.NAME,"parent"));
+  Filter rawFilterMe=new NotFilter(new TermFilter(new Term("filter","me")));
   int max=numUniqueChildValues / 4;
   for (int i=0; i < max; i++) {
     Filter parentFilter;
@@ -70,6 +76,13 @@
  else {
       parentFilter=rawParentFilter;
     }
+    Filter filterMe;
+    if (random().nextBoolean()) {
+      filterMe=SearchContext.current().filterCache().cache(rawFilterMe);
+    }
+ else {
+      filterMe=rawFilterMe;
+    }
     if (random().nextBoolean()) {
       int numberOfUpdates=1 + random().nextInt(TEST_NIGHTLY ? 25 : 5);
       for (int j=0; j < numberOfUpdates; j++) {
@@ -77,7 +90,7 @@
         do {
           parentId=random().nextInt(numParentDocs);
         }
- while (initialDeletedParentIds.contains(parentId));
+ while (filteredOrDeletedDocs.contains(parentId));
         String parentUid=Uid.createUid("parent",Integer.toString(parentId));
         indexWriter.deleteDocuments(new Term(UidFieldMapper.NAME,parentUid));
         Document document=new Document();
@@ -101,6 +114,7 @@
  else {
       query=new XConstantScoreQuery(new CustomQueryWrappingFilter(new ChildrenConstantScoreQuery(childQuery,"parent","child",parentFilter,shortCircuitParentDocSet)));
     }
+    query=new XFilteredQuery(query,filterMe);
     BitSetCollector collector=new BitSetCollector(indexReader.maxDoc());
     searcher.search(query,collector);
     FixedBitSet actualResult=collector.getResult();
