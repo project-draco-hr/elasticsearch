@@ -1,6 +1,16 @@
 {
-  List<MappingTask> allTasks=new ArrayList<MappingTask>();
-  refreshOrUpdateQueue.drainTo(allTasks);
+  final List<MappingTask> allTasks=new ArrayList<MappingTask>();
+synchronized (refreshOrUpdateMutex) {
+    if (refreshOrUpdateQueue.isEmpty()) {
+      return currentState;
+    }
+    if (insertionOrder < refreshOrUpdateProcessedInsertOrder) {
+      return currentState;
+    }
+    allTasks.addAll(refreshOrUpdateQueue);
+    refreshOrUpdateQueue.clear();
+    refreshOrUpdateProcessedInsertOrder=refreshOrUpdateInsertOrder;
+  }
   if (allTasks.isEmpty()) {
     return currentState;
   }
@@ -20,20 +30,45 @@
   MetaData.Builder mdBuilder=MetaData.builder(currentState.metaData());
   for (  Map.Entry<String,List<MappingTask>> entry : tasksPerIndex.entrySet()) {
     String index=entry.getKey();
-    List<MappingTask> tasks=entry.getValue();
+    final IndexMetaData indexMetaData=mdBuilder.get(index);
+    if (indexMetaData == null) {
+      logger.debug("[{}] ignoring tasks - index meta data doesn't exist",index);
+      continue;
+    }
+    List<MappingTask> allIndexTasks=entry.getValue();
+    List<MappingTask> tasks=new ArrayList<MappingTask>();
+    for (    MappingTask task : allIndexTasks) {
+      if (!indexMetaData.isSameUUID(task.indexUUID)) {
+        logger.debug("[{}] ignoring task [{}] - index meta data doesn't match task uuid",index,task);
+        continue;
+      }
+      boolean add=true;
+      if (task instanceof UpdateTask) {
+        UpdateTask uTask=(UpdateTask)task;
+        if (uTask.order != -1 && uTask.nodeId != null) {
+          for (int i=0; i < tasks.size(); i++) {
+            MappingTask existing=tasks.get(i);
+            if (existing instanceof UpdateTask) {
+              UpdateTask eTask=(UpdateTask)existing;
+              if (eTask.order != -1 && eTask.nodeId != null) {
+                if (eTask.nodeId.equals(uTask.nodeId) && uTask.order > eTask.order) {
+                  tasks.set(i,uTask);
+                  add=false;
+                  break;
+                }
+              }
+            }
+          }
+        }
+      }
+      if (add) {
+        tasks.add(task);
+      }
+    }
     boolean removeIndex=false;
     Set<String> processedRefreshes=Sets.newHashSet();
     try {
       for (      MappingTask task : tasks) {
-        final IndexMetaData indexMetaData=mdBuilder.get(index);
-        if (indexMetaData == null) {
-          logger.debug("[{}] ignoring task [{}] - index meta data doesn't exist",index,task);
-          continue;
-        }
-        if (!indexMetaData.isSameUUID(task.indexUUID)) {
-          logger.debug("[{}] ignoring task [{}] - index meta data doesn't match task uuid",index,task);
-          continue;
-        }
         if (task instanceof RefreshTask) {
           RefreshTask refreshTask=(RefreshTask)task;
           try {
@@ -116,13 +151,20 @@
       if (removeIndex) {
         indicesService.removeIndex(index,"created for mapping processing");
       }
-      for (      Object task : tasks) {
+    }
+  }
+  threadPool.generic().execute(new Runnable(){
+    @Override public void run(){
+      for (      Object task : allTasks) {
         if (task instanceof UpdateTask) {
-          ((UpdateTask)task).listener.onResponse(new ClusterStateUpdateResponse(true));
+          UpdateTask uTask=(UpdateTask)task;
+          ClusterStateUpdateResponse response=new ClusterStateUpdateResponse(true);
+          uTask.listener.onResponse(response);
         }
       }
     }
   }
+);
   if (!dirty) {
     return currentState;
   }
