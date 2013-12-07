@@ -1,11 +1,23 @@
 {
   client().admin().indices().prepareCreate("test").setSettings(ImmutableSettings.settingsBuilder().put("index.number_of_shards",1).put("index.number_of_replicas",0)).execute().actionGet();
   client().admin().cluster().prepareHealth().setWaitForEvents(Priority.LANGUID).setWaitForGreenStatus().execute().actionGet();
-  int recCount=200;
-  final CountDownLatch latch=new CountDownLatch(recCount);
-  for (int rec=0; rec < recCount; rec++) {
-    client().prepareIndex("test","type","rec" + rec).setSource("field" + rec,"some_value").execute(new ActionListener<IndexResponse>(){
-      @Override public void onResponse(      IndexResponse indexResponse){
+  ThreadPool.Info info=cluster().getInstance(ThreadPool.class).info(ThreadPool.Names.BULK);
+  int bulkCount=info.getMax() + (int)info.getQueueSize().getSingles();
+  int bulkSize=between(4,10);
+  int recCount=bulkCount * bulkSize;
+  int idCounter=0;
+  final CountDownLatch latch=new CountDownLatch(bulkCount);
+  for (int i=0; i < bulkCount; i++) {
+    BulkRequestBuilder bulk=client().prepareBulk();
+    for (int rec=0; rec < bulkSize; rec++) {
+      int id=idCounter++;
+      bulk.add(new IndexRequestBuilder(client()).setOpType(IndexRequest.OpType.INDEX).setIndex("test").setType("type").setId("rec" + id).setSource("field" + id,"some_value"));
+    }
+    bulk.execute(new ActionListener<BulkResponse>(){
+      @Override public void onResponse(      BulkResponse bulkItemResponses){
+        if (bulkItemResponses.hasFailures()) {
+          System.out.println("failed to index in test: " + bulkItemResponses.buildFailureMessage());
+        }
         latch.countDown();
       }
       @Override public void onFailure(      Throwable e){
