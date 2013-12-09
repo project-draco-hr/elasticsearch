@@ -1,0 +1,49 @@
+{
+  Random random=getRandom();
+  int atLeast=atLeast(random,1000);
+  int maxValuesPerDoc=randomIntBetween(1,3);
+  for (int i=0; i < atLeast; i++) {
+    Document d=new Document();
+    d.add(new StringField("_id","" + i,Field.Store.NO));
+    final int numValues=randomInt(maxValuesPerDoc);
+    for (int j=0; j < numValues; ++j) {
+      final double lat=randomDouble() * 180 - 90;
+      final double lon=randomDouble() * 360 - 180;
+      d.add(new StringField("geopoint",lat + "," + lon,Field.Store.NO));
+    }
+    writer.addDocument(d);
+    if (random.nextInt(10) == 0) {
+      refreshReader();
+    }
+  }
+  AtomicReaderContext context=refreshReader();
+  Map<FieldDataType,Type> typeMap=new HashMap<FieldDataType,DuelFieldDataTests.Type>();
+  final Distance precision=new Distance(1,randomFrom(DistanceUnit.values()));
+  typeMap.put(new FieldDataType("geo_point",ImmutableSettings.builder().put("format","array")),Type.GeoPoint);
+  typeMap.put(new FieldDataType("geo_point",ImmutableSettings.builder().put("format","compressed").put("precision",precision)),Type.GeoPoint);
+  ArrayList<Entry<FieldDataType,Type>> list=new ArrayList<Entry<FieldDataType,Type>>(typeMap.entrySet());
+  while (!list.isEmpty()) {
+    Entry<FieldDataType,Type> left;
+    Entry<FieldDataType,Type> right;
+    if (list.size() > 1) {
+      left=list.remove(random.nextInt(list.size()));
+      right=list.remove(random.nextInt(list.size()));
+    }
+ else {
+      right=left=list.remove(0);
+    }
+    ifdService.clear();
+    IndexGeoPointFieldData<?> leftFieldData=getForField(left.getKey(),left.getValue().name().toLowerCase(Locale.ROOT));
+    ifdService.clear();
+    IndexGeoPointFieldData<?> rightFieldData=getForField(right.getKey(),right.getValue().name().toLowerCase(Locale.ROOT));
+    duelFieldDataGeoPoint(random,context,leftFieldData,rightFieldData,precision);
+    duelFieldDataGeoPoint(random,context,rightFieldData,leftFieldData,precision);
+    DirectoryReader perSegment=DirectoryReader.open(writer,true);
+    CompositeReaderContext composite=perSegment.getContext();
+    List<AtomicReaderContext> leaves=composite.leaves();
+    for (    AtomicReaderContext atomicReaderContext : leaves) {
+      duelFieldDataGeoPoint(random,atomicReaderContext,leftFieldData,rightFieldData,precision);
+    }
+    perSegment.close();
+  }
+}

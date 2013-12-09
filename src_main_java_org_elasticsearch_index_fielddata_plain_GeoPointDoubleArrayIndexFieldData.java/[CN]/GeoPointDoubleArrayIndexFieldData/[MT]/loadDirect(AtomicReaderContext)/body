@@ -2,7 +2,7 @@
   AtomicReader reader=context.reader();
   Terms terms=reader.terms(getFieldNames().indexName());
   if (terms == null) {
-    return GeoPointDoubleArrayAtomicFieldData.empty(reader.maxDoc());
+    return new Empty(reader.maxDoc());
   }
   final BigDoubleArrayList lat=new BigDoubleArrayList();
   final BigDoubleArrayList lon=new BigDoubleArrayList();
@@ -10,22 +10,12 @@
   lon.add(0);
   final float acceptableTransientOverheadRatio=fieldDataType.getSettings().getAsFloat("acceptable_transient_overhead_ratio",OrdinalsBuilder.DEFAULT_ACCEPTABLE_OVERHEAD_RATIO);
   OrdinalsBuilder builder=new OrdinalsBuilder(terms.size(),reader.maxDoc(),acceptableTransientOverheadRatio);
-  final CharsRef spare=new CharsRef();
   try {
-    BytesRefIterator iter=builder.buildFromTerms(terms.iterator(null));
-    BytesRef term;
-    while ((term=iter.next()) != null) {
-      UnicodeUtil.UTF8toUTF16(term,spare);
-      boolean parsed=false;
-      for (int i=spare.offset; i < spare.length; i++) {
-        if (spare.chars[i] == ',') {
-          lat.add(Double.parseDouble(new String(spare.chars,spare.offset,(i - spare.offset))));
-          lon.add(Double.parseDouble(new String(spare.chars,(spare.offset + (i + 1)),spare.length - ((i + 1) - spare.offset))));
-          parsed=true;
-          break;
-        }
-      }
-      assert parsed;
+    final GeoPointEnum iter=new GeoPointEnum(builder.buildFromTerms(terms.iterator(null)));
+    GeoPoint point;
+    while ((point=iter.next()) != null) {
+      lat.add(point.getLat());
+      lon.add(point.getLon());
     }
     Ordinals build=builder.build(fieldDataType.getSettings());
     if (!build.isMultiValued() && CommonSettings.removeOrdsOnSingleValue(fieldDataType)) {
