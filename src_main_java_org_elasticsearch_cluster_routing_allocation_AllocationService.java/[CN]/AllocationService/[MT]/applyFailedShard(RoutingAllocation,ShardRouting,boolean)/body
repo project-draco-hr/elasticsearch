@@ -8,14 +8,13 @@
   if (failedShard.relocatingNodeId() != null) {
     if (failedShard.state() == INITIALIZING) {
       boolean dirty=false;
-      RoutingNode initializingNode=routingNodes.node(failedShard.currentNodeId());
+      RoutingNodes.RoutingNodeIterator initializingNode=routingNodes.routingNodeIter(failedShard.currentNodeId());
       if (initializingNode != null) {
-        for (Iterator<MutableShardRouting> it=initializingNode.iterator(); it.hasNext(); ) {
-          MutableShardRouting shardRouting=it.next();
+        while (initializingNode.hasNext()) {
+          MutableShardRouting shardRouting=initializingNode.next();
           if (shardRouting.equals(failedShard)) {
             dirty=true;
-            it.remove();
-            routingNodes.deassignShard(shardRouting);
+            initializingNode.remove();
             if (addToIgnoreList) {
               allocation.addIgnoreShardForNode(failedShard.shardId(),failedShard.currentNodeId());
             }
@@ -26,11 +25,10 @@
       if (dirty) {
         RoutingNode relocatingFromNode=routingNodes.node(failedShard.relocatingNodeId());
         if (relocatingFromNode != null) {
-          for (Iterator<MutableShardRouting> it=relocatingFromNode.iterator(); it.hasNext(); ) {
-            MutableShardRouting shardRouting=it.next();
-            if (shardRouting.shardId().equals(failedShard.shardId()) && shardRouting.state() == RELOCATING) {
+          for (          MutableShardRouting shardRouting : relocatingFromNode) {
+            if (shardRouting.shardId().equals(failedShard.shardId()) && shardRouting.relocating()) {
               dirty=true;
-              routingNodes.cancelRelocationForShard(shardRouting);
+              routingNodes.cancelRelocation(shardRouting);
               break;
             }
           }
@@ -40,14 +38,13 @@
     }
  else     if (failedShard.state() == RELOCATING) {
       boolean dirty=false;
-      RoutingNode relocatingFromNode=routingNodes.node(failedShard.currentNodeId());
+      RoutingNodes.RoutingNodeIterator relocatingFromNode=routingNodes.routingNodeIter(failedShard.currentNodeId());
       if (relocatingFromNode != null) {
-        for (Iterator<MutableShardRouting> it=relocatingFromNode.iterator(); it.hasNext(); ) {
-          MutableShardRouting shardRouting=it.next();
+        while (relocatingFromNode.hasNext()) {
+          MutableShardRouting shardRouting=relocatingFromNode.next();
           if (shardRouting.equals(failedShard)) {
             dirty=true;
-            routingNodes.cancelRelocationForShard(shardRouting);
-            it.remove();
+            relocatingFromNode.remove();
             if (addToIgnoreList) {
               allocation.addIgnoreShardForNode(failedShard.shardId(),failedShard.currentNodeId());
             }
@@ -57,14 +54,13 @@
         }
       }
       if (dirty) {
-        RoutingNode initializingNode=routingNodes.node(failedShard.relocatingNodeId());
+        RoutingNodes.RoutingNodeIterator initializingNode=routingNodes.routingNodeIter(failedShard.relocatingNodeId());
         if (initializingNode != null) {
-          for (Iterator<MutableShardRouting> it=initializingNode.iterator(); it.hasNext(); ) {
-            MutableShardRouting shardRouting=it.next();
+          while (initializingNode.hasNext()) {
+            MutableShardRouting shardRouting=initializingNode.next();
             if (shardRouting.shardId().equals(failedShard.shardId()) && shardRouting.state() == INITIALIZING) {
               dirty=true;
-              routingNodes.deassignShard(shardRouting);
-              it.remove();
+              initializingNode.remove();
             }
           }
         }
@@ -77,16 +73,16 @@
   }
  else {
     boolean dirty=false;
-    RoutingNode node=routingNodes.node(failedShard.currentNodeId());
+    RoutingNodes.RoutingNodeIterator node=routingNodes.routingNodeIter(failedShard.currentNodeId());
     if (node != null) {
-      for (Iterator<MutableShardRouting> it=node.iterator(); it.hasNext(); ) {
-        MutableShardRouting shardRouting=it.next();
+      while (node.hasNext()) {
+        MutableShardRouting shardRouting=node.next();
         if (shardRouting.equals(failedShard)) {
           dirty=true;
           if (addToIgnoreList) {
             allocation.addIgnoreShardForNode(failedShard.shardId(),failedShard.currentNodeId());
           }
-          it.remove();
+          node.remove();
           List<MutableShardRouting> shardsToMove=Lists.newArrayList();
           for (Iterator<MutableShardRouting> unassignedIt=routingNodes.unassigned().iterator(); unassignedIt.hasNext(); ) {
             MutableShardRouting unassignedShardRouting=unassignedIt.next();
