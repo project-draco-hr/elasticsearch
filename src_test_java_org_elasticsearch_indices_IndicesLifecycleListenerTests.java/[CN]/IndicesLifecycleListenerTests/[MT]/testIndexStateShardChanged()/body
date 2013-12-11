@@ -1,0 +1,23 @@
+{
+  String node1=cluster().startNode();
+  IndexShardStateChangeListener stateChangeListenerNode1=new IndexShardStateChangeListener();
+  cluster().getInstance(IndicesLifecycle.class,node1).addListener(stateChangeListenerNode1);
+  assertAcked(client().admin().indices().prepareCreate("test").setSettings(SETTING_NUMBER_OF_SHARDS,6,SETTING_NUMBER_OF_REPLICAS,0));
+  ensureGreen();
+  assertShardStatesMatch(stateChangeListenerNode1,6,CREATED,RECOVERING,POST_RECOVERY,STARTED);
+  assertAcked(client().admin().cluster().prepareUpdateSettings().setPersistentSettings(builder().put(CLUSTER_ROUTING_ALLOCATION_DISABLE_ALLOCATION,true)));
+  String node2=cluster().startNode();
+  IndexShardStateChangeListener stateChangeListenerNode2=new IndexShardStateChangeListener();
+  cluster().getInstance(IndicesLifecycle.class,node2).addListener(stateChangeListenerNode2);
+  assertAcked(client().admin().cluster().prepareUpdateSettings().setPersistentSettings(builder().put(CLUSTER_ROUTING_ALLOCATION_DISABLE_ALLOCATION,false)));
+  ensureGreen();
+  assertShardStatesMatch(stateChangeListenerNode1,3,CLOSED);
+  assertShardStatesMatch(stateChangeListenerNode2,3,CREATED,RECOVERING,POST_RECOVERY,STARTED);
+  assertAcked(client().admin().indices().prepareUpdateSettings("test").setSettings(builder().put(SETTING_NUMBER_OF_REPLICAS,1)));
+  ensureGreen();
+  assertShardStatesMatch(stateChangeListenerNode1,3,CREATED,RECOVERING,POST_RECOVERY,STARTED);
+  assertShardStatesMatch(stateChangeListenerNode2,3,CREATED,RECOVERING,POST_RECOVERY,STARTED);
+  assertAcked(client().admin().indices().prepareClose("test"));
+  assertShardStatesMatch(stateChangeListenerNode1,6,CLOSED);
+  assertShardStatesMatch(stateChangeListenerNode2,6,CLOSED);
+}
