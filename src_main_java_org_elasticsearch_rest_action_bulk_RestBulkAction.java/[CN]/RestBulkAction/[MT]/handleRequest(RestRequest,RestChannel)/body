@@ -33,6 +33,7 @@
         XContentBuilder builder=restContentBuilder(request);
         builder.startObject();
         builder.field(Fields.TOOK,response.getTookInMillis());
+        builder.field(Fields.ERRORS,response.hasFailures());
         builder.startArray(Fields.ITEMS);
         for (        BulkItemResponse itemResponse : response) {
           builder.startObject();
@@ -45,14 +46,39 @@
             builder.field(Fields._VERSION,itemResponse.getVersion());
           }
           if (itemResponse.isFailed()) {
+            builder.field(Fields.STATUS,itemResponse.getFailure().getStatus().getStatus());
             builder.field(Fields.ERROR,itemResponse.getFailure().getMessage());
           }
  else {
             builder.field(Fields.OK,true);
-          }
-          if (itemResponse.getResponse() instanceof DeleteResponse) {
-            DeleteResponse deleteResponse=itemResponse.getResponse();
-            builder.field(Fields.FOUND,!deleteResponse.isNotFound());
+            if (itemResponse.getResponse() instanceof DeleteResponse) {
+              DeleteResponse deleteResponse=itemResponse.getResponse();
+              if (deleteResponse.isNotFound()) {
+                builder.field(Fields.STATUS,RestStatus.NOT_FOUND.getStatus());
+              }
+ else {
+                builder.field(Fields.STATUS,RestStatus.OK.getStatus());
+              }
+              builder.field(Fields.FOUND,!deleteResponse.isNotFound());
+            }
+ else             if (itemResponse.getResponse() instanceof IndexResponse) {
+              IndexResponse indexResponse=itemResponse.getResponse();
+              if (indexResponse.isCreated()) {
+                builder.field(Fields.STATUS,RestStatus.CREATED.getStatus());
+              }
+ else {
+                builder.field(Fields.STATUS,RestStatus.OK.getStatus());
+              }
+            }
+ else             if (itemResponse.getResponse() instanceof UpdateResponse) {
+              UpdateResponse updateResponse=itemResponse.getResponse();
+              if (updateResponse.isCreated()) {
+                builder.field(Fields.STATUS,RestStatus.CREATED.getStatus());
+              }
+ else {
+                builder.field(Fields.STATUS,RestStatus.OK.getStatus());
+              }
+            }
           }
           builder.endObject();
           builder.endObject();
