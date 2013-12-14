@@ -1,0 +1,20 @@
+{
+  super(shardId,indexSettings,indexStore);
+  final long seed=indexSettings.getAsLong(ElasticsearchIntegrationTest.INDEX_SEED_SETTING,0l);
+  Random random=new Random(seed);
+  helper=new MockDirectoryHelper(shardId,indexSettings,logger,random,seed);
+  checkIndexOnClose=indexSettings.getAsBoolean(CHECK_INDEX_ON_CLOSE,random.nextDouble() < 0.1);
+  delegateService=helper.randomDirectorService(indexStore);
+  if (checkIndexOnClose) {
+    final IndicesLifecycle.Listener listener=new IndicesLifecycle.Listener(){
+      @Override public void beforeIndexShardClosed(      ShardId sid,      @Nullable IndexShard indexShard){
+        if (shardId.equals(sid) && indexShard != null) {
+          checkIndex(((InternalIndexShard)indexShard).store());
+        }
+        service.indicesLifecycle().removeListener(this);
+      }
+    }
+;
+    service.indicesLifecycle().addListener(listener);
+  }
+}

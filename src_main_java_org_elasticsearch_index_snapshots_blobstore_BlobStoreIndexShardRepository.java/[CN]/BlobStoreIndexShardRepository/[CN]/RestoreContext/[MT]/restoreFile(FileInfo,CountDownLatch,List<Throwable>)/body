@@ -4,51 +4,70 @@
     indexOutput=store.createOutputRaw(fileInfo.physicalName());
   }
  catch (  IOException e) {
-    failures.add(e);
-    latch.countDown();
+    try {
+      failures.add(e);
+    }
+  finally {
+      latch.countDown();
+    }
     return;
   }
   String firstFileToRecover=fileInfo.partName(0);
   final AtomicInteger partIndex=new AtomicInteger();
-  blobContainer.readBlob(firstFileToRecover,new BlobContainer.ReadBlobListener(){
-    @Override public synchronized void onPartial(    byte[] data,    int offset,    int size) throws IOException {
-      recoveryState.getIndex().addRecoveredByteCount(size);
-      RecoveryState.File file=recoveryState.getIndex().file(fileInfo.name());
-      if (file != null) {
-        file.updateRecovered(size);
-      }
-      indexOutput.writeBytes(data,offset,size);
-      if (restoreRateLimiter != null) {
-        rateLimiterListener.onRestorePause(restoreRateLimiter.pause(size));
-      }
-    }
-    @Override public synchronized void onCompleted(){
-      int part=partIndex.incrementAndGet();
-      if (part < fileInfo.numberOfParts()) {
-        String partName=fileInfo.partName(part);
-        blobContainer.readBlob(partName,this);
-        return;
-      }
- else {
-        try {
-          indexOutput.close();
-          if (fileInfo.checksum() != null) {
-            store.writeChecksum(fileInfo.physicalName(),fileInfo.checksum());
-          }
-          store.directory().sync(Collections.singleton(fileInfo.physicalName()));
-          recoveryState.getIndex().addRecoveredFileCount(1);
+  boolean success=false;
+  try {
+    blobContainer.readBlob(firstFileToRecover,new BlobContainer.ReadBlobListener(){
+      @Override public synchronized void onPartial(      byte[] data,      int offset,      int size) throws IOException {
+        recoveryState.getIndex().addRecoveredByteCount(size);
+        RecoveryState.File file=recoveryState.getIndex().file(fileInfo.name());
+        if (file != null) {
+          file.updateRecovered(size);
         }
- catch (        IOException e) {
-          onFailure(e);
+        indexOutput.writeBytes(data,offset,size);
+        if (restoreRateLimiter != null) {
+          rateLimiterListener.onRestorePause(restoreRateLimiter.pause(size));
+        }
+      }
+      @Override public synchronized void onCompleted(){
+        int part=partIndex.incrementAndGet();
+        if (part < fileInfo.numberOfParts()) {
+          String partName=fileInfo.partName(part);
+          blobContainer.readBlob(partName,this);
           return;
         }
+ else {
+          try {
+            indexOutput.close();
+            if (fileInfo.checksum() != null) {
+              store.writeChecksum(fileInfo.physicalName(),fileInfo.checksum());
+            }
+            store.directory().sync(Collections.singleton(fileInfo.physicalName()));
+            recoveryState.getIndex().addRecoveredFileCount(1);
+          }
+ catch (          IOException e) {
+            onFailure(e);
+            return;
+          }
+        }
+        latch.countDown();
       }
-      latch.countDown();
+      @Override public void onFailure(      Throwable t){
+        try {
+          IOUtils.closeWhileHandlingException(indexOutput);
+          failures.add(t);
+        }
+  finally {
+          latch.countDown();
+        }
+      }
     }
-    @Override public void onFailure(    Throwable t){
-      failures.add(t);
+);
+    success=true;
+  }
+  finally {
+    if (!success) {
+      IOUtils.closeWhileHandlingException(indexOutput);
       latch.countDown();
     }
   }
-);
 }

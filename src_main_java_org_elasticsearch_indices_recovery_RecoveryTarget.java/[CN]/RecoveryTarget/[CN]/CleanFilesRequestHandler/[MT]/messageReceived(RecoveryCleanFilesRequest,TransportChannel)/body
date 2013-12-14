@@ -7,38 +7,44 @@
     onGoingRecovery.sentCanceledToSource=true;
     throw new IndexShardClosedException(request.shardId());
   }
-  Store store=onGoingRecovery.indexShard.store();
-  String prefix="recovery." + onGoingRecovery.recoveryState().getTimer().startTime() + ".";
-  Set<String> filesToRename=Sets.newHashSet();
-  for (  String existingFile : store.directory().listAll()) {
-    if (existingFile.startsWith(prefix)) {
-      filesToRename.add(existingFile.substring(prefix.length(),existingFile.length()));
+  final Store store=onGoingRecovery.indexShard.store();
+  store.incRef();
+  try {
+    String prefix="recovery." + onGoingRecovery.recoveryState().getTimer().startTime() + ".";
+    Set<String> filesToRename=Sets.newHashSet();
+    for (    String existingFile : store.directory().listAll()) {
+      if (existingFile.startsWith(prefix)) {
+        filesToRename.add(existingFile.substring(prefix.length(),existingFile.length()));
+      }
     }
+    Exception failureToRename=null;
+    if (!filesToRename.isEmpty()) {
+      final Directory directory=store.directory();
+      for (      String file : filesToRename) {
+        try {
+          directory.deleteFile(file);
+        }
+ catch (        Throwable ex) {
+          logger.debug("failed to delete file [{}]",ex,file);
+        }
+      }
+      for (      String fileToRename : filesToRename) {
+        store.renameFile(prefix + fileToRename,fileToRename);
+      }
+    }
+    store.writeChecksums(onGoingRecovery.checksums);
+    for (    String existingFile : store.directory().listAll()) {
+      if (!request.snapshotFiles().contains(existingFile) && !Store.isChecksum(existingFile)) {
+        try {
+          store.directory().deleteFile(existingFile);
+        }
+ catch (        Exception e) {
+        }
+      }
+    }
+    channel.sendResponse(TransportResponse.Empty.INSTANCE);
   }
-  Exception failureToRename=null;
-  if (!filesToRename.isEmpty()) {
-    final Directory directory=store.directory();
-    for (    String file : filesToRename) {
-      try {
-        directory.deleteFile(file);
-      }
- catch (      Throwable ex) {
-        logger.debug("failed to delete file [{}]",ex,file);
-      }
-    }
-    for (    String fileToRename : filesToRename) {
-      store.renameFile(prefix + fileToRename,fileToRename);
-    }
+  finally {
+    store.decRef();
   }
-  store.writeChecksums(onGoingRecovery.checksums);
-  for (  String existingFile : store.directory().listAll()) {
-    if (!request.snapshotFiles().contains(existingFile) && !Store.isChecksum(existingFile)) {
-      try {
-        store.directory().deleteFile(existingFile);
-      }
- catch (      Exception e) {
-      }
-    }
-  }
-  channel.sendResponse(TransportResponse.Empty.INSTANCE);
 }

@@ -1,86 +1,92 @@
 {
   logger.debug("[{}] [{}] snapshot to [{}] ...",shardId,snapshotId,repositoryName);
-  final ImmutableMap<String,BlobMetaData> blobs;
+  store.incRef();
   try {
-    blobs=blobContainer.listBlobs();
-  }
- catch (  IOException e) {
-    throw new IndexShardSnapshotFailedException(shardId,"failed to list blobs",e);
-  }
-  long generation=findLatestFileNameGeneration(blobs);
-  BlobStoreIndexShardSnapshots snapshots=buildBlobStoreIndexShardSnapshots(blobs);
-  final CopyOnWriteArrayList<Throwable> failures=new CopyOnWriteArrayList<Throwable>();
-  final List<BlobStoreIndexShardSnapshot.FileInfo> indexCommitPointFiles=newArrayList();
-  int indexNumberOfFiles=0;
-  long indexTotalFilesSize=0;
-  ArrayList<FileInfo> filesToSnapshot=newArrayList();
-  for (  String fileName : snapshotIndexCommit.getFiles()) {
-    if (snapshotStatus.aborted()) {
-      logger.debug("[{}] [{}] Aborted on the file [{}], exiting",shardId,snapshotId,fileName);
-      throw new IndexShardSnapshotFailedException(shardId,"Aborted");
-    }
-    logger.trace("[{}] [{}] Processing [{}]",shardId,snapshotId,fileName);
-    final StoreFileMetaData md;
+    final ImmutableMap<String,BlobMetaData> blobs;
     try {
-      md=store.metaData(fileName);
+      blobs=blobContainer.listBlobs();
     }
  catch (    IOException e) {
-      throw new IndexShardSnapshotFailedException(shardId,"Failed to get store file metadata",e);
+      throw new IndexShardSnapshotFailedException(shardId,"failed to list blobs",e);
     }
-    boolean snapshotRequired=false;
-    BlobStoreIndexShardSnapshot.FileInfo fileInfo=snapshots.findPhysicalIndexFile(fileName);
-    if (fileInfo == null || !fileInfo.isSame(md) || !snapshotFileExistsInBlobs(fileInfo,blobs)) {
-      snapshotRequired=true;
-    }
-    if (snapshotRequired) {
-      indexNumberOfFiles++;
-      indexTotalFilesSize+=md.length();
-      BlobStoreIndexShardSnapshot.FileInfo snapshotFileInfo=new BlobStoreIndexShardSnapshot.FileInfo(fileNameFromGeneration(++generation),fileName,md.length(),chunkSize,md.checksum());
-      indexCommitPointFiles.add(snapshotFileInfo);
-      filesToSnapshot.add(snapshotFileInfo);
-    }
+    long generation=findLatestFileNameGeneration(blobs);
+    BlobStoreIndexShardSnapshots snapshots=buildBlobStoreIndexShardSnapshots(blobs);
+    final CopyOnWriteArrayList<Throwable> failures=new CopyOnWriteArrayList<Throwable>();
+    final List<BlobStoreIndexShardSnapshot.FileInfo> indexCommitPointFiles=newArrayList();
+    int indexNumberOfFiles=0;
+    long indexTotalFilesSize=0;
+    ArrayList<FileInfo> filesToSnapshot=newArrayList();
+    for (    String fileName : snapshotIndexCommit.getFiles()) {
+      if (snapshotStatus.aborted()) {
+        logger.debug("[{}] [{}] Aborted on the file [{}], exiting",shardId,snapshotId,fileName);
+        throw new IndexShardSnapshotFailedException(shardId,"Aborted");
+      }
+      logger.trace("[{}] [{}] Processing [{}]",shardId,snapshotId,fileName);
+      final StoreFileMetaData md;
+      try {
+        md=store.metaData(fileName);
+      }
+ catch (      IOException e) {
+        throw new IndexShardSnapshotFailedException(shardId,"Failed to get store file metadata",e);
+      }
+      boolean snapshotRequired=false;
+      BlobStoreIndexShardSnapshot.FileInfo fileInfo=snapshots.findPhysicalIndexFile(fileName);
+      if (fileInfo == null || !fileInfo.isSame(md) || !snapshotFileExistsInBlobs(fileInfo,blobs)) {
+        snapshotRequired=true;
+      }
+      if (snapshotRequired) {
+        indexNumberOfFiles++;
+        indexTotalFilesSize+=md.length();
+        BlobStoreIndexShardSnapshot.FileInfo snapshotFileInfo=new BlobStoreIndexShardSnapshot.FileInfo(fileNameFromGeneration(++generation),fileName,md.length(),chunkSize,md.checksum());
+        indexCommitPointFiles.add(snapshotFileInfo);
+        filesToSnapshot.add(snapshotFileInfo);
+      }
  else {
-      indexCommitPointFiles.add(fileInfo);
+        indexCommitPointFiles.add(fileInfo);
+      }
     }
-  }
-  snapshotStatus.files(indexNumberOfFiles,indexTotalFilesSize);
-  snapshotStatus.updateStage(IndexShardSnapshotStatus.Stage.STARTED);
-  final CountDownLatch indexLatch=new CountDownLatch(filesToSnapshot.size());
-  for (  FileInfo snapshotFileInfo : filesToSnapshot) {
+    snapshotStatus.files(indexNumberOfFiles,indexTotalFilesSize);
+    snapshotStatus.updateStage(IndexShardSnapshotStatus.Stage.STARTED);
+    final CountDownLatch indexLatch=new CountDownLatch(filesToSnapshot.size());
+    for (    FileInfo snapshotFileInfo : filesToSnapshot) {
+      try {
+        snapshotFile(snapshotFileInfo,indexLatch,failures);
+      }
+ catch (      IOException e) {
+        failures.add(e);
+      }
+    }
+    snapshotStatus.indexVersion(snapshotIndexCommit.getGeneration());
     try {
-      snapshotFile(snapshotFileInfo,indexLatch,failures);
+      indexLatch.await();
+    }
+ catch (    InterruptedException e) {
+      failures.add(e);
+      Thread.currentThread().interrupt();
+    }
+    if (!failures.isEmpty()) {
+      throw new IndexShardSnapshotFailedException(shardId,"Failed to perform snapshot (index files)",failures.get(0));
+    }
+    snapshotStatus.updateStage(IndexShardSnapshotStatus.Stage.FINALIZE);
+    String commitPointName=snapshotBlobName(snapshotId);
+    BlobStoreIndexShardSnapshot snapshot=new BlobStoreIndexShardSnapshot(snapshotId.getSnapshot(),snapshotIndexCommit.getGeneration(),indexCommitPointFiles,snapshotStatus.startTime(),System.currentTimeMillis() - snapshotStatus.startTime(),indexNumberOfFiles,indexTotalFilesSize);
+    try {
+      byte[] snapshotData=writeSnapshot(snapshot);
+      logger.trace("[{}] [{}] writing shard snapshot file",shardId,snapshotId);
+      blobContainer.writeBlob(commitPointName,new BytesStreamInput(snapshotData,false),snapshotData.length);
     }
  catch (    IOException e) {
-      failures.add(e);
+      throw new IndexShardSnapshotFailedException(shardId,"Failed to write commit point",e);
     }
+    List<BlobStoreIndexShardSnapshot> newSnapshotsList=Lists.newArrayList();
+    newSnapshotsList.add(snapshot);
+    for (    BlobStoreIndexShardSnapshot point : snapshots) {
+      newSnapshotsList.add(point);
+    }
+    cleanup(newSnapshotsList,blobs);
+    snapshotStatus.updateStage(IndexShardSnapshotStatus.Stage.DONE);
   }
-  snapshotStatus.indexVersion(snapshotIndexCommit.getGeneration());
-  try {
-    indexLatch.await();
+  finally {
+    store.decRef();
   }
- catch (  InterruptedException e) {
-    failures.add(e);
-    Thread.currentThread().interrupt();
-  }
-  if (!failures.isEmpty()) {
-    throw new IndexShardSnapshotFailedException(shardId,"Failed to perform snapshot (index files)",failures.get(0));
-  }
-  snapshotStatus.updateStage(IndexShardSnapshotStatus.Stage.FINALIZE);
-  String commitPointName=snapshotBlobName(snapshotId);
-  BlobStoreIndexShardSnapshot snapshot=new BlobStoreIndexShardSnapshot(snapshotId.getSnapshot(),snapshotIndexCommit.getGeneration(),indexCommitPointFiles,snapshotStatus.startTime(),System.currentTimeMillis() - snapshotStatus.startTime(),indexNumberOfFiles,indexTotalFilesSize);
-  try {
-    byte[] snapshotData=writeSnapshot(snapshot);
-    logger.trace("[{}] [{}] writing shard snapshot file",shardId,snapshotId);
-    blobContainer.writeBlob(commitPointName,new BytesStreamInput(snapshotData,false),snapshotData.length);
-  }
- catch (  IOException e) {
-    throw new IndexShardSnapshotFailedException(shardId,"Failed to write commit point",e);
-  }
-  List<BlobStoreIndexShardSnapshot> newSnapshotsList=Lists.newArrayList();
-  newSnapshotsList.add(snapshot);
-  for (  BlobStoreIndexShardSnapshot point : snapshots) {
-    newSnapshotsList.add(point);
-  }
-  cleanup(newSnapshotsList,blobs);
-  snapshotStatus.updateStage(IndexShardSnapshotStatus.Stage.DONE);
 }

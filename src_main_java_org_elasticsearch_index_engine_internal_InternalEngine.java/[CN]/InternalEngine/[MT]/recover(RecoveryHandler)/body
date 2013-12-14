@@ -4,7 +4,7 @@
     if (closed) {
       throw new EngineClosedException(shardId);
     }
-    onGoingRecoveries.increment();
+    onGoingRecoveries.startRecovery();
   }
   finally {
     rwl.writeLock().unlock();
@@ -14,15 +14,14 @@
     phase1Snapshot=deletionPolicy.snapshot();
   }
  catch (  Throwable e) {
-    onGoingRecoveries.decrement();
+    Releasables.releaseWhileHandlingException(onGoingRecoveries);
     throw new RecoveryEngineException(shardId,1,"Snapshot failed",e);
   }
   try {
     recoveryHandler.phase1(phase1Snapshot);
   }
  catch (  Throwable e) {
-    onGoingRecoveries.decrement();
-    phase1Snapshot.release();
+    Releasables.releaseWhileHandlingException(onGoingRecoveries,phase1Snapshot);
     if (closed) {
       e=new EngineClosedException(shardId,e);
     }
@@ -33,8 +32,7 @@
     phase2Snapshot=translog.snapshot();
   }
  catch (  Throwable e) {
-    onGoingRecoveries.decrement();
-    phase1Snapshot.release();
+    Releasables.releaseWhileHandlingException(onGoingRecoveries,phase1Snapshot);
     if (closed) {
       e=new EngineClosedException(shardId,e);
     }
@@ -44,9 +42,7 @@
     recoveryHandler.phase2(phase2Snapshot);
   }
  catch (  Throwable e) {
-    onGoingRecoveries.decrement();
-    phase1Snapshot.release();
-    phase2Snapshot.release();
+    Releasables.releaseWhileHandlingException(onGoingRecoveries,phase1Snapshot,phase2Snapshot);
     if (closed) {
       e=new EngineClosedException(shardId,e);
     }
@@ -54,20 +50,18 @@
   }
   rwl.writeLock().lock();
   Translog.Snapshot phase3Snapshot=null;
+  boolean success=false;
   try {
     phase3Snapshot=translog.snapshot(phase2Snapshot);
     recoveryHandler.phase3(phase3Snapshot);
+    success=true;
   }
  catch (  Throwable e) {
     throw new RecoveryEngineException(shardId,3,"Execution failed",e);
   }
  finally {
-    onGoingRecoveries.decrement();
+    Releasables.release(success,onGoingRecoveries);
     rwl.writeLock().unlock();
-    phase1Snapshot.release();
-    phase2Snapshot.release();
-    if (phase3Snapshot != null) {
-      phase3Snapshot.release();
-    }
+    Releasables.release(success,phase1Snapshot,phase2Snapshot,phase3Snapshot);
   }
 }
