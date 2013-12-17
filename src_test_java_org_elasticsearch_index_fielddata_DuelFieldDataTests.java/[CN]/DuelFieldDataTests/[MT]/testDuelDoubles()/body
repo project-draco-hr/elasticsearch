@@ -1,21 +1,32 @@
 {
+  final String mapping=XContentFactory.jsonBuilder().startObject().startObject("type").startObject("properties").startObject("float").field("type","float").startObject("fielddata").field("format","doc_values").endObject().endObject().startObject("double").field("type","double").startObject("fielddata").field("format","doc_values").endObject().endObject().endObject().endObject().endObject().string();
+  final DocumentMapper mapper=MapperTestUtils.newParser().parse(mapping);
   Random random=getRandom();
   int atLeast=atLeast(random,1000);
+  final int maxNumValues=randomBoolean() ? 1 : randomIntBetween(2,40);
+  float[] values=new float[maxNumValues];
   for (int i=0; i < atLeast; i++) {
-    Document d=new Document();
-    d.add(new StringField("_id","" + i,Field.Store.NO));
-    if (random.nextInt(15) != 0) {
-      int[] numbers=getNumbers(random,Short.MAX_VALUE);
-      for (      int j : numbers) {
-        d.add(new FloatField("float",j,Field.Store.NO));
-        d.add(new DoubleField("double",j,Field.Store.NO));
-        if (LuceneTestCase.defaultCodecSupportsSortedSet()) {
-          d.add(doubleDV("double",j));
-          d.add(floatDV("float",j));
-        }
+    final int numValues=randomInt(maxNumValues);
+    float def=randomBoolean() ? randomFloat() : Float.NaN;
+    for (int j=0; j < numValues; ++j) {
+      if (randomBoolean()) {
+        values[j]=def;
+      }
+ else {
+        values[j]=randomFloat();
       }
     }
-    writer.addDocument(d);
+    XContentBuilder doc=XContentFactory.jsonBuilder().startObject().startArray("float");
+    for (int j=0; j < numValues; ++j) {
+      doc=doc.value(values[j]);
+    }
+    doc=doc.endArray().startArray("double");
+    for (int j=0; j < numValues; ++j) {
+      doc=doc.value(values[j]);
+    }
+    doc=doc.endArray().endObject();
+    final ParsedDocument d=mapper.parse("type",Integer.toString(i),doc.bytes());
+    writer.addDocument(d.rootDoc());
     if (random.nextInt(10) == 0) {
       refreshReader();
     }
@@ -24,10 +35,8 @@
   Map<FieldDataType,Type> typeMap=new HashMap<FieldDataType,Type>();
   typeMap.put(new FieldDataType("double",ImmutableSettings.builder().put("format","array")),Type.Double);
   typeMap.put(new FieldDataType("float",ImmutableSettings.builder().put("format","array")),Type.Float);
-  if (LuceneTestCase.defaultCodecSupportsSortedSet()) {
-    typeMap.put(new FieldDataType("double",ImmutableSettings.builder().put("format","doc_values")),Type.Double);
-    typeMap.put(new FieldDataType("float",ImmutableSettings.builder().put("format","doc_values")),Type.Float);
-  }
+  typeMap.put(new FieldDataType("double",ImmutableSettings.builder().put("format","doc_values")),Type.Double);
+  typeMap.put(new FieldDataType("float",ImmutableSettings.builder().put("format","doc_values")),Type.Float);
   ArrayList<Entry<FieldDataType,Type>> list=new ArrayList<Entry<FieldDataType,Type>>(typeMap.entrySet());
   while (!list.isEmpty()) {
     Entry<FieldDataType,Type> left;

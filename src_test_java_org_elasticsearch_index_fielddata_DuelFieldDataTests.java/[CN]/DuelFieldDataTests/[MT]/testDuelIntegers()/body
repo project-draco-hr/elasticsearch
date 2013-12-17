@@ -1,21 +1,31 @@
 {
+  final String mapping=XContentFactory.jsonBuilder().startObject().startObject("type").startObject("properties").startObject("byte").field("type","byte").startObject("fielddata").field("format","doc_values").endObject().endObject().startObject("short").field("type","short").startObject("fielddata").field("format","doc_values").endObject().endObject().startObject("integer").field("type","integer").startObject("fielddata").field("format","doc_values").endObject().endObject().startObject("long").field("type","long").startObject("fielddata").field("format","doc_values").endObject().endObject().endObject().endObject().endObject().string();
+  final DocumentMapper mapper=MapperTestUtils.newParser().parse(mapping);
   Random random=getRandom();
   int atLeast=atLeast(random,1000);
+  final int maxNumValues=randomBoolean() ? 1 : randomIntBetween(2,40);
+  byte[] values=new byte[maxNumValues];
   for (int i=0; i < atLeast; i++) {
-    Document d=new Document();
-    d.add(new StringField("_id","" + i,Field.Store.NO));
-    if (random.nextInt(15) != 0) {
-      int[] numbers=getNumbers(random,Byte.MAX_VALUE);
-      for (      int j : numbers) {
-        d.add(new LongField("long",j,Field.Store.NO));
-        d.add(new IntField("integer",j,Field.Store.NO));
-        if (LuceneTestCase.defaultCodecSupportsSortedSet()) {
-          d.add(longDV("long",j));
-          d.add(intDV("integer",j));
-        }
+    final int numValues=randomInt(maxNumValues);
+    for (int j=0; j < numValues; ++j) {
+      if (randomBoolean()) {
+        values[j]=1;
+      }
+ else {
+        values[j]=randomByte();
       }
     }
-    writer.addDocument(d);
+    XContentBuilder doc=XContentFactory.jsonBuilder().startObject();
+    for (    String fieldName : Arrays.asList("byte","short","integer","long")) {
+      doc=doc.startArray(fieldName);
+      for (int j=0; j < numValues; ++j) {
+        doc=doc.value(values[j]);
+      }
+      doc=doc.endArray();
+    }
+    doc=doc.endObject();
+    final ParsedDocument d=mapper.parse("type",Integer.toString(i),doc.bytes());
+    writer.addDocument(d.rootDoc());
     if (random.nextInt(10) == 0) {
       refreshReader();
     }
@@ -26,12 +36,10 @@
   typeMap.put(new FieldDataType("short",ImmutableSettings.builder().put("format","array")),Type.Integer);
   typeMap.put(new FieldDataType("int",ImmutableSettings.builder().put("format","array")),Type.Integer);
   typeMap.put(new FieldDataType("long",ImmutableSettings.builder().put("format","array")),Type.Long);
-  if (LuceneTestCase.defaultCodecSupportsSortedSet()) {
-    typeMap.put(new FieldDataType("byte",ImmutableSettings.builder().put("format","doc_values")),Type.Integer);
-    typeMap.put(new FieldDataType("short",ImmutableSettings.builder().put("format","doc_values")),Type.Integer);
-    typeMap.put(new FieldDataType("int",ImmutableSettings.builder().put("format","doc_values")),Type.Integer);
-    typeMap.put(new FieldDataType("long",ImmutableSettings.builder().put("format","doc_values")),Type.Long);
-  }
+  typeMap.put(new FieldDataType("byte",ImmutableSettings.builder().put("format","doc_values")),Type.Integer);
+  typeMap.put(new FieldDataType("short",ImmutableSettings.builder().put("format","doc_values")),Type.Integer);
+  typeMap.put(new FieldDataType("int",ImmutableSettings.builder().put("format","doc_values")),Type.Integer);
+  typeMap.put(new FieldDataType("long",ImmutableSettings.builder().put("format","doc_values")),Type.Long);
   ArrayList<Entry<FieldDataType,Type>> list=new ArrayList<Entry<FieldDataType,Type>>(typeMap.entrySet());
   while (!list.isEmpty()) {
     Entry<FieldDataType,Type> left;
