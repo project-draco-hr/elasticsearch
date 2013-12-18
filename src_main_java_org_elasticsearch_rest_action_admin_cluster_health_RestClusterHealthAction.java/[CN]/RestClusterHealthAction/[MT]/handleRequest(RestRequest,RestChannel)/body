@@ -2,7 +2,6 @@
   ClusterHealthRequest clusterHealthRequest=clusterHealthRequest(Strings.splitStringByCommaToArray(request.param("index")));
   clusterHealthRequest.local(request.paramAsBoolean("local",clusterHealthRequest.local()));
   clusterHealthRequest.listenerThreaded(false);
-  int level=0;
   try {
     clusterHealthRequest.masterNodeTimeout(request.paramAsTime("master_timeout",clusterHealthRequest.masterNodeTimeout()));
     clusterHealthRequest.timeout(request.paramAsTime("timeout",clusterHealthRequest.timeout()));
@@ -13,18 +12,6 @@
     clusterHealthRequest.waitForRelocatingShards(request.paramAsInt("wait_for_relocating_shards",clusterHealthRequest.waitForRelocatingShards()));
     clusterHealthRequest.waitForActiveShards(request.paramAsInt("wait_for_active_shards",clusterHealthRequest.waitForActiveShards()));
     clusterHealthRequest.waitForNodes(request.param("wait_for_nodes",clusterHealthRequest.waitForNodes()));
-    String sLevel=request.param("level");
-    if (sLevel != null) {
-      if ("cluster".equals(sLevel)) {
-        level=0;
-      }
- else       if ("indices".equals(sLevel)) {
-        level=1;
-      }
- else       if ("shards".equals(sLevel)) {
-        level=2;
-      }
-    }
   }
  catch (  Exception e) {
     try {
@@ -36,59 +23,13 @@
     }
     return;
   }
-  final int fLevel=level;
   client.admin().cluster().health(clusterHealthRequest,new ActionListener<ClusterHealthResponse>(){
     @Override public void onResponse(    ClusterHealthResponse response){
       try {
         RestStatus status=RestStatus.OK;
         XContentBuilder builder=RestXContentBuilder.restContentBuilder(request);
         builder.startObject();
-        builder.field(Fields.CLUSTER_NAME,response.getClusterName());
-        builder.field(Fields.STATUS,response.getStatus().name().toLowerCase(Locale.ROOT));
-        builder.field(Fields.TIMED_OUT,response.isTimedOut());
-        builder.field(Fields.NUMBER_OF_NODES,response.getNumberOfNodes());
-        builder.field(Fields.NUMBER_OF_DATA_NODES,response.getNumberOfDataNodes());
-        builder.field(Fields.ACTIVE_PRIMARY_SHARDS,response.getActivePrimaryShards());
-        builder.field(Fields.ACTIVE_SHARDS,response.getActiveShards());
-        builder.field(Fields.RELOCATING_SHARDS,response.getRelocatingShards());
-        builder.field(Fields.INITIALIZING_SHARDS,response.getInitializingShards());
-        builder.field(Fields.UNASSIGNED_SHARDS,response.getUnassignedShards());
-        if (!response.getValidationFailures().isEmpty()) {
-          builder.startArray(Fields.VALIDATION_FAILURES);
-          for (          String validationFailure : response.getValidationFailures()) {
-            builder.value(validationFailure);
-          }
-          if (fLevel == 0) {
-            for (            ClusterIndexHealth indexHealth : response) {
-              builder.startObject(indexHealth.getIndex());
-              if (!indexHealth.getValidationFailures().isEmpty()) {
-                builder.startArray(Fields.VALIDATION_FAILURES);
-                for (                String validationFailure : indexHealth.getValidationFailures()) {
-                  builder.value(validationFailure);
-                }
-                builder.endArray();
-              }
-              builder.endObject();
-            }
-          }
-          builder.endArray();
-        }
-        if (fLevel > 0) {
-          builder.startObject(Fields.INDICES);
-          for (          ClusterIndexHealth indexHealth : response) {
-            builder.startObject(indexHealth.getIndex(),XContentBuilder.FieldCaseConversion.NONE);
-            ToXContent.Params params;
-            if (fLevel > 1) {
-              params=new ToXContent.DelegatingMapParams(SHARD_LEVEL_PARAMS,request);
-            }
- else {
-              params=request;
-            }
-            indexHealth.toXContent(builder,params);
-            builder.endObject();
-          }
-          builder.endObject();
-        }
+        response.toXContent(builder,request);
         builder.endObject();
         channel.sendResponse(new XContentRestResponse(request,status,builder));
       }
