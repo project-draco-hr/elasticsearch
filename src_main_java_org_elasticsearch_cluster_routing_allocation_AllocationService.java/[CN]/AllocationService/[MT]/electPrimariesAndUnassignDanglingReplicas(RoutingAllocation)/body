@@ -1,2 +1,49 @@
 {
+  boolean changed=false;
+  RoutingNodes routingNodes=allocation.routingNodes();
+  if (!routingNodes.hasUnassignedPrimaries()) {
+    return changed;
+  }
+  for (  MutableShardRouting shardEntry : routingNodes.unassigned()) {
+    if (shardEntry.primary()) {
+      MutableShardRouting candidate=allocation.routingNodes().activeReplica(shardEntry);
+      if (candidate != null) {
+        routingNodes.swapPrimaryFlag(shardEntry,candidate);
+        if (candidate.relocatingNodeId() != null) {
+          changed=true;
+          RoutingNode node=routingNodes.node(candidate.relocatingNodeId());
+          if (node != null) {
+            for (            MutableShardRouting shardRouting : node) {
+              if (shardRouting.shardId().equals(candidate.shardId()) && !shardRouting.primary()) {
+                routingNodes.swapPrimaryFlag(shardRouting);
+                break;
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+  List<ShardRouting> shardsToFail=null;
+  if (routingNodes.hasUnassignedPrimaries()) {
+    for (    MutableShardRouting shardEntry : routingNodes.unassigned()) {
+      if (shardEntry.primary()) {
+        for (        MutableShardRouting routing : routingNodes.assignedShards(shardEntry)) {
+          if (!routing.primary()) {
+            changed=true;
+            if (shardsToFail == null) {
+              shardsToFail=new ArrayList<ShardRouting>();
+            }
+            shardsToFail.add(routing);
+          }
+        }
+      }
+    }
+    if (shardsToFail != null) {
+      for (      ShardRouting shardToFail : shardsToFail) {
+        applyFailedShard(allocation,shardToFail,false);
+      }
+    }
+  }
+  return changed;
 }
