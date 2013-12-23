@@ -1,6 +1,6 @@
 {
   XContentParser parser=parseContext.parser();
-  Query query=null;
+  Query innerQuery=null;
   boolean queryFound=false;
   float boost=1.0f;
   String childType=null;
@@ -19,7 +19,7 @@
         queryFound=true;
         String[] origTypes=QueryParseContext.setTypesWithPrevious(childType == null ? null : new String[]{childType});
         try {
-          query=parseContext.parseInnerQuery();
+          innerQuery=parseContext.parseInnerQuery();
         }
   finally {
           QueryParseContext.setTypes(origTypes);
@@ -65,7 +65,7 @@
   if (childType == null) {
     throw new QueryParsingException(parseContext.index(),"[top_children] requires 'type' field");
   }
-  if (query == null) {
+  if (innerQuery == null) {
     return null;
   }
   if ("delete_by_query".equals(SearchContext.current().source())) {
@@ -79,11 +79,11 @@
     throw new QueryParsingException(parseContext.index(),"Type [" + childType + "] does not have parent mapping");
   }
   String parentType=childDocMapper.parentFieldMapper().type();
-  query.setBoost(boost);
-  query=new XFilteredQuery(query,parseContext.cacheFilter(childDocMapper.typeFilter(),null));
-  TopChildrenQuery childQuery=new TopChildrenQuery(query,childType,parentType,scoreType,factor,incrementalFactor,parseContext.cacheRecycler());
+  innerQuery.setBoost(boost);
+  innerQuery=new XFilteredQuery(innerQuery,parseContext.cacheFilter(childDocMapper.typeFilter(),null));
+  TopChildrenQuery query=new TopChildrenQuery(innerQuery,childType,parentType,scoreType,factor,incrementalFactor,parseContext.cacheRecycler());
   if (queryName != null) {
-    parseContext.addNamedQuery(queryName,childQuery);
+    parseContext.addNamedFilter(queryName,new CustomQueryWrappingFilter(query));
   }
-  return childQuery;
+  return query;
 }
