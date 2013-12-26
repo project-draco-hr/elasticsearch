@@ -19,8 +19,19 @@
   }
   indexShard.warmerService().onPreWarm();
   long time=System.nanoTime();
+  final List<IndicesWarmer.Listener.TerminationHandle> terminationHandles=Lists.newArrayList();
   for (  final Listener listener : listeners) {
-    listener.warm(indexShard,indexMetaData,context,threadPool);
+    terminationHandles.add(listener.warm(indexShard,indexMetaData,context,threadPool));
+  }
+  for (  IndicesWarmer.Listener.TerminationHandle terminationHandle : terminationHandles) {
+    try {
+      terminationHandle.awaitTermination();
+    }
+ catch (    InterruptedException e) {
+      Thread.currentThread().interrupt();
+      logger.warn("Warming has been interrupted",e);
+      break;
+    }
   }
   long took=System.nanoTime() - time;
   indexShard.warmerService().onPostWarm(took);
