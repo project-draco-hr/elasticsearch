@@ -7,7 +7,7 @@
     nodesToPing.add(node);
   }
   final CountDownLatch latch=new CountDownLatch(nodesToPing.size());
-  final Queue<ClusterStateResponse> clusterStateResponses=ConcurrentCollections.newQueue();
+  final ConcurrentMap<DiscoveryNode,ClusterStateResponse> clusterStateResponses=ConcurrentCollections.newConcurrentMap();
   for (  final DiscoveryNode listedNode : nodesToPing) {
     threadPool.executor(ThreadPool.Names.MANAGEMENT).execute(new Runnable(){
       @Override public void run(){
@@ -37,7 +37,7 @@
               return ThreadPool.Names.SAME;
             }
             @Override public void handleResponse(            ClusterStateResponse response){
-              clusterStateResponses.add(response);
+              clusterStateResponses.put(listedNode,response);
               latch.countDown();
             }
             @Override public void handleException(            TransportException e){
@@ -48,7 +48,7 @@
           }
 );
         }
- catch (        Exception e) {
+ catch (        Throwable e) {
           logger.info("failed to get local cluster state info for {}, disconnecting...",e,listedNode);
           transportService.disconnectFromNode(listedNode);
           latch.countDown();
@@ -64,13 +64,17 @@
     return;
   }
   HashSet<DiscoveryNode> newNodes=new HashSet<DiscoveryNode>(listedNodes);
-  for (  ClusterStateResponse clusterStateResponse : clusterStateResponses) {
-    if (!ignoreClusterName && !clusterName.equals(clusterStateResponse.getClusterName())) {
-      logger.warn("node {} not part of the cluster {}, ignoring...",clusterStateResponse.getState().nodes().localNode(),clusterName);
+  HashSet<DiscoveryNode> newFilteredNodes=new HashSet<DiscoveryNode>();
+  for (  Map.Entry<DiscoveryNode,ClusterStateResponse> entry : clusterStateResponses.entrySet()) {
+    if (!ignoreClusterName && !clusterName.equals(entry.getValue().getClusterName())) {
+      logger.warn("node {} not part of the cluster {}, ignoring...",entry.getValue().getState().nodes().localNode(),clusterName);
+      newFilteredNodes.add(entry.getKey());
+      continue;
     }
-    for (    ObjectCursor<DiscoveryNode> cursor : clusterStateResponse.getState().nodes().dataNodes().values()) {
+    for (    ObjectCursor<DiscoveryNode> cursor : entry.getValue().getState().nodes().dataNodes().values()) {
       newNodes.add(cursor.value);
     }
   }
   nodes=validateNewNodes(newNodes);
+  filteredNodes=ImmutableList.copyOf(newFilteredNodes);
 }
