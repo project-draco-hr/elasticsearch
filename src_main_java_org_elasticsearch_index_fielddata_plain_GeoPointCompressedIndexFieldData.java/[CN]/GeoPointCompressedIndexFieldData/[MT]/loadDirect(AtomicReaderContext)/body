@@ -1,8 +1,12 @@
 {
   AtomicReader reader=context.reader();
   Terms terms=reader.terms(getFieldNames().indexName());
+  AtomicGeoPointFieldData data=null;
+  NonEstimatingEstimator estimator=new NonEstimatingEstimator(breakerService.getBreaker());
   if (terms == null) {
-    return new Empty(reader.maxDoc());
+    data=new Empty(reader.maxDoc());
+    estimator.afterLoad(null,data.getMemorySizeInBytes());
+    return data;
   }
   final long initialSize;
   if (terms.size() >= 0) {
@@ -16,6 +20,7 @@
   PagedMutable lon=new PagedMutable(initialSize,pageSize,encoding.numBitsPerCoordinate(),PackedInts.COMPACT);
   final float acceptableTransientOverheadRatio=fieldDataType.getSettings().getAsFloat("acceptable_transient_overhead_ratio",OrdinalsBuilder.DEFAULT_ACCEPTABLE_OVERHEAD_RATIO);
   OrdinalsBuilder builder=new OrdinalsBuilder(terms.size(),reader.maxDoc(),acceptableTransientOverheadRatio);
+  boolean success=false;
   try {
     final GeoPointEnum iter=new GeoPointEnum(builder.buildFromTerms(terms.iterator(null)));
     GeoPoint point;
@@ -43,10 +48,10 @@
       }
       FixedBitSet set=builder.buildDocsWithValuesSet();
       if (set == null) {
-        return new GeoPointCompressedAtomicFieldData.Single(encoding,sLon,sLat,reader.maxDoc(),ordinals.getNumOrds());
+        data=new GeoPointCompressedAtomicFieldData.Single(encoding,sLon,sLat,reader.maxDoc(),ordinals.getNumOrds());
       }
  else {
-        return new GeoPointCompressedAtomicFieldData.SingleFixedSet(encoding,sLon,sLat,reader.maxDoc(),set,ordinals.getNumOrds());
+        data=new GeoPointCompressedAtomicFieldData.SingleFixedSet(encoding,sLon,sLat,reader.maxDoc(),set,ordinals.getNumOrds());
       }
     }
  else {
@@ -54,10 +59,15 @@
         lat=lat.resize(build.getMaxOrd());
         lon=lon.resize(build.getMaxOrd());
       }
-      return new GeoPointCompressedAtomicFieldData.WithOrdinals(encoding,lon,lat,reader.maxDoc(),build);
+      data=new GeoPointCompressedAtomicFieldData.WithOrdinals(encoding,lon,lat,reader.maxDoc(),build);
     }
+    success=true;
+    return data;
   }
   finally {
+    if (success) {
+      estimator.afterLoad(null,data.getMemorySizeInBytes());
+    }
     builder.close();
   }
 }

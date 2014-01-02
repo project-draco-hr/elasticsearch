@@ -1,8 +1,12 @@
 {
   AtomicReader reader=context.reader();
   Terms terms=reader.terms(getFieldNames().indexName());
+  AtomicGeoPointFieldData data=null;
+  NonEstimatingEstimator estimator=new NonEstimatingEstimator(breakerService.getBreaker());
   if (terms == null) {
-    return new Empty(reader.maxDoc());
+    data=new Empty(reader.maxDoc());
+    estimator.afterLoad(null,data.getMemorySizeInBytes());
+    return data;
   }
   final BigDoubleArrayList lat=new BigDoubleArrayList();
   final BigDoubleArrayList lon=new BigDoubleArrayList();
@@ -10,6 +14,7 @@
   lon.add(0);
   final float acceptableTransientOverheadRatio=fieldDataType.getSettings().getAsFloat("acceptable_transient_overhead_ratio",OrdinalsBuilder.DEFAULT_ACCEPTABLE_OVERHEAD_RATIO);
   OrdinalsBuilder builder=new OrdinalsBuilder(terms.size(),reader.maxDoc(),acceptableTransientOverheadRatio);
+  boolean success=false;
   try {
     final GeoPointEnum iter=new GeoPointEnum(builder.buildFromTerms(terms.iterator(null)));
     GeoPoint point;
@@ -30,17 +35,22 @@
       }
       FixedBitSet set=builder.buildDocsWithValuesSet();
       if (set == null) {
-        return new GeoPointDoubleArrayAtomicFieldData.Single(sLon,sLat,reader.maxDoc(),ordinals.getNumOrds());
+        data=new GeoPointDoubleArrayAtomicFieldData.Single(sLon,sLat,reader.maxDoc(),ordinals.getNumOrds());
       }
  else {
-        return new GeoPointDoubleArrayAtomicFieldData.SingleFixedSet(sLon,sLat,reader.maxDoc(),set,ordinals.getNumOrds());
+        data=new GeoPointDoubleArrayAtomicFieldData.SingleFixedSet(sLon,sLat,reader.maxDoc(),set,ordinals.getNumOrds());
       }
     }
  else {
-      return new GeoPointDoubleArrayAtomicFieldData.WithOrdinals(lon,lat,reader.maxDoc(),build);
+      data=new GeoPointDoubleArrayAtomicFieldData.WithOrdinals(lon,lat,reader.maxDoc(),build);
     }
+    success=true;
+    return data;
   }
   finally {
+    if (success) {
+      estimator.afterLoad(null,data.getMemorySizeInBytes());
+    }
     builder.close();
   }
 }

@@ -1,0 +1,65 @@
+{
+  final int numShards=between(1,5);
+  String mapping=XContentFactory.jsonBuilder().startObject().startObject("type").startObject("properties").startObject("test-str").field("type","string").field("index","not_analyzed").startObject("fielddata").field("format",randomBytesFieldDataFormat()).endObject().endObject().startObject("test-num").field("type",randomFrom(Arrays.asList("float","long","double","short","integer"))).startObject("fielddata").field("format",randomNumericFieldDataFormat()).endObject().endObject().endObject().endObject().endObject().string();
+  final double exceptionRate;
+  final double exceptionOnOpenRate;
+  if (frequently()) {
+    if (randomBoolean()) {
+      if (randomBoolean()) {
+        exceptionOnOpenRate=1.0 / between(5,100);
+        exceptionRate=0.0d;
+      }
+ else {
+        exceptionRate=1.0 / between(5,100);
+        exceptionOnOpenRate=0.0d;
+      }
+    }
+ else {
+      exceptionOnOpenRate=1.0 / between(5,100);
+      exceptionRate=1.0 / between(5,100);
+    }
+  }
+ else {
+    exceptionRate=0d;
+    exceptionOnOpenRate=0d;
+  }
+  ImmutableSettings.Builder settings=settingsBuilder().put("index.number_of_shards",numShards).put("index.number_of_replicas",randomIntBetween(0,1)).put(MockDirectoryHelper.RANDOM_IO_EXCEPTION_RATE,exceptionRate).put(MockDirectoryHelper.RANDOM_IO_EXCEPTION_RATE_ON_OPEN,exceptionOnOpenRate).put(MockDirectoryHelper.CHECK_INDEX_ON_CLOSE,true);
+  logger.info("creating index: [test] using settings: [{}]",settings.build().getAsMap());
+  client().admin().indices().prepareCreate("test").setSettings(settings).addMapping("type",mapping).execute().actionGet();
+  ClusterHealthResponse clusterHealthResponse=client().admin().cluster().health(Requests.clusterHealthRequest().waitForYellowStatus().timeout(TimeValue.timeValueSeconds(5))).get();
+  final int numDocs;
+  if (clusterHealthResponse.isTimedOut()) {
+    logger.info("ClusterHealth timed out - only index one doc and expect searches to fail");
+    numDocs=1;
+  }
+ else {
+    numDocs=between(10,100);
+  }
+  for (int i=0; i < numDocs; i++) {
+    try {
+      client().prepareIndex("test","type","" + i).setTimeout(TimeValue.timeValueSeconds(1)).setSource("test-str",randomUnicodeOfLengthBetween(5,25),"test-num",i).get();
+    }
+ catch (    ElasticSearchException ex) {
+    }
+  }
+  logger.info("Start Refresh");
+  RefreshResponse refreshResponse=client().admin().indices().prepareRefresh("test").execute().get();
+  final boolean refreshFailed=refreshResponse.getShardFailures().length != 0 || refreshResponse.getFailedShards() != 0;
+  logger.info("Refresh failed: [{}] numShardsFailed: [{}], shardFailuresLength: [{}], successfulShards: [{}], totalShards: [{}] ",refreshFailed,refreshResponse.getFailedShards(),refreshResponse.getShardFailures().length,refreshResponse.getSuccessfulShards(),refreshResponse.getTotalShards());
+  final int numSearches=atLeast(10);
+  for (int i=0; i < numSearches; i++) {
+    try {
+      client().prepareSearch().setQuery(QueryBuilders.matchAllQuery()).addSort("test-str",SortOrder.ASC).addSort("test-num",SortOrder.ASC).get();
+    }
+ catch (    SearchPhaseExecutionException ex) {
+      logger.info("expected SearchPhaseException: [{}]",ex.getMessage());
+    }
+    if (frequently()) {
+      client().admin().indices().prepareClearCache("test").setFieldDataCache(true).execute().actionGet();
+      NodesStatsResponse resp=client().admin().cluster().prepareNodesStats().all().execute().actionGet();
+      for (      NodeStats stats : resp.getNodes()) {
+        assertThat("Breaker reset to 0",stats.getBreaker().getEstimated(),equalTo(0L));
+      }
+    }
+  }
+}
