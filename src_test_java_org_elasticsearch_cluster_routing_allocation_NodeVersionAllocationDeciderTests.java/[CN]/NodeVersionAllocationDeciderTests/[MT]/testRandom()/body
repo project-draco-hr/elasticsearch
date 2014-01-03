@@ -1,0 +1,43 @@
+{
+  AllocationService service=createAllocationService(settingsBuilder().put("cluster.routing.allocation.concurrent_recoveries",10).put("cluster.routing.allocation.allow_rebalance","always").put("cluster.routing.allocation.cluster_concurrent_rebalance",-1).build());
+  logger.info("Building initial routing table");
+  MetaData.Builder builder=MetaData.builder();
+  RoutingTable.Builder rtBuilder=RoutingTable.builder();
+  int numIndices=between(1,20);
+  for (int i=0; i < numIndices; i++) {
+    builder.put(IndexMetaData.builder("test_" + i).numberOfShards(between(1,5)).numberOfReplicas(between(0,2)));
+  }
+  MetaData metaData=builder.build();
+  for (int i=0; i < numIndices; i++) {
+    rtBuilder.addAsNew(metaData.index("test_" + i));
+  }
+  RoutingTable routingTable=rtBuilder.build();
+  ClusterState clusterState=ClusterState.builder().metaData(metaData).routingTable(routingTable).build();
+  assertThat(routingTable.shardsWithState(UNASSIGNED).size(),equalTo(routingTable.allShards().size()));
+  List<DiscoveryNode> nodes=new ArrayList<DiscoveryNode>();
+  int nodeIdx=0;
+  int iters=atLeast(10);
+  for (int i=0; i < iters; i++) {
+    DiscoveryNodes.Builder nodesBuilder=DiscoveryNodes.builder();
+    int numNodes=between(1,20);
+    if (nodes.size() > numNodes) {
+      Collections.shuffle(nodes,getRandom());
+      nodes=nodes.subList(0,numNodes);
+    }
+ else {
+      for (int j=nodes.size(); j < numNodes; j++) {
+        if (frequently()) {
+          nodes.add(newNode("node" + (nodeIdx++),randomBoolean() ? getPreviousVersion() : Version.CURRENT));
+        }
+ else {
+          nodes.add(newNode("node" + (nodeIdx++),randomVersion()));
+        }
+      }
+    }
+    for (    DiscoveryNode node : nodes) {
+      nodesBuilder.put(node);
+    }
+    clusterState=ClusterState.builder(clusterState).nodes(nodesBuilder).build();
+    clusterState=stabelize(clusterState,service);
+  }
+}
