@@ -4,27 +4,21 @@
   clusterState=ClusterState.builder(clusterState).routingTable(routingTable).build();
   RoutingNodes routingNodes=clusterState.routingNodes();
   assertRecoveryNodeVersions(routingNodes);
-  logger.info("start all the primary shards, replicas will start initializing");
-  routingNodes=clusterState.routingNodes();
-  routingTable=service.applyStartedShards(clusterState,routingNodes.shardsWithState(INITIALIZING)).routingTable();
-  clusterState=ClusterState.builder(clusterState).routingTable(routingTable).build();
-  routingNodes=clusterState.routingNodes();
-  assertRecoveryNodeVersions(routingNodes);
-  logger.info("start the replica shards");
-  routingNodes=clusterState.routingNodes();
-  routingTable=service.applyStartedShards(clusterState,routingNodes.shardsWithState(INITIALIZING)).routingTable();
-  clusterState=ClusterState.builder(clusterState).routingTable(routingTable).build();
-  routingNodes=clusterState.routingNodes();
   logger.info("complete rebalancing");
   RoutingTable prev=routingTable;
-  while (true) {
+  boolean stable=false;
+  for (int i=0; i < 1000; i++) {
     logger.trace("RoutingNodes: {}",clusterState.getRoutingNodes().prettyPrint());
     routingTable=service.applyStartedShards(clusterState,routingNodes.shardsWithState(INITIALIZING)).routingTable();
     clusterState=ClusterState.builder(clusterState).routingTable(routingTable).build();
     routingNodes=clusterState.routingNodes();
-    if (routingTable == prev)     break;
+    if (stable=(routingTable == prev)) {
+      break;
+    }
     assertRecoveryNodeVersions(routingNodes);
     prev=routingTable;
   }
+  logger.info("stabilized success [{}]",stable);
+  assertThat(stable,is(true));
   return clusterState;
 }
