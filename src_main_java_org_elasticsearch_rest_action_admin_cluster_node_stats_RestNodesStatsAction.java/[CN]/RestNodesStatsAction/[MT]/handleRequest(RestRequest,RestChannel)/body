@@ -1,25 +1,71 @@
 {
   String[] nodesIds=Strings.splitStringByCommaToArray(request.param("nodeId"));
+  Set<String> metrics=Strings.splitStringByCommaToSet(request.param("metric","_all"));
   NodesStatsRequest nodesStatsRequest=new NodesStatsRequest(nodesIds);
-  boolean clear=request.paramAsBoolean("clear",false);
-  if (clear) {
-    nodesStatsRequest.clear();
-  }
-  boolean all=request.paramAsBoolean("all",false);
-  if (all) {
+  nodesStatsRequest.listenerThreaded(false);
+  if (metrics.size() == 1 && metrics.contains("_all")) {
     nodesStatsRequest.all();
+    nodesStatsRequest.indices(CommonStatsFlags.ALL);
   }
-  if (request.hasParam("indices")) {
-    nodesStatsRequest.indices(request.paramAsBoolean("indices",false));
+ else {
+    nodesStatsRequest.clear();
+    nodesStatsRequest.os(metrics.contains("os"));
+    nodesStatsRequest.jvm(metrics.contains("jvm"));
+    nodesStatsRequest.threadPool(metrics.contains("thread_pool"));
+    nodesStatsRequest.network(metrics.contains("network"));
+    nodesStatsRequest.fs(metrics.contains("fs"));
+    nodesStatsRequest.transport(metrics.contains("transport"));
+    nodesStatsRequest.http(metrics.contains("http"));
+    nodesStatsRequest.indices(metrics.contains("indices"));
+    nodesStatsRequest.process(metrics.contains("process"));
+    nodesStatsRequest.breaker(metrics.contains("breaker"));
+    if (metrics.contains("indices")) {
+      Set<String> indexMetrics=Strings.splitStringByCommaToSet(request.param("indexMetric","_all"));
+      if (indexMetrics.size() == 1 && indexMetrics.contains("_all")) {
+        nodesStatsRequest.indices(CommonStatsFlags.ALL);
+      }
+ else {
+        CommonStatsFlags flags=new CommonStatsFlags();
+        for (        Flag flag : CommonStatsFlags.Flag.values()) {
+          flags.set(flag,indexMetrics.contains(flag.getRestName()));
+        }
+        nodesStatsRequest.indices(flags);
+      }
+    }
   }
-  nodesStatsRequest.os(request.paramAsBoolean("os",nodesStatsRequest.os()));
-  nodesStatsRequest.process(request.paramAsBoolean("process",nodesStatsRequest.process()));
-  nodesStatsRequest.jvm(request.paramAsBoolean("jvm",nodesStatsRequest.jvm()));
-  nodesStatsRequest.threadPool(request.paramAsBoolean("thread_pool",nodesStatsRequest.threadPool()));
-  nodesStatsRequest.network(request.paramAsBoolean("network",nodesStatsRequest.network()));
-  nodesStatsRequest.fs(request.paramAsBoolean("fs",nodesStatsRequest.fs()));
-  nodesStatsRequest.transport(request.paramAsBoolean("transport",nodesStatsRequest.transport()));
-  nodesStatsRequest.http(request.paramAsBoolean("http",nodesStatsRequest.http()));
-  nodesStatsRequest.breaker(request.paramAsBoolean("breaker",nodesStatsRequest.breaker()));
-  executeNodeStats(request,channel,nodesStatsRequest);
+  if (nodesStatsRequest.indices().isSet(Flag.FieldData) && (request.hasParam("fields") || request.hasParam("fielddata_fields"))) {
+    nodesStatsRequest.indices().fieldDataFields(request.paramAsStringArray("fielddata_fields",request.paramAsStringArray("fields",null)));
+  }
+  if (nodesStatsRequest.indices().isSet(Flag.Completion) && (request.hasParam("fields") || request.hasParam("completion_fields"))) {
+    nodesStatsRequest.indices().completionDataFields(request.paramAsStringArray("completion_fields",request.paramAsStringArray("fields",null)));
+  }
+  if (nodesStatsRequest.indices().isSet(Flag.Search) && (request.hasParam("groups"))) {
+    nodesStatsRequest.indices().groups(request.paramAsStringArray("groups",null));
+  }
+  if (nodesStatsRequest.indices().isSet(Flag.Indexing) && (request.hasParam("types"))) {
+    nodesStatsRequest.indices().types(request.paramAsStringArray("types",null));
+  }
+  client.admin().cluster().nodesStats(nodesStatsRequest,new ActionListener<NodesStatsResponse>(){
+    @Override public void onResponse(    NodesStatsResponse response){
+      try {
+        XContentBuilder builder=RestXContentBuilder.restContentBuilder(request);
+        builder.startObject();
+        response.toXContent(builder,request);
+        builder.endObject();
+        channel.sendResponse(new XContentRestResponse(request,RestStatus.OK,builder));
+      }
+ catch (      Throwable e) {
+        onFailure(e);
+      }
+    }
+    @Override public void onFailure(    Throwable e){
+      try {
+        channel.sendResponse(new XContentThrowableRestResponse(request,e));
+      }
+ catch (      IOException e1) {
+        logger.error("Failed to send failure response",e1);
+      }
+    }
+  }
+);
 }
