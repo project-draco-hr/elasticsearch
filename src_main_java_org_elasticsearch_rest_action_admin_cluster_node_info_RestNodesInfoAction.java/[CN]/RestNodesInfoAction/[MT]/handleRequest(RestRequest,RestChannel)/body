@@ -1,23 +1,53 @@
 {
-  String[] nodesIds=Strings.splitStringByCommaToArray(request.param("nodeId"));
-  final NodesInfoRequest nodesInfoRequest=new NodesInfoRequest(nodesIds);
-  boolean clear=request.paramAsBoolean("clear",false);
-  if (clear) {
-    nodesInfoRequest.clear();
+  String[] nodeIds;
+  Set<String> metrics;
+  if (request.hasParam("nodeId") && !request.hasParam("metrics")) {
+    nodeIds=new String[]{"_all"};
+    metrics=Strings.splitStringByCommaToSet(request.param("nodeId","_all"));
   }
-  boolean all=request.paramAsBoolean("all",false);
-  if (all) {
+ else {
+    nodeIds=Strings.splitStringByCommaToArray(request.param("nodeId","_all"));
+    metrics=Strings.splitStringByCommaToSet(request.param("metrics","_all"));
+  }
+  final NodesInfoRequest nodesInfoRequest=new NodesInfoRequest(nodeIds);
+  nodesInfoRequest.listenerThreaded(false);
+  if (metrics.size() == 1 && metrics.contains("_all")) {
     nodesInfoRequest.all();
   }
-  nodesInfoRequest.settings(request.paramAsBoolean("settings",nodesInfoRequest.settings()));
-  nodesInfoRequest.os(request.paramAsBoolean("os",nodesInfoRequest.os()));
-  nodesInfoRequest.process(request.paramAsBoolean("process",nodesInfoRequest.process()));
-  nodesInfoRequest.jvm(request.paramAsBoolean("jvm",nodesInfoRequest.jvm()));
-  nodesInfoRequest.threadPool(request.paramAsBoolean("thread_pool",nodesInfoRequest.threadPool()));
-  nodesInfoRequest.network(request.paramAsBoolean("network",nodesInfoRequest.network()));
-  nodesInfoRequest.transport(request.paramAsBoolean("transport",nodesInfoRequest.transport()));
-  nodesInfoRequest.http(request.paramAsBoolean("http",nodesInfoRequest.http()));
-  nodesInfoRequest.plugin(request.paramAsBoolean("plugin",nodesInfoRequest.plugin()));
-  nodesInfoRequest.timeout(request.paramAsTime("timeout",nodesInfoRequest.timeout()));
-  executeNodeRequest(request,channel,nodesInfoRequest);
+ else {
+    nodesInfoRequest.clear();
+    nodesInfoRequest.settings(metrics.contains("settings"));
+    nodesInfoRequest.os(metrics.contains("os"));
+    nodesInfoRequest.process(metrics.contains("process"));
+    nodesInfoRequest.jvm(metrics.contains("jvm"));
+    nodesInfoRequest.threadPool(metrics.contains("thread_pool"));
+    nodesInfoRequest.network(metrics.contains("network"));
+    nodesInfoRequest.transport(metrics.contains("transport"));
+    nodesInfoRequest.http(metrics.contains("http"));
+    nodesInfoRequest.plugin(metrics.contains("plugin"));
+  }
+  client.admin().cluster().nodesInfo(nodesInfoRequest,new ActionListener<NodesInfoResponse>(){
+    @Override public void onResponse(    NodesInfoResponse response){
+      try {
+        response.settingsFilter(settingsFilter);
+        XContentBuilder builder=RestXContentBuilder.restContentBuilder(request);
+        builder.startObject();
+        response.toXContent(builder,request);
+        builder.endObject();
+        channel.sendResponse(new XContentRestResponse(request,RestStatus.OK,builder));
+      }
+ catch (      Throwable e) {
+        onFailure(e);
+      }
+    }
+    @Override public void onFailure(    Throwable e){
+      try {
+        channel.sendResponse(new XContentThrowableRestResponse(request,e));
+      }
+ catch (      IOException e1) {
+        logger.error("Failed to send failure response",e1);
+      }
+    }
+  }
+);
 }
