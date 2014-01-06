@@ -1,0 +1,40 @@
+{
+  if (q < 0 || q > 1) {
+    throw new ElasticsearchIllegalArgumentException("q should be in [0,1], got " + q);
+  }
+  GroupRedBlackTree values=summary;
+  if (values.size() == 0) {
+    return Double.NaN;
+  }
+ else   if (values.size() == 1) {
+    return values.mean(values.root());
+  }
+  final double index=q * (count - 1);
+  double previousMean=Double.NaN, previousIndex=0;
+  long total=0;
+  int next;
+  Iterator<IntCursor> it=centroids().iterator();
+  while (true) {
+    next=it.next().value;
+    final double nextIndex=total + (values.count(next) - 1.0) / 2;
+    if (nextIndex >= index) {
+      if (Double.isNaN(previousMean)) {
+        if (nextIndex == previousIndex) {
+          return values.mean(next);
+        }
+        int next2=it.next().value;
+        final double nextIndex2=total + values.count(next) + (values.count(next2) - 1.0) / 2;
+        previousMean=(nextIndex2 * values.mean(next) - nextIndex * values.mean(next2)) / (nextIndex2 - nextIndex);
+      }
+      return quantile(previousIndex,index,nextIndex,previousMean,values.mean(next));
+    }
+ else     if (!it.hasNext()) {
+      final double nextIndex2=count - 1;
+      final double nextMean2=(values.mean(next) * (nextIndex2 - previousIndex) - previousMean * (nextIndex2 - nextIndex)) / (nextIndex - previousIndex);
+      return quantile(nextIndex,index,nextIndex2,values.mean(next),nextMean2);
+    }
+    total+=values.count(next);
+    previousMean=values.mean(next);
+    previousIndex=nextIndex;
+  }
+}
