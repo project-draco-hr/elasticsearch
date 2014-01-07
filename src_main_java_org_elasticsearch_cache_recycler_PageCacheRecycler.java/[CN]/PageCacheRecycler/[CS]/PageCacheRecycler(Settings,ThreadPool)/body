@@ -1,23 +1,16 @@
 {
   super(settings);
   final Type type=Type.parse(componentSettings.get(TYPE));
-  long limit=componentSettings.getAsMemory(LIMIT_HEAP,"10%").bytes();
-  if (type.perThread()) {
-    final long limitPerThread=componentSettings.getAsBytesSize(LIMIT_PER_THREAD,new ByteSizeValue(-1)).bytes();
-    if (limitPerThread != -1) {
-      limit=limitPerThread;
-    }
- else {
-      limit/=maximumSearchThreadPoolSize(threadPool,settings);
-    }
-  }
+  final long limit=componentSettings.getAsMemory(LIMIT_HEAP,"10%").bytes();
+  final int availableProcessors=EsExecutors.boundedNumberOfProcessors(settings);
+  final int searchThreadPoolSize=maximumSearchThreadPoolSize(threadPool,settings);
   final double bytesWeight=componentSettings.getAsDouble(WEIGHT + ".bytes",1d);
   final double intsWeight=componentSettings.getAsDouble(WEIGHT + ".ints",1d);
   final double longsWeight=componentSettings.getAsDouble(WEIGHT + ".longs",1d);
   final double doublesWeight=componentSettings.getAsDouble(WEIGHT + ".doubles",1d);
   final double objectsWeight=componentSettings.getAsDouble(WEIGHT + ".objects",0.1d);
   final double totalWeight=bytesWeight + intsWeight + longsWeight+ doublesWeight+ objectsWeight;
-  bytePage=build(type,maxCount(limit,BigArrays.BYTE_PAGE_SIZE,bytesWeight,totalWeight),new Recycler.C<byte[]>(){
+  bytePage=build(type,maxCount(limit,BigArrays.BYTE_PAGE_SIZE,bytesWeight,totalWeight),searchThreadPoolSize,availableProcessors,new Recycler.C<byte[]>(){
     @Override public byte[] newInstance(    int sizing){
       return new byte[BigArrays.BYTE_PAGE_SIZE];
     }
@@ -25,7 +18,7 @@
     }
   }
 );
-  intPage=build(type,maxCount(limit,BigArrays.INT_PAGE_SIZE,intsWeight,totalWeight),new Recycler.C<int[]>(){
+  intPage=build(type,maxCount(limit,BigArrays.INT_PAGE_SIZE,intsWeight,totalWeight),searchThreadPoolSize,availableProcessors,new Recycler.C<int[]>(){
     @Override public int[] newInstance(    int sizing){
       return new int[BigArrays.INT_PAGE_SIZE];
     }
@@ -33,7 +26,7 @@
     }
   }
 );
-  longPage=build(type,maxCount(limit,BigArrays.LONG_PAGE_SIZE,longsWeight,totalWeight),new Recycler.C<long[]>(){
+  longPage=build(type,maxCount(limit,BigArrays.LONG_PAGE_SIZE,longsWeight,totalWeight),searchThreadPoolSize,availableProcessors,new Recycler.C<long[]>(){
     @Override public long[] newInstance(    int sizing){
       return new long[BigArrays.LONG_PAGE_SIZE];
     }
@@ -41,7 +34,7 @@
     }
   }
 );
-  doublePage=build(type,maxCount(limit,BigArrays.DOUBLE_PAGE_SIZE,doublesWeight,totalWeight),new Recycler.C<double[]>(){
+  doublePage=build(type,maxCount(limit,BigArrays.DOUBLE_PAGE_SIZE,doublesWeight,totalWeight),searchThreadPoolSize,availableProcessors,new Recycler.C<double[]>(){
     @Override public double[] newInstance(    int sizing){
       return new double[BigArrays.DOUBLE_PAGE_SIZE];
     }
@@ -49,7 +42,7 @@
     }
   }
 );
-  objectPage=build(type,maxCount(limit,BigArrays.OBJECT_PAGE_SIZE,objectsWeight,totalWeight),new Recycler.C<Object[]>(){
+  objectPage=build(type,maxCount(limit,BigArrays.OBJECT_PAGE_SIZE,objectsWeight,totalWeight),searchThreadPoolSize,availableProcessors,new Recycler.C<Object[]>(){
     @Override public Object[] newInstance(    int sizing){
       return new Object[BigArrays.OBJECT_PAGE_SIZE];
     }
