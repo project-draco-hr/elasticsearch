@@ -1,0 +1,11 @@
+{
+  assertAcked(client().admin().indices().prepareCreate("test").addMapping("type1",type1TermVectorMapping()));
+  ensureGreen();
+  client().prepareIndex("test","type1").setSource("field1",Joiner.on("").join(Iterables.limit(Iterables.cycle("t   "),1024 * 256))).get();
+  refresh();
+  logger.info("--> highlighting and searching on field1");
+  SearchSourceBuilder source=searchSource().query(termQuery("field1","t")).highlight(highlight().highlighterType("fvh").field("field1",20,1).order("score").preTags("<xxx>").postTags("</xxx>"));
+  SearchResponse searchResponse=client().search(searchRequest("test").source(source)).actionGet();
+  assertHighlight(searchResponse,0,"field1",0,1,containsString("<xxx>t</xxx>"));
+  logger.info("--> done");
+}
