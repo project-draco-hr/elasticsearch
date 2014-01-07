@@ -78,16 +78,21 @@
   }
   innerQuery.setBoost(boost);
   innerQuery=new XFilteredQuery(innerQuery,parseContext.cacheFilter(parentDocMapper.typeFilter(),null));
+  ParentChildIndexFieldData parentChildIndexFieldData=null;
   Set<String> parentTypes=new HashSet<String>(5);
   parentTypes.add(parentType);
   for (  DocumentMapper documentMapper : parseContext.mapperService()) {
     ParentFieldMapper parentFieldMapper=documentMapper.parentFieldMapper();
     if (parentFieldMapper.active()) {
+      parentChildIndexFieldData=parseContext.fieldData().getForField(parentFieldMapper);
       DocumentMapper parentTypeDocumentMapper=parseContext.mapperService().documentMapper(parentFieldMapper.type());
       if (parentTypeDocumentMapper == null) {
         parentTypes.add(parentFieldMapper.type());
       }
     }
+  }
+  if (parentChildIndexFieldData == null) {
+    throw new QueryParsingException(parseContext.index(),"[has_parent] no _parent field configured");
   }
   Filter parentFilter;
   if (parentTypes.size() == 1) {
@@ -107,10 +112,10 @@
   boolean deleteByQuery="delete_by_query".equals(SearchContext.current().source());
   Query query;
   if (!deleteByQuery && score) {
-    query=new ParentQuery(innerQuery,parentType,childrenFilter);
+    query=new ParentQuery(parentChildIndexFieldData,innerQuery,parentType,childrenFilter);
   }
  else {
-    query=new ParentConstantScoreQuery(innerQuery,parentType,childrenFilter);
+    query=new ParentConstantScoreQuery(parentChildIndexFieldData,innerQuery,parentType,childrenFilter);
     if (deleteByQuery) {
       query=new XConstantScoreQuery(new DeleteByQueryWrappingFilter(query));
     }

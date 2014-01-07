@@ -3,9 +3,24 @@
   if (DocIdSets.isEmpty(childrenDocSet)) {
     return null;
   }
-  IdReaderTypeCache idTypeCache=searchContext.idCache().reader(context.reader()).type(parentType);
-  if (idTypeCache == null) {
+  BytesValues.WithOrdinals bytesValues=parentChildIndexFieldData.load(context).getBytesValues(parentType);
+  if (bytesValues == null) {
     return null;
   }
-  return new ChildScorer(this,uidToScore.v(),childrenDocSet.iterator(),idTypeCache);
+  Ordinals.Docs ordinals=bytesValues.ordinals();
+  final int maxOrd=(int)ordinals.getMaxOrd();
+  if (parentIdsIndexCache == null) {
+    parentIdsIndexCache=BigArrays.newLongArray(BigArrays.overSize(maxOrd),searchContext.pageCacheRecycler(),false);
+  }
+ else   if (parentIdsIndexCache.size() < maxOrd) {
+    parentIdsIndexCache=BigArrays.grow(parentIdsIndexCache,maxOrd);
+  }
+  parentIdsIndexCache.fill(0,maxOrd,-1L);
+  if (seenOrdinalsCache == null || seenOrdinalsCache.length() < maxOrd) {
+    seenOrdinalsCache=new FixedBitSet(maxOrd);
+  }
+ else {
+    seenOrdinalsCache.clear(0,maxOrd);
+  }
+  return new ChildScorer(this,parentIds,scores,childrenDocSet.iterator(),bytesValues,ordinals,seenOrdinalsCache,parentIdsIndexCache);
 }

@@ -75,13 +75,19 @@
   if (childDocMapper == null) {
     throw new QueryParsingException(parseContext.index(),"No mapping for for type [" + childType + "]");
   }
-  if (!childDocMapper.parentFieldMapper().active()) {
+  ParentFieldMapper parentFieldMapper=childDocMapper.parentFieldMapper();
+  if (!parentFieldMapper.active()) {
     throw new QueryParsingException(parseContext.index(),"Type [" + childType + "] does not have parent mapping");
   }
   String parentType=childDocMapper.parentFieldMapper().type();
+  Filter nonNestedDocsFilter=null;
+  if (childDocMapper.hasNestedObjects()) {
+    nonNestedDocsFilter=parseContext.cacheFilter(NonNestedDocsFilter.INSTANCE,null);
+  }
   innerQuery.setBoost(boost);
   innerQuery=new XFilteredQuery(innerQuery,parseContext.cacheFilter(childDocMapper.typeFilter(),null));
-  TopChildrenQuery query=new TopChildrenQuery(innerQuery,childType,parentType,scoreType,factor,incrementalFactor,parseContext.cacheRecycler());
+  ParentChildIndexFieldData parentChildIndexFieldData=parseContext.fieldData().getForField(parentFieldMapper);
+  TopChildrenQuery query=new TopChildrenQuery(parentChildIndexFieldData,innerQuery,childType,parentType,scoreType,factor,incrementalFactor,parseContext.cacheRecycler(),nonNestedDocsFilter);
   if (queryName != null) {
     parseContext.addNamedFilter(queryName,new CustomQueryWrappingFilter(query));
   }

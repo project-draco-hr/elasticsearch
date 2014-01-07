@@ -4,16 +4,33 @@
   for (  ScoreDoc scoreDoc : topDocs.scoreDocs) {
     int readerIndex=ReaderUtil.subIndex(scoreDoc.doc,context.searcher().getIndexReader().leaves());
     AtomicReaderContext subContext=context.searcher().getIndexReader().leaves().get(readerIndex);
+    BytesValues.WithOrdinals parentValues=parentChildIndexFieldData.load(subContext).getBytesValues(parentType);
     int subDoc=scoreDoc.doc - subContext.docBase;
-    HashedBytesArray parentId=context.idCache().reader(subContext.reader()).parentIdByDoc(parentType,subDoc);
+    parentValues.setDocument(subDoc);
+    BytesRef parentId=parentValues.nextValue();
     if (parentId == null) {
       continue;
     }
     for (    AtomicReaderContext atomicReaderContext : context.searcher().getIndexReader().leaves()) {
       AtomicReader indexReader=atomicReaderContext.reader();
-      int parentDocId=context.idCache().reader(indexReader).docById(parentType,parentId);
-      Bits liveDocs=indexReader.getLiveDocs();
-      if (parentDocId != -1 && (liveDocs == null || liveDocs.get(parentDocId))) {
+      FixedBitSet nonNestedDocs=null;
+      if (nonNestedDocsFilter != null) {
+        nonNestedDocs=(FixedBitSet)nonNestedDocsFilter.getDocIdSet(atomicReaderContext,indexReader.getLiveDocs());
+      }
+      Terms terms=indexReader.terms(UidFieldMapper.NAME);
+      if (terms == null) {
+        continue;
+      }
+      TermsEnum termsEnum=terms.iterator(null);
+      if (!termsEnum.seekExact(Uid.createUidAsBytes(parentType,parentId))) {
+        continue;
+      }
+      DocsEnum docsEnum=termsEnum.docs(indexReader.getLiveDocs(),null,DocsEnum.FLAG_NONE);
+      int parentDocId=docsEnum.nextDoc();
+      if (nonNestedDocs != null && !nonNestedDocs.get(parentDocId)) {
+        parentDocId=nonNestedDocs.nextSetBit(parentDocId);
+      }
+      if (parentDocId != DocsEnum.NO_MORE_DOCS) {
         Recycler.V<IntObjectOpenHashMap<ParentDoc>> readerParentDocs=parentDocsPerReader.v().get(indexReader.getCoreCacheKey());
         if (readerParentDocs == null) {
           readerParentDocs=cacheRecycler.intObjectMap(indexReader.maxDoc());
