@@ -2,7 +2,17 @@
   request.indices(state.metaData().concreteIndices(request.indices(),request.indicesOptions()));
   flushAction.execute(Requests.flushRequest(request.indices()),new ActionListener<FlushResponse>(){
     @Override public void onResponse(    FlushResponse flushResponse){
-      QuerySourceBuilder querySourceBuilder=new QuerySourceBuilder().setQuery(QueryBuilders.filteredQuery(QueryBuilders.matchAllQuery(),FilterBuilders.typeFilter(request.type())));
+      ImmutableOpenMap<String,ImmutableOpenMap<String,MappingMetaData>> result=state.metaData().findMappings(request.indices(),request.types());
+      OrFilterBuilder filterBuilder=new OrFilterBuilder();
+      Set<String> types=new HashSet<String>();
+      for (      ObjectObjectCursor<String,ImmutableOpenMap<String,MappingMetaData>> typesMeta : result) {
+        for (        ObjectObjectCursor<String,MappingMetaData> type : typesMeta.value) {
+          filterBuilder.add(new TypeFilterBuilder(type.key));
+          types.add(type.key);
+        }
+      }
+      request.types(types.toArray(new String[types.size()]));
+      QuerySourceBuilder querySourceBuilder=new QuerySourceBuilder().setQuery(QueryBuilders.filteredQuery(QueryBuilders.matchAllQuery(),filterBuilder));
       deleteByQueryAction.execute(Requests.deleteByQueryRequest(request.indices()).source(querySourceBuilder),new ActionListener<DeleteByQueryResponse>(){
         @Override public void onResponse(        DeleteByQueryResponse deleteByQueryResponse){
           refreshAction.execute(Requests.refreshRequest(request.indices()),new ActionListener<RefreshResponse>(){
@@ -13,7 +23,7 @@
               removeMapping();
             }
             protected void removeMapping(){
-              DeleteMappingClusterStateUpdateRequest clusterStateUpdateRequest=new DeleteMappingClusterStateUpdateRequest().indices(request.indices()).type(request.type()).ackTimeout(request.timeout()).masterNodeTimeout(request.masterNodeTimeout());
+              DeleteMappingClusterStateUpdateRequest clusterStateUpdateRequest=new DeleteMappingClusterStateUpdateRequest().indices(request.indices()).types(request.types()).ackTimeout(request.timeout()).masterNodeTimeout(request.masterNodeTimeout());
               metaDataMappingService.removeMapping(clusterStateUpdateRequest,new ClusterStateUpdateListener(){
                 @Override public void onResponse(                ClusterStateUpdateResponse response){
                   listener.onResponse(new DeleteMappingResponse(response.isAcknowledged()));
