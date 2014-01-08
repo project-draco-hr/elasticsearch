@@ -1,7 +1,7 @@
 {
   List<InternalAggregation> aggregations=reduceContext.aggregations();
   if (aggregations.size() == 1) {
-    if (emptyBucketInfo == null) {
+    if (minDocCount == 1) {
       return aggregations.get(0);
     }
     AbstractHistogramBase histo=(AbstractHistogramBase)aggregations.get(0);
@@ -9,16 +9,25 @@
     List<HistogramBase.Bucket> list=order.asc ? histo.buckets : Lists.reverse(histo.buckets);
     HistogramBase.Bucket prevBucket=null;
     ListIterator<HistogramBase.Bucket> iter=list.listIterator();
-    while (iter.hasNext()) {
-      HistogramBase.Bucket nextBucket=list.get(iter.nextIndex());
-      if (prevBucket != null) {
-        long key=emptyBucketInfo.rounding.nextRoundingValue(prevBucket.getKey());
-        while (key != nextBucket.getKey()) {
-          iter.add(createBucket(key,0,emptyBucketInfo.subAggregations));
-          key=emptyBucketInfo.rounding.nextRoundingValue(key);
+    if (minDocCount == 0) {
+      while (iter.hasNext()) {
+        HistogramBase.Bucket nextBucket=list.get(iter.nextIndex());
+        if (prevBucket != null) {
+          long key=emptyBucketInfo.rounding.nextRoundingValue(prevBucket.getKey());
+          while (key != nextBucket.getKey()) {
+            iter.add(createBucket(key,0,emptyBucketInfo.subAggregations));
+            key=emptyBucketInfo.rounding.nextRoundingValue(key);
+          }
+        }
+        prevBucket=iter.next();
+      }
+    }
+ else {
+      while (iter.hasNext()) {
+        if (iter.next().getDocCount() < minDocCount) {
+          iter.remove();
         }
       }
-      prevBucket=iter.next();
     }
     if (order != InternalOrder.KEY_ASC && order != InternalOrder.KEY_DESC) {
       CollectionUtil.introSort(histo.buckets,order.comparator());
@@ -44,11 +53,13 @@
   for (int i=0; i < allocated.length; i++) {
     if (allocated[i]) {
       Bucket bucket=((List<Bucket>)buckets[i]).get(0).reduce(((List<Bucket>)buckets[i]),reduceContext.cacheRecycler());
-      reducedBuckets.add(bucket);
+      if (bucket.getDocCount() >= minDocCount) {
+        reducedBuckets.add(bucket);
+      }
     }
   }
   bucketsByKey.release();
-  if (emptyBucketInfo != null) {
+  if (minDocCount == 0) {
     CollectionUtil.introSort(reducedBuckets,order.asc ? InternalOrder.KEY_ASC.comparator() : InternalOrder.KEY_DESC.comparator());
     List<HistogramBase.Bucket> list=order.asc ? reducedBuckets : Lists.reverse(reducedBuckets);
     HistogramBase.Bucket prevBucket=null;
