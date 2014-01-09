@@ -65,43 +65,23 @@
             value=source.source.length();
           }
  else {
-            if (field.contains("_source.")) {
-              if (searchLookup == null) {
-                searchLookup=new SearchLookup(mapperService,fieldDataService,new String[]{type});
-              }
-              if (sourceAsMap == null) {
-                sourceAsMap=SourceLookup.sourceAsMap(source.source);
-              }
-              SearchScript searchScript=scriptService.search(searchLookup,"mvel",field,null);
-              searchScript.setNextSource(sourceAsMap);
-              try {
-                value=searchScript.run();
-              }
- catch (              RuntimeException e) {
-                if (logger.isTraceEnabled()) {
-                  logger.trace("failed to execute get request script field [{}]",e,field);
-                }
+            if (searchLookup == null) {
+              searchLookup=new SearchLookup(mapperService,fieldDataService,new String[]{type});
+              searchLookup.source().setNextSource(source.source);
+            }
+            FieldMapper<?> x=docMapper.mappers().smartNameFieldMapper(field);
+            if (x == null) {
+              if (docMapper.objectMappers().get(field) != null) {
+                throw new ElasticsearchIllegalArgumentException("field [" + field + "] isn't a leaf field");
               }
             }
- else {
-              if (searchLookup == null) {
-                searchLookup=new SearchLookup(mapperService,fieldDataService,new String[]{type});
-                searchLookup.source().setNextSource(source.source);
-              }
-              FieldMapper<?> x=docMapper.mappers().smartNameFieldMapper(field);
-              if (x == null) {
-                if (docMapper.objectMappers().get(field) != null) {
-                  throw new ElasticsearchIllegalArgumentException("field [" + field + "] isn't a leaf field");
+ else             if (docMapper.sourceMapper().enabled() || x.fieldType().stored()) {
+              List<Object> values=searchLookup.source().extractRawValues(field);
+              if (!values.isEmpty()) {
+                for (int i=0; i < values.size(); i++) {
+                  values.set(i,x.valueForSearch(values.get(i)));
                 }
-              }
- else               if (docMapper.sourceMapper().enabled() || x.fieldType().stored()) {
-                List<Object> values=searchLookup.source().extractRawValues(field);
-                if (!values.isEmpty()) {
-                  for (int i=0; i < values.size(); i++) {
-                    values.set(i,x.valueForSearch(values.get(i)));
-                  }
-                  value=values;
-                }
+                value=values;
               }
             }
           }
