@@ -20,6 +20,7 @@
     clusterService.submitStateUpdateTask("update_snapshot [" + snapshot + "]",new ProcessedClusterStateUpdateTask(){
       boolean accepted=false;
       SnapshotMetaData.Entry updatedSnapshot;
+      String failure=null;
       @Override public ClusterState execute(      ClusterState currentState){
         MetaData metaData=currentState.metaData();
         MetaData.Builder mdBuilder=MetaData.builder(currentState.metaData());
@@ -28,6 +29,15 @@
         for (        SnapshotMetaData.Entry entry : snapshots.entries()) {
           if (entry.snapshotId().equals(snapshot.snapshotId())) {
             ImmutableMap<ShardId,SnapshotMetaData.ShardSnapshotStatus> shards=shards(snapshot.snapshotId(),currentState,snapshot.indices());
+            if (!partial) {
+              Set<String> indicesWithMissingShards=indicesWithMissingShards(shards);
+              if (indicesWithMissingShards != null) {
+                updatedSnapshot=new SnapshotMetaData.Entry(snapshot.snapshotId(),snapshot.includeGlobalState(),State.FAILED,snapshot.indices(),shards);
+                entries.add(updatedSnapshot);
+                failure="Indices don't have primary shards +[" + indicesWithMissingShards + "]";
+                continue;
+              }
+            }
             updatedSnapshot=new SnapshotMetaData.Entry(snapshot.snapshotId(),snapshot.includeGlobalState(),State.STARTED,snapshot.indices(),shards);
             entries.add(updatedSnapshot);
             if (!completed(shards.values())) {
@@ -48,7 +58,7 @@
       @Override public void clusterStateProcessed(      String source,      ClusterState oldState,      ClusterState newState){
         userCreateSnapshotListener.onResponse();
         if (!accepted && updatedSnapshot != null) {
-          endSnapshot(updatedSnapshot);
+          endSnapshot(updatedSnapshot,failure);
         }
       }
     }
