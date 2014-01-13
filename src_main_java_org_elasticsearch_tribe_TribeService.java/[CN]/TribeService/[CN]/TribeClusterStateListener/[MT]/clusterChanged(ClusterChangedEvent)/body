@@ -1,0 +1,57 @@
+{
+  logger.debug("[{}] received cluster event, [{}]",tribeName,event.source());
+  clusterService.submitStateUpdateTask("cluster event from " + tribeName + ", "+ event.source(),new ClusterStateUpdateTask(){
+    @Override public ClusterState execute(    ClusterState currentState) throws Exception {
+      ClusterState tribeState=event.state();
+      DiscoveryNodes.Builder nodes=DiscoveryNodes.builder(currentState.nodes());
+      for (      DiscoveryNode discoNode : currentState.nodes()) {
+        String markedTribeName=discoNode.attributes().get(TRIBE_NAME);
+        if (markedTribeName != null && markedTribeName.equals(tribeName)) {
+          if (tribeState.nodes().get(discoNode.id()) == null) {
+            logger.info("[{}] removing node [{}]",tribeName,discoNode);
+            nodes.remove(discoNode.id());
+          }
+        }
+      }
+      for (      DiscoveryNode tribe : tribeState.nodes()) {
+        if (currentState.nodes().get(tribe.id()) == null) {
+          ImmutableMap<String,String> tribeAttr=MapBuilder.newMapBuilder(tribe.attributes()).put(TRIBE_NAME,tribeName).immutableMap();
+          DiscoveryNode discoNode=new DiscoveryNode(tribe.name(),tribe.id(),tribe.getHostName(),tribe.getHostAddress(),tribe.address(),tribeAttr,tribe.version());
+          logger.info("[{}] adding node [{}]",tribeName,discoNode);
+          nodes.put(discoNode);
+        }
+      }
+      MetaData.Builder metaData=MetaData.builder(currentState.metaData());
+      RoutingTable.Builder routingTable=RoutingTable.builder(currentState.routingTable());
+      for (      IndexMetaData index : currentState.metaData()) {
+        String markedTribeName=index.settings().get(TRIBE_NAME);
+        if (markedTribeName != null && markedTribeName.equals(tribeName)) {
+          IndexMetaData tribeIndex=tribeState.metaData().index(index.index());
+          if (tribeIndex == null) {
+            logger.info("[{}] removing index [{}]",tribeName,index.index());
+            metaData.remove(index.index());
+            routingTable.remove(index.index());
+          }
+ else {
+            routingTable.add(tribeState.routingTable().index(index.index()));
+            Settings tribeSettings=ImmutableSettings.builder().put(tribeIndex.settings()).put(TRIBE_NAME,tribeName).build();
+            metaData.put(IndexMetaData.builder(tribeIndex).settings(tribeSettings));
+          }
+        }
+      }
+      for (      IndexMetaData tribeIndex : tribeState.metaData()) {
+        if (!currentState.metaData().hasIndex(tribeIndex.index())) {
+          logger.info("[{}] adding index [{}]",tribeName,tribeIndex.index());
+          Settings tribeSettings=ImmutableSettings.builder().put(tribeIndex.settings()).put(TRIBE_NAME,tribeName).build();
+          metaData.put(IndexMetaData.builder(tribeIndex).settings(tribeSettings));
+          routingTable.add(tribeState.routingTable().index(tribeIndex.index()));
+        }
+      }
+      return ClusterState.builder(currentState).nodes(nodes).metaData(metaData).routingTable(routingTable).build();
+    }
+    @Override public void onFailure(    String source,    Throwable t){
+      logger.warn("failed to process [{}]",t,source);
+    }
+  }
+);
+}

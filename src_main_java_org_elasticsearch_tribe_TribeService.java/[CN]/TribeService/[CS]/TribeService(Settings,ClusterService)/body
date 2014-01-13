@@ -1,0 +1,27 @@
+{
+  super(settings);
+  this.clusterService=clusterService;
+  Map<String,Settings> nodesSettings=settings.getGroups("tribe",true);
+  for (  Map.Entry<String,Settings> entry : nodesSettings.entrySet()) {
+    ImmutableSettings.Builder sb=ImmutableSettings.builder().put(entry.getValue());
+    sb.put("node.name",settings.get("name") + "/" + entry.getKey());
+    sb.put(TRIBE_NAME,entry.getKey());
+    if (sb.get("http.enabled") == null) {
+      sb.put("http.enabled",false);
+    }
+    nodes.add((InternalNode)NodeBuilder.nodeBuilder().settings(sb).client(true).build());
+  }
+  if (!nodes.isEmpty()) {
+    clusterService.removeInitialStateBlock(Discovery.NO_MASTER_BLOCK);
+    clusterService.removeInitialStateBlock(GatewayService.STATE_NOT_RECOVERED_BLOCK);
+    if (settings.getAsBoolean("tribe.blocks.write",false)) {
+      clusterService.addInitialStateBlock(TRIBE_WRITE_BLOCK);
+    }
+    if (settings.getAsBoolean("tribe.blocks.metadata",false)) {
+      clusterService.addInitialStateBlock(TRIBE_METADATA_BLOCK);
+    }
+    for (    InternalNode node : nodes) {
+      node.injector().getInstance(ClusterService.class).add(new TribeClusterStateListener(node));
+    }
+  }
+}
