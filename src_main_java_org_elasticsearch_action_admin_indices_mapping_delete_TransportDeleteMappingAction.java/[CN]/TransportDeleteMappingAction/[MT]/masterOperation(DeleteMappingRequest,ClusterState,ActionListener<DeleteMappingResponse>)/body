@@ -2,14 +2,17 @@
   request.indices(state.metaData().concreteIndices(request.indices(),request.indicesOptions()));
   flushAction.execute(Requests.flushRequest(request.indices()),new ActionListener<FlushResponse>(){
     @Override public void onResponse(    FlushResponse flushResponse){
-      ImmutableOpenMap<String,ImmutableOpenMap<String,MappingMetaData>> result=state.metaData().findMappings(request.indices(),request.types());
-      OrFilterBuilder filterBuilder=new OrFilterBuilder();
+      ImmutableOpenMap<String,ImmutableOpenMap<String,MappingMetaData>> result=clusterService.state().metaData().findMappings(request.indices(),request.types());
+      BoolFilterBuilder filterBuilder=new BoolFilterBuilder();
       Set<String> types=new HashSet<String>();
       for (      ObjectObjectCursor<String,ImmutableOpenMap<String,MappingMetaData>> typesMeta : result) {
         for (        ObjectObjectCursor<String,MappingMetaData> type : typesMeta.value) {
-          filterBuilder.add(new TypeFilterBuilder(type.key));
+          filterBuilder.should(new TypeFilterBuilder(type.key));
           types.add(type.key);
         }
+      }
+      if (types.size() == 0) {
+        throw new TypeMissingException(new Index("_all"),request.types(),"No index has the type.");
       }
       request.types(types.toArray(new String[types.size()]));
       QuerySourceBuilder querySourceBuilder=new QuerySourceBuilder().setQuery(QueryBuilders.filteredQuery(QueryBuilders.matchAllQuery(),filterBuilder));
