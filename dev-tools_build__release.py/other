@@ -15,6 +15,7 @@ import urllib.request
 from http.client import HTTPConnection
 " \n This tool builds a release from the a given elasticsearch branch.\n In order to execute it go in the top level directory and run:\n   $ python3 dev_tools/build_release.py --branch 0.90 --publish --remote origin\n\n By default this script runs in 'dry' mode which essentially simulates a release. If the\n '--publish' option is set the actual release is done. The script takes over almost all\n steps necessary for a release from a high level point of view it does the following things:\n\n  - run prerequisit checks ie. check for Java 1.6 being presend or S3 credentials available as env variables\n  - detect the version to release from the specified branch (--branch) or the current branch\n  - creates a release branch & updates pom.xml and Version.java to point to a release version rather than a snapshot\n  - builds the artifacts and runs smoke-tests on the build zip & tar.gz files\n  - commits the new version and merges the release branch into the source branch\n  - creates a tag and pushes the commit to the specified origin (--remote)\n  - publishes the releases to sonar-type and S3\n\nOnce it's done it will print all the remaining steps.\n\n Prerequisites:\n    - Python 3k for script execution\n    - Boto for S3 Upload ($ apt-get install python-boto)\n    - RPM for RPM building ($ apt-get install rpm)\n    - S3 keys exported via ENV Variables (AWS_ACCESS_KEY_ID,  AWS_SECRET_ACCESS_KEY)\n"
 env = os.environ
+PLUGINS = [('bigdesk', 'lukas-vlcek/bigdesk'), ('paramedic', 'karmi/elasticsearch-paramedic'), ('segmentspy', 'polyfractal/elasticsearch-segmentspy'), ('inquisitor', 'polyfractal/elasticsearch-inquisitor'), ('head', 'mobz/elasticsearch-head')]
 LOG = env.get('ES_RELEASE_LOG', '/tmp/elasticsearch_release.log')
 try:
     JAVA_HOME = env['JAVA_HOME']
@@ -62,12 +63,10 @@ if (__name__ == '__main__'):
     print ('Preparing Release from branch [%s] running tests: [%s] dryrun: [%s]' % (src_branch, run_tests, dry_run))
     print ('  JAVA_HOME is [%s]' % JAVA_HOME)
     print ('  Running with maven command: [%s] ' % MVN)
-    release_version = find_release_version(src_branch)
-    if ((not smoke_test_version) and (not dry_run)):
-        smoke_test_version = release_version
-    elif smoke_test_version:
-        print ('Skipping build - smoketest only against version %s' % smoke_test_version)
     if build:
+        release_version = find_release_version(src_branch)
+        if (not dry_run):
+            smoke_test_version = release_version
         head_hash = get_head_hash()
         run_mvn('clean')
         print ('  Release version: [%s]' % release_version)
@@ -86,11 +85,14 @@ if (__name__ == '__main__'):
             print ''.join(['-' for _ in range(80)])
             print 'Building Release candidate'
             input('Press Enter to continue...')
-            print ('  Running maven builds now and publish to sonartype- run-tests [%s]' % run_tests)
+            if (not dry_run):
+                print ('  Running maven builds now and publish to sonartype - run-tests [%s]' % run_tests)
+            else:
+                print ('  Running maven builds now run-tests [%s]' % run_tests)
             build_release(run_tests=run_tests, dry_run=dry_run, cpus=cpus)
             artifacts = get_artifacts(release_version)
             artifacts_and_checksum = generate_checksums(artifacts)
-            smoke_test_release(release_version, artifacts, get_head_hash())
+            smoke_test_release(release_version, artifacts, get_head_hash(), PLUGINS)
             print ''.join(['-' for _ in range(80)])
             print ('Finish Release -- dry_run: %s' % dry_run)
             input('Press Enter to continue...')
@@ -109,5 +111,8 @@ if (__name__ == '__main__'):
                 run(('git reset --hard %s' % head_hash))
                 run(('git tag -d v%s' % release_version))
             run(('git branch -D %s' % release_branch(release_version)))
+    else:
+        print ('Skipping build - smoketest only against version %s' % smoke_test_version)
     if smoke_test_version:
-        download_and_verify(smoke_test_version, artifact_names(smoke_test_version))
+        fetch(remote)
+        download_and_verify(smoke_test_version, artifact_names(smoke_test_version), plugins=PLUGINS)
