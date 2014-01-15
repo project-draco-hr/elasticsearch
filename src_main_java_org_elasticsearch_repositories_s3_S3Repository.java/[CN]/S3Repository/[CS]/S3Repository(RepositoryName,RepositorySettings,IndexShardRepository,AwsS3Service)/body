@@ -1,0 +1,67 @@
+{
+  super(name.getName(),repositorySettings,indexShardRepository);
+  String bucket=repositorySettings.settings().get("bucket",componentSettings.get("bucket"));
+  if (bucket == null) {
+    throw new RepositoryException(name.name(),"No bucket defined for s3 gateway");
+  }
+  String region=repositorySettings.settings().get("region",componentSettings.get("region"));
+  if (region == null) {
+    String regionSetting=repositorySettings.settings().get("cloud.aws.region",settings.get("cloud.aws.region"));
+    if (regionSetting != null) {
+      regionSetting=regionSetting.toLowerCase(Locale.ENGLISH);
+      if ("us-east".equals(regionSetting)) {
+        region=null;
+      }
+ else       if ("us-east-1".equals(regionSetting)) {
+        region=null;
+      }
+ else       if ("us-west".equals(regionSetting)) {
+        region="us-west-1";
+      }
+ else       if ("us-west-1".equals(regionSetting)) {
+        region="us-west-1";
+      }
+ else       if ("us-west-2".equals(regionSetting)) {
+        region="us-west-2";
+      }
+ else       if ("ap-southeast".equals(regionSetting)) {
+        region="ap-southeast-1";
+      }
+ else       if ("ap-southeast-1".equals(regionSetting)) {
+        region="ap-southeast-1";
+      }
+ else       if ("ap-southeast-2".equals(regionSetting)) {
+        region="ap-southeast-2";
+      }
+ else       if ("eu-west".equals(regionSetting)) {
+        region="EU";
+      }
+ else       if ("eu-west-1".equals(regionSetting)) {
+        region="EU";
+      }
+ else       if ("sa-east".equals(regionSetting)) {
+        region="sa-east-1";
+      }
+ else       if ("sa-east-1".equals(regionSetting)) {
+        region="sa-east-1";
+      }
+    }
+  }
+  int concurrentStreams=repositorySettings.settings().getAsInt("concurrent_streams",componentSettings.getAsInt("concurrent_streams",5));
+  ExecutorService concurrentStreamPool=EsExecutors.newScaling(1,concurrentStreams,5,TimeUnit.SECONDS,EsExecutors.daemonThreadFactory(settings,"[s3_stream]"));
+  logger.debug("using bucket [{}], region [{}], chunk_size [{}], concurrent_streams [{}]",bucket,region,chunkSize,concurrentStreams);
+  blobStore=new S3BlobStore(settings,s3Service.client(),bucket,region,concurrentStreamPool);
+  this.chunkSize=repositorySettings.settings().getAsBytesSize("chunk_size",componentSettings.getAsBytesSize("chunk_size",new ByteSizeValue(100,ByteSizeUnit.MB)));
+  this.compress=repositorySettings.settings().getAsBoolean("compress",componentSettings.getAsBoolean("compress",false));
+  String basePath=repositorySettings.settings().get("base_path",null);
+  if (Strings.hasLength(basePath)) {
+    BlobPath path=new BlobPath();
+    for (    String elem : Strings.splitStringToArray(basePath,'/')) {
+      path=path.add(elem);
+    }
+    this.basePath=path;
+  }
+ else {
+    this.basePath=BlobPath.cleanPath();
+  }
+}
