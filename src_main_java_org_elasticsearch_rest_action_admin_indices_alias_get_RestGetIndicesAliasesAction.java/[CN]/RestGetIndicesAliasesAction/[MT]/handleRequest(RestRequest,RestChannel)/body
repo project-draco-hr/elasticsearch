@@ -1,5 +1,6 @@
 {
   final String[] indices=Strings.splitStringByCommaToArray(request.param("index"));
+  final String[] aliases=Strings.splitStringByCommaToArray(request.param("name"));
   ClusterStateRequest clusterStateRequest=Requests.clusterStateRequest().routingTable(false).nodes(false).indices(indices);
   clusterStateRequest.listenerThreaded(false);
   client.admin().cluster().state(clusterStateRequest,new ActionListener<ClusterStateResponse>(){
@@ -8,11 +9,14 @@
         MetaData metaData=response.getState().metaData();
         XContentBuilder builder=RestXContentBuilder.restContentBuilder(request);
         builder.startObject();
+        final boolean isAllAliasesRequested=isAllOrWildcard(aliases);
         for (        IndexMetaData indexMetaData : metaData) {
           builder.startObject(indexMetaData.index(),XContentBuilder.FieldCaseConversion.NONE);
           builder.startObject("aliases");
           for (          ObjectCursor<AliasMetaData> cursor : indexMetaData.aliases().values()) {
-            AliasMetaData.Builder.toXContent(cursor.value,builder,ToXContent.EMPTY_PARAMS);
+            if (isAllAliasesRequested || Regex.simpleMatch(aliases,cursor.value.alias())) {
+              AliasMetaData.Builder.toXContent(cursor.value,builder,ToXContent.EMPTY_PARAMS);
+            }
           }
           builder.endObject();
           builder.endObject();

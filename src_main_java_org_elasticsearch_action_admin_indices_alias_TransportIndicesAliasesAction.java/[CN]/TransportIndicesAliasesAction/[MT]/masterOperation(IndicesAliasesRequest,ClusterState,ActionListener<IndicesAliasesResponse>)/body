@@ -1,5 +1,28 @@
 {
-  IndicesAliasesClusterStateUpdateRequest updateRequest=new IndicesAliasesClusterStateUpdateRequest().ackTimeout(request.timeout()).masterNodeTimeout(request.masterNodeTimeout()).actions(request.aliasActions().toArray(new AliasAction[request.aliasActions().size()]));
+  List<AliasActions> actions=request.aliasActions();
+  List<AliasAction> finalActions=new ArrayList<AliasAction>();
+  boolean hasOnlyDeletesButNoneCanBeDone=true;
+  Set<String> aliases=new HashSet<String>();
+  for (  AliasActions action : actions) {
+    String[] concreteIndices=state.metaData().concreteIndices(action.indices(),request.indicesOptions());
+    for (    String alias : action.aliases()) {
+      aliases.add(alias);
+    }
+    for (    String index : concreteIndices) {
+      for (      String alias : action.concreteAliases(state.metaData(),index)) {
+        AliasAction finalAction=new AliasAction(action.aliasAction());
+        finalAction.index(index);
+        finalAction.alias(alias);
+        finalActions.add(finalAction);
+        hasOnlyDeletesButNoneCanBeDone=false;
+      }
+    }
+  }
+  if (hasOnlyDeletesButNoneCanBeDone && actions.size() != 0) {
+    throw new AliasesMissingException(aliases.toArray(new String[aliases.size()]));
+  }
+  request.aliasActions().clear();
+  IndicesAliasesClusterStateUpdateRequest updateRequest=new IndicesAliasesClusterStateUpdateRequest().ackTimeout(request.timeout()).masterNodeTimeout(request.masterNodeTimeout()).actions(finalActions.toArray(new AliasAction[finalActions.size()]));
   indexAliasesService.indicesAliases(updateRequest,new ClusterStateUpdateListener(){
     @Override public void onResponse(    ClusterStateUpdateResponse response){
       listener.onResponse(new IndicesAliasesResponse(response.isAcknowledged()));
