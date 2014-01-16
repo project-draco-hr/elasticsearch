@@ -1,2 +1,28 @@
 {
+  client().admin().indices().prepareCreate("test1").setSettings(settingsBuilder().put("index.number_of_shards","4").put("index.number_of_replicas",1)).execute().actionGet();
+  client().admin().indices().prepareCreate("test2").setSettings(settingsBuilder().put("index.number_of_shards","4").put("index.number_of_replicas",1)).execute().actionGet();
+  client().admin().indices().prepareAliases().addAliasAction(AliasAction.newAddAliasAction("test1","routing_alias").routing("ABC")).addAliasAction(AliasAction.newAddAliasAction("test2","routing_alias").routing("EFG")).execute().actionGet();
+  client().admin().cluster().prepareHealth().setWaitForEvents(Priority.LANGUID).setWaitForGreenStatus().execute().actionGet();
+  ClusterSearchShardsResponse response=client().admin().cluster().prepareSearchShards("routing_alias").execute().actionGet();
+  assertThat(response.getGroups().length,equalTo(2));
+  assertThat(response.getGroups()[0].getShards().length,equalTo(2));
+  assertThat(response.getGroups()[1].getShards().length,equalTo(2));
+  boolean seenTest1=false;
+  boolean seenTest2=false;
+  for (  ClusterSearchShardsGroup group : response.getGroups()) {
+    if (group.getIndex().equals("test1")) {
+      seenTest1=true;
+      assertThat(group.getShards().length,equalTo(2));
+    }
+ else     if (group.getIndex().equals("test2")) {
+      seenTest2=true;
+      assertThat(group.getShards().length,equalTo(2));
+    }
+ else {
+      fail();
+    }
+  }
+  assertThat(seenTest1,equalTo(true));
+  assertThat(seenTest2,equalTo(true));
+  assertThat(response.getNodes().length,equalTo(2));
 }

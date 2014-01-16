@@ -1,2 +1,44 @@
 {
+  ScheduledExecutorService timer=Executors.newSingleThreadScheduledExecutor();
+  PrioritizedEsThreadPoolExecutor executor=EsExecutors.newSinglePrioritizing(Executors.defaultThreadFactory());
+  final CountDownLatch block=new CountDownLatch(1);
+  executor.execute(new Runnable(){
+    @Override public void run(){
+      try {
+        block.await();
+      }
+ catch (      InterruptedException e) {
+        fail();
+      }
+    }
+    @Override public String toString(){
+      return "the blocking";
+    }
+  }
+);
+  final AtomicBoolean executeCalled=new AtomicBoolean();
+  final CountDownLatch timedOut=new CountDownLatch(1);
+  executor.execute(new Runnable(){
+    @Override public void run(){
+      executeCalled.set(true);
+    }
+    @Override public String toString(){
+      return "the waiting";
+    }
+  }
+,timer,TimeValue.timeValueMillis(100),new Runnable(){
+    @Override public void run(){
+      timedOut.countDown();
+    }
+  }
+);
+  PrioritizedEsThreadPoolExecutor.Pending[] pending=executor.getPending();
+  assertThat(pending.length,equalTo(1));
+  assertThat(pending[0].task.toString(),equalTo("the waiting"));
+  assertThat(timedOut.await(2,TimeUnit.SECONDS),equalTo(true));
+  block.countDown();
+  Thread.sleep(100);
+  assertThat(executeCalled.get(),equalTo(false));
+  timer.shutdownNow();
+  executor.shutdownNow();
 }

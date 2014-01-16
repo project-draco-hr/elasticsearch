@@ -1,2 +1,70 @@
 {
+  client().admin().indices().prepareCreate("test").setSettings(ImmutableSettings.settingsBuilder().put("index.refresh_interval",-1)).execute().actionGet();
+  ClusterHealthResponse clusterHealth=client().admin().cluster().health(clusterHealthRequest().waitForGreenStatus()).actionGet();
+  assertThat(clusterHealth.isTimedOut(),equalTo(false));
+  assertThat(clusterHealth.getStatus(),equalTo(ClusterHealthStatus.GREEN));
+  GetResponse response=client().prepareGet("test","type1","1").execute().actionGet();
+  assertThat(response.isExists(),equalTo(false));
+  logger.info("--> index doc 1");
+  client().prepareIndex("test","type1","1").setSource("field1","value1","field2","value2").execute().actionGet();
+  response=client().prepareGet("test","type1","1").setVersion(0).execute().actionGet();
+  assertThat(response.isExists(),equalTo(true));
+  assertThat(response.getId(),equalTo("1"));
+  assertThat(response.getVersion(),equalTo(1l));
+  response=client().prepareGet("test","type1","1").setVersion(1).execute().actionGet();
+  assertThat(response.isExists(),equalTo(true));
+  assertThat(response.getId(),equalTo("1"));
+  assertThat(response.getVersion(),equalTo(1l));
+  try {
+    client().prepareGet("test","type1","1").setVersion(2).execute().actionGet();
+    fail();
+  }
+ catch (  VersionConflictEngineException e) {
+  }
+  client().admin().indices().prepareRefresh("test").execute().actionGet();
+  response=client().prepareGet("test","type1","1").setVersion(0).setRealtime(false).execute().actionGet();
+  assertThat(response.isExists(),equalTo(true));
+  assertThat(response.getId(),equalTo("1"));
+  assertThat(response.getVersion(),equalTo(1l));
+  response=client().prepareGet("test","type1","1").setVersion(1).setRealtime(false).execute().actionGet();
+  assertThat(response.isExists(),equalTo(true));
+  assertThat(response.getId(),equalTo("1"));
+  assertThat(response.getVersion(),equalTo(1l));
+  try {
+    client().prepareGet("test","type1","1").setVersion(2).setRealtime(false).execute().actionGet();
+    fail();
+  }
+ catch (  VersionConflictEngineException e) {
+  }
+  logger.info("--> index doc 1 again, so increasing the version");
+  client().prepareIndex("test","type1","1").setSource("field1","value1","field2","value2").execute().actionGet();
+  response=client().prepareGet("test","type1","1").setVersion(0).execute().actionGet();
+  assertThat(response.isExists(),equalTo(true));
+  assertThat(response.getId(),equalTo("1"));
+  assertThat(response.getVersion(),equalTo(2l));
+  try {
+    client().prepareGet("test","type1","1").setVersion(1).execute().actionGet();
+    fail();
+  }
+ catch (  VersionConflictEngineException e) {
+  }
+  response=client().prepareGet("test","type1","1").setVersion(2).execute().actionGet();
+  assertThat(response.isExists(),equalTo(true));
+  assertThat(response.getId(),equalTo("1"));
+  assertThat(response.getVersion(),equalTo(2l));
+  client().admin().indices().prepareRefresh("test").execute().actionGet();
+  response=client().prepareGet("test","type1","1").setVersion(0).setRealtime(false).execute().actionGet();
+  assertThat(response.isExists(),equalTo(true));
+  assertThat(response.getId(),equalTo("1"));
+  assertThat(response.getVersion(),equalTo(2l));
+  try {
+    client().prepareGet("test","type1","1").setVersion(1).setRealtime(false).execute().actionGet();
+    fail();
+  }
+ catch (  VersionConflictEngineException e) {
+  }
+  response=client().prepareGet("test","type1","1").setVersion(2).setRealtime(false).execute().actionGet();
+  assertThat(response.isExists(),equalTo(true));
+  assertThat(response.getId(),equalTo("1"));
+  assertThat(response.getVersion(),equalTo(2l));
 }

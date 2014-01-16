@@ -1,2 +1,42 @@
 {
+  Settings settings=settingsBuilder().put("discovery.type","local").build();
+  cluster().startNode(settings);
+  ClusterService clusterService1=cluster().getInstance(ClusterService.class);
+  final CountDownLatch block=new CountDownLatch(1);
+  clusterService1.submitStateUpdateTask("test1",new ClusterStateUpdateTask(){
+    @Override public ClusterState execute(    ClusterState currentState){
+      try {
+        block.await();
+      }
+ catch (      InterruptedException e) {
+        fail();
+      }
+      return currentState;
+    }
+    @Override public void onFailure(    String source,    Throwable t){
+      fail();
+    }
+  }
+);
+  final CountDownLatch timedOut=new CountDownLatch(1);
+  final AtomicBoolean executeCalled=new AtomicBoolean();
+  clusterService1.submitStateUpdateTask("test2",new TimeoutClusterStateUpdateTask(){
+    @Override public TimeValue timeout(){
+      return TimeValue.timeValueMillis(2);
+    }
+    @Override public void onFailure(    String source,    Throwable t){
+      timedOut.countDown();
+    }
+    @Override public ClusterState execute(    ClusterState currentState){
+      executeCalled.set(true);
+      return currentState;
+    }
+    @Override public void clusterStateProcessed(    String source,    ClusterState oldState,    ClusterState newState){
+    }
+  }
+);
+  assertThat(timedOut.await(500,TimeUnit.MILLISECONDS),equalTo(true));
+  block.countDown();
+  Thread.sleep(100);
+  assertThat(executeCalled.get(),equalTo(false));
 }

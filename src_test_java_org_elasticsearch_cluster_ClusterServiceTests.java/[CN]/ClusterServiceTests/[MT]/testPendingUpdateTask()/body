@@ -1,2 +1,107 @@
 {
+  Settings zenSettings=settingsBuilder().put("discovery.type","zen").build();
+  String node_0=cluster().startNode(zenSettings);
+  cluster().startNodeClient(zenSettings);
+  ClusterService clusterService=cluster().getInstance(ClusterService.class,node_0);
+  final CountDownLatch block1=new CountDownLatch(1);
+  final CountDownLatch invoked1=new CountDownLatch(1);
+  clusterService.submitStateUpdateTask("1",new ClusterStateUpdateTask(){
+    @Override public ClusterState execute(    ClusterState currentState){
+      invoked1.countDown();
+      try {
+        block1.await();
+      }
+ catch (      InterruptedException e) {
+        fail();
+      }
+      return currentState;
+    }
+    @Override public void onFailure(    String source,    Throwable t){
+      invoked1.countDown();
+      fail();
+    }
+  }
+);
+  invoked1.await();
+  final CountDownLatch invoked2=new CountDownLatch(9);
+  for (int i=2; i <= 10; i++) {
+    clusterService.submitStateUpdateTask(Integer.toString(i),new ClusterStateUpdateTask(){
+      @Override public ClusterState execute(      ClusterState currentState){
+        invoked2.countDown();
+        return currentState;
+      }
+      @Override public void onFailure(      String source,      Throwable t){
+        fail();
+      }
+    }
+);
+  }
+  Set<String> controlSources=new HashSet<String>(Arrays.asList("2","3","4","5","6","7","8","9","10"));
+  List<PendingClusterTask> pendingClusterTasks=clusterService.pendingTasks();
+  assertThat(pendingClusterTasks.size(),equalTo(9));
+  for (  PendingClusterTask task : pendingClusterTasks) {
+    assertTrue(controlSources.remove(task.source().string()));
+  }
+  assertTrue(controlSources.isEmpty());
+  controlSources=new HashSet<String>(Arrays.asList("2","3","4","5","6","7","8","9","10"));
+  PendingClusterTasksResponse response=cluster().clientNodeClient().admin().cluster().preparePendingClusterTasks().execute().actionGet();
+  assertThat(response.pendingTasks().size(),equalTo(9));
+  for (  PendingClusterTask task : response) {
+    assertTrue(controlSources.remove(task.source().string()));
+  }
+  assertTrue(controlSources.isEmpty());
+  block1.countDown();
+  invoked2.await();
+  pendingClusterTasks=clusterService.pendingTasks();
+  assertThat(pendingClusterTasks,empty());
+  response=cluster().clientNodeClient().admin().cluster().preparePendingClusterTasks().execute().actionGet();
+  assertThat(response.pendingTasks(),empty());
+  final CountDownLatch block2=new CountDownLatch(1);
+  final CountDownLatch invoked3=new CountDownLatch(1);
+  clusterService.submitStateUpdateTask("1",new ClusterStateUpdateTask(){
+    @Override public ClusterState execute(    ClusterState currentState){
+      invoked3.countDown();
+      try {
+        block2.await();
+      }
+ catch (      InterruptedException e) {
+        fail();
+      }
+      return currentState;
+    }
+    @Override public void onFailure(    String source,    Throwable t){
+      invoked3.countDown();
+      fail();
+    }
+  }
+);
+  invoked3.await();
+  for (int i=2; i <= 5; i++) {
+    clusterService.submitStateUpdateTask(Integer.toString(i),new ClusterStateUpdateTask(){
+      @Override public ClusterState execute(      ClusterState currentState){
+        return currentState;
+      }
+      @Override public void onFailure(      String source,      Throwable t){
+        fail();
+      }
+    }
+);
+  }
+  Thread.sleep(100);
+  pendingClusterTasks=clusterService.pendingTasks();
+  assertThat(pendingClusterTasks.size(),equalTo(4));
+  controlSources=new HashSet<String>(Arrays.asList("2","3","4","5"));
+  for (  PendingClusterTask task : pendingClusterTasks) {
+    assertTrue(controlSources.remove(task.source().string()));
+  }
+  assertTrue(controlSources.isEmpty());
+  response=cluster().clientNodeClient().admin().cluster().preparePendingClusterTasks().execute().actionGet();
+  assertThat(response.pendingTasks().size(),equalTo(4));
+  controlSources=new HashSet<String>(Arrays.asList("2","3","4","5"));
+  for (  PendingClusterTask task : response) {
+    assertTrue(controlSources.remove(task.source().string()));
+    assertThat(task.getTimeInQueueInMillis(),greaterThan(0l));
+  }
+  assertTrue(controlSources.isEmpty());
+  block2.countDown();
 }

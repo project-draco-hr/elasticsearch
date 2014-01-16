@@ -1,2 +1,26 @@
 {
+  final Client client=client();
+  try {
+    client.admin().indices().prepareCreate("ramtest").setSource("{\"mappings\": {\"type\": {\"properties\": {\"test\": " + "{\"type\": \"string\",\"fielddata\": {\"filter\": {\"regex\": {\"pattern\": \"^value.*\"}}}}}}}}").execute().actionGet();
+    client.admin().cluster().prepareHealth("ramtest").setWaitForGreenStatus().setTimeout("10s").execute().actionGet();
+    int docCount=atLeast(300);
+    for (long id=0; id < docCount; id++) {
+      client.prepareIndex("ramtest","type",Long.toString(id)).setSource(MapBuilder.<String,Object>newMapBuilder().put("test","value" + id).map()).execute().actionGet();
+    }
+    refresh();
+    client.prepareSearch("ramtest").setSource("{\"sort\": \"test\",\"query\":{\"match_all\":{}}}").execute().actionGet();
+    client.admin().indices().prepareClearCache("ramtest").setFieldDataCache(true).execute().actionGet();
+    Settings settings=settingsBuilder().put(InternalCircuitBreakerService.CIRCUIT_BREAKER_MAX_BYTES_SETTING,"100b").put(InternalCircuitBreakerService.CIRCUIT_BREAKER_OVERHEAD_SETTING,1.05).build();
+    client.admin().cluster().prepareUpdateSettings().setTransientSettings(settings).execute().actionGet();
+    try {
+      client.prepareSearch("ramtest").setSource("{\"sort\": \"test\",\"query\":{\"match_all\":{}}}").execute().actionGet();
+      fail("should not reach this point");
+    }
+ catch (    SearchPhaseExecutionException e) {
+    }
+  }
+  finally {
+    Settings resetSettings=settingsBuilder().put(InternalCircuitBreakerService.CIRCUIT_BREAKER_MAX_BYTES_SETTING,"-1").put(InternalCircuitBreakerService.CIRCUIT_BREAKER_OVERHEAD_SETTING,InternalCircuitBreakerService.DEFAULT_OVERHEAD_CONSTANT).build();
+    client.admin().cluster().prepareUpdateSettings().setTransientSettings(resetSettings).execute().actionGet();
+  }
 }
