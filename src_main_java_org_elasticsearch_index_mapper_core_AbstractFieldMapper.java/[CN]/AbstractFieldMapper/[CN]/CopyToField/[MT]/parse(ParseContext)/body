@@ -1,0 +1,52 @@
+{
+  context.setWithinCopyTo(boost);
+  FieldMappers mappers=context.docMapper().mappers().indexName(field);
+  if (mappers != null && !mappers.isEmpty()) {
+    mappers.mapper().parse(context);
+  }
+ else {
+    int posDot=field.lastIndexOf('.');
+    if (posDot > 0) {
+      String objectPath=field.substring(0,posDot);
+      String fieldPath=field.substring(posDot + 1);
+      ObjectMapper mapper=context.docMapper().objectMappers().get(objectPath);
+      if (mapper == null) {
+        throw new MapperParsingException("attempt to copy value to non-existing object [" + field + "]");
+      }
+      ContentPath.Type origPathType=context.path().pathType();
+      context.path().pathType(ContentPath.Type.FULL);
+      context.path().add(objectPath);
+      boolean origWithinNewMapper=context.isWithinNewMapper();
+      context.clearWithinNewMapper();
+      try {
+        mapper.parseDynamicValue(context,fieldPath,context.parser().currentToken());
+      }
+  finally {
+        if (origWithinNewMapper) {
+          context.setWithinNewMapper();
+        }
+ else {
+          context.clearWithinNewMapper();
+        }
+        context.path().remove();
+        context.path().pathType(origPathType);
+      }
+    }
+ else {
+      boolean origWithinNewMapper=context.isWithinNewMapper();
+      context.clearWithinNewMapper();
+      try {
+        context.docMapper().root().parseDynamicValue(context,field,context.parser().currentToken());
+      }
+  finally {
+        if (origWithinNewMapper) {
+          context.setWithinNewMapper();
+        }
+ else {
+          context.clearWithinNewMapper();
+        }
+      }
+    }
+  }
+  context.clearWithinCopyTo();
+}

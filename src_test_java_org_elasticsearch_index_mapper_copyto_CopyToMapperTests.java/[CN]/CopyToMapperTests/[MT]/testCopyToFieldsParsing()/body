@@ -1,0 +1,37 @@
+{
+  String mapping=jsonBuilder().startObject().startObject("type1").startObject("properties").startObject("copy_test").field("type","string").array("copy_to","another_field^10","cyclic_test").endObject().startObject("another_field").field("type","string").endObject().startObject("cyclic_test").field("type","string").array("copy_to","copy_test").endObject().startObject("int_to_str_test").field("type","integer").startArray("copy_to").startObject().field("field","another_field").field("boost",5.5f).endObject().startObject().field("field","new_field").endObject().endArray().endObject().endObject().endObject().endObject().string();
+  DocumentMapper docMapper=MapperTestUtils.newParser().parse(mapping);
+  FieldMapper fieldMapper=docMapper.mappers().name("copy_test").mapper();
+  assertThat(fieldMapper,instanceOf(StringFieldMapper.class));
+  StringFieldMapper stringFieldMapper=(StringFieldMapper)fieldMapper;
+  XContentBuilder builder=jsonBuilder().startObject();
+  stringFieldMapper.toXContent(builder,ToXContent.EMPTY_PARAMS).endObject();
+  builder.close();
+  Map<String,Object> serializedMap=JsonXContent.jsonXContent.createParser(builder.bytes()).mapAndClose();
+  Map<String,Object> copyTestMap=(Map<String,Object>)serializedMap.get("copy_test");
+  assertThat(copyTestMap.get("type").toString(),is("string"));
+  List<Map<String,Object>> copyToMap=(List<Map<String,Object>>)copyTestMap.get("copy_to");
+  assertThat(copyToMap.size(),equalTo(2));
+  assertThat(copyToMap.get(0).get("field").toString(),equalTo("another_field"));
+  assertThat((Double)copyToMap.get(0).get("boost"),closeTo(10.0,0.001));
+  assertThat(copyToMap.get(1).get("field").toString(),equalTo("cyclic_test"));
+  BytesReference json=jsonBuilder().startObject().field("copy_test","foo").field("cyclic_test","bar").field("int_to_str_test",42).endObject().bytes();
+  ParseContext.Document doc=docMapper.parse("type1","1",json).rootDoc();
+  assertThat(doc.getFields("copy_test").length,equalTo(2));
+  assertThat(doc.getFields("copy_test")[0].stringValue(),equalTo("foo"));
+  assertThat(doc.getFields("copy_test")[1].stringValue(),equalTo("bar"));
+  assertThat(doc.getFields("another_field").length,equalTo(2));
+  assertThat(doc.getFields("another_field")[0].stringValue(),equalTo("foo"));
+  assertThat((double)(doc.getFields("another_field")[0].boost()),closeTo(10.0,0.001));
+  assertThat(doc.getFields("another_field")[1].stringValue(),equalTo("42"));
+  assertThat((double)(doc.getFields("another_field")[1].boost()),closeTo(5.5,0.001));
+  assertThat(doc.getFields("cyclic_test").length,equalTo(2));
+  assertThat(doc.getFields("cyclic_test")[0].stringValue(),equalTo("foo"));
+  assertThat(doc.getFields("cyclic_test")[1].stringValue(),equalTo("bar"));
+  assertThat(doc.getFields("int_to_str_test").length,equalTo(1));
+  assertThat(doc.getFields("int_to_str_test")[0].numericValue().intValue(),equalTo(42));
+  assertThat(doc.getFields("new_field").length,equalTo(1));
+  assertThat(doc.getFields("new_field")[0].numericValue().intValue(),equalTo(42));
+  fieldMapper=docMapper.mappers().name("new_field").mapper();
+  assertThat(fieldMapper,instanceOf(LongFieldMapper.class));
+}
