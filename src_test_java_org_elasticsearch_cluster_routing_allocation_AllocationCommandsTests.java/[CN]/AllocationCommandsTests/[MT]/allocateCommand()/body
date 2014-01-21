@@ -5,13 +5,20 @@
   RoutingTable routingTable=RoutingTable.builder().addAsNew(metaData.index("test")).build();
   ClusterState clusterState=ClusterState.builder().metaData(metaData).routingTable(routingTable).build();
   logger.info("--> adding 3 nodes on same rack and do rerouting");
-  clusterState=ClusterState.builder(clusterState).nodes(DiscoveryNodes.builder().put(newNode("node1")).put(newNode("node2")).put(newNode("node3"))).build();
+  clusterState=ClusterState.builder(clusterState).nodes(DiscoveryNodes.builder().put(newNode("node1")).put(newNode("node2")).put(newNode("node3")).put(newNode("node4",ImmutableMap.of("data",Boolean.FALSE.toString())))).build();
   RoutingAllocation.Result rerouteResult=allocation.reroute(clusterState);
   clusterState=ClusterState.builder(clusterState).routingTable(rerouteResult.routingTable()).build();
   assertThat(clusterState.routingNodes().shardsWithState(INITIALIZING).size(),equalTo(0));
   logger.info("--> allocating with primary flag set to false, should fail");
   try {
     allocation.reroute(clusterState,new AllocationCommands(new AllocateAllocationCommand(new ShardId("test",0),"node1",false)));
+    fail();
+  }
+ catch (  ElasticsearchIllegalArgumentException e) {
+  }
+  logger.info("--> allocating to non-data node, should fail");
+  try {
+    rerouteResult=allocation.reroute(clusterState,new AllocationCommands(new AllocateAllocationCommand(new ShardId("test",0),"node4",true)));
     fail();
   }
  catch (  ElasticsearchIllegalArgumentException e) {
