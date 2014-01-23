@@ -34,19 +34,25 @@ catch (      Exception e) {
   }
   for (  final RiverRouting routing : state.routing()) {
     if (routing.node() == null) {
+      logger.trace("river {} has no routing node",routing.riverName().getName());
       continue;
     }
     if (!routing.node().equals(localNode)) {
+      logger.trace("river {} belongs to node {}",routing.riverName().getName(),routing.node());
       continue;
     }
     if (rivers.containsKey(routing.riverName())) {
+      logger.trace("river {} is already allocated",routing.riverName().getName());
       continue;
     }
-    client.prepareGet(riverIndexName,routing.riverName().name(),"_meta").setListenerThreaded(true).execute(new ActionListener<GetResponse>(){
+    prepareGetMetaDocument(routing.riverName().name()).execute(new ActionListener<GetResponse>(){
       @Override public void onResponse(      GetResponse getResponse){
         if (!rivers.containsKey(routing.riverName())) {
           if (getResponse.isExists()) {
             createRiver(routing.riverName(),getResponse.getSourceAsMap());
+          }
+ else {
+            logger.warn("{}/{}/_meta document not found",riverIndexName,routing.riverName().getName());
           }
         }
       }
@@ -58,7 +64,7 @@ catch (      Exception e) {
           try {
             threadPool.schedule(TimeValue.timeValueSeconds(5),ThreadPool.Names.SAME,new Runnable(){
               @Override public void run(){
-                client.prepareGet(riverIndexName,routing.riverName().name(),"_meta").setListenerThreaded(true).execute(listener);
+                prepareGetMetaDocument(routing.riverName().name()).execute(listener);
               }
             }
 );
