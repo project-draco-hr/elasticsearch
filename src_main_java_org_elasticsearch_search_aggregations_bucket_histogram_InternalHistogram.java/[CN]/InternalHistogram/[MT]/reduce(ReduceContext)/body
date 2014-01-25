@@ -1,0 +1,95 @@
+{
+  List<InternalAggregation> aggregations=reduceContext.aggregations();
+  if (aggregations.size() == 1) {
+    InternalHistogram<B> histo=(InternalHistogram<B>)aggregations.get(0);
+    if (minDocCount == 1) {
+      for (      B bucket : histo.buckets) {
+        bucket.aggregations.reduce(reduceContext.cacheRecycler());
+      }
+      return histo;
+    }
+    CollectionUtil.introSort(histo.buckets,order.asc ? InternalOrder.KEY_ASC.comparator() : InternalOrder.KEY_DESC.comparator());
+    List<B> list=order.asc ? histo.buckets : Lists.reverse(histo.buckets);
+    B prevBucket=null;
+    ListIterator<B> iter=list.listIterator();
+    if (minDocCount == 0) {
+      while (iter.hasNext()) {
+        B nextBucket=list.get(iter.nextIndex());
+        nextBucket.aggregations.reduce(reduceContext.cacheRecycler());
+        if (prevBucket != null) {
+          long key=emptyBucketInfo.rounding.nextRoundingValue(prevBucket.key);
+          while (key != nextBucket.key) {
+            iter.add(createBucket(key,0,emptyBucketInfo.subAggregations,formatter));
+            key=emptyBucketInfo.rounding.nextRoundingValue(key);
+          }
+        }
+        prevBucket=iter.next();
+      }
+    }
+ else {
+      while (iter.hasNext()) {
+        InternalHistogram.Bucket bucket=iter.next();
+        if (bucket.getDocCount() < minDocCount) {
+          iter.remove();
+        }
+ else {
+          bucket.aggregations.reduce(reduceContext.cacheRecycler());
+        }
+      }
+    }
+    if (order != InternalOrder.KEY_ASC && order != InternalOrder.KEY_DESC) {
+      CollectionUtil.introSort(histo.buckets,order.comparator());
+    }
+    return histo;
+  }
+  InternalHistogram reduced=(InternalHistogram)aggregations.get(0);
+  Recycler.V<LongObjectOpenHashMap<List<Histogram.Bucket>>> bucketsByKey=reduceContext.cacheRecycler().longObjectMap(-1);
+  for (  InternalAggregation aggregation : aggregations) {
+    InternalHistogram<B> histogram=(InternalHistogram)aggregation;
+    for (    B bucket : histogram.buckets) {
+      List<Histogram.Bucket> bucketList=bucketsByKey.v().get(bucket.key);
+      if (bucketList == null) {
+        bucketList=new ArrayList<Histogram.Bucket>(aggregations.size());
+        bucketsByKey.v().put(bucket.key,bucketList);
+      }
+      bucketList.add(bucket);
+    }
+  }
+  List<B> reducedBuckets=new ArrayList<B>(bucketsByKey.v().size());
+  Object[] buckets=bucketsByKey.v().values;
+  boolean[] allocated=bucketsByKey.v().allocated;
+  for (int i=0; i < allocated.length; i++) {
+    if (allocated[i]) {
+      B bucket=((List<B>)buckets[i]).get(0).reduce(((List<B>)buckets[i]),reduceContext.cacheRecycler());
+      if (bucket.getDocCount() >= minDocCount) {
+        reducedBuckets.add(bucket);
+      }
+    }
+  }
+  bucketsByKey.release();
+  if (minDocCount == 0) {
+    CollectionUtil.introSort(reducedBuckets,order.asc ? InternalOrder.KEY_ASC.comparator() : InternalOrder.KEY_DESC.comparator());
+    List<B> list=order.asc ? reducedBuckets : Lists.reverse(reducedBuckets);
+    B prevBucket=null;
+    ListIterator<B> iter=list.listIterator();
+    while (iter.hasNext()) {
+      B nextBucket=list.get(iter.nextIndex());
+      if (prevBucket != null) {
+        long key=emptyBucketInfo.rounding.nextRoundingValue(prevBucket.key);
+        while (key != nextBucket.key) {
+          iter.add(createBucket(key,0,emptyBucketInfo.subAggregations,formatter));
+          key=emptyBucketInfo.rounding.nextRoundingValue(key);
+        }
+      }
+      prevBucket=iter.next();
+    }
+    if (order != InternalOrder.KEY_ASC && order != InternalOrder.KEY_DESC) {
+      CollectionUtil.introSort(reducedBuckets,order.comparator());
+    }
+  }
+ else {
+    CollectionUtil.introSort(reducedBuckets,order.comparator());
+  }
+  reduced.buckets=reducedBuckets;
+  return reduced;
+}
