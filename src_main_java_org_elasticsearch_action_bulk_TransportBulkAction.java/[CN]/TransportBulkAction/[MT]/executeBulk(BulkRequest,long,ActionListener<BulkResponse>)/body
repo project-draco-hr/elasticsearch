@@ -2,7 +2,9 @@
   ClusterState clusterState=clusterService.state();
   clusterState.blocks().globalBlockedRaiseException(ClusterBlockLevel.WRITE);
   MetaData metaData=clusterState.metaData();
-  for (  ActionRequest request : bulkRequest.requests) {
+  final AtomicArray<BulkItemResponse> responses=new AtomicArray<BulkItemResponse>(bulkRequest.requests.size());
+  for (int i=0; i < bulkRequest.requests.size(); i++) {
+    ActionRequest request=bulkRequest.requests.get(i);
     if (request instanceof IndexRequest) {
       IndexRequest indexRequest=(IndexRequest)request;
       String aliasOrIndex=indexRequest.index();
@@ -11,7 +13,15 @@
       if (metaData.hasIndex(indexRequest.index())) {
         mappingMd=metaData.index(indexRequest.index()).mappingOrDefault(indexRequest.type());
       }
-      indexRequest.process(metaData,aliasOrIndex,mappingMd,allowIdGeneration);
+      try {
+        indexRequest.process(metaData,aliasOrIndex,mappingMd,allowIdGeneration);
+      }
+ catch (      ElasticsearchParseException e) {
+        BulkItemResponse.Failure failure=new BulkItemResponse.Failure(indexRequest.index(),indexRequest.type(),indexRequest.id(),e);
+        BulkItemResponse bulkItemResponse=new BulkItemResponse(i,"index",failure);
+        responses.set(i,bulkItemResponse);
+        bulkRequest.requests.set(i,null);
+      }
     }
  else     if (request instanceof DeleteRequest) {
       DeleteRequest deleteRequest=(DeleteRequest)request;
@@ -24,7 +34,6 @@
       updateRequest.index(clusterState.metaData().concreteIndex(updateRequest.index()));
     }
   }
-  final AtomicArray<BulkItemResponse> responses=new AtomicArray<BulkItemResponse>(bulkRequest.requests.size());
   Map<ShardId,List<BulkItemRequest>> requestsByShard=Maps.newHashMap();
   for (int i=0; i < bulkRequest.requests.size(); i++) {
     ActionRequest request=bulkRequest.requests.get(i);
