@@ -9,13 +9,18 @@
   client.admin().indices().getFieldMappings(getMappingsRequest,new ActionListener<GetFieldMappingsResponse>(){
     @SuppressWarnings("unchecked") @Override public void onResponse(    GetFieldMappingsResponse response){
       try {
-        XContentBuilder builder=RestXContentBuilder.restContentBuilder(request);
-        builder.startObject();
         ImmutableMap<String,ImmutableMap<String,ImmutableMap<String,FieldMappingMetaData>>> mappingsByIndex=response.mappings();
+        boolean isPossibleSingleFieldRequest=indices.length == 1 && types.length == 1 && fields.length == 1;
+        if (isPossibleSingleFieldRequest && isFieldMappingMissingField(mappingsByIndex)) {
+          channel.sendResponse(new XContentRestResponse(request,OK,emptyBuilder(request)));
+          return;
+        }
         RestStatus status=OK;
         if (mappingsByIndex.isEmpty() && fields.length > 0) {
           status=NOT_FOUND;
         }
+        XContentBuilder builder=RestXContentBuilder.restContentBuilder(request);
+        builder.startObject();
         response.toXContent(builder,ToXContent.EMPTY_PARAMS);
         builder.endObject();
         channel.sendResponse(new XContentRestResponse(request,status,builder));
