@@ -1,0 +1,142 @@
+{
+  String field=null;
+  int requiredSize=DEFAULT_REQUIRED_SIZE;
+  int shardSize=DEFAULT_SHARD_SIZE;
+  String format=null;
+  String include=null;
+  int includeFlags=0;
+  String exclude=null;
+  int excludeFlags=0;
+  String executionHint=null;
+  long minDocCount=DEFAULT_MIN_DOC_COUNT;
+  XContentParser.Token token;
+  String currentFieldName=null;
+  while ((token=parser.nextToken()) != XContentParser.Token.END_OBJECT) {
+    if (token == XContentParser.Token.FIELD_NAME) {
+      currentFieldName=parser.currentName();
+    }
+ else     if (token == XContentParser.Token.VALUE_STRING) {
+      if ("field".equals(currentFieldName)) {
+        field=parser.text();
+      }
+ else       if ("format".equals(currentFieldName)) {
+        format=parser.text();
+      }
+ else       if ("include".equals(currentFieldName)) {
+        include=parser.text();
+      }
+ else       if ("exclude".equals(currentFieldName)) {
+        exclude=parser.text();
+      }
+ else       if ("execution_hint".equals(currentFieldName) || "executionHint".equals(currentFieldName)) {
+        executionHint=parser.text();
+      }
+ else {
+        throw new SearchParseException(context,"Unknown key for a " + token + " in ["+ aggregationName+ "]: ["+ currentFieldName+ "].");
+      }
+    }
+ else     if (token == XContentParser.Token.VALUE_NUMBER) {
+      if ("size".equals(currentFieldName)) {
+        requiredSize=parser.intValue();
+      }
+ else       if ("shard_size".equals(currentFieldName) || "shardSize".equals(currentFieldName)) {
+        shardSize=parser.intValue();
+      }
+ else       if ("min_doc_count".equals(currentFieldName) || "minDocCount".equals(currentFieldName)) {
+        minDocCount=parser.intValue();
+      }
+ else {
+        throw new SearchParseException(context,"Unknown key for a " + token + " in ["+ aggregationName+ "]: ["+ currentFieldName+ "].");
+      }
+    }
+ else     if (token == XContentParser.Token.START_OBJECT) {
+      if ("include".equals(currentFieldName)) {
+        while ((token=parser.nextToken()) != XContentParser.Token.END_OBJECT) {
+          if (token == XContentParser.Token.FIELD_NAME) {
+            currentFieldName=parser.currentName();
+          }
+ else           if (token == XContentParser.Token.VALUE_STRING) {
+            if ("pattern".equals(currentFieldName)) {
+              include=parser.text();
+            }
+ else             if ("flags".equals(currentFieldName)) {
+              includeFlags=Regex.flagsFromString(parser.text());
+            }
+          }
+ else           if (token == XContentParser.Token.VALUE_NUMBER) {
+            if ("flags".equals(currentFieldName)) {
+              includeFlags=parser.intValue();
+            }
+          }
+        }
+      }
+ else       if ("exclude".equals(currentFieldName)) {
+        while ((token=parser.nextToken()) != XContentParser.Token.END_OBJECT) {
+          if (token == XContentParser.Token.FIELD_NAME) {
+            currentFieldName=parser.currentName();
+          }
+ else           if (token == XContentParser.Token.VALUE_STRING) {
+            if ("pattern".equals(currentFieldName)) {
+              exclude=parser.text();
+            }
+ else             if ("flags".equals(currentFieldName)) {
+              excludeFlags=Regex.flagsFromString(parser.text());
+            }
+          }
+ else           if (token == XContentParser.Token.VALUE_NUMBER) {
+            if ("flags".equals(currentFieldName)) {
+              excludeFlags=parser.intValue();
+            }
+          }
+        }
+      }
+ else {
+        throw new SearchParseException(context,"Unknown key for a " + token + " in ["+ aggregationName+ "]: ["+ currentFieldName+ "].");
+      }
+    }
+ else {
+      throw new SearchParseException(context,"Unexpected token " + token + " in ["+ aggregationName+ "].");
+    }
+  }
+  if (shardSize == DEFAULT_SHARD_SIZE) {
+    shardSize=2 * BucketUtils.suggestShardSideQueueSize(requiredSize,context.numberOfShards());
+  }
+  if (shardSize < requiredSize) {
+    shardSize=requiredSize;
+  }
+  IncludeExclude includeExclude=null;
+  if (include != null || exclude != null) {
+    Pattern includePattern=include != null ? Pattern.compile(include,includeFlags) : null;
+    Pattern excludePattern=exclude != null ? Pattern.compile(exclude,excludeFlags) : null;
+    includeExclude=new IncludeExclude(includePattern,excludePattern);
+  }
+  FieldMapper<?> mapper=context.smartNameFieldMapper(field);
+  if (mapper == null) {
+    ValuesSourceConfig<?> config=new ValuesSourceConfig<BytesValuesSource>(BytesValuesSource.class);
+    config.unmapped(true);
+    return new SignificantTermsAggregatorFactory(aggregationName,config,requiredSize,shardSize,minDocCount,includeExclude,executionHint);
+  }
+  IndexFieldData<?> indexFieldData=context.fieldData().getForField(mapper);
+  ValuesSourceConfig<?> config;
+  if (mapper instanceof DateFieldMapper) {
+    DateFieldMapper dateMapper=(DateFieldMapper)mapper;
+    ValueFormatter formatter=format == null ? new ValueFormatter.DateTime(dateMapper.dateTimeFormatter()) : new ValueFormatter.DateTime(format);
+    config=new ValuesSourceConfig<NumericValuesSource>(NumericValuesSource.class).formatter(formatter).parser(new ValueParser.DateMath(dateMapper.dateMathParser()));
+  }
+ else   if (mapper instanceof IpFieldMapper) {
+    config=new ValuesSourceConfig<NumericValuesSource>(NumericValuesSource.class).formatter(ValueFormatter.IPv4).parser(ValueParser.IPv4);
+  }
+ else   if (indexFieldData instanceof IndexNumericFieldData) {
+    config=new ValuesSourceConfig<NumericValuesSource>(NumericValuesSource.class);
+    if (format != null) {
+      config.formatter(new ValueFormatter.Number.Pattern(format));
+    }
+  }
+ else {
+    config=new ValuesSourceConfig<BytesValuesSource>(BytesValuesSource.class);
+    config.needsHashes(true);
+  }
+  config.fieldContext(new FieldContext(field,indexFieldData));
+  config.ensureUnique(true);
+  return new SignificantTermsAggregatorFactory(aggregationName,config,requiredSize,shardSize,minDocCount,includeExclude,executionHint);
+}

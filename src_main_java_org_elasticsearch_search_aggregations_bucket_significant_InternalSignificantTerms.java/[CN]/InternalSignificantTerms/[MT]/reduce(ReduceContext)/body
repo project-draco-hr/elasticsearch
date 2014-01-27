@@ -1,0 +1,60 @@
+{
+  List<InternalAggregation> aggregations=reduceContext.aggregations();
+  if (aggregations.size() == 1) {
+    InternalSignificantTerms terms=(InternalSignificantTerms)aggregations.get(0);
+    terms.trimExcessEntries();
+    return terms;
+  }
+  InternalSignificantTerms reduced=null;
+  long globalSubsetSize=0;
+  long globalSupersetSize=0;
+  for (  InternalAggregation aggregation : aggregations) {
+    InternalSignificantTerms terms=(InternalSignificantTerms)aggregation;
+    globalSubsetSize+=terms.subsetSize;
+    globalSupersetSize+=terms.supersetSize;
+  }
+  Map<String,List<InternalSignificantTerms.Bucket>> buckets=null;
+  for (  InternalAggregation aggregation : aggregations) {
+    InternalSignificantTerms terms=(InternalSignificantTerms)aggregation;
+    if (terms instanceof UnmappedSignificantTerms) {
+      continue;
+    }
+    if (reduced == null) {
+      reduced=terms;
+    }
+    if (buckets == null) {
+      buckets=new HashMap<String,List<Bucket>>(terms.buckets.size());
+    }
+    for (    Bucket bucket : terms.buckets) {
+      List<Bucket> existingBuckets=buckets.get(bucket.getKey());
+      if (existingBuckets == null) {
+        existingBuckets=new ArrayList<Bucket>(aggregations.size());
+        buckets.put(bucket.getKey(),existingBuckets);
+      }
+      bucket.subsetSize=globalSubsetSize;
+      bucket.supersetSize=globalSupersetSize;
+      bucket.updateScore();
+      existingBuckets.add(bucket);
+    }
+  }
+  if (reduced == null) {
+    return (UnmappedSignificantTerms)aggregations.get(0);
+  }
+  final int size=Math.min(requiredSize,buckets.size());
+  BucketSignificancePriorityQueue ordered=new BucketSignificancePriorityQueue(size);
+  for (  Map.Entry<String,List<Bucket>> entry : buckets.entrySet()) {
+    List<Bucket> sameTermBuckets=entry.getValue();
+    final Bucket b=sameTermBuckets.get(0).reduce(sameTermBuckets,reduceContext.bigArrays());
+    if ((b.score > 0) && (b.subsetDf >= minDocCount)) {
+      ordered.insertWithOverflow(b);
+    }
+  }
+  Bucket[] list=new Bucket[ordered.size()];
+  for (int i=ordered.size() - 1; i >= 0; i--) {
+    list[i]=(Bucket)ordered.pop();
+  }
+  reduced.buckets=Arrays.asList(list);
+  reduced.subsetSize=globalSubsetSize;
+  reduced.supersetSize=globalSupersetSize;
+  return reduced;
+}
