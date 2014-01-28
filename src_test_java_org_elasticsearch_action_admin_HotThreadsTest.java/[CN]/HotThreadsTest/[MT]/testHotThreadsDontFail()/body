@@ -1,6 +1,7 @@
 {
   createIndex("test");
   final int iters=atLeast(2);
+  final AtomicBoolean hasErrors=new AtomicBoolean(false);
   for (int i=0; i < iters; i++) {
     final String type;
     NodesHotThreadsRequestBuilder nodesHotThreadsRequestBuilder=client().admin().cluster().prepareNodesHotThreads();
@@ -9,7 +10,7 @@
       nodesHotThreadsRequestBuilder.setInterval(timeValue);
     }
     if (randomBoolean()) {
-      nodesHotThreadsRequestBuilder.setThreads(randomIntBetween(1,100));
+      nodesHotThreadsRequestBuilder.setThreads(rarely() ? randomIntBetween(500,5000) : randomIntBetween(1,500));
     }
     if (randomBoolean()) {
 switch (randomIntBetween(0,2)) {
@@ -32,6 +33,7 @@ type=null;
 final CountDownLatch latch=new CountDownLatch(1);
 nodesHotThreadsRequestBuilder.execute(new ActionListener<NodesHotThreadsResponse>(){
 @Override public void onResponse(NodesHotThreadsResponse nodeHotThreads){
+boolean success=false;
 try {
 assertThat(nodeHotThreads,notNullValue());
 Map<String,NodeHotThreads> nodesMap=nodeHotThreads.getNodesMap();
@@ -39,13 +41,18 @@ assertThat(nodesMap.size(),equalTo(cluster().size()));
 for (NodeHotThreads ht : nodeHotThreads) {
 assertNotNull(ht.getHotThreads());
 }
+success=true;
 }
   finally {
+if (!success) {
+hasErrors.set(true);
+}
 latch.countDown();
 }
 }
 @Override public void onFailure(Throwable e){
 logger.error("FAILED",e);
+hasErrors.set(true);
 latch.countDown();
 fail();
 }
@@ -57,5 +64,6 @@ while (latch.getCount() > 0) {
 assertHitCount(client().prepareSearch().setQuery(matchAllQuery()).setPostFilter(andFilter(queryFilter(matchAllQuery()),notFilter(andFilter(queryFilter(termQuery("field1","value1")),queryFilter(termQuery("field1","value2")))))).get(),3l);
 }
 latch.await();
+assertThat(hasErrors.get(),is(false));
 }
 }
