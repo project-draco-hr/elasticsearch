@@ -26,6 +26,9 @@
       String failureReason=null;
       try {
         validate(request,currentState);
+        for (        Alias alias : request.aliases()) {
+          aliasValidator.validateAlias(alias,request.index(),currentState.metaData());
+        }
         List<IndexTemplateMetaData> templates=findTemplates(request,currentState);
         Map<String,Custom> customs=Maps.newHashMap();
         Map<String,Map<String,Object>> mappings=Maps.newHashMap();
@@ -122,6 +125,12 @@
             throw new MapperParsingException("mapping [" + entry.getKey() + "]",e);
           }
         }
+        IndexQueryParserService indexQueryParserService=indexService.queryParserService();
+        for (        Alias alias : request.aliases()) {
+          if (Strings.hasLength(alias.filter())) {
+            aliasValidator.validateAliasFilter(alias.name(),alias.filter(),indexQueryParserService);
+          }
+        }
         Map<String,MappingMetaData> mappingsMetaData=Maps.newHashMap();
         for (        DocumentMapper mapper : mapperService) {
           MappingMetaData mappingMd=new MappingMetaData(mapper);
@@ -130,6 +139,10 @@
         final IndexMetaData.Builder indexMetaDataBuilder=IndexMetaData.builder(request.index()).settings(actualIndexSettings);
         for (        MappingMetaData mappingMd : mappingsMetaData.values()) {
           indexMetaDataBuilder.putMapping(mappingMd);
+        }
+        for (        Alias alias : request.aliases()) {
+          AliasMetaData aliasMetaData=AliasMetaData.builder(alias.name()).filter(alias.filter()).indexRouting(alias.indexRouting()).searchRouting(alias.searchRouting()).build();
+          indexMetaDataBuilder.putAlias(aliasMetaData);
         }
         for (        Map.Entry<String,Custom> customEntry : customs.entrySet()) {
           indexMetaDataBuilder.putCustom(customEntry.getKey(),customEntry.getValue());
