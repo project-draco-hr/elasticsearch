@@ -8,32 +8,12 @@
     client.admin().indices().create(createIndexRequest(indexName)).actionGet();
     client.admin().indices().preparePutMapping(indexName).setType("child").setSource(XContentFactory.jsonBuilder().startObject().startObject("child").startObject("_parent").field("type","parent").endObject().endObject().endObject()).execute().actionGet();
     Thread.sleep(5000);
-    StopWatch stopWatch=new StopWatch().start();
-    System.out.println("--> Indexing [" + COUNT + "] parent document and ["+ (COUNT * CHILD_COUNT)+ " child documents");
-    long ITERS=COUNT / BATCH;
-    long i=1;
-    int counter=0;
-    for (; i <= ITERS; i++) {
-      BulkRequestBuilder request=client.prepareBulk();
-      for (int j=0; j < BATCH; j++) {
-        counter++;
-        request.add(Requests.indexRequest(indexName).type("parent").id(Integer.toString(counter)).source(parentSource(Integer.toString(counter),"test" + counter)));
-        for (int k=0; k < CHILD_COUNT; k++) {
-          request.add(Requests.indexRequest(indexName).type("child").id(Integer.toString(counter) + "_" + k).parent(Integer.toString(counter)).source(childSource(Integer.toString(counter),"tag" + k)));
-        }
-      }
-      BulkResponse response=request.execute().actionGet();
-      if (response.hasFailures()) {
-        System.err.println("--> failures...");
-      }
-      if (((i * BATCH) % 10000) == 0) {
-        System.out.println("--> Indexed " + (i * BATCH) * (1 + CHILD_COUNT) + " took " + stopWatch.stop().lastTaskTime());
-        stopWatch.start();
-      }
-    }
-    System.out.println("--> Indexing took " + stopWatch.totalTime() + ", TPS "+ (((double)(COUNT * (1 + CHILD_COUNT))) / stopWatch.totalTime().secondsFrac()));
+    long startTime=System.currentTimeMillis();
+    ParentChildIndexGenerator generator=new ParentChildIndexGenerator(client,PARENT_COUNT,NUM_CHILDREN_PER_PARENT,QUERY_VALUE_RATIO_PER_PARENT);
+    generator.index();
+    System.out.println("--> Indexing took " + ((System.currentTimeMillis() - startTime) / 1000) + " seconds.");
   }
- catch (  Exception e) {
+ catch (  IndexAlreadyExistsException e) {
     System.out.println("--> Index already exists, ignoring indexing phase, waiting for green");
     ClusterHealthResponse clusterHealthResponse=client.admin().cluster().prepareHealth(indexName).setWaitForGreenStatus().setTimeout("10m").execute().actionGet();
     if (clusterHealthResponse.isTimedOut()) {
