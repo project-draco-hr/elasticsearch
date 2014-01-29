@@ -1,0 +1,46 @@
+{
+  Map<Analyzer,List<FieldAndMapper>> groups=new HashMap<Analyzer,List<FieldAndMapper>>();
+  List<Tuple<String,Float>> missing=new ArrayList<Tuple<String,Float>>();
+  for (  Map.Entry<String,Float> entry : fieldNames.entrySet()) {
+    String name=entry.getKey();
+    MapperService.SmartNameFieldMappers smartNameFieldMappers=parseContext.smartFieldMappers(name);
+    if (smartNameFieldMappers != null && smartNameFieldMappers.hasMapper()) {
+      Analyzer actualAnalyzer=getAnalyzer(smartNameFieldMappers.mapper(),smartNameFieldMappers);
+      name=smartNameFieldMappers.mapper().names().indexName();
+      if (!groups.containsKey(actualAnalyzer)) {
+        groups.put(actualAnalyzer,new ArrayList<FieldAndMapper>());
+      }
+      Float boost=entry.getValue();
+      boost=boost == null ? Float.valueOf(1.0f) : boost;
+      groups.get(actualAnalyzer).add(new FieldAndMapper(name,smartNameFieldMappers.mapper(),boost));
+    }
+ else {
+      missing.add(new Tuple(name,entry.getValue()));
+    }
+  }
+  List<Query> queries=new ArrayList<Query>();
+  for (  Tuple<String,Float> tuple : missing) {
+    Query q=parseGroup(type.matchQueryType(),tuple.v1(),tuple.v2(),value,minimumShouldMatch);
+    if (q != null) {
+      queries.add(q);
+    }
+  }
+  for (  List<FieldAndMapper> group : groups.values()) {
+    if (group.size() > 1) {
+      blendedFields=new FieldAndMapper[group.size()];
+      int i=0;
+      for (      FieldAndMapper fieldAndMapper : group) {
+        blendedFields[i++]=fieldAndMapper;
+      }
+    }
+ else {
+      blendedFields=null;
+    }
+    final FieldAndMapper fieldAndMapper=group.get(0);
+    Query q=parseGroup(type.matchQueryType(),fieldAndMapper.field,fieldAndMapper.boost,value,minimumShouldMatch);
+    if (q != null) {
+      queries.add(q);
+    }
+  }
+  return queries.isEmpty() ? null : queries;
+}
