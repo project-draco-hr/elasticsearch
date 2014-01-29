@@ -5,9 +5,17 @@
     try {
       indexInput=store.openInputRaw(fileInfo.physicalName(),IOContext.READONCE);
       indexInput.seek(i * fileInfo.partBytes());
-      InputStreamIndexInput is=new ThreadSafeInputStreamIndexInput(indexInput,fileInfo.partBytes());
+      InputStreamIndexInput inputStreamIndexInput=new ThreadSafeInputStreamIndexInput(indexInput,fileInfo.partBytes());
       final IndexInput fIndexInput=indexInput;
-      blobContainer.writeBlob(fileInfo.partName(i),is,is.actualSizeToRead(),new ImmutableBlobContainer.WriterListener(){
+      long size=inputStreamIndexInput.actualSizeToRead();
+      InputStream inputStream;
+      if (snapshotRateLimiter != null) {
+        inputStream=new RateLimitingInputStream(inputStreamIndexInput,snapshotRateLimiter,snapshotThrottleListener);
+      }
+ else {
+        inputStream=inputStreamIndexInput;
+      }
+      blobContainer.writeBlob(fileInfo.partName(i),inputStream,size,new ImmutableBlobContainer.WriterListener(){
         @Override public void onCompleted(){
           IOUtils.closeWhileHandlingException(fIndexInput);
           if (counter.decrementAndGet() == 0) {
