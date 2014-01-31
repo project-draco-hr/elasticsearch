@@ -16,15 +16,39 @@
  else     if (searchContext.searchType() == SearchType.SCAN) {
       topDocs=searchContext.scanContext().execute(searchContext);
     }
- else     if (searchContext.sort() != null) {
-      topDocs=searchContext.searcher().search(query,null,numDocs,searchContext.sort(),searchContext.trackScores(),searchContext.trackScores());
-    }
  else {
-      rescore=!searchContext.rescore().isEmpty();
-      for (      RescoreSearchContext rescoreContext : searchContext.rescore()) {
-        numDocs=Math.max(rescoreContext.window(),numDocs);
+      if (!searchContext.useSlowScroll() && searchContext.request().scroll() != null) {
+        numDocs=searchContext.size();
+        ScoreDoc lastEmittedDoc=searchContext.lastEmittedDoc();
+        if (searchContext.sort() != null) {
+          topDocs=searchContext.searcher().searchAfter(lastEmittedDoc,query,null,numDocs,searchContext.sort(),searchContext.trackScores(),searchContext.trackScores());
+        }
+ else {
+          rescore=!searchContext.rescore().isEmpty();
+          for (          RescoreSearchContext rescoreContext : searchContext.rescore()) {
+            numDocs=Math.max(rescoreContext.window(),numDocs);
+          }
+          topDocs=searchContext.searcher().searchAfter(lastEmittedDoc,query,numDocs);
+        }
+        int size=topDocs.scoreDocs.length;
+        if (size > 0) {
+          if (searchContext.searchType() == SearchType.QUERY_AND_FETCH || searchContext.searchType() == SearchType.DFS_QUERY_AND_FETCH) {
+            searchContext.lastEmittedDoc(topDocs.scoreDocs[size - 1]);
+          }
+        }
       }
-      topDocs=searchContext.searcher().search(query,numDocs);
+ else {
+        if (searchContext.sort() != null) {
+          topDocs=searchContext.searcher().search(query,null,numDocs,searchContext.sort(),searchContext.trackScores(),searchContext.trackScores());
+        }
+ else {
+          rescore=!searchContext.rescore().isEmpty();
+          for (          RescoreSearchContext rescoreContext : searchContext.rescore()) {
+            numDocs=Math.max(rescoreContext.window(),numDocs);
+          }
+          topDocs=searchContext.searcher().search(query,numDocs);
+        }
+      }
     }
     searchContext.queryResult().topDocs(topDocs);
   }

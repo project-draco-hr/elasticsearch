@@ -1,15 +1,29 @@
 {
-  sortedShardList=searchPhaseController.sortDocs(queryResults);
+  if (useSlowScroll) {
+    sortedShardList=searchPhaseController.sortDocs(queryResults);
+  }
+ else {
+    sortedShardList=searchPhaseController.sortDocsForScroll(queryResults);
+  }
   AtomicArray<IntArrayList> docIdsToLoad=new AtomicArray<IntArrayList>(queryResults.length());
   searchPhaseController.fillDocIdsToLoad(docIdsToLoad,sortedShardList);
   if (docIdsToLoad.asList().isEmpty()) {
     finishHim();
+    return;
+  }
+  final ScoreDoc[] lastEmittedDocPerShard;
+  if (useSlowScroll) {
+    lastEmittedDocPerShard=new ScoreDoc[queryResults.length()];
+  }
+ else {
+    lastEmittedDocPerShard=searchPhaseController.getLastEmittedDocPerShard(sortedShardList,queryResults.length());
   }
   final AtomicInteger counter=new AtomicInteger(docIdsToLoad.asList().size());
   for (  final AtomicArray.Entry<IntArrayList> entry : docIdsToLoad.asList()) {
     IntArrayList docIds=entry.value;
     final QuerySearchResult querySearchResult=queryResults.get(entry.index);
-    FetchSearchRequest fetchSearchRequest=new FetchSearchRequest(request,querySearchResult.id(),docIds);
+    ScoreDoc lastEmittedDoc=lastEmittedDocPerShard[entry.index];
+    FetchSearchRequest fetchSearchRequest=new FetchSearchRequest(request,querySearchResult.id(),docIds,lastEmittedDoc);
     DiscoveryNode node=nodes.get(querySearchResult.shardTarget().nodeId());
     searchService.sendExecuteFetch(node,fetchSearchRequest,new SearchServiceListener<FetchSearchResult>(){
       @Override public void onResult(      FetchSearchResult result){

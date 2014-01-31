@@ -1,0 +1,20 @@
+{
+  TestContext context=create(SearchType.DFS_QUERY_AND_FETCH,SearchType.QUERY_AND_FETCH);
+  SearchResponse searchScrollResponse=client().prepareSearch("index").setSearchType(context.searchType).addSort(context.sort).setSize(context.scrollRequestSize).setScroll("10m").get();
+  assertNoFailures(searchScrollResponse);
+  assertThat(searchScrollResponse.getHits().getTotalHits(),equalTo((long)context.numDocs));
+  int counter=searchScrollResponse.getHits().hits().length;
+  String scrollId=searchScrollResponse.getScrollId();
+  while (true) {
+    searchScrollResponse=client().prepareSearchScroll(scrollId).setScroll("10m").get();
+    assertNoFailures(searchScrollResponse);
+    assertThat(searchScrollResponse.getHits().getTotalHits(),equalTo((long)context.numDocs));
+    if (searchScrollResponse.getHits().hits().length == 0) {
+      break;
+    }
+    counter+=searchScrollResponse.getHits().hits().length;
+    scrollId=searchScrollResponse.getScrollId();
+  }
+  assertThat(counter,equalTo(context.numDocs));
+  clearScroll(scrollId);
+}

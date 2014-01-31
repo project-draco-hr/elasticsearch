@@ -1,0 +1,41 @@
+{
+  TestContext context=create(SearchType.DFS_QUERY_THEN_FETCH,SearchType.QUERY_THEN_FETCH);
+  SearchResponse control=client().prepareSearch("index").setSearchType(context.searchType).addSort(context.sort).setSize(context.numDocs).get();
+  assertNoFailures(control);
+  SearchHits sh=control.getHits();
+  assertThat(sh.totalHits(),equalTo((long)context.numDocs));
+  assertThat(sh.getHits().length,equalTo(context.numDocs));
+  SearchResponse searchScrollResponse=client().prepareSearch("index").setSearchType(context.searchType).addSort(context.sort).setSize(context.scrollRequestSize).setScroll("10m").get();
+  assertNoFailures(searchScrollResponse);
+  assertThat(searchScrollResponse.getHits().getTotalHits(),equalTo((long)context.numDocs));
+  assertThat(searchScrollResponse.getHits().hits().length,equalTo(context.scrollRequestSize));
+  int counter=0;
+  for (  SearchHit hit : searchScrollResponse.getHits()) {
+    assertThat(hit.sortValues()[0],equalTo(sh.getAt(counter++).sortValues()[0]));
+  }
+  int iter=1;
+  String scrollId=searchScrollResponse.getScrollId();
+  while (true) {
+    searchScrollResponse=client().prepareSearchScroll(scrollId).setScroll("10m").get();
+    assertNoFailures(searchScrollResponse);
+    assertThat(searchScrollResponse.getHits().getTotalHits(),equalTo((long)context.numDocs));
+    if (searchScrollResponse.getHits().hits().length == 0) {
+      break;
+    }
+    int expectedLength;
+    int scrollSlice=++iter * context.scrollRequestSize;
+    if (scrollSlice <= context.numDocs) {
+      expectedLength=context.scrollRequestSize;
+    }
+ else {
+      expectedLength=context.scrollRequestSize - (scrollSlice - context.numDocs);
+    }
+    assertThat(searchScrollResponse.getHits().hits().length,equalTo(expectedLength));
+    for (    SearchHit hit : searchScrollResponse.getHits()) {
+      assertThat(hit.sortValues()[0],equalTo(sh.getAt(counter++).sortValues()[0]));
+    }
+    scrollId=searchScrollResponse.getScrollId();
+  }
+  assertThat(counter,equalTo(context.numDocs));
+  clearScroll(scrollId);
+}
