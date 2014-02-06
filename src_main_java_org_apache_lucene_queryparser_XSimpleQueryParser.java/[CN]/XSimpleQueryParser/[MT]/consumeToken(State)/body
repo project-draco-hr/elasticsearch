@@ -2,6 +2,7 @@
   int copied=0;
   boolean escaped=false;
   boolean prefix=false;
+  boolean fuzzy=false;
   while (state.index < state.length) {
     if (!escaped) {
       if (state.data[state.index] == '\\' && (flags & ESCAPE_OPERATOR) != 0) {
@@ -10,7 +11,11 @@
         ++state.index;
         continue;
       }
- else       if ((state.data[state.index] == '"' && (flags & PHRASE_OPERATOR) != 0) || (state.data[state.index] == '|' && (flags & OR_OPERATOR) != 0) || (state.data[state.index] == '+' && (flags & AND_OPERATOR) != 0)|| (state.data[state.index] == '(' && (flags & PRECEDENCE_OPERATORS) != 0)|| (state.data[state.index] == ')' && (flags & PRECEDENCE_OPERATORS) != 0)|| ((state.data[state.index] == ' ' || state.data[state.index] == '\t' || state.data[state.index] == '\n' || state.data[state.index] == '\r') && (flags & WHITESPACE_OPERATOR) != 0)) {
+ else       if (tokenFinished(state)) {
+        break;
+      }
+ else       if (copied > 0 && state.data[state.index] == '~' && (flags & FUZZY_OPERATOR) != 0) {
+        fuzzy=true;
         break;
       }
       prefix=copied > 0 && state.data[state.index] == '*' && (flags & PREFIX_OPERATOR) != 0;
@@ -20,7 +25,18 @@
   }
   if (copied > 0) {
     final Query branch;
-    if (prefix) {
+    if (fuzzy && (flags & FUZZY_OPERATOR) != 0) {
+      String token=new String(state.buffer,0,copied);
+      int fuzziness=parseFuzziness(state);
+      fuzziness=Math.min(fuzziness,LevenshteinAutomata.MAXIMUM_SUPPORTED_DISTANCE);
+      if (fuzziness == 0) {
+        branch=newDefaultQuery(token);
+      }
+ else {
+        branch=newFuzzyQuery(token,fuzziness);
+      }
+    }
+ else     if (prefix) {
       String token=new String(state.buffer,0,copied - 1);
       branch=newPrefixQuery(token);
     }
