@@ -29,20 +29,12 @@
     if (context.size < 0) {
       context.size=0;
     }
-    final MemoryIndex memoryIndex=cache.get();
-    for (    IndexableField field : parsedDocument.rootDoc().getFields()) {
-      if (!field.fieldType().indexed() && field.name().equals(UidFieldMapper.NAME)) {
-        continue;
-      }
-      try {
-        TokenStream tokenStream=field.tokenStream(parsedDocument.analyzer());
-        if (tokenStream != null) {
-          memoryIndex.addField(field.name(),tokenStream,field.boost());
-        }
-      }
- catch (      IOException e) {
-        throw new ElasticsearchException("Failed to create token stream",e);
-      }
+    PercolatorIndex percolatorIndex;
+    if (indexShard.mapperService().documentMapper(request.documentType()).hasNestedObjects()) {
+      percolatorIndex=multi;
+    }
+ else {
+      percolatorIndex=single;
     }
     PercolatorType action;
     if (request.onlyCount()) {
@@ -60,7 +52,7 @@
       }
     }
     context.percolatorTypeId=action.id();
-    context.initialize(memoryIndex,parsedDocument);
+    percolatorIndex.prepare(context,parsedDocument);
     indexShard.readAllowed();
     return action.doPercolate(request,context);
   }
