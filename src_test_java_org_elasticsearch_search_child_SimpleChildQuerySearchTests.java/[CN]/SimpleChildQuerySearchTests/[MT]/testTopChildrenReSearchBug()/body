@@ -1,7 +1,6 @@
 {
-  client().admin().indices().prepareCreate("test").setSettings(ImmutableSettings.settingsBuilder().put("index.number_of_shards",1).put("index.number_of_replicas",0)).execute().actionGet();
-  client().admin().cluster().prepareHealth().setWaitForEvents(Priority.LANGUID).setWaitForGreenStatus().execute().actionGet();
-  client().admin().indices().preparePutMapping("test").setType("child").setSource(jsonBuilder().startObject().startObject("child").startObject("_parent").field("type","parent").endObject().endObject().endObject()).execute().actionGet();
+  client().admin().indices().prepareCreate("test").setSettings(ImmutableSettings.settingsBuilder().put("index.number_of_shards",1).put("index.number_of_replicas",0)).addMapping("parent").addMapping("child","_parent","type=parent").get();
+  ensureGreen();
   int numberOfParents=4;
   int numberOfChildrenPerParent=123;
   for (int i=1; i <= numberOfParents; i++) {
@@ -11,8 +10,8 @@
       client().prepareIndex("test","child",String.format(Locale.ROOT,"%s_c%d",parentId,j)).setSource("c_field1",parentId,"c_field2",i % 2 == 0 ? "even" : "not_even").setParent(parentId).execute().actionGet();
     }
   }
-  client().admin().indices().prepareRefresh().execute().actionGet();
-  SearchResponse searchResponse=client().prepareSearch("test").setQuery(topChildrenQuery("child",termQuery("c_field1","p3"))).execute().actionGet();
+  refresh();
+  SearchResponse searchResponse=client().prepareSearch("test").setQuery(topChildrenQuery("child",termQuery("c_field1","p3"))).get();
   assertNoFailures(searchResponse);
   assertThat(searchResponse.getFailedShards(),equalTo(0));
   assertThat(searchResponse.getHits().totalHits(),equalTo(1l));
