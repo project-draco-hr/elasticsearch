@@ -1,0 +1,31 @@
+{
+  final FixedBitSet allVisitedOrds=new FixedBitSet(maxOrd);
+  for (long bucket=visitedOrds.size() - 1; bucket >= 0; --bucket) {
+    final FixedBitSet bits=visitedOrds.get(bucket);
+    if (bits != null) {
+      allVisitedOrds.or(bits);
+    }
+  }
+  final org.elasticsearch.common.hash.MurmurHash3.Hash128 hash=new org.elasticsearch.common.hash.MurmurHash3.Hash128();
+  final LongArray hashes=bigArrays.newLongArray(maxOrd,false);
+  boolean success=false;
+  try {
+    for (int ord=allVisitedOrds.nextSetBit(0); ord != -1; ord=ord + 1 < maxOrd ? allVisitedOrds.nextSetBit(ord + 1) : -1) {
+      final BytesRef value=values.getValueByOrd(ord);
+      org.elasticsearch.common.hash.MurmurHash3.hash128(value.bytes,value.offset,value.length,0,hash);
+      hashes.set(ord,hash.h1);
+    }
+    for (long bucket=visitedOrds.size() - 1; bucket >= 0; --bucket) {
+      final FixedBitSet bits=visitedOrds.get(bucket);
+      if (bits != null) {
+        for (int ord=bits.nextSetBit(0); ord != -1; ord=ord + 1 < maxOrd ? bits.nextSetBit(ord + 1) : -1) {
+          counts.collect(bucket,hashes.get(ord));
+        }
+      }
+    }
+    success=true;
+  }
+  finally {
+    Releasables.release(success,hashes);
+  }
+}

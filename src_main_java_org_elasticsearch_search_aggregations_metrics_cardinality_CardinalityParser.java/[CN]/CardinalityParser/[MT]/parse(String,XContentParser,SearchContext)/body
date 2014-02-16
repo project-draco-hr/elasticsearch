@@ -1,0 +1,89 @@
+{
+  long precisionThreshold=-1;
+  Boolean rehash=null;
+  String field=null;
+  String script=null;
+  String scriptLang=null;
+  Map<String,Object> scriptParams=null;
+  XContentParser.Token token;
+  String currentFieldName=null;
+  while ((token=parser.nextToken()) != XContentParser.Token.END_OBJECT) {
+    if (token == XContentParser.Token.FIELD_NAME) {
+      currentFieldName=parser.currentName();
+    }
+ else     if (token == XContentParser.Token.VALUE_STRING) {
+      if ("field".equals(currentFieldName)) {
+        field=parser.text();
+      }
+ else       if ("script".equals(currentFieldName)) {
+        script=parser.text();
+      }
+ else       if ("lang".equals(currentFieldName)) {
+        scriptLang=parser.text();
+      }
+ else {
+        throw new SearchParseException(context,"Unknown key for a " + token + " in ["+ name+ "]: ["+ currentFieldName+ "].");
+      }
+    }
+ else     if (token == XContentParser.Token.START_OBJECT) {
+      if ("params".equals(currentFieldName)) {
+        scriptParams=parser.map();
+      }
+ else {
+        throw new SearchParseException(context,"Unknown key for a " + token + " in ["+ name+ "]: ["+ currentFieldName+ "].");
+      }
+    }
+ else     if (token == XContentParser.Token.VALUE_BOOLEAN) {
+      if ("rehash".equals(currentFieldName)) {
+        rehash=parser.booleanValue();
+      }
+ else {
+        throw new SearchParseException(context,"Unknown key for a " + token + " in ["+ name+ "]: ["+ currentFieldName+ "].");
+      }
+    }
+ else     if (token == XContentParser.Token.VALUE_NUMBER) {
+      if (PRECISION_THRESHOLD.match(currentFieldName)) {
+        precisionThreshold=parser.longValue();
+      }
+ else {
+        throw new SearchParseException(context,"Unknown key for a " + token + " in ["+ name+ "]: ["+ currentFieldName+ "].");
+      }
+    }
+ else {
+      throw new SearchParseException(context,"Unexpected token " + token + " in ["+ name+ "].");
+    }
+  }
+  ValuesSourceConfig<?> config=null;
+  if (script != null) {
+    config=new ValuesSourceConfig<BytesValuesSource>(BytesValuesSource.class);
+    config.script(context.scriptService().search(context.lookup(),scriptLang,script,scriptParams));
+  }
+  if (field != null) {
+    FieldMapper<?> mapper=context.smartNameFieldMapper(field);
+    if (config == null) {
+      if (mapper instanceof NumberFieldMapper) {
+        config=new ValuesSourceConfig<NumericValuesSource>(NumericValuesSource.class);
+      }
+ else {
+        config=new ValuesSourceConfig<BytesValuesSource>(BytesValuesSource.class);
+        if (mapper == null) {
+          config.unmapped(true);
+        }
+      }
+      if (rehash == null && mapper instanceof Murmur3FieldMapper) {
+        rehash=false;
+      }
+    }
+    if (mapper != null) {
+      IndexFieldData<?> indexFieldData=context.fieldData().getForField(mapper);
+      config.fieldContext(new FieldContext(field,indexFieldData));
+    }
+  }
+ else   if (config == null) {
+    config=new ValuesSourceConfig<BytesValuesSource>(BytesValuesSource.class);
+  }
+  if (rehash == null) {
+    rehash=true;
+  }
+  return new CardinalityAggregatorFactory(name,config,precisionThreshold,rehash);
+}
