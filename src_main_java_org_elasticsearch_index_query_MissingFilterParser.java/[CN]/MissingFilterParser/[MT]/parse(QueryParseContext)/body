@@ -2,8 +2,8 @@
   XContentParser parser=parseContext.parser();
   String fieldPattern=null;
   String filterName=null;
-  boolean nullValue=false;
-  boolean existence=true;
+  boolean nullValue=DEFAULT_NULL_VALUE;
+  boolean existence=DEFAULT_EXISTENCE_VALUE;
   XContentParser.Token token;
   String currentFieldName=null;
   while ((token=parser.nextToken()) != XContentParser.Token.END_OBJECT) {
@@ -31,75 +31,5 @@
   if (fieldPattern == null) {
     throw new QueryParsingException(parseContext.index(),"missing must be provided with a [field]");
   }
-  if (!existence && !nullValue) {
-    throw new QueryParsingException(parseContext.index(),"missing must have either existence, or null_value, or both set to true");
-  }
-  MapperService.SmartNameObjectMapper smartNameObjectMapper=parseContext.smartObjectMapper(fieldPattern);
-  if (smartNameObjectMapper != null && smartNameObjectMapper.hasMapper()) {
-    fieldPattern=fieldPattern + ".*";
-  }
-  Set<String> fields=parseContext.simpleMatchToIndexNames(fieldPattern);
-  if (fields.isEmpty()) {
-    if (existence) {
-      return Queries.MATCH_ALL_FILTER;
-    }
-    return null;
-  }
-  Filter existenceFilter=null;
-  Filter nullFilter=null;
-  MapperService.SmartNameFieldMappers nonNullFieldMappers=null;
-  if (existence) {
-    XBooleanFilter boolFilter=new XBooleanFilter();
-    for (    String field : fields) {
-      MapperService.SmartNameFieldMappers smartNameFieldMappers=parseContext.smartFieldMappers(field);
-      if (smartNameFieldMappers != null) {
-        nonNullFieldMappers=smartNameFieldMappers;
-      }
-      Filter filter=null;
-      if (smartNameFieldMappers != null && smartNameFieldMappers.hasMapper()) {
-        filter=smartNameFieldMappers.mapper().rangeFilter(null,null,true,true,parseContext);
-      }
-      if (filter == null) {
-        filter=new TermRangeFilter(field,null,null,true,true);
-      }
-      boolFilter.add(filter,BooleanClause.Occur.SHOULD);
-    }
-    existenceFilter=parseContext.cacheFilter(boolFilter,new CacheKeyFilter.Key("$exists$" + fieldPattern));
-    existenceFilter=new NotFilter(existenceFilter);
-    existenceFilter=parseContext.cacheFilter(existenceFilter,new CacheKeyFilter.Key("$missing$" + fieldPattern));
-  }
-  if (nullValue) {
-    for (    String field : fields) {
-      MapperService.SmartNameFieldMappers smartNameFieldMappers=parseContext.smartFieldMappers(field);
-      if (smartNameFieldMappers != null && smartNameFieldMappers.hasMapper()) {
-        nullFilter=smartNameFieldMappers.mapper().nullValueFilter();
-        if (nullFilter != null) {
-          nullFilter=parseContext.cacheFilter(nullFilter,new CacheKeyFilter.Key("$null$" + fieldPattern));
-        }
-      }
-    }
-  }
-  Filter filter;
-  if (nullFilter != null) {
-    if (existenceFilter != null) {
-      XBooleanFilter combined=new XBooleanFilter();
-      combined.add(existenceFilter,BooleanClause.Occur.SHOULD);
-      combined.add(nullFilter,BooleanClause.Occur.SHOULD);
-      filter=parseContext.cacheFilter(combined,null);
-    }
- else {
-      filter=nullFilter;
-    }
-  }
- else {
-    filter=existenceFilter;
-  }
-  if (filter == null) {
-    return null;
-  }
-  filter=wrapSmartNameFilter(filter,nonNullFieldMappers,parseContext);
-  if (filterName != null) {
-    parseContext.addNamedFilter(filterName,existenceFilter);
-  }
-  return filter;
+  return newFilter(parseContext,fieldPattern,existence,nullValue,filterName);
 }
