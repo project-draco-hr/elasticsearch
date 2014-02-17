@@ -1,0 +1,94 @@
+{
+  System.setProperty("es.logger.prefix","");
+  Natives.tryMlockall();
+  Random random=new Random();
+  Settings settings=settingsBuilder().put("index.refresh_interval","-1").put("gateway.type","local").put(SETTING_NUMBER_OF_SHARDS,1).put(SETTING_NUMBER_OF_REPLICAS,0).put(TransportModule.TRANSPORT_TYPE_KEY,"local").build();
+  String clusterName=GlobalOrdinalsBenchmark.class.getSimpleName();
+  node=(InternalNode)nodeBuilder().clusterName(clusterName).settings(settingsBuilder().put(settings)).node();
+  client=node.client();
+  try {
+    client.admin().indices().prepareCreate(INDEX_NAME).addMapping(TYPE_NAME,jsonBuilder().startObject().startObject(TYPE_NAME).startArray("dynamic_templates").startObject().startObject("default").field("match","*").field("match_mapping_type","string").startObject("mapping").field("type","string").field("index","not_analyzed").startObject("fields").startObject("doc_values").field("type","string").field("index","no").startObject("fielddata").field("format","doc_values").endObject().endObject().endObject().endObject().endObject().endObject().endArray().endObject().endObject()).get();
+    ObjectOpenHashSet<String> uniqueTerms=ObjectOpenHashSet.newInstance();
+    for (int i=0; i < FIELD_LIMIT; i++) {
+      boolean added;
+      do {
+        added=uniqueTerms.add(RandomStrings.randomAsciiOfLength(random,16));
+      }
+ while (!added);
+    }
+    String[] sValues=uniqueTerms.toArray(String.class);
+    uniqueTerms=null;
+    BulkRequestBuilder builder=client.prepareBulk();
+    IntIntOpenHashMap tracker=new IntIntOpenHashMap();
+    for (int i=0; i < COUNT; i++) {
+      Map<String,Object> fieldValues=new HashMap<>();
+      for (int fieldSuffix=1; fieldSuffix <= FIELD_LIMIT; fieldSuffix<<=1) {
+        int index;
+        if (tracker.containsKey(fieldSuffix)) {
+          index=tracker.lget();
+        }
+ else {
+          tracker.put(fieldSuffix,index=0);
+        }
+        if (index >= fieldSuffix) {
+          index=random.nextInt(fieldSuffix);
+          fieldValues.put("field_" + fieldSuffix,sValues[index]);
+        }
+ else {
+          fieldValues.put("field_" + fieldSuffix,sValues[index]);
+          tracker.put(fieldSuffix,++index);
+        }
+      }
+      builder.add(client.prepareIndex(INDEX_NAME,TYPE_NAME,String.valueOf(i)).setSource(fieldValues));
+      if (builder.numberOfActions() >= 1000) {
+        builder.get();
+        builder=client.prepareBulk();
+      }
+    }
+    if (builder.numberOfActions() > 0) {
+      builder.get();
+    }
+  }
+ catch (  IndexAlreadyExistsException e) {
+    System.out.println("--> Index already exists, ignoring indexing phase, waiting for green");
+    ClusterHealthResponse clusterHealthResponse=client.admin().cluster().prepareHealth().setWaitForGreenStatus().setTimeout("10m").execute().actionGet();
+    if (clusterHealthResponse.isTimedOut()) {
+      System.err.println("--> Timed out waiting for cluster health");
+    }
+  }
+  client.admin().cluster().prepareUpdateSettings().setTransientSettings(ImmutableSettings.builder().put("logger.index.fielddata.ordinals","DEBUG")).get();
+  client.admin().indices().prepareRefresh(INDEX_NAME).execute().actionGet();
+  COUNT=client.prepareCount(INDEX_NAME).setQuery(matchAllQuery()).execute().actionGet().getCount();
+  System.out.println("--> Number of docs in index: " + COUNT);
+  List<StatsResult> stats=new ArrayList<>();
+  int[] thresholds=new int[]{2048};
+  for (  int threshold : thresholds) {
+    updateThresholdInMapping(threshold);
+    for (int fieldSuffix=FIELD_START; fieldSuffix <= FIELD_LIMIT; fieldSuffix<<=1) {
+      String fieldName="field_" + fieldSuffix;
+      String name=threshold + "-" + fieldName;
+      if (USE_DOC_VALUES) {
+        fieldName=fieldName + ".doc_values";
+        name=name + "_doc_values";
+      }
+      stats.add(terms(name,fieldName,"global_ordinals"));
+    }
+  }
+  for (int fieldSuffix=FIELD_START; fieldSuffix <= FIELD_LIMIT; fieldSuffix<<=1) {
+    String fieldName="field_" + fieldSuffix;
+    String name="segment-ordinals-" + fieldName;
+    if (USE_DOC_VALUES) {
+      fieldName=fieldName + ".doc_values";
+      name=name + "_doc_values";
+    }
+    stats.add(terms(name,fieldName,"ordinals"));
+  }
+  System.out.println("------------------ SUMMARY ----------------------------------------------");
+  System.out.format(Locale.ENGLISH,"%40s%10s%10s%15s\n","name","took","millis","fieldata size");
+  for (  StatsResult stat : stats) {
+    System.out.format(Locale.ENGLISH,"%40s%10s%10d%15s\n",stat.name,TimeValue.timeValueMillis(stat.took),(stat.took / QUERY_COUNT),stat.fieldDataMemoryUsed);
+  }
+  System.out.println("------------------ SUMMARY ----------------------------------------------");
+  client.close();
+  node.close();
+}

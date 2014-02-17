@@ -1,0 +1,35 @@
+{
+  if (globalOrdinals == null) {
+    return buildEmptyAggregation();
+  }
+  final int size;
+  if (minDocCount == 0) {
+    size=(int)Math.min(globalOrdinals.getMaxOrd(),shardSize);
+  }
+ else {
+    size=(int)Math.min(maxBucketOrd(),shardSize);
+  }
+  BucketPriorityQueue ordered=new BucketPriorityQueue(size,order.comparator(this));
+  StringTerms.Bucket spare=null;
+  for (long termOrd=Ordinals.MIN_ORDINAL; termOrd < globalOrdinals.getMaxOrd(); ++termOrd) {
+    final long bucketOrd=getBucketOrd(termOrd);
+    final long bucketDocCount=bucketOrd < 0 ? 0 : bucketDocCount(bucketOrd);
+    if (minDocCount > 0 && bucketDocCount == 0) {
+      continue;
+    }
+    if (spare == null) {
+      spare=new StringTerms.Bucket(new BytesRef(),0,null);
+    }
+    spare.bucketOrd=bucketOrd;
+    spare.docCount=bucketDocCount;
+    copy(globalValues.getValueByOrd(termOrd),spare.termBytes);
+    spare=(StringTerms.Bucket)ordered.insertWithOverflow(spare);
+  }
+  final InternalTerms.Bucket[] list=new InternalTerms.Bucket[ordered.size()];
+  for (int i=ordered.size() - 1; i >= 0; --i) {
+    final StringTerms.Bucket bucket=(StringTerms.Bucket)ordered.pop();
+    bucket.aggregations=bucket.docCount == 0 ? bucketEmptyAggregations() : bucketAggregations(bucket.bucketOrd);
+    list[i]=bucket;
+  }
+  return new StringTerms(name,order,requiredSize,minDocCount,Arrays.asList(list));
+}
