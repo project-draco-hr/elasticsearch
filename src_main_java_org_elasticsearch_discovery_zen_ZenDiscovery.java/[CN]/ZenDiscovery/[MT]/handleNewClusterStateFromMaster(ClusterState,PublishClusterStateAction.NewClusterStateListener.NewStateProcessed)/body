@@ -1,5 +1,6 @@
 {
   if (master) {
+    final ClusterState newState=newClusterState;
     clusterService.submitStateUpdateTask("zen-disco-master_receive_cluster_state_from_another_master [" + newState.nodes().masterNode() + "]",Priority.URGENT,new ProcessedClusterStateUpdateTask(){
       @Override public ClusterState execute(      ClusterState currentState){
         if (newState.version() > currentState.version()) {
@@ -28,30 +29,58 @@
 );
   }
  else {
-    if (newState.nodes().localNode() == null) {
-      logger.warn("received a cluster state from [{}] and not part of the cluster, should not happen",newState.nodes().masterNode());
+    if (newClusterState.nodes().localNode() == null) {
+      logger.warn("received a cluster state from [{}] and not part of the cluster, should not happen",newClusterState.nodes().masterNode());
       newStateProcessed.onNewClusterStateFailed(new ElasticsearchIllegalStateException("received state from a node that is not part of the cluster"));
     }
  else {
       if (currentJoinThread != null) {
         logger.debug("got a new state from master node, though we are already trying to rejoin the cluster");
       }
-      clusterService.submitStateUpdateTask("zen-disco-receive(from master [" + newState.nodes().masterNode() + "])",Priority.URGENT,new ProcessedClusterStateUpdateTask(){
+      final ProcessClusterState processClusterState=new ProcessClusterState(newClusterState,newStateProcessed);
+      processNewClusterStates.add(processClusterState);
+      clusterService.submitStateUpdateTask("zen-disco-receive(from master [" + newClusterState.nodes().masterNode() + "])",Priority.URGENT,new ProcessedClusterStateUpdateTask(){
         @Override public ClusterState execute(        ClusterState currentState){
-          latestDiscoNodes=newState.nodes();
+          if (processClusterState.processed) {
+            return currentState;
+          }
+          ProcessClusterState stateToProcess=processNewClusterStates.poll();
+          if (stateToProcess == null) {
+            return currentState;
+          }
+          stateToProcess.processed=true;
+          while (true) {
+            ProcessClusterState potentialState=processNewClusterStates.peek();
+            if (potentialState == null) {
+              break;
+            }
+            if (!Objects.equal(stateToProcess.clusterState.nodes().masterNodeId(),potentialState.clusterState.nodes().masterNodeId())) {
+              break;
+            }
+            potentialState=processNewClusterStates.poll();
+            potentialState.processed=true;
+            if (potentialState.clusterState.version() > stateToProcess.clusterState.version()) {
+              stateToProcess=potentialState;
+            }
+          }
+          ClusterState updatedState=stateToProcess.clusterState;
+          if (updatedState.version() < currentState.version() && Objects.equal(updatedState.nodes().masterNodeId(),currentState.nodes().masterNodeId())) {
+            return currentState;
+          }
+          latestDiscoNodes=updatedState.nodes();
           if (masterFD.masterNode() == null || !masterFD.masterNode().equals(latestDiscoNodes.masterNode())) {
             masterFD.restart(latestDiscoNodes.masterNode(),"new cluster state received and we are monitoring the wrong master [" + masterFD.masterNode() + "]");
           }
-          ClusterState.Builder builder=ClusterState.builder(newState);
-          if (newState.routingTable().version() == currentState.routingTable().version()) {
+          ClusterState.Builder builder=ClusterState.builder(updatedState);
+          if (updatedState.routingTable().version() == currentState.routingTable().version()) {
             builder.routingTable(currentState.routingTable());
           }
-          if (newState.metaData().version() == currentState.metaData().version()) {
+          if (updatedState.metaData().version() == currentState.metaData().version()) {
             builder.metaData(currentState.metaData());
           }
  else {
-            MetaData.Builder metaDataBuilder=MetaData.builder(newState.metaData()).removeAllIndices();
-            for (            IndexMetaData indexMetaData : newState.metaData()) {
+            MetaData.Builder metaDataBuilder=MetaData.builder(updatedState.metaData()).removeAllIndices();
+            for (            IndexMetaData indexMetaData : updatedState.metaData()) {
               IndexMetaData currentIndexMetaData=currentState.metaData().index(indexMetaData.index());
               if (currentIndexMetaData == null || currentIndexMetaData.version() != indexMetaData.version()) {
                 metaDataBuilder.put(indexMetaData,false);
