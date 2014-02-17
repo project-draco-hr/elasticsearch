@@ -1,27 +1,16 @@
 {
-  boolean mustRewrite=!highlighterContext.query.queryRewritten();
   Query original=highlighterContext.query.originalQuery();
-  MultiTermQuery originalMultiTermQuery=null;
-  MultiTermQuery.RewriteMethod originalRewriteMethod=null;
-  if (original instanceof MultiTermQuery) {
-    originalMultiTermQuery=(MultiTermQuery)original;
-    if (!allowsForTermExtraction(originalMultiTermQuery.getRewriteMethod())) {
-      originalRewriteMethod=originalMultiTermQuery.getRewriteMethod();
-      originalMultiTermQuery.setRewriteMethod(new MultiTermQuery.TopTermsScoringBooleanQueryRewrite(50));
-      mustRewrite=true;
-    }
-  }
-  if (!mustRewrite) {
+  List<Tuple<MultiTermQuery,MultiTermQuery.RewriteMethod>> modifiedMultiTermQueries=Lists.newArrayList();
+  overrideMultiTermRewriteMethod(original,modifiedMultiTermQueries);
+  if (highlighterContext.query.queryRewritten() && modifiedMultiTermQueries.size() == 0) {
     return highlighterContext.query.query();
   }
   Query query=original;
   for (Query rewrittenQuery=query.rewrite(reader); rewrittenQuery != query; rewrittenQuery=query.rewrite(reader)) {
     query=rewrittenQuery;
   }
-  if (originalMultiTermQuery != null) {
-    if (originalRewriteMethod != null) {
-      originalMultiTermQuery.setRewriteMethod(originalRewriteMethod);
-    }
+  for (  Tuple<MultiTermQuery,MultiTermQuery.RewriteMethod> modifiedMultiTermQuery : modifiedMultiTermQueries) {
+    modifiedMultiTermQuery.v1().setRewriteMethod(modifiedMultiTermQuery.v2());
   }
   return query;
 }
