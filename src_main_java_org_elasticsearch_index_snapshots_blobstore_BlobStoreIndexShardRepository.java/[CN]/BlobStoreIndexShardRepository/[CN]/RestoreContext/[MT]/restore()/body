@@ -1,7 +1,7 @@
 {
   logger.debug("[{}] [{}] restoring to [{}] ...",snapshotId,repositoryName,shardId);
   BlobStoreIndexShardSnapshot snapshot=loadSnapshot();
-  recoveryStatus.updateStage(RecoveryStatus.Stage.INDEX);
+  recoveryState.setStage(RecoveryState.Stage.INDEX);
   int numberOfFiles=0;
   long totalSize=0;
   int numberOfReusedFiles=0;
@@ -20,6 +20,7 @@
       totalSize+=md.length();
       numberOfReusedFiles++;
       reusedTotalSize+=md.length();
+      recoveryState.getIndex().addReusedFileDetail(fileInfo.name(),fileInfo.length());
       if (logger.isTraceEnabled()) {
         logger.trace("not_recovering [{}], exists in local store and is same",fileInfo.physicalName());
       }
@@ -27,6 +28,7 @@
  else {
       totalSize+=fileInfo.length();
       filesToRecover.add(fileInfo);
+      recoveryState.getIndex().addFileDetail(fileInfo.name(),fileInfo.length());
       if (logger.isTraceEnabled()) {
         if (md == null) {
           logger.trace("recovering [{}], does not exists in local store",fileInfo.physicalName());
@@ -37,7 +39,7 @@
       }
     }
   }
-  recoveryStatus.index().files(numberOfFiles,totalSize,numberOfReusedFiles,reusedTotalSize);
+  recoveryState.getIndex().files(numberOfFiles,totalSize,numberOfReusedFiles,reusedTotalSize);
   if (filesToRecover.isEmpty()) {
     logger.trace("no files to recover, all exists within the local store");
   }
@@ -68,7 +70,7 @@
  catch (  IOException e) {
     throw new IndexShardRestoreFailedException(shardId,"Failed to fetch index version after copying it over",e);
   }
-  recoveryStatus.index().updateVersion(version);
+  recoveryState.getIndex().updateVersion(version);
   try {
     for (    String storeFile : store.directory().listAll()) {
       if (!snapshot.containPhysicalIndexFile(storeFile)) {

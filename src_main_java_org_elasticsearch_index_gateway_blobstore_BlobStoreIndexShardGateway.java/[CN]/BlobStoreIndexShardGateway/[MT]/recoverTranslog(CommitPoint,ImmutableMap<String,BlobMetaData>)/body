@@ -1,20 +1,20 @@
 {
   if (commitPoint.translogFiles().isEmpty()) {
-    recoveryStatus.start().startTime(System.currentTimeMillis());
-    recoveryStatus.updateStage(RecoveryStatus.Stage.START);
+    recoveryState.getStart().startTime(System.currentTimeMillis());
+    recoveryState.setStage(RecoveryState.Stage.START);
     indexShard.postRecovery("post recovery from gateway, no translog");
-    recoveryStatus.start().time(System.currentTimeMillis() - recoveryStatus.start().startTime());
-    recoveryStatus.start().checkIndexTime(indexShard.checkIndexTook());
+    recoveryState.getStart().time(System.currentTimeMillis() - recoveryState.getStart().startTime());
+    recoveryState.getStart().checkIndexTime(indexShard.checkIndexTook());
     return;
   }
   try {
-    recoveryStatus.start().startTime(System.currentTimeMillis());
-    recoveryStatus.updateStage(RecoveryStatus.Stage.START);
+    recoveryState.getStart().startTime(System.currentTimeMillis());
+    recoveryState.setStage(RecoveryState.Stage.START);
     indexShard.performRecoveryPrepareForTranslog();
-    recoveryStatus.start().time(System.currentTimeMillis() - recoveryStatus.start().startTime());
-    recoveryStatus.start().checkIndexTime(indexShard.checkIndexTook());
-    recoveryStatus.updateStage(RecoveryStatus.Stage.TRANSLOG);
-    recoveryStatus.translog().startTime(System.currentTimeMillis());
+    recoveryState.getStart().time(System.currentTimeMillis() - recoveryState.getStart().startTime());
+    recoveryState.getStart().checkIndexTime(indexShard.checkIndexTook());
+    recoveryState.setStage(RecoveryState.Stage.TRANSLOG);
+    recoveryState.getTranslog().startTime(System.currentTimeMillis());
     final AtomicReference<Throwable> failure=new AtomicReference<Throwable>();
     final CountDownLatch latch=new CountDownLatch(1);
     final Iterator<CommitPoint.FileInfo> transIt=commitPoint.translogFiles().iterator();
@@ -46,7 +46,7 @@
             if ((si.position() - curPos) != opSize) {
               logger.warn("mismatch in size, expected [{}], got [{}]",opSize,si.position() - curPos);
             }
-            recoveryStatus.translog().addTranslogOperations(1);
+            recoveryState.getTranslog().addTranslogOperations(1);
             indexShard.performRecoveryOperation(operation);
             if (si.position() >= bos.size()) {
               position=si.position();
@@ -54,7 +54,7 @@
             }
           }
  catch (          Throwable e) {
-            logger.warn("failed to retrieve translog after [{}] operations, ignoring the rest, considered corrupted",e,recoveryStatus.translog().currentTranslogOperations());
+            logger.warn("failed to retrieve translog after [{}] operations, ignoring the rest, considered corrupted",e,recoveryState.getTranslog().currentTranslogOperations());
             ignore=true;
             latch.countDown();
             return;
@@ -88,7 +88,7 @@
       throw failure.get();
     }
     indexShard.performRecoveryFinalization(true);
-    recoveryStatus.translog().time(System.currentTimeMillis() - recoveryStatus.translog().startTime());
+    recoveryState.getTranslog().time(System.currentTimeMillis() - recoveryState.getTranslog().startTime());
   }
  catch (  Throwable e) {
     throw new IndexShardGatewayRecoveryException(shardId,"Failed to recover translog",e);

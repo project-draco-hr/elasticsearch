@@ -1,0 +1,21 @@
+{
+  logger.info("--> start nodes");
+  String node=cluster().startNode(settingsBuilder().put("gateway.type","local"));
+  createAndPopulateIndex(INDEX_NAME,1,SHARD_COUNT,REPLICA_COUNT);
+  logger.info("--> restarting cluster");
+  cluster().fullRestart();
+  ensureGreen();
+  logger.info("--> request recoveries");
+  RecoveryResponse response=client().admin().indices().prepareRecoveries(INDEX_NAME).execute().actionGet();
+  assertThat(response.shardResponses().size(),equalTo(SHARD_COUNT));
+  assertThat(response.shardResponses().get(INDEX_NAME).size(),equalTo(1));
+  List<ShardRecoveryResponse> shardResponses=response.shardResponses().get(INDEX_NAME);
+  assertThat(shardResponses.size(),equalTo(1));
+  ShardRecoveryResponse shardResponse=shardResponses.get(0);
+  RecoveryState state=shardResponse.recoveryState();
+  assertThat(state.getType(),equalTo(RecoveryState.Type.GATEWAY));
+  assertThat(state.getStage(),equalTo(RecoveryState.Stage.DONE));
+  assertThat(node,equalTo(state.getSourceNode().getName()));
+  assertThat(node,equalTo(state.getTargetNode().getName()));
+  assertNull(state.getRestoreSource());
+}

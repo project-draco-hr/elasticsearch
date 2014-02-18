@@ -1,0 +1,23 @@
+{
+  logger.info("--> start node A");
+  String nodeA=cluster().startNode(settingsBuilder().put("gateway.type","local"));
+  logger.info("--> create index on node: {}",nodeA);
+  createAndPopulateIndex(INDEX_NAME,1,SHARD_COUNT,REPLICA_COUNT);
+  logger.info("--> start node B");
+  String nodeB=cluster().startNode(settingsBuilder().put("gateway.type","local"));
+  ensureGreen();
+  logger.info("--> move shard from: {} to: {}",nodeA,nodeB);
+  client().admin().cluster().prepareReroute().add(new MoveAllocationCommand(new ShardId(INDEX_NAME,0),nodeA,nodeB)).execute().actionGet().getState();
+  ensureGreen();
+  logger.info("--> request recoveries");
+  RecoveryResponse response=client().admin().indices().prepareRecoveries(INDEX_NAME).execute().actionGet();
+  List<ShardRecoveryResponse> shardResponses=response.shardResponses().get(INDEX_NAME);
+  assertThat(shardResponses.size(),equalTo(1));
+  ShardRecoveryResponse shardResponse=shardResponses.get(0);
+  RecoveryState state=shardResponse.recoveryState();
+  assertThat(state.getType(),equalTo(RecoveryState.Type.RELOCATION));
+  assertThat(state.getStage(),equalTo(RecoveryState.Stage.DONE));
+  assertThat(nodeA,equalTo(state.getSourceNode().getName()));
+  assertThat(nodeB,equalTo(state.getTargetNode().getName()));
+  assertNull(state.getRestoreSource());
+}

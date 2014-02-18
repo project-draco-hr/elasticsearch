@@ -1,0 +1,38 @@
+{
+  int successfulShards=0;
+  int failedShards=0;
+  List<ShardOperationFailedException> shardFailures=null;
+  Map<String,List<ShardRecoveryResponse>> shardResponses=new HashMap<String,List<ShardRecoveryResponse>>();
+  for (int i=0; i < shardsResponses.length(); i++) {
+    Object shardResponse=shardsResponses.get(i);
+    if (shardResponse == null) {
+    }
+ else     if (shardResponse instanceof BroadcastShardOperationFailedException) {
+      failedShards++;
+      if (shardFailures == null) {
+        shardFailures=new ArrayList<ShardOperationFailedException>();
+      }
+      shardFailures.add(new DefaultShardOperationFailedException((BroadcastShardOperationFailedException)shardResponse));
+    }
+ else {
+      ShardRecoveryResponse recoveryResponse=(ShardRecoveryResponse)shardResponse;
+      successfulShards++;
+      String indexName=recoveryResponse.getIndex();
+      List<ShardRecoveryResponse> responses=shardResponses.get(indexName);
+      if (responses == null) {
+        responses=new ArrayList<ShardRecoveryResponse>();
+        shardResponses.put(indexName,responses);
+      }
+      if (request.activeOnly()) {
+        if (recoveryResponse.recoveryState().getStage() != RecoveryState.Stage.DONE) {
+          responses.add(recoveryResponse);
+        }
+      }
+ else {
+        responses.add(recoveryResponse);
+      }
+    }
+  }
+  RecoveryResponse response=new RecoveryResponse(shardsResponses.length(),successfulShards,failedShards,request.detailed(),shardResponses,shardFailures);
+  return response;
+}
