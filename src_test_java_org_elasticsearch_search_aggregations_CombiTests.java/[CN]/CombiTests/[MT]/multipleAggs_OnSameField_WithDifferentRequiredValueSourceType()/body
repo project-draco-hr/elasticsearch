@@ -1,0 +1,34 @@
+{
+  createIndex("idx");
+  IndexRequestBuilder[] builders=new IndexRequestBuilder[randomInt(30)];
+  IntIntMap values=new IntIntOpenHashMap();
+  long missingValues=0;
+  for (int i=0; i < builders.length; i++) {
+    String name="name_" + randomIntBetween(1,10);
+    if (rarely()) {
+      missingValues++;
+      builders[i]=client().prepareIndex("idx","type").setSource(jsonBuilder().startObject().field("name",name).endObject());
+    }
+ else {
+      int value=randomIntBetween(1,10);
+      values.put(value,values.getOrDefault(value,0) + 1);
+      builders[i]=client().prepareIndex("idx","type").setSource(jsonBuilder().startObject().field("name",name).field("value",value).endObject());
+    }
+  }
+  indexRandom(true,builders);
+  ensureSearchable();
+  SearchResponse response=client().prepareSearch("idx").addAggregation(missing("missing_values").field("value")).addAggregation(terms("values").field("value")).execute().actionGet();
+  assertSearchResponse(response);
+  Aggregations aggs=response.getAggregations();
+  Missing missing=aggs.get("missing_values");
+  assertNotNull(missing);
+  assertThat(missing.getDocCount(),equalTo(missingValues));
+  Terms terms=aggs.get("values");
+  assertNotNull(terms);
+  Collection<Terms.Bucket> buckets=terms.getBuckets();
+  assertThat(buckets.size(),equalTo(values.size()));
+  for (  Terms.Bucket bucket : buckets) {
+    values.remove(bucket.getKeyAsNumber().intValue());
+  }
+  assertTrue(values.isEmpty());
+}
