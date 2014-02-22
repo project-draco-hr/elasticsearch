@@ -1,11 +1,11 @@
 {
-  client().admin().indices().prepareCreate("test").setSettings(ImmutableSettings.settingsBuilder().put("index.number_of_shards",1).put("index.number_of_replicas",0)).addMapping("parent").addMapping("child","_parent","type=parent").get();
+  assertAcked(prepareCreate("test").addMapping("parent").addMapping("child","_parent","type=parent"));
   ensureGreen();
   for (int i=0; i < 10; i++) {
     client().prepareIndex("test","parent","p" + i).setSource("{}").get();
     client().prepareIndex("test","child","c" + i).setSource("{}").setParent("p" + i).get();
   }
-  client().admin().indices().prepareRefresh().get();
+  refresh();
   QueryBuilder[] queries=new QueryBuilder[]{hasChildQuery("child",matchAllQuery()),filteredQuery(matchAllQuery(),hasChildFilter("child",matchAllQuery())),hasParentQuery("parent",matchAllQuery()),filteredQuery(matchAllQuery(),hasParentFilter("parent",matchAllQuery())),topChildrenQuery("child",matchAllQuery()).factor(10)};
   for (  QueryBuilder query : queries) {
     SearchResponse scrollResponse=client().prepareSearch("test").setScroll(TimeValue.timeValueSeconds(30)).setSize(1).addField("_id").setQuery(query).setSearchType("scan").execute().actionGet();

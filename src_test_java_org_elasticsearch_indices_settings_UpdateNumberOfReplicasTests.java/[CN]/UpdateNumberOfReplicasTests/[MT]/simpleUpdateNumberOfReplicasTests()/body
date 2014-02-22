@@ -1,18 +1,19 @@
 {
   logger.info("Creating index test");
-  prepareCreate("test",2).execute().actionGet();
+  assertAcked(prepareCreate("test",2));
   logger.info("Running Cluster Health");
   ClusterHealthResponse clusterHealth=client().admin().cluster().prepareHealth().setWaitForEvents(Priority.LANGUID).setWaitForGreenStatus().execute().actionGet();
   logger.info("Done Cluster Health, status " + clusterHealth.getStatus());
+  NumShards numShards=getNumShards("test");
   assertThat(clusterHealth.isTimedOut(),equalTo(false));
   assertThat(clusterHealth.getStatus(),equalTo(ClusterHealthStatus.GREEN));
-  assertThat(clusterHealth.getIndices().get("test").getActivePrimaryShards(),equalTo(5));
+  assertThat(clusterHealth.getIndices().get("test").getActivePrimaryShards(),equalTo(numShards.numPrimaries));
   assertThat(clusterHealth.getIndices().get("test").getNumberOfReplicas(),equalTo(1));
-  assertThat(clusterHealth.getIndices().get("test").getActiveShards(),equalTo(10));
+  assertThat(clusterHealth.getIndices().get("test").getActiveShards(),equalTo(numShards.totalNumShards));
   for (int i=0; i < 10; i++) {
     client().prepareIndex("test","type1",Integer.toString(i)).setSource(jsonBuilder().startObject().field("value","test" + i).endObject()).get();
   }
-  client().admin().indices().prepareRefresh().execute().actionGet();
+  refresh();
   for (int i=0; i < 10; i++) {
     CountResponse countResponse=client().prepareCount().setQuery(matchAllQuery()).get();
     assertHitCount(countResponse,10l);
@@ -21,13 +22,13 @@
   client().admin().indices().prepareUpdateSettings("test").setSettings(settingsBuilder().put("index.number_of_replicas",2)).execute().actionGet();
   Thread.sleep(200);
   logger.info("Running Cluster Health");
-  clusterHealth=client().admin().cluster().prepareHealth().setWaitForEvents(Priority.LANGUID).setWaitForYellowStatus().setWaitForActiveShards(10).execute().actionGet();
+  clusterHealth=client().admin().cluster().prepareHealth().setWaitForEvents(Priority.LANGUID).setWaitForYellowStatus().setWaitForActiveShards(numShards.numPrimaries * 2).execute().actionGet();
   logger.info("Done Cluster Health, status " + clusterHealth.getStatus());
   assertThat(clusterHealth.isTimedOut(),equalTo(false));
   assertThat(clusterHealth.getStatus(),equalTo(ClusterHealthStatus.YELLOW));
-  assertThat(clusterHealth.getIndices().get("test").getActivePrimaryShards(),equalTo(5));
+  assertThat(clusterHealth.getIndices().get("test").getActivePrimaryShards(),equalTo(numShards.numPrimaries));
   assertThat(clusterHealth.getIndices().get("test").getNumberOfReplicas(),equalTo(2));
-  assertThat(clusterHealth.getIndices().get("test").getActiveShards(),equalTo(10));
+  assertThat(clusterHealth.getIndices().get("test").getActiveShards(),equalTo(numShards.numPrimaries * 2));
   logger.info("starting another node to new replicas will be allocated to it");
   allowNodes("test",3);
   Thread.sleep(100);
@@ -36,9 +37,9 @@
   logger.info("Done Cluster Health, status " + clusterHealth.getStatus());
   assertThat(clusterHealth.isTimedOut(),equalTo(false));
   assertThat(clusterHealth.getStatus(),equalTo(ClusterHealthStatus.GREEN));
-  assertThat(clusterHealth.getIndices().get("test").getActivePrimaryShards(),equalTo(5));
+  assertThat(clusterHealth.getIndices().get("test").getActivePrimaryShards(),equalTo(numShards.numPrimaries));
   assertThat(clusterHealth.getIndices().get("test").getNumberOfReplicas(),equalTo(2));
-  assertThat(clusterHealth.getIndices().get("test").getActiveShards(),equalTo(15));
+  assertThat(clusterHealth.getIndices().get("test").getActiveShards(),equalTo(numShards.numPrimaries * 3));
   for (int i=0; i < 10; i++) {
     CountResponse countResponse=client().prepareCount().setQuery(matchAllQuery()).get();
     assertHitCount(countResponse,10l);
@@ -51,9 +52,9 @@
   logger.info("Done Cluster Health, status " + clusterHealth.getStatus());
   assertThat(clusterHealth.isTimedOut(),equalTo(false));
   assertThat(clusterHealth.getStatus(),equalTo(ClusterHealthStatus.GREEN));
-  assertThat(clusterHealth.getIndices().get("test").getActivePrimaryShards(),equalTo(5));
+  assertThat(clusterHealth.getIndices().get("test").getActivePrimaryShards(),equalTo(numShards.numPrimaries));
   assertThat(clusterHealth.getIndices().get("test").getNumberOfReplicas(),equalTo(0));
-  assertThat(clusterHealth.getIndices().get("test").getActiveShards(),equalTo(5));
+  assertThat(clusterHealth.getIndices().get("test").getActiveShards(),equalTo(numShards.numPrimaries));
   for (int i=0; i < 10; i++) {
     assertHitCount(client().prepareSearch().setQuery(matchAllQuery()).get(),10);
   }

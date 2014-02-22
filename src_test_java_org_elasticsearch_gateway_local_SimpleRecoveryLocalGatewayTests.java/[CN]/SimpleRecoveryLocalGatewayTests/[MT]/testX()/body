@@ -1,28 +1,22 @@
 {
-  cluster().startNode(settingsBuilder().put("index.number_of_shards",1).build());
+  cluster().startNode(settingsBuilder().build());
   String mapping=XContentFactory.jsonBuilder().startObject().startObject("type1").startObject("properties").startObject("appAccountIds").field("type","string").endObject().endObject().endObject().endObject().string();
-  client().admin().indices().prepareCreate("test").addMapping("type1",mapping).execute().actionGet();
+  assertAcked(prepareCreate("test").addMapping("type1",mapping));
   client().prepareIndex("test","type1","10990239").setSource(jsonBuilder().startObject().field("_id","10990239").startArray("appAccountIds").value(14).value(179).endArray().endObject()).execute().actionGet();
   client().prepareIndex("test","type1","10990473").setSource(jsonBuilder().startObject().field("_id","10990473").startArray("appAccountIds").value(14).endArray().endObject()).execute().actionGet();
   client().prepareIndex("test","type1","10990513").setSource(jsonBuilder().startObject().field("_id","10990513").startArray("appAccountIds").value(14).value(179).endArray().endObject()).execute().actionGet();
   client().prepareIndex("test","type1","10990695").setSource(jsonBuilder().startObject().field("_id","10990695").startArray("appAccountIds").value(14).endArray().endObject()).execute().actionGet();
   client().prepareIndex("test","type1","11026351").setSource(jsonBuilder().startObject().field("_id","11026351").startArray("appAccountIds").value(14).endArray().endObject()).execute().actionGet();
+  refresh();
+  assertHitCount(client().prepareCount().setQuery(termQuery("appAccountIds",179)).execute().actionGet(),2);
+  cluster().fullRestart();
+  logger.info("Running Cluster Health (wait for the shards to startup)");
+  ensureYellow();
   client().admin().indices().prepareRefresh().execute().actionGet();
   assertHitCount(client().prepareCount().setQuery(termQuery("appAccountIds",179)).execute().actionGet(),2);
   cluster().fullRestart();
   logger.info("Running Cluster Health (wait for the shards to startup)");
-  ClusterHealthResponse clusterHealth=client().admin().cluster().health(clusterHealthRequest().waitForYellowStatus().waitForActiveShards(1)).actionGet();
-  logger.info("Done Cluster Health, status " + clusterHealth.getStatus());
-  assertThat(clusterHealth.isTimedOut(),equalTo(false));
-  assertThat(clusterHealth.getStatus(),equalTo(ClusterHealthStatus.YELLOW));
-  client().admin().indices().prepareRefresh().execute().actionGet();
-  assertHitCount(client().prepareCount().setQuery(termQuery("appAccountIds",179)).execute().actionGet(),2);
-  cluster().fullRestart();
-  logger.info("Running Cluster Health (wait for the shards to startup)");
-  clusterHealth=client().admin().cluster().health(clusterHealthRequest().waitForYellowStatus().waitForActiveShards(1)).actionGet();
-  logger.info("Done Cluster Health, status " + clusterHealth.getStatus());
-  assertThat(clusterHealth.isTimedOut(),equalTo(false));
-  assertThat(clusterHealth.getStatus(),equalTo(ClusterHealthStatus.YELLOW));
+  ensureYellow();
   client().admin().indices().prepareRefresh().execute().actionGet();
   assertHitCount(client().prepareCount().setQuery(termQuery("appAccountIds",179)).execute().actionGet(),2);
 }

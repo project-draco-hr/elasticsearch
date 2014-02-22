@@ -1,5 +1,6 @@
 {
   createIndex();
+  NumShards numShards=getNumShards(getConcreteIndexName());
   logger.info("Running Cluster Health");
   ensureGreen();
   logger.info("Indexing [type1/1]");
@@ -9,7 +10,7 @@
   assertThat(indexResponse.getType(),equalTo("type1"));
   logger.info("Refreshing");
   RefreshResponse refreshResponse=refresh();
-  assertThat(refreshResponse.getSuccessfulShards(),equalTo(10));
+  assertThat(refreshResponse.getSuccessfulShards(),equalTo(numShards.totalNumShards));
   logger.info("--> index exists?");
   assertThat(indexExists(getConcreteIndexName()),equalTo(true));
   logger.info("--> index exists?, fake index");
@@ -17,11 +18,11 @@
   logger.info("Clearing cache");
   ClearIndicesCacheResponse clearIndicesCacheResponse=client().admin().indices().clearCache(clearIndicesCacheRequest("test").recycler(true).fieldDataCache(true).filterCache(true).idCache(true)).actionGet();
   assertNoFailures(clearIndicesCacheResponse);
-  assertThat(clearIndicesCacheResponse.getSuccessfulShards(),equalTo(10));
+  assertThat(clearIndicesCacheResponse.getSuccessfulShards(),equalTo(numShards.totalNumShards));
   logger.info("Optimizing");
   waitForRelocation(ClusterHealthStatus.GREEN);
   OptimizeResponse optimizeResponse=optimize();
-  assertThat(optimizeResponse.getSuccessfulShards(),equalTo(10));
+  assertThat(optimizeResponse.getSuccessfulShards(),equalTo(numShards.totalNumShards));
   GetResponse getResult;
   logger.info("Get [type1/1]");
   for (int i=0; i < 5; i++) {
@@ -64,7 +65,7 @@
   client().index(indexRequest("test").type("type1").id("2").source(source("2","test2"))).actionGet();
   logger.info("Flushing");
   FlushResponse flushResult=client().admin().indices().prepareFlush("test").execute().actionGet();
-  assertThat(flushResult.getSuccessfulShards(),equalTo(10));
+  assertThat(flushResult.getSuccessfulShards(),equalTo(numShards.totalNumShards));
   assertThat(flushResult.getFailedShards(),equalTo(0));
   logger.info("Refreshing");
   client().admin().indices().refresh(refreshRequest("test")).actionGet();
@@ -84,29 +85,29 @@
     CountResponse countResponse=client().prepareCount("test").setQuery(termQuery("_type","type1")).setOperationThreading(BroadcastOperationThreading.NO_THREADS).execute().actionGet();
     assertNoFailures(countResponse);
     assertThat(countResponse.getCount(),equalTo(2l));
-    assertThat(countResponse.getSuccessfulShards(),equalTo(5));
+    assertThat(countResponse.getSuccessfulShards(),equalTo(numShards.numPrimaries));
     assertThat(countResponse.getFailedShards(),equalTo(0));
     countResponse=client().prepareCount("test").setQuery(termQuery("_type","type1")).setOperationThreading(BroadcastOperationThreading.SINGLE_THREAD).get();
     assertThat(countResponse.getCount(),equalTo(2l));
-    assertThat(countResponse.getSuccessfulShards(),equalTo(5));
+    assertThat(countResponse.getSuccessfulShards(),equalTo(numShards.numPrimaries));
     assertThat(countResponse.getFailedShards(),equalTo(0));
     countResponse=client().prepareCount("test").setQuery(termQuery("_type","type1")).setOperationThreading(BroadcastOperationThreading.THREAD_PER_SHARD).get();
     assertThat(countResponse.getCount(),equalTo(2l));
-    assertThat(countResponse.getSuccessfulShards(),equalTo(5));
+    assertThat(countResponse.getSuccessfulShards(),equalTo(numShards.numPrimaries));
     assertThat(countResponse.getFailedShards(),equalTo(0));
     countResponse=client().count(countRequest("test").source("{ term : { _type : \"type1 } }".getBytes(Charsets.UTF_8))).actionGet();
     assertThat(countResponse.getCount(),equalTo(0l));
     assertThat(countResponse.getSuccessfulShards(),equalTo(0));
-    assertThat(countResponse.getFailedShards(),equalTo(5));
+    assertThat(countResponse.getFailedShards(),equalTo(numShards.numPrimaries));
     countResponse=client().prepareCount("test").execute().actionGet();
     assertThat("Failures " + countResponse.getShardFailures(),countResponse.getShardFailures() == null ? 0 : countResponse.getShardFailures().length,equalTo(0));
     assertThat(countResponse.getCount(),equalTo(2l));
-    assertThat(countResponse.getSuccessfulShards(),equalTo(5));
+    assertThat(countResponse.getSuccessfulShards(),equalTo(numShards.numPrimaries));
     assertThat(countResponse.getFailedShards(),equalTo(0));
   }
   logger.info("Delete by query");
   DeleteByQueryResponse queryResponse=client().prepareDeleteByQuery().setIndices("test").setQuery(termQuery("name","test2")).execute().actionGet();
-  assertThat(queryResponse.getIndex(getConcreteIndexName()).getSuccessfulShards(),equalTo(5));
+  assertThat(queryResponse.getIndex(getConcreteIndexName()).getSuccessfulShards(),equalTo(numShards.numPrimaries));
   assertThat(queryResponse.getIndex(getConcreteIndexName()).getFailedShards(),equalTo(0));
   client().admin().indices().refresh(refreshRequest("test")).actionGet();
   logger.info("Get [type1/1] and [type1/2], should be empty");

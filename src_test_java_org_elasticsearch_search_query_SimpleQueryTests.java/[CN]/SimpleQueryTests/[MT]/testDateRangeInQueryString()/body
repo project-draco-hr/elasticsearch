@@ -1,5 +1,6 @@
 {
-  assertAcked(client().admin().indices().prepareCreate("test").setSettings(SETTING_NUMBER_OF_SHARDS,1));
+  createIndex("test");
+  ensureGreen();
   String aMonthAgo=ISODateTimeFormat.yearMonthDay().print(new DateTime(DateTimeZone.UTC).minusMonths(1));
   String aMonthFromNow=ISODateTimeFormat.yearMonthDay().print(new DateTime(DateTimeZone.UTC).plusMonths(1));
   client().prepareIndex("test","type","1").setSource("past",aMonthAgo,"future",aMonthFromNow).get();
@@ -10,8 +11,10 @@
   assertHitCount(searchResponse,1l);
   try {
     client().prepareSearch().setQuery(queryString("future:[now/D TO now+2M/d]").lowercaseExpandedTerms(false)).get();
-    fail("D is an unsupported unit in date math");
+    fail("expected SearchPhaseExecutionException (total failure)");
   }
- catch (  Exception e) {
+ catch (  SearchPhaseExecutionException e) {
+    assertThat(e.status(),equalTo(RestStatus.BAD_REQUEST));
+    assertThat(e.getMessage(),containsString("unit [D] not supported for date math"));
   }
 }

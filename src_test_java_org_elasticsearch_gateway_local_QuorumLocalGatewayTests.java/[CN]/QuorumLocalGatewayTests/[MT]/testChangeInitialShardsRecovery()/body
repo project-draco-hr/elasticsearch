@@ -1,19 +1,17 @@
 {
   logger.info("--> starting 3 nodes");
   final String[] nodes=new String[3];
-  nodes[0]=cluster().startNode(settingsBuilder().put("gateway.type","local").put("index.number_of_shards",2).put("index.number_of_replicas",2).build());
-  nodes[1]=cluster().startNode(settingsBuilder().put("gateway.type","local").put("index.number_of_shards",2).put("index.number_of_replicas",2).build());
-  nodes[2]=cluster().startNode(settingsBuilder().put("gateway.type","local").put("index.number_of_shards",2).put("index.number_of_replicas",2).build());
+  nodes[0]=cluster().startNode(settingsBuilder().put("gateway.type","local").build());
+  nodes[1]=cluster().startNode(settingsBuilder().put("gateway.type","local").build());
+  nodes[2]=cluster().startNode(settingsBuilder().put("gateway.type","local").build());
+  createIndex("test");
+  ensureGreen();
+  NumShards test=getNumShards("test");
   logger.info("--> indexing...");
   client().prepareIndex("test","type1","1").setSource(jsonBuilder().startObject().field("field","value1").endObject()).get();
-  client().admin().indices().prepareFlush().get();
+  flush();
   client().prepareIndex("test","type1","2").setSource(jsonBuilder().startObject().field("field","value2").endObject()).get();
-  assertNoFailures(client().admin().indices().prepareRefresh().execute().get());
-  logger.info("--> running cluster_health (wait for the shards to startup)");
-  ClusterHealthResponse clusterHealth=client().admin().cluster().health(clusterHealthRequest().waitForGreenStatus().waitForActiveShards(6)).actionGet();
-  logger.info("--> done cluster_health, status " + clusterHealth.getStatus());
-  assertThat(clusterHealth.isTimedOut(),equalTo(false));
-  assertThat(clusterHealth.getStatus(),equalTo(ClusterHealthStatus.GREEN));
+  refresh();
   for (int i=0; i < 10; i++) {
     assertHitCount(client().prepareCount().setQuery(matchAllQuery()).get(),2l);
   }
@@ -31,7 +29,7 @@
   if (randomBoolean()) {
     Thread.sleep(between(1,400));
   }
-  clusterHealth=client().admin().cluster().health(clusterHealthRequest().waitForNodes("1")).actionGet();
+  ClusterHealthResponse clusterHealth=client().admin().cluster().health(clusterHealthRequest().waitForNodes("1")).actionGet();
   assertThat(clusterHealth.isTimedOut(),equalTo(false));
   assertThat(clusterHealth.getStatus(),equalTo(ClusterHealthStatus.RED));
   assertThat(awaitBusy(new Predicate<Object>(){
@@ -47,8 +45,8 @@
   assertThat(clusterStateResponse.getState().routingTable().index("test").allPrimaryShardsActive(),is(false));
   logger.info("--> change the recovery.initial_shards setting, and make sure its recovered");
   client().admin().indices().prepareUpdateSettings("test").setSettings(settingsBuilder().put("recovery.initial_shards",1)).get();
-  logger.info("--> running cluster_health (wait for the shards to startup), 2 shards since we only have 1 node");
-  clusterHealth=client().admin().cluster().health(clusterHealthRequest().waitForYellowStatus().waitForActiveShards(2)).actionGet();
+  logger.info("--> running cluster_health (wait for the shards to startup), primaries only since we only have 1 node");
+  clusterHealth=client().admin().cluster().health(clusterHealthRequest().waitForYellowStatus().waitForActiveShards(test.numPrimaries)).actionGet();
   logger.info("--> done cluster_health, status " + clusterHealth.getStatus());
   assertThat(clusterHealth.isTimedOut(),equalTo(false));
   assertThat(clusterHealth.getStatus(),equalTo(ClusterHealthStatus.YELLOW));

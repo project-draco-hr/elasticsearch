@@ -1,18 +1,16 @@
 {
   logger.info("--> starting 3 nodes");
-  cluster().startNode(settingsBuilder().put("gateway.type","local").put("index.number_of_shards",2).put("index.number_of_replicas",2).build());
-  cluster().startNode(settingsBuilder().put("gateway.type","local").put("index.number_of_shards",2).put("index.number_of_replicas",2).build());
-  cluster().startNode(settingsBuilder().put("gateway.type","local").put("index.number_of_shards",2).put("index.number_of_replicas",2).build());
+  cluster().startNode(settingsBuilder().put("gateway.type","local").build());
+  cluster().startNode(settingsBuilder().put("gateway.type","local").build());
+  cluster().startNode(settingsBuilder().put("gateway.type","local").build());
+  createIndex("test");
+  ensureGreen();
+  final NumShards test=getNumShards("test");
   logger.info("--> indexing...");
   client().prepareIndex("test","type1","1").setSource(jsonBuilder().startObject().field("field","value1").endObject()).get();
-  client().admin().indices().prepareFlush().get();
+  flush();
   client().prepareIndex("test","type1","2").setSource(jsonBuilder().startObject().field("field","value2").endObject()).get();
-  assertNoFailures(client().admin().indices().prepareRefresh().get());
-  logger.info("--> running cluster_health (wait for the shards to startup)");
-  ClusterHealthResponse clusterHealth=client().admin().cluster().health(clusterHealthRequest().waitForGreenStatus().waitForActiveShards(6)).actionGet();
-  logger.info("--> done cluster_health, status " + clusterHealth.getStatus());
-  assertThat(clusterHealth.isTimedOut(),equalTo(false));
-  assertThat(clusterHealth.getStatus(),equalTo(ClusterHealthStatus.GREEN));
+  refresh();
   for (int i=0; i < 10; i++) {
     assertHitCount(client().prepareCount().setQuery(matchAllQuery()).get(),2l);
   }
@@ -27,7 +25,7 @@
         assertThat(awaitBusy(new Predicate<Object>(){
           @Override public boolean apply(          Object input){
             logger.info("--> running cluster_health (wait for the shards to startup)");
-            ClusterHealthResponse clusterHealth=activeClient.admin().cluster().health(clusterHealthRequest().waitForYellowStatus().waitForNodes("2").waitForActiveShards(4)).actionGet();
+            ClusterHealthResponse clusterHealth=activeClient.admin().cluster().health(clusterHealthRequest().waitForYellowStatus().waitForNodes("2").waitForActiveShards(test.numPrimaries * 2)).actionGet();
             logger.info("--> done cluster_health, status " + clusterHealth.getStatus());
             return (!clusterHealth.isTimedOut()) && clusterHealth.getStatus() == ClusterHealthStatus.YELLOW;
           }
@@ -45,10 +43,7 @@
 );
   logger.info("--> all nodes are started back, verifying we got the latest version");
   logger.info("--> running cluster_health (wait for the shards to startup)");
-  clusterHealth=client().admin().cluster().health(clusterHealthRequest().waitForGreenStatus().waitForActiveShards(6)).actionGet();
-  logger.info("--> done cluster_health, status " + clusterHealth.getStatus());
-  assertThat(clusterHealth.isTimedOut(),equalTo(false));
-  assertThat(clusterHealth.getStatus(),equalTo(ClusterHealthStatus.GREEN));
+  ensureGreen();
   for (int i=0; i < 10; i++) {
     assertHitCount(client().prepareCount().setQuery(matchAllQuery()).get(),3l);
   }

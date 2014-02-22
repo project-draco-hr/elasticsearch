@@ -1,5 +1,5 @@
 {
-  assertAcked(client().admin().indices().prepareCreate("test").setSettings(ImmutableSettings.settingsBuilder().put("index.number_of_shards",2)).addMapping("type1","title","type=string,store=yes,term_vector=no"));
+  assertAcked(prepareCreate("test").addMapping("type1","title","type=string,store=yes,term_vector=no"));
   ensureGreen();
   IndexRequestBuilder[] indexRequestBuilders=new IndexRequestBuilder[5];
   for (int i=0; i < 5; i++) {
@@ -8,14 +8,6 @@
   indexRandom(true,indexRequestBuilders);
   SearchResponse search=client().prepareSearch().setQuery(matchPhraseQuery("title","this is a test")).addHighlightedField("title",50,1,10).get();
   assertNoFailures(search);
-  search=client().prepareSearch().setQuery(matchPhraseQuery("title","this is a test")).addHighlightedField("title",50,1,10).setHighlighterType("fast-vector-highlighter").execute().actionGet();
-  assertThat(search.getFailedShards(),equalTo(2));
-  for (  ShardSearchFailure shardSearchFailure : search.getShardFailures()) {
-    assertThat(shardSearchFailure.reason(),containsString("the field [title] should be indexed with term vector with position offsets to be used with fast vector highlighter"));
-  }
-  search=client().prepareSearch().setQuery(matchPhraseQuery("title","this is a test")).addHighlightedField("tit*",50,1,10).setHighlighterType("fast-vector-highlighter").execute().actionGet();
-  assertThat(search.getFailedShards(),equalTo(2));
-  for (  ShardSearchFailure shardSearchFailure : search.getShardFailures()) {
-    assertThat(shardSearchFailure.reason(),containsString("the field [title] should be indexed with term vector with position offsets to be used with fast vector highlighter"));
-  }
+  assertFailures(client().prepareSearch().setQuery(matchPhraseQuery("title","this is a test")).addHighlightedField("title",50,1,10).setHighlighterType("fast-vector-highlighter"),RestStatus.BAD_REQUEST,containsString("the field [title] should be indexed with term vector with position offsets to be used with fast vector highlighter"));
+  assertFailures(client().prepareSearch().setQuery(matchPhraseQuery("title","this is a test")).addHighlightedField("tit*",50,1,10).setHighlighterType("fast-vector-highlighter"),RestStatus.BAD_REQUEST,containsString("the field [title] should be indexed with term vector with position offsets to be used with fast vector highlighter"));
 }

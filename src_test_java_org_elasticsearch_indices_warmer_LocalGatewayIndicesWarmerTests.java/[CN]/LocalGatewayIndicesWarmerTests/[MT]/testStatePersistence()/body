@@ -2,12 +2,10 @@
   logger.info("--> starting 1 nodes");
   cluster().startNode(settingsBuilder().put("gateway.type","local"));
   logger.info("--> putting two templates");
-  client().admin().indices().prepareCreate("test").setSettings(ImmutableSettings.settingsBuilder().put("index.number_of_shards",1)).execute().actionGet();
-  client().admin().cluster().prepareHealth().setWaitForEvents(Priority.LANGUID).setWaitForYellowStatus().execute().actionGet();
-  PutWarmerResponse putWarmerResponse=client().admin().indices().preparePutWarmer("warmer_1").setSearchRequest(client().prepareSearch("test").setQuery(QueryBuilders.termQuery("field","value1"))).execute().actionGet();
-  assertThat(putWarmerResponse.isAcknowledged(),equalTo(true));
-  putWarmerResponse=client().admin().indices().preparePutWarmer("warmer_2").setSearchRequest(client().prepareSearch("test").setQuery(QueryBuilders.termQuery("field","value2"))).execute().actionGet();
-  assertThat(putWarmerResponse.isAcknowledged(),equalTo(true));
+  createIndex("test");
+  ensureYellow();
+  assertAcked(client().admin().indices().preparePutWarmer("warmer_1").setSearchRequest(client().prepareSearch("test").setQuery(QueryBuilders.termQuery("field","value1"))));
+  assertAcked(client().admin().indices().preparePutWarmer("warmer_2").setSearchRequest(client().prepareSearch("test").setQuery(QueryBuilders.termQuery("field","value2"))));
   logger.info("--> put template with warmer");
   client().admin().indices().preparePutTemplate("template_1").setSource("{\n" + "    \"template\" : \"xxx\",\n" + "    \"warmers\" : {\n"+ "        \"warmer_1\" : {\n"+ "            \"types\" : [],\n"+ "            \"source\" : {\n"+ "                \"query\" : {\n"+ "                    \"match_all\" : {}\n"+ "                }\n"+ "            }\n"+ "        }\n"+ "    }\n"+ "}").execute().actionGet();
   logger.info("--> verify warmers are registered in cluster state");
@@ -25,8 +23,7 @@
     }
   }
 );
-  ClusterHealthResponse healthResponse=client().admin().cluster().prepareHealth().setWaitForEvents(Priority.LANGUID).setWaitForYellowStatus().execute().actionGet();
-  assertThat(healthResponse.isTimedOut(),equalTo(false));
+  ensureYellow();
   logger.info("--> verify warmers are recovered");
   clusterState=client().admin().cluster().prepareState().execute().actionGet().getState();
   IndexWarmersMetaData recoveredWarmersMetaData=clusterState.metaData().index("test").custom(IndexWarmersMetaData.TYPE);
@@ -57,8 +54,7 @@
     }
   }
 );
-  healthResponse=client().admin().cluster().prepareHealth().setWaitForEvents(Priority.LANGUID).setWaitForYellowStatus().execute().actionGet();
-  assertThat(healthResponse.isTimedOut(),equalTo(false));
+  ensureYellow();
   logger.info("--> verify warmers are recovered");
   clusterState=client().admin().cluster().prepareState().execute().actionGet().getState();
   recoveredWarmersMetaData=clusterState.metaData().index("test").custom(IndexWarmersMetaData.TYPE);

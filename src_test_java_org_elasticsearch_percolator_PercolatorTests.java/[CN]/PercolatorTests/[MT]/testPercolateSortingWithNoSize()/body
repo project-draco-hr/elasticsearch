@@ -1,5 +1,5 @@
 {
-  client().admin().indices().prepareCreate("my-index").execute().actionGet();
+  createIndex("my-index");
   ensureGreen();
   client().prepareIndex("my-index",PercolatorService.TYPE_NAME,"1").setSource(jsonBuilder().startObject().field("query",matchAllQuery()).field("level",1).endObject()).execute().actionGet();
   client().prepareIndex("my-index",PercolatorService.TYPE_NAME,"2").setSource(jsonBuilder().startObject().field("query",matchAllQuery()).field("level",2).endObject()).execute().actionGet();
@@ -12,10 +12,9 @@
   assertThat(response.getMatches()[1].getScore(),equalTo(1f));
   response=client().preparePercolate().setIndices("my-index").setDocumentType("my-type").setSortByScore(true).setPercolateDoc(docBuilder().setDoc("field","value")).setPercolateQuery(QueryBuilders.functionScoreQuery(matchAllQuery(),scriptFunction("doc['level'].value"))).execute().actionGet();
   assertThat(response.getCount(),equalTo(0l));
-  assertThat(response.getSuccessfulShards(),equalTo(3));
-  assertThat(response.getShardFailures().length,equalTo(2));
-  assertThat(response.getShardFailures()[0].status().getStatus(),equalTo(400));
-  assertThat(response.getShardFailures()[0].reason(),containsString("Can't sort if size isn't specified"));
-  assertThat(response.getShardFailures()[1].status().getStatus(),equalTo(400));
-  assertThat(response.getShardFailures()[1].reason(),containsString("Can't sort if size isn't specified"));
+  assertThat(response.getShardFailures().length,greaterThan(0));
+  for (  ShardOperationFailedException failure : response.getShardFailures()) {
+    assertThat(failure.status(),equalTo(RestStatus.BAD_REQUEST));
+    assertThat(failure.reason(),containsString("Can't sort if size isn't specified"));
+  }
 }
