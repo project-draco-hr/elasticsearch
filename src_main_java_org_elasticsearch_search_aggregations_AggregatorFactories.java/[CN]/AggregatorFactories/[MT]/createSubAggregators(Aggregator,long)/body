@@ -11,7 +11,7 @@
       ObjectArray<Aggregator> aggregators;
 {
         long arraySize=estimatedBucketsCount > 0 ? estimatedBucketsCount : 1;
-        aggregators=BigArrays.newObjectArray(arraySize,context.pageCacheRecycler());
+        aggregators=bigArrays.newObjectArray(arraySize);
         aggregators.set(0,first);
         for (long i=1; i < arraySize; ++i) {
           aggregators.set(i,createAndRegisterContextAware(parent.context(),factory,parent,estimatedBucketsCount));
@@ -29,7 +29,7 @@
         }
       }
       @Override public void collect(      int doc,      long owningBucketOrdinal) throws IOException {
-        aggregators=BigArrays.grow(aggregators,owningBucketOrdinal + 1);
+        aggregators=bigArrays.grow(aggregators,owningBucketOrdinal + 1);
         Aggregator aggregator=aggregators.get(owningBucketOrdinal);
         if (aggregator == null) {
           aggregator=createAndRegisterContextAware(parent.context(),factory,parent,estimatedBucketsCount);
@@ -46,7 +46,22 @@
         return first.buildEmptyAggregation();
       }
       @Override public void doRelease(){
-        Releasables.release(aggregators);
+        final Iterable<Aggregator> aggregatorsIter=new Iterable<Aggregator>(){
+          @Override public Iterator<Aggregator> iterator(){
+            return new UnmodifiableIterator<Aggregator>(){
+              long i=0;
+              @Override public boolean hasNext(){
+                return i < aggregators.size();
+              }
+              @Override public Aggregator next(){
+                return aggregators.get(i++);
+              }
+            }
+;
+          }
+        }
+;
+        Releasables.release(Iterables.concat(aggregatorsIter,Collections.singleton(aggregators)));
       }
     }
 ;
