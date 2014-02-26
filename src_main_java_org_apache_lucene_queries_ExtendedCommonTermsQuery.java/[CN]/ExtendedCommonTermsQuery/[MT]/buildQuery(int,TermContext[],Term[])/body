@@ -1,0 +1,50 @@
+{
+  BooleanQuery lowFreq=new BooleanQuery(disableCoord);
+  BooleanQuery highFreq=new BooleanQuery(disableCoord);
+  highFreq.setBoost(highFreqBoost);
+  lowFreq.setBoost(lowFreqBoost);
+  BooleanQuery query=new BooleanQuery(true);
+  for (int i=0; i < queryTerms.length; i++) {
+    TermContext termContext=contextArray[i];
+    if (termContext == null) {
+      lowFreq.add(newTermQuery(queryTerms[i],null),lowFreqOccur);
+    }
+ else {
+      if ((maxTermFrequency >= 1f && termContext.docFreq() > maxTermFrequency) || (termContext.docFreq() > (int)Math.ceil(maxTermFrequency * (float)maxDoc))) {
+        highFreq.add(newTermQuery(queryTerms[i],termContext),highFreqOccur);
+      }
+ else {
+        lowFreq.add(newTermQuery(queryTerms[i],termContext),lowFreqOccur);
+      }
+    }
+  }
+  final int numLowFreqClauses=lowFreq.clauses().size();
+  final int numHighFreqClauses=highFreq.clauses().size();
+  if (lowFreqOccur == Occur.SHOULD && numLowFreqClauses > 0) {
+    int minMustMatch=calcLowFreqMinimumNumberShouldMatch(numLowFreqClauses);
+    lowFreq.setMinimumNumberShouldMatch(minMustMatch);
+  }
+  if (highFreqOccur == Occur.SHOULD && numHighFreqClauses > 0) {
+    int minMustMatch=calcHighFreqMinimumNumberShouldMatch(numHighFreqClauses);
+    highFreq.setMinimumNumberShouldMatch(minMustMatch);
+  }
+  if (lowFreq.clauses().isEmpty()) {
+    if (highFreq.getMinimumNumberShouldMatch() == 0 && highFreqOccur != Occur.MUST) {
+      for (      BooleanClause booleanClause : highFreq) {
+        booleanClause.setOccur(Occur.MUST);
+      }
+    }
+    highFreq.setBoost(getBoost());
+    return highFreq;
+  }
+ else   if (highFreq.clauses().isEmpty()) {
+    lowFreq.setBoost(getBoost());
+    return lowFreq;
+  }
+ else {
+    query.add(highFreq,Occur.SHOULD);
+    query.add(lowFreq,Occur.MUST);
+    query.setBoost(getBoost());
+    return query;
+  }
+}
