@@ -1,0 +1,36 @@
+{
+  boolean asc=randomBoolean();
+  SearchResponse response=client().prepareSearch("idx").setTypes("type").addAggregation(terms("tags").field("num_tag").order(Terms.Order.aggregation("filter1>filter2>max",asc)).subAggregation(filter("filter1").filter(FilterBuilders.matchAllFilter()).subAggregation(filter("filter2").filter(FilterBuilders.matchAllFilter()).subAggregation(max("max").field(SINGLE_VALUED_FIELD_NAME))))).execute().actionGet();
+  assertSearchResponse(response);
+  Terms tags=response.getAggregations().get("tags");
+  assertThat(tags,notNullValue());
+  assertThat(tags.getName(),equalTo("tags"));
+  assertThat(tags.getBuckets().size(),equalTo(2));
+  Iterator<Terms.Bucket> iters=tags.getBuckets().iterator();
+  Terms.Bucket tag=iters.next();
+  assertThat(tag,notNullValue());
+  assertThat(key(tag),equalTo(asc ? "1" : "0"));
+  assertThat(tag.getDocCount(),equalTo(asc ? 3l : 2l));
+  Filter filter1=tag.getAggregations().get("filter1");
+  assertThat(filter1,notNullValue());
+  assertThat(filter1.getDocCount(),equalTo(asc ? 3l : 2l));
+  Filter filter2=filter1.getAggregations().get("filter2");
+  assertThat(filter2,notNullValue());
+  assertThat(filter2.getDocCount(),equalTo(asc ? 3l : 2l));
+  Max max=filter2.getAggregations().get("max");
+  assertThat(max,notNullValue());
+  assertThat(max.getValue(),equalTo(asc ? 2.0 : 4.0));
+  tag=iters.next();
+  assertThat(tag,notNullValue());
+  assertThat(key(tag),equalTo(asc ? "0" : "1"));
+  assertThat(tag.getDocCount(),equalTo(asc ? 2l : 3l));
+  filter1=tag.getAggregations().get("filter1");
+  assertThat(filter1,notNullValue());
+  assertThat(filter1.getDocCount(),equalTo(asc ? 2l : 3l));
+  filter2=filter1.getAggregations().get("filter2");
+  assertThat(filter2,notNullValue());
+  assertThat(filter2.getDocCount(),equalTo(asc ? 2l : 3l));
+  max=filter2.getAggregations().get("max");
+  assertThat(max,notNullValue());
+  assertThat(max.getValue(),equalTo(asc ? 4.0 : 2.0));
+}
