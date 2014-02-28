@@ -2,6 +2,9 @@
   request.indices(state.metaData().concreteIndices(request.indices(),request.indicesOptions()));
   flushAction.execute(Requests.flushRequest(request.indices()),new ActionListener<FlushResponse>(){
     @Override public void onResponse(    FlushResponse flushResponse){
+      if (logger.isTraceEnabled()) {
+        traceLogResponse("Flush",flushResponse);
+      }
       ImmutableOpenMap<String,ImmutableOpenMap<String,MappingMetaData>> result=clusterService.state().metaData().findMappings(request.indices(),request.types());
       BoolFilterBuilder filterBuilder=new BoolFilterBuilder();
       Set<String> types=new HashSet<String>();
@@ -18,11 +21,27 @@
       QuerySourceBuilder querySourceBuilder=new QuerySourceBuilder().setQuery(QueryBuilders.filteredQuery(QueryBuilders.matchAllQuery(),filterBuilder));
       deleteByQueryAction.execute(Requests.deleteByQueryRequest(request.indices()).source(querySourceBuilder),new ActionListener<DeleteByQueryResponse>(){
         @Override public void onResponse(        DeleteByQueryResponse deleteByQueryResponse){
+          if (logger.isTraceEnabled()) {
+            for (            IndexDeleteByQueryResponse indexResponse : deleteByQueryResponse) {
+              logger.trace("Delete by query[{}] completed with total[{}], successful[{}] and failed[{}]",indexResponse.getIndex(),indexResponse.getTotalShards(),indexResponse.getSuccessfulShards(),indexResponse.getFailedShards());
+              if (indexResponse.getFailedShards() > 0) {
+                for (                ShardOperationFailedException failure : indexResponse.getFailures()) {
+                  logger.trace("[{}/{}] Delete by query shard failure reason: {}",failure.index(),failure.shardId(),failure.reason());
+                }
+              }
+            }
+          }
           refreshAction.execute(Requests.refreshRequest(request.indices()),new ActionListener<RefreshResponse>(){
             @Override public void onResponse(            RefreshResponse refreshResponse){
+              if (logger.isTraceEnabled()) {
+                traceLogResponse("Refresh",refreshResponse);
+              }
               removeMapping();
             }
             @Override public void onFailure(            Throwable e){
+              if (logger.isDebugEnabled()) {
+                logger.debug("Refresh failed completely",e);
+              }
               removeMapping();
             }
             protected void removeMapping(){
