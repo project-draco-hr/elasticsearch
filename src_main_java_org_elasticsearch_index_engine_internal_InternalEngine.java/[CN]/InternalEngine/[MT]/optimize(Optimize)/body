@@ -3,9 +3,19 @@
     flush(new Flush().force(true).waitIfOngoing(true));
   }
   if (optimizeMutex.compareAndSet(false,true)) {
+    ElasticsearchMergePolicy elasticsearchMergePolicy=null;
     rwl.readLock().lock();
     try {
       ensureOpen();
+      if (indexWriter.getConfig().getMergePolicy() instanceof ElasticsearchMergePolicy) {
+        elasticsearchMergePolicy=(ElasticsearchMergePolicy)indexWriter.getConfig().getMergePolicy();
+      }
+      if (optimize.force() && elasticsearchMergePolicy == null) {
+        throw new ElasticsearchIllegalStateException("The `force` flag can only be used if the merge policy is an instance of " + ElasticsearchMergePolicy.class.getSimpleName() + ", got ["+ indexWriter.getConfig().getMergePolicy().getClass().getName()+ "]");
+      }
+      if (optimize.force()) {
+        elasticsearchMergePolicy.setForce(true);
+      }
       if (optimize.onlyExpungeDeletes()) {
         Merges.forceMergeDeletes(indexWriter,false);
       }
@@ -31,6 +41,9 @@ catch (    Throwable e) {
       throw new OptimizeFailedEngineException(shardId,e);
     }
  finally {
+      if (elasticsearchMergePolicy != null) {
+        elasticsearchMergePolicy.setForce(false);
+      }
       rwl.readLock().unlock();
       optimizeMutex.set(false);
     }
