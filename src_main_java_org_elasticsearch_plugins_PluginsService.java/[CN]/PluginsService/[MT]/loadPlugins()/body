@@ -1,0 +1,61 @@
+{
+  File pluginsFile=environment.pluginsFile();
+  if (!isAccessibleDirectory(pluginsFile,logger)) {
+    return Collections.emptyList();
+  }
+  List<Tuple<PluginInfo,Plugin>> pluginData=Lists.newArrayList();
+  boolean defaultIsolation=settings.getAsBoolean("plugins.isolation",Boolean.TRUE);
+  ClassLoader esClassLoader=settings.getClassLoader();
+  Method addURL=null;
+  boolean discoveredAddUrl=false;
+  File[] pluginsFiles=pluginsFile.listFiles();
+  if (pluginsFiles != null) {
+    for (    File pluginRoot : pluginsFiles) {
+      if (isAccessibleDirectory(pluginRoot,logger)) {
+        try {
+          logger.trace("--- adding plugin [" + pluginRoot.getAbsolutePath() + "]");
+          List<File> pluginClassPath=PluginUtils.pluginClassPathAsFiles(pluginRoot);
+          List<URL> pluginProperties=PluginUtils.lookupPluginProperties(pluginClassPath);
+          boolean isolated=PluginUtils.lookupIsolation(pluginProperties,defaultIsolation);
+          if (isolated) {
+            logger.trace("--- creating isolated space for plugin [" + pluginRoot.getAbsolutePath() + "]");
+            PluginClassLoader pcl=new PluginClassLoader(PluginUtils.convertFileToUrl(pluginClassPath),esClassLoader);
+            pluginData.addAll(loadPlugin(pluginClassPath,pluginProperties,pcl,true));
+          }
+ else {
+            if (!discoveredAddUrl) {
+              discoveredAddUrl=true;
+              Class<?> esClassLoaderClass=esClassLoader.getClass();
+              while (!esClassLoaderClass.equals(Object.class)) {
+                try {
+                  addURL=esClassLoaderClass.getDeclaredMethod("addURL",URL.class);
+                  addURL.setAccessible(true);
+                  break;
+                }
+ catch (                NoSuchMethodException e) {
+                  esClassLoaderClass=esClassLoaderClass.getSuperclass();
+                }
+              }
+            }
+            if (addURL == null) {
+              logger.debug("failed to find addURL method on classLoader [" + esClassLoader + "] to add methods");
+            }
+ else {
+              for (              File file : pluginClassPath) {
+                addURL.invoke(esClassLoader,file.toURI().toURL());
+              }
+              pluginData.addAll(loadPlugin(pluginClassPath,pluginProperties,esClassLoader,false));
+            }
+          }
+        }
+ catch (        Throwable e) {
+          logger.warn("failed to add plugin [" + pluginRoot.getAbsolutePath() + "]",e);
+        }
+      }
+    }
+  }
+ else {
+    logger.debug("failed to list plugins from {}. Check your right access.",pluginsFile.getAbsolutePath());
+  }
+  return pluginData;
+}
