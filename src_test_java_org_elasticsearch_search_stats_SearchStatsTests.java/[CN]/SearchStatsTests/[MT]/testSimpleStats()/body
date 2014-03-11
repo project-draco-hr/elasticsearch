@@ -1,25 +1,31 @@
 {
   client().admin().indices().prepareStats().clear().execute().actionGet();
   createIndex("test1");
-  for (int i=0; i < 500; i++) {
+  int docsTest1=atLeast(20);
+  for (int i=0; i < docsTest1; i++) {
     client().prepareIndex("test1","type",Integer.toString(i)).setSource("field","value").execute().actionGet();
-    if (i == 10) {
+    if (rarely()) {
       refresh();
     }
   }
   createIndex("test2");
-  for (int i=0; i < 500; i++) {
+  int docsTest2=atLeast(20);
+  for (int i=0; i < docsTest2; i++) {
     client().prepareIndex("test2","type",Integer.toString(i)).setSource("field","value").execute().actionGet();
-    if (i == 10) {
+    if (rarely()) {
       refresh();
     }
   }
+  refresh();
   cluster().ensureAtMostNumNodes(numAssignedShards("test1","test2"));
   assertThat(cluster().size(),greaterThanOrEqualTo(2));
   assertThat(numAssignedShards("test1","test2"),greaterThanOrEqualTo(2));
   ensureGreen();
-  for (int i=0; i < 200; i++) {
-    client().prepareSearch().setQuery(QueryBuilders.termQuery("field","value")).setStats("group1","group2").execute().actionGet();
+  int iters=atLeast(20);
+  for (int i=0; i < iters; i++) {
+    SearchResponse searchResponse=client().prepareSearch().setQuery(QueryBuilders.termQuery("field","value")).setStats("group1","group2").execute().actionGet();
+    assertHitCount(searchResponse,docsTest1 + docsTest2);
+    assertAllSuccessful(searchResponse);
   }
   IndicesStatsResponse indicesStats=client().admin().indices().prepareStats().execute().actionGet();
   assertThat(indicesStats.getTotal().getSearch().getTotal().getQueryCount(),greaterThan(0l));
