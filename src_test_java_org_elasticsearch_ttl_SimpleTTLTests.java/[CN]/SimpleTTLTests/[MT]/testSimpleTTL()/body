@@ -1,6 +1,7 @@
 {
   assertAcked(prepareCreate("test").addMapping("type1",XContentFactory.jsonBuilder().startObject().startObject("type1").startObject("_timestamp").field("enabled",true).field("store","yes").endObject().startObject("_ttl").field("enabled",true).field("store","yes").endObject().endObject().endObject()).addMapping("type2",XContentFactory.jsonBuilder().startObject().startObject("type2").startObject("_timestamp").field("enabled",true).field("store","yes").endObject().startObject("_ttl").field("enabled",true).field("store","yes").field("default","1d").endObject().endObject().endObject()));
   ensureGreen();
+  final NumShards test=getNumShards("test");
   long providedTTLValue=3000;
   logger.info("--> checking ttl");
   client().prepareIndex("test","type1","1").setSource("field1","value1").setTTL(providedTTLValue).setRefresh(true).execute().actionGet();
@@ -54,25 +55,27 @@
   getResponse=client().prepareGet("test","type2","default_ttl").setFields("_ttl").setRealtime(true).execute().actionGet();
   ttl0=((Number)getResponse.getField("_ttl").getValue()).longValue();
   assertThat(ttl0,greaterThan(0L));
+  IndicesStatsResponse response=client().admin().indices().prepareStats("test").clear().setIndexing(true).get();
+  assertThat(response.getIndices().get("test").getTotal().getIndexing().getTotal().getDeleteCount(),equalTo(0L));
   long shouldBeExpiredDate=now + providedTTLValue + PURGE_INTERVAL+ 2000;
   currentTime=System.currentTimeMillis();
   if (shouldBeExpiredDate - currentTime > 0) {
     Thread.sleep(shouldBeExpiredDate - currentTime);
   }
   logger.info("--> checking purger");
-  long currentDeleteCount;
-  do {
-    if (rarely()) {
-      client().admin().indices().prepareFlush("test").setFull(true).execute().actionGet();
+  assertThat(awaitBusy(new Predicate<Object>(){
+    @Override public boolean apply(    Object input){
+      if (rarely()) {
+        client().admin().indices().prepareFlush("test").setFull(true).get();
+      }
+ else       if (rarely()) {
+        client().admin().indices().prepareOptimize("test").setMaxNumSegments(1).get();
+      }
+      IndicesStatsResponse response=client().admin().indices().prepareStats("test").clear().setIndexing(true).get();
+      return response.getIndices().get("test").getTotal().getIndexing().getTotal().getDeleteCount() == 2L * test.dataCopies;
     }
- else     if (rarely()) {
-      client().admin().indices().prepareOptimize("test").setMaxNumSegments(1).execute().actionGet();
-    }
-    IndicesStatsResponse response=client().admin().indices().prepareStats("test").clear().setIndexing(true).execute().actionGet();
-    currentDeleteCount=response.getIndices().get("test").getTotal().getIndexing().getTotal().getDeleteCount();
   }
- while (currentDeleteCount < 4);
-  assertThat(currentDeleteCount,equalTo(4l));
+,5,TimeUnit.SECONDS),equalTo(true));
   getResponse=client().prepareGet("test","type1","1").setFields("_ttl").setRealtime(true).execute().actionGet();
   assertThat(getResponse.isExists(),equalTo(false));
   getResponse=client().prepareGet("test","type1","with_routing").setRouting("routing").setFields("_ttl").setRealtime(true).execute().actionGet();
