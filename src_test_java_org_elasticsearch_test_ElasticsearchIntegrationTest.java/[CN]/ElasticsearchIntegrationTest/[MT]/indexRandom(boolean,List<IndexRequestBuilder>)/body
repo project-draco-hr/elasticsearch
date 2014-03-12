@@ -10,54 +10,36 @@
   final String[] indices=indicesSet.toArray(new String[indicesSet.size()]);
   Collections.shuffle(builders,random);
   final CopyOnWriteArrayList<Tuple<IndexRequestBuilder,Throwable>> errors=new CopyOnWriteArrayList<Tuple<IndexRequestBuilder,Throwable>>();
-  List<CountDownLatch> latches=new ArrayList<CountDownLatch>();
-  if (frequently()) {
-    logger.info("Index [{}] docs async: [{}] bulk: [{}]",builders.size(),true,false);
-    final CountDownLatch latch=new CountDownLatch(builders.size());
-    latches.add(latch);
-    for (    IndexRequestBuilder indexRequestBuilder : builders) {
-      indexRequestBuilder.execute(new PayloadLatchedActionListener<IndexResponse,IndexRequestBuilder>(indexRequestBuilder,latch,errors));
-      if (rarely()) {
-        if (rarely()) {
-          client().admin().indices().prepareRefresh(indices).setIndicesOptions(IndicesOptions.lenient()).execute(new LatchedActionListener<RefreshResponse>(newLatch(latches)));
-        }
- else         if (rarely()) {
-          client().admin().indices().prepareFlush(indices).setIndicesOptions(IndicesOptions.lenient()).execute(new LatchedActionListener<FlushResponse>(newLatch(latches)));
-        }
- else         if (rarely()) {
-          client().admin().indices().prepareOptimize(indices).setIndicesOptions(IndicesOptions.lenient()).setMaxNumSegments(between(1,10)).setFlush(random.nextBoolean()).execute(new LatchedActionListener<OptimizeResponse>(newLatch(latches)));
-        }
+  List<CountDownLatch> inFlightAsyncOperations=new ArrayList<CountDownLatch>();
+  if (builders.size() < FREQUENT_BULK_THRESHOLD ? frequently() : rarely()) {
+    if (frequently()) {
+      logger.info("Index [{}] docs async: [{}] bulk: [{}]",builders.size(),true,false);
+      for (      IndexRequestBuilder indexRequestBuilder : builders) {
+        indexRequestBuilder.execute(new PayloadLatchedActionListener<IndexResponse,IndexRequestBuilder>(indexRequestBuilder,newLatch(inFlightAsyncOperations),errors));
+        postIndexAsyncActions(indices,inFlightAsyncOperations);
       }
     }
-  }
- else   if (randomBoolean()) {
-    logger.info("Index [{}] docs async: [{}] bulk: [{}]",builders.size(),false,false);
-    for (    IndexRequestBuilder indexRequestBuilder : builders) {
-      indexRequestBuilder.execute().actionGet();
-      if (rarely()) {
-        if (rarely()) {
-          client().admin().indices().prepareRefresh(indices).setIndicesOptions(IndicesOptions.lenient()).execute(new LatchedActionListener<RefreshResponse>(newLatch(latches)));
-        }
- else         if (rarely()) {
-          client().admin().indices().prepareFlush(indices).setIndicesOptions(IndicesOptions.lenient()).execute(new LatchedActionListener<FlushResponse>(newLatch(latches)));
-        }
- else         if (rarely()) {
-          client().admin().indices().prepareOptimize(indices).setIndicesOptions(IndicesOptions.lenient()).setMaxNumSegments(between(1,10)).setFlush(random.nextBoolean()).execute(new LatchedActionListener<OptimizeResponse>(newLatch(latches)));
-        }
+ else {
+      logger.info("Index [{}] docs async: [{}] bulk: [{}]",builders.size(),false,false);
+      for (      IndexRequestBuilder indexRequestBuilder : builders) {
+        indexRequestBuilder.execute().actionGet();
+        postIndexAsyncActions(indices,inFlightAsyncOperations);
       }
     }
   }
  else {
     logger.info("Index [{}] docs async: [{}] bulk: [{}]",builders.size(),false,true);
-    BulkRequestBuilder bulkBuilder=client().prepareBulk();
-    for (    IndexRequestBuilder indexRequestBuilder : builders) {
-      bulkBuilder.add(indexRequestBuilder);
+    for (    List<IndexRequestBuilder> segmented : Lists.partition(builders,between(MAX_BULK_INDEX_REQUEST_SIZE / 2,MAX_BULK_INDEX_REQUEST_SIZE))) {
+      BulkRequestBuilder bulkBuilder=client().prepareBulk();
+      for (      IndexRequestBuilder indexRequestBuilder : segmented) {
+        bulkBuilder.add(indexRequestBuilder);
+      }
+      BulkResponse actionGet=bulkBuilder.execute().actionGet();
+      assertThat(actionGet.hasFailures() ? actionGet.buildFailureMessage() : "",actionGet.hasFailures(),equalTo(false));
     }
-    BulkResponse actionGet=bulkBuilder.execute().actionGet();
-    assertThat(actionGet.hasFailures() ? actionGet.buildFailureMessage() : "",actionGet.hasFailures(),equalTo(false));
   }
-  for (  CountDownLatch countDownLatch : latches) {
-    countDownLatch.await();
+  for (  CountDownLatch operation : inFlightAsyncOperations) {
+    operation.await();
   }
   final List<Throwable> actualErrors=new ArrayList<Throwable>();
   for (  Tuple<IndexRequestBuilder,Throwable> tuple : errors) {
