@@ -1,0 +1,79 @@
+{
+  final StoppableSemaphore semaphore=new StoppableSemaphore(1);
+  final Map<String,CompetitionResult> competitionResults=new HashMap<String,CompetitionResult>();
+  final BenchmarkResponse benchmarkResponse=new BenchmarkResponse(request.benchmarkName(),competitionResults);
+  if (this.nodeName == null) {
+    this.nodeName=clusterService.localNode().name();
+  }
+synchronized (lock) {
+    if (activeBenchmarks.containsKey(request.benchmarkName())) {
+      throw new ElasticsearchException("Benchmark with id [" + request.benchmarkName() + "] is already running");
+    }
+    activeBenchmarks=ImmutableOpenMap.builder(activeBenchmarks).fPut(request.benchmarkName(),new BenchmarkState(request,benchmarkResponse,semaphore)).build();
+  }
+  try {
+    final List<String> errorMessages=new ArrayList<>();
+    try {
+      for (      BenchmarkCompetitor competitor : request.competitors()) {
+        final BenchmarkSettings settings=competitor.settings();
+        final int iterations=settings.iterations();
+        logger.debug("Executing [{}] iterations for benchmark [{}][{}] ",iterations,request.benchmarkName(),competitor.name());
+        final List<CompetitionIteration> competitionIterations=new ArrayList<>(iterations);
+        final CompetitionResult competitionResult=new CompetitionResult(competitor.name(),settings.concurrency(),settings.multiplier(),request.percentiles());
+        final CompetitionNodeResult competitionNodeResult=new CompetitionNodeResult(competitor.name(),nodeName,iterations,competitionIterations);
+        competitionResult.addCompetitionNodeResult(competitionNodeResult);
+        benchmarkResponse.competitionResults.put(competitor.name(),competitionResult);
+        final List<SearchRequest> searchRequests=competitor.settings().searchRequests();
+        if (settings.warmup()) {
+          final long beforeWarmup=System.nanoTime();
+          final List<String> warmUpErrors=warmUp(competitor,searchRequests,semaphore);
+          final long afterWarmup=System.nanoTime();
+          competitionNodeResult.warmUpTime(TimeUnit.MILLISECONDS.convert(afterWarmup - beforeWarmup,TimeUnit.NANOSECONDS));
+          if (!warmUpErrors.isEmpty()) {
+            competitionNodeResult.failures(warmUpErrors.toArray(Strings.EMPTY_ARRAY));
+            continue;
+          }
+        }
+        final int requestsPerRound=settings.multiplier() * searchRequests.size();
+        final long[] timeBuckets=new long[requestsPerRound];
+        final long[] docBuckets=new long[requestsPerRound];
+        for (int i=0; i < iterations; i++) {
+          if (settings.allowCacheClearing() && settings.clearCaches() != null) {
+            try {
+              client.admin().indices().clearCache(settings.clearCaches()).get();
+            }
+ catch (            ExecutionException e) {
+              throw new ElasticsearchException("Failed to clear caches before benchmark round",e);
+            }
+          }
+          CompetitionIteration ci=runIteration(competitor,searchRequests,timeBuckets,docBuckets,errorMessages,semaphore);
+          ci.percentiles(request.percentiles());
+          if (errorMessages.isEmpty()) {
+            competitionIterations.add(ci);
+            competitionNodeResult.incrementCompletedIterations();
+          }
+ else {
+            competitionNodeResult.failures(errorMessages.toArray(Strings.EMPTY_ARRAY));
+            return benchmarkResponse;
+          }
+        }
+        competitionNodeResult.totalExecutedQueries(settings.multiplier() * searchRequests.size() * iterations);
+      }
+    }
+ catch (    InterruptedException ex) {
+      Thread.currentThread().interrupt();
+      benchmarkResponse.state(BenchmarkResponse.State.ABORTED);
+    }
+    benchmarkResponse.state(BenchmarkResponse.State.COMPLETE);
+    return benchmarkResponse;
+  }
+  finally {
+synchronized (lock) {
+      if (!activeBenchmarks.containsKey(request.benchmarkName())) {
+        throw new ElasticsearchException("Benchmark with id [" + request.benchmarkName() + "] is missing");
+      }
+      semaphore.stop();
+      activeBenchmarks=ImmutableOpenMap.builder(activeBenchmarks).fRemove(request.benchmarkName()).build();
+    }
+  }
+}

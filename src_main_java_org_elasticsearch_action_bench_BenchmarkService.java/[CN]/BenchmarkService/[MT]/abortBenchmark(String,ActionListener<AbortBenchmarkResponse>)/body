@@ -1,0 +1,32 @@
+{
+  BenchmarkStateListener benchmarkStateListener=new BenchmarkStateListener(){
+    @Override public void onResponse(    final ClusterState newState,    final BenchmarkMetaData.Entry entry){
+      if (entry != null) {
+        threadPool.executor(ThreadPool.Names.GENERIC).execute(new Runnable(){
+          @Override public void run(){
+            final ImmutableOpenMap<String,DiscoveryNode> nodes=newState.nodes().nodes();
+            BenchmarkAbortAsyncHandler async=new BenchmarkAbortAsyncHandler(entry.nodes().length,id,listener);
+            for (            String nodeId : entry.nodes()) {
+              final DiscoveryNode node=nodes.get(nodeId);
+              if (node != null) {
+                transportService.sendRequest(node,AbortExecutionHandler.ACTION,new NodeAbortRequest(id),async);
+              }
+ else {
+                logger.debug("Node for ID [" + nodeId + "] not found in cluster state - skipping");
+              }
+            }
+          }
+        }
+);
+      }
+ else {
+        listener.onResponse(new AbortBenchmarkResponse(id,"Benchmark with id [" + id + "] not found"));
+      }
+    }
+    @Override public void onFailure(    Throwable t){
+      listener.onFailure(t);
+    }
+  }
+;
+  clusterService.submitStateUpdateTask("abort_benchmark",new AbortBenchmarkTask(id,benchmarkStateListener));
+}
