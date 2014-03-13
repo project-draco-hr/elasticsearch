@@ -4,7 +4,7 @@
     InternalHistogram<B> histo=(InternalHistogram<B>)aggregations.get(0);
     if (minDocCount == 1) {
       for (      B bucket : histo.buckets) {
-        bucket.aggregations.reduce(reduceContext.cacheRecycler());
+        bucket.aggregations.reduce(reduceContext.bigArrays());
       }
       return histo;
     }
@@ -15,7 +15,7 @@
     if (minDocCount == 0) {
       while (iter.hasNext()) {
         B nextBucket=list.get(iter.nextIndex());
-        nextBucket.aggregations.reduce(reduceContext.cacheRecycler());
+        nextBucket.aggregations.reduce(reduceContext.bigArrays());
         if (prevBucket != null) {
           long key=emptyBucketInfo.rounding.nextRoundingValue(prevBucket.key);
           while (key != nextBucket.key) {
@@ -33,7 +33,7 @@
           iter.remove();
         }
  else {
-          bucket.aggregations.reduce(reduceContext.cacheRecycler());
+          bucket.aggregations.reduce(reduceContext.bigArrays());
         }
       }
     }
@@ -43,27 +43,24 @@
     return histo;
   }
   InternalHistogram reduced=(InternalHistogram)aggregations.get(0);
-  Recycler.V<LongObjectOpenHashMap<List<Histogram.Bucket>>> bucketsByKey=reduceContext.cacheRecycler().longObjectMap(-1);
+  LongObjectPagedHashMap<List<B>> bucketsByKey=new LongObjectPagedHashMap<List<B>>(reduceContext.bigArrays());
   for (  InternalAggregation aggregation : aggregations) {
     InternalHistogram<B> histogram=(InternalHistogram)aggregation;
     for (    B bucket : histogram.buckets) {
-      List<Histogram.Bucket> bucketList=bucketsByKey.v().get(bucket.key);
+      List<B> bucketList=bucketsByKey.get(bucket.key);
       if (bucketList == null) {
-        bucketList=new ArrayList<Histogram.Bucket>(aggregations.size());
-        bucketsByKey.v().put(bucket.key,bucketList);
+        bucketList=new ArrayList<B>(aggregations.size());
+        bucketsByKey.put(bucket.key,bucketList);
       }
       bucketList.add(bucket);
     }
   }
-  List<B> reducedBuckets=new ArrayList<B>(bucketsByKey.v().size());
-  Object[] buckets=bucketsByKey.v().values;
-  boolean[] allocated=bucketsByKey.v().allocated;
-  for (int i=0; i < allocated.length; i++) {
-    if (allocated[i]) {
-      B bucket=((List<B>)buckets[i]).get(0).reduce(((List<B>)buckets[i]),reduceContext.cacheRecycler());
-      if (bucket.getDocCount() >= minDocCount) {
-        reducedBuckets.add(bucket);
-      }
+  List<B> reducedBuckets=new ArrayList<B>((int)bucketsByKey.size());
+  for (  LongObjectPagedHashMap.Cursor<List<B>> cursor : bucketsByKey) {
+    List<B> sameTermBuckets=cursor.value;
+    B bucket=sameTermBuckets.get(0).reduce(sameTermBuckets,reduceContext.bigArrays());
+    if (bucket.getDocCount() >= minDocCount) {
+      reducedBuckets.add(bucket);
     }
   }
   bucketsByKey.release();
