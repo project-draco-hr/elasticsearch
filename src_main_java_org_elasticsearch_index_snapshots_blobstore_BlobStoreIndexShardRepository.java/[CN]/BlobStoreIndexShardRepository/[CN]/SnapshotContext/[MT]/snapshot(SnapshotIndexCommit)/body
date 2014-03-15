@@ -9,12 +9,11 @@
   }
   long generation=findLatestFileNameGeneration(blobs);
   BlobStoreIndexShardSnapshots snapshots=buildBlobStoreIndexShardSnapshots(blobs);
-  snapshotStatus.updateStage(IndexShardSnapshotStatus.Stage.STARTED);
-  final CountDownLatch indexLatch=new CountDownLatch(snapshotIndexCommit.getFiles().length);
   final CopyOnWriteArrayList<Throwable> failures=new CopyOnWriteArrayList<Throwable>();
   final List<BlobStoreIndexShardSnapshot.FileInfo> indexCommitPointFiles=newArrayList();
   int indexNumberOfFiles=0;
   long indexTotalFilesSize=0;
+  ArrayList<FileInfo> filesToSnapshot=newArrayList();
   for (  String fileName : snapshotIndexCommit.getFiles()) {
     if (snapshotStatus.aborted()) {
       logger.debug("[{}] [{}] Aborted on the file [{}], exiting",shardId,snapshotId,fileName);
@@ -36,21 +35,25 @@
     if (snapshotRequired) {
       indexNumberOfFiles++;
       indexTotalFilesSize+=md.length();
-      try {
-        BlobStoreIndexShardSnapshot.FileInfo snapshotFileInfo=new BlobStoreIndexShardSnapshot.FileInfo(fileNameFromGeneration(++generation),fileName,md.length(),chunkSize,md.checksum());
-        indexCommitPointFiles.add(snapshotFileInfo);
-        snapshotFile(snapshotFileInfo,indexLatch,failures);
-      }
- catch (      IOException e) {
-        failures.add(e);
-      }
+      BlobStoreIndexShardSnapshot.FileInfo snapshotFileInfo=new BlobStoreIndexShardSnapshot.FileInfo(fileNameFromGeneration(++generation),fileName,md.length(),chunkSize,md.checksum());
+      indexCommitPointFiles.add(snapshotFileInfo);
+      filesToSnapshot.add(snapshotFileInfo);
     }
  else {
       indexCommitPointFiles.add(fileInfo);
-      indexLatch.countDown();
     }
   }
   snapshotStatus.files(indexNumberOfFiles,indexTotalFilesSize);
+  snapshotStatus.updateStage(IndexShardSnapshotStatus.Stage.STARTED);
+  final CountDownLatch indexLatch=new CountDownLatch(filesToSnapshot.size());
+  for (  FileInfo snapshotFileInfo : filesToSnapshot) {
+    try {
+      snapshotFile(snapshotFileInfo,indexLatch,failures);
+    }
+ catch (    IOException e) {
+      failures.add(e);
+    }
+  }
   snapshotStatus.indexVersion(snapshotIndexCommit.getGeneration());
   try {
     indexLatch.await();
@@ -64,7 +67,7 @@
   }
   snapshotStatus.updateStage(IndexShardSnapshotStatus.Stage.FINALIZE);
   String commitPointName=snapshotBlobName(snapshotId);
-  BlobStoreIndexShardSnapshot snapshot=new BlobStoreIndexShardSnapshot(snapshotId.getSnapshot(),snapshotIndexCommit.getGeneration(),indexCommitPointFiles);
+  BlobStoreIndexShardSnapshot snapshot=new BlobStoreIndexShardSnapshot(snapshotId.getSnapshot(),snapshotIndexCommit.getGeneration(),indexCommitPointFiles,snapshotStatus.startTime(),System.currentTimeMillis() - snapshotStatus.startTime(),indexNumberOfFiles,indexTotalFilesSize);
   try {
     byte[] snapshotData=writeSnapshot(snapshot);
     logger.trace("[{}] [{}] writing shard snapshot file",shardId,snapshotId);

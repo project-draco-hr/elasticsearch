@@ -1,0 +1,28 @@
+{
+  ImmutableMap.Builder<ShardId,IndexShardSnapshotStatus> shardStatusBuilder=ImmutableMap.builder();
+  Repository repository=repositoriesService.repository(snapshotId.getRepository());
+  IndexShardRepository indexShardRepository=repositoriesService.indexShardRepository(snapshotId.getRepository());
+  Snapshot snapshot=repository.readSnapshot(snapshotId);
+  MetaData metaData=repository.readSnapshotMetaData(snapshotId,snapshot.indices());
+  for (  String index : snapshot.indices()) {
+    IndexMetaData indexMetaData=metaData.indices().get(index);
+    if (indexMetaData != null) {
+      int numberOfShards=indexMetaData.getNumberOfShards();
+      for (int i=0; i < numberOfShards; i++) {
+        ShardId shardId=new ShardId(index,i);
+        SnapshotShardFailure shardFailure=findShardFailure(snapshot.shardFailures(),shardId);
+        if (shardFailure != null) {
+          IndexShardSnapshotStatus shardSnapshotStatus=new IndexShardSnapshotStatus();
+          shardSnapshotStatus.updateStage(IndexShardSnapshotStatus.Stage.FAILURE);
+          shardSnapshotStatus.failure(shardFailure.reason());
+          shardStatusBuilder.put(shardId,shardSnapshotStatus);
+        }
+ else {
+          IndexShardSnapshotStatus shardSnapshotStatus=indexShardRepository.snapshotStatus(snapshotId,shardId);
+          shardStatusBuilder.put(shardId,shardSnapshotStatus);
+        }
+      }
+    }
+  }
+  return shardStatusBuilder.build();
+}

@@ -1,0 +1,29 @@
+{
+  ImmutableMap.Builder<SnapshotId,ImmutableMap<ShardId,SnapshotIndexShardStatus>> snapshotMapBuilder=ImmutableMap.builder();
+  try {
+    String nodeId=clusterService.localNode().id();
+    for (    SnapshotId snapshotId : request.snapshotIds) {
+      ImmutableMap<ShardId,IndexShardSnapshotStatus> shardsStatus=snapshotsService.currentSnapshotShards(snapshotId);
+      if (shardsStatus == null) {
+        continue;
+      }
+      ImmutableMap.Builder<ShardId,SnapshotIndexShardStatus> shardMapBuilder=ImmutableMap.builder();
+      for (      ImmutableMap.Entry<ShardId,IndexShardSnapshotStatus> shardEntry : shardsStatus.entrySet()) {
+        SnapshotIndexShardStatus shardStatus;
+        IndexShardSnapshotStatus.Stage stage=shardEntry.getValue().stage();
+        if (stage != IndexShardSnapshotStatus.Stage.DONE && stage != IndexShardSnapshotStatus.Stage.FAILURE) {
+          shardStatus=new SnapshotIndexShardStatus(shardEntry.getKey(),shardEntry.getValue(),nodeId);
+        }
+ else {
+          shardStatus=new SnapshotIndexShardStatus(shardEntry.getKey(),shardEntry.getValue());
+        }
+        shardMapBuilder.put(shardEntry.getKey(),shardStatus);
+      }
+      snapshotMapBuilder.put(snapshotId,shardMapBuilder.build());
+    }
+    return new NodeSnapshotStatus(clusterService.localNode(),snapshotMapBuilder.build());
+  }
+ catch (  Exception e) {
+    throw new ElasticsearchException("failed to load metadata",e);
+  }
+}
