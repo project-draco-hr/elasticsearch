@@ -1,10 +1,9 @@
 {
   final int numShards=between(2,10);
   final int numReplicas=0;
-  cluster().ensureAtLeastNumNodes(3);
   logger.info("--> creating test index ...");
   int allowNodes=2;
-  assertAcked(prepareCreate("test").setSettings(settingsBuilder().put(indexSettings()).put("number_of_shards",numShards).put("number_of_replicas",numReplicas).build()));
+  assertAcked(prepareCreate("test",3,settingsBuilder().put(SETTING_NUMBER_OF_SHARDS,numShards).put(SETTING_NUMBER_OF_REPLICAS,numReplicas)));
   final AtomicLong idGenerator=new AtomicLong();
   final AtomicLong indexCounter=new AtomicLong();
   final AtomicBoolean stop=new AtomicBoolean(false);
@@ -39,28 +38,34 @@
 ;
     writers[i].start();
   }
-  final int numDocs=between(10000,50000);
-  for (int i=0; i < numDocs; i+=between(100,1000)) {
+  try {
+    final int numDocs=between(10000,50000);
+    for (int i=0; i < numDocs; i+=between(100,1000)) {
+      assertThat(failures,emptyIterable());
+      logger.info("--> waiting for {} docs to be indexed ...",i);
+      waitForDocs(i);
+      logger.info("--> {} docs indexed",i);
+      allowNodes=2 / allowNodes;
+      allowNodes("test",allowNodes);
+      logger.info("--> waiting for GREEN health status ...");
+      assertThat(client().admin().cluster().prepareHealth().setWaitForEvents(Priority.LANGUID).setTimeout("1m").setWaitForGreenStatus().execute().actionGet().isTimedOut(),equalTo(false));
+    }
+    logger.info("--> marking and waiting for indexing threads to stop ...");
+    stop.set(true);
+    stopLatch.await();
     assertThat(failures,emptyIterable());
-    logger.info("--> waiting for {} docs to be indexed ...",i);
-    waitForDocs(i);
-    logger.info("--> {} docs indexed",i);
-    allowNodes=2 / allowNodes;
-    allowNodes("test",allowNodes);
-    logger.info("--> waiting for GREEN health status ...");
+    logger.info("--> indexing threads stopped");
+    logger.info("--> bump up number of replicas to 1 and allow all nodes to hold the index");
+    allowNodes("test",3);
+    assertAcked(client().admin().indices().prepareUpdateSettings("test").setSettings(settingsBuilder().put("number_of_replicas",1)).get());
     assertThat(client().admin().cluster().prepareHealth().setWaitForEvents(Priority.LANGUID).setTimeout("1m").setWaitForGreenStatus().execute().actionGet().isTimedOut(),equalTo(false));
+    logger.info("--> refreshing the index");
+    refreshAndAssert();
+    logger.info("--> verifying indexed content");
+    iterateAssertCount(numShards,indexCounter.get(),10);
   }
-  logger.info("--> marking and waiting for indexing threads to stop ...");
-  stop.set(true);
-  assertThat(failures,emptyIterable());
-  stopLatch.await();
-  logger.info("--> indexing threads stopped");
-  logger.info("--> bump up number of replicas to 1 and allow all nodes to hold the index");
-  allowNodes("test",3);
-  assertAcked(client().admin().indices().prepareUpdateSettings("test").setSettings(settingsBuilder().put("number_of_replicas",1)).get());
-  assertThat(client().admin().cluster().prepareHealth().setWaitForEvents(Priority.LANGUID).setTimeout("1m").setWaitForGreenStatus().execute().actionGet().isTimedOut(),equalTo(false));
-  logger.info("--> refreshing the index");
-  refreshAndAssert();
-  logger.info("--> verifying indexed content");
-  iterateAssertCount(numShards,indexCounter.get(),10);
+  finally {
+    stop.set(true);
+    stopLatch.await();
+  }
 }

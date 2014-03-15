@@ -1,6 +1,7 @@
 {
   logger.info("--> creating test index ...");
-  assertAcked(prepareCreate("test",1,settingsBuilder().put(SETTING_NUMBER_OF_REPLICAS,1)));
+  int numberOfShards=numberOfShards();
+  assertAcked(prepareCreate("test",1,settingsBuilder().put(SETTING_NUMBER_OF_SHARDS,numberOfShards).put(SETTING_NUMBER_OF_REPLICAS,1)));
   final AtomicLong idGenerator=new AtomicLong();
   final AtomicLong indexCounter=new AtomicLong();
   final AtomicBoolean stop=new AtomicBoolean(false);
@@ -32,29 +33,35 @@
 ;
     writers[i].start();
   }
-  logger.info("--> waiting for 2000 docs to be indexed ...");
-  waitForDocs(2000);
-  logger.info("--> 2000 docs indexed");
-  logger.info("--> flushing the index ....");
-  client().admin().indices().prepareFlush().execute().actionGet();
-  logger.info("--> waiting for 4000 docs to be indexed ...");
-  waitForDocs(4000);
-  logger.info("--> 4000 docs indexed");
-  logger.info("--> allow 4 nodes for index [test] ...");
-  allowNodes("test",4);
-  logger.info("--> waiting for GREEN health status ...");
-  assertThat(client().admin().cluster().prepareHealth().setWaitForEvents(Priority.LANGUID).setTimeout("1m").setWaitForGreenStatus().setWaitForNodes(">=4").execute().actionGet().isTimedOut(),equalTo(false));
-  logger.info("--> waiting for 15000 docs to be indexed ...");
-  waitForDocs(15000);
-  logger.info("--> 15000 docs indexed");
-  stop.set(true);
-  stopLatch.await();
-  logger.info("--> marking and waiting for indexing threads to stop ...");
-  stop.set(true);
-  stopLatch.await();
-  logger.info("--> indexing threads stopped");
-  logger.info("--> refreshing the index");
-  refreshAndAssert();
-  logger.info("--> verifying indexed content");
-  iterateAssertCount(5,indexCounter.get(),10);
+  try {
+    logger.info("--> waiting for 2000 docs to be indexed ...");
+    waitForDocs(2000);
+    logger.info("--> 2000 docs indexed");
+    logger.info("--> flushing the index ....");
+    client().admin().indices().prepareFlush().execute().actionGet();
+    logger.info("--> waiting for 4000 docs to be indexed ...");
+    waitForDocs(4000);
+    logger.info("--> 4000 docs indexed");
+    logger.info("--> allow 4 nodes for index [test] ...");
+    allowNodes("test",4);
+    logger.info("--> waiting for GREEN health status ...");
+    assertThat(client().admin().cluster().prepareHealth().setWaitForEvents(Priority.LANGUID).setTimeout("1m").setWaitForGreenStatus().setWaitForNodes(">=4").execute().actionGet().isTimedOut(),equalTo(false));
+    logger.info("--> waiting for 15000 docs to be indexed ...");
+    waitForDocs(15000);
+    logger.info("--> 15000 docs indexed");
+    stop.set(true);
+    stopLatch.await();
+    logger.info("--> marking and waiting for indexing threads to stop ...");
+    stop.set(true);
+    stopLatch.await();
+    logger.info("--> indexing threads stopped");
+    logger.info("--> refreshing the index");
+    refreshAndAssert();
+    logger.info("--> verifying indexed content");
+    iterateAssertCount(numberOfShards,indexCounter.get(),10);
+  }
+  finally {
+    stop.set(true);
+    stopLatch.await();
+  }
 }
