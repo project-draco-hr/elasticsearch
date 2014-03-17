@@ -10,20 +10,51 @@
     }
     CollectionUtil.introSort(histo.buckets,order.asc ? InternalOrder.KEY_ASC.comparator() : InternalOrder.KEY_DESC.comparator());
     List<B> list=order.asc ? histo.buckets : Lists.reverse(histo.buckets);
-    B prevBucket=null;
+    B lastBucket=null;
     ListIterator<B> iter=list.listIterator();
     if (minDocCount == 0) {
+      ExtendedBounds bounds=emptyBucketInfo.bounds;
+      if (bounds != null) {
+        B firstBucket=iter.hasNext() ? list.get(iter.nextIndex()) : null;
+        if (firstBucket == null) {
+          if (bounds.min != null && bounds.max != null) {
+            long key=bounds.min;
+            long max=bounds.max;
+            while (key <= max) {
+              iter.add(createBucket(key,0,emptyBucketInfo.subAggregations,formatter));
+              key=emptyBucketInfo.rounding.nextRoundingValue(key);
+            }
+          }
+        }
+ else {
+          if (bounds.min != null) {
+            long key=bounds.min;
+            while (key < firstBucket.key) {
+              iter.add(createBucket(key,0,emptyBucketInfo.subAggregations,formatter));
+              key=emptyBucketInfo.rounding.nextRoundingValue(key);
+            }
+          }
+        }
+      }
       while (iter.hasNext()) {
         B nextBucket=list.get(iter.nextIndex());
         nextBucket.aggregations.reduce(reduceContext.bigArrays());
-        if (prevBucket != null) {
-          long key=emptyBucketInfo.rounding.nextRoundingValue(prevBucket.key);
+        if (lastBucket != null) {
+          long key=emptyBucketInfo.rounding.nextRoundingValue(lastBucket.key);
           while (key != nextBucket.key) {
             iter.add(createBucket(key,0,emptyBucketInfo.subAggregations,formatter));
             key=emptyBucketInfo.rounding.nextRoundingValue(key);
           }
         }
-        prevBucket=iter.next();
+        lastBucket=iter.next();
+      }
+      if (bounds != null && lastBucket != null && bounds.max != null && bounds.max > lastBucket.key) {
+        long key=emptyBucketInfo.rounding.nextRoundingValue(lastBucket.key);
+        long max=bounds.max;
+        while (key <= max) {
+          iter.add(createBucket(key,0,emptyBucketInfo.subAggregations,formatter));
+          key=emptyBucketInfo.rounding.nextRoundingValue(key);
+        }
       }
     }
  else {
@@ -67,18 +98,51 @@
   if (minDocCount == 0) {
     CollectionUtil.introSort(reducedBuckets,order.asc ? InternalOrder.KEY_ASC.comparator() : InternalOrder.KEY_DESC.comparator());
     List<B> list=order.asc ? reducedBuckets : Lists.reverse(reducedBuckets);
-    B prevBucket=null;
+    B lastBucket=null;
+    ExtendedBounds bounds=emptyBucketInfo.bounds;
     ListIterator<B> iter=list.listIterator();
+    if (bounds != null) {
+      B firstBucket=iter.hasNext() ? list.get(iter.nextIndex()) : null;
+      if (firstBucket == null) {
+        if (bounds.min != null && bounds.max != null) {
+          long key=bounds.min;
+          long max=bounds.max;
+          while (key <= max) {
+            iter.add(createBucket(key,0,emptyBucketInfo.subAggregations,formatter));
+            key=emptyBucketInfo.rounding.nextRoundingValue(key);
+          }
+        }
+      }
+ else {
+        if (bounds.min != null) {
+          long key=bounds.min;
+          if (key < firstBucket.key) {
+            while (key < firstBucket.key) {
+              iter.add(createBucket(key,0,emptyBucketInfo.subAggregations,formatter));
+              key=emptyBucketInfo.rounding.nextRoundingValue(key);
+            }
+          }
+        }
+      }
+    }
     while (iter.hasNext()) {
       B nextBucket=list.get(iter.nextIndex());
-      if (prevBucket != null) {
-        long key=emptyBucketInfo.rounding.nextRoundingValue(prevBucket.key);
+      if (lastBucket != null) {
+        long key=emptyBucketInfo.rounding.nextRoundingValue(lastBucket.key);
         while (key != nextBucket.key) {
           iter.add(createBucket(key,0,emptyBucketInfo.subAggregations,formatter));
           key=emptyBucketInfo.rounding.nextRoundingValue(key);
         }
       }
-      prevBucket=iter.next();
+      lastBucket=iter.next();
+    }
+    if (bounds != null && lastBucket != null && bounds.max != null && bounds.max > lastBucket.key) {
+      long key=emptyBucketInfo.rounding.nextRoundingValue(lastBucket.key);
+      long max=bounds.max;
+      while (key <= max) {
+        iter.add(createBucket(key,0,emptyBucketInfo.subAggregations,formatter));
+        key=emptyBucketInfo.rounding.nextRoundingValue(key);
+      }
     }
     if (order != InternalOrder.KEY_ASC && order != InternalOrder.KEY_DESC) {
       CollectionUtil.introSort(reducedBuckets,order.comparator());

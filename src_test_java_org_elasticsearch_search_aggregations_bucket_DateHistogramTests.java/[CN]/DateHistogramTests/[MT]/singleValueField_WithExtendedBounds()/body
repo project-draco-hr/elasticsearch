@@ -1,0 +1,79 @@
+{
+  String pattern="yyyy-MM-dd";
+  int interval=randomIntBetween(1,2);
+  long intervalMillis=interval * 24 * 60* 60* 1000;
+  DateTime base=new DateTime(DateTimeZone.UTC).dayOfMonth().roundFloorCopy();
+  DateTime baseKey=new DateTime(intervalMillis * (base.getMillis() / intervalMillis),DateTimeZone.UTC);
+  createIndex("idx2");
+  int numOfBuckets=randomIntBetween(3,6);
+  int emptyBucketIndex=randomIntBetween(1,numOfBuckets - 2);
+  long[] docCounts=new long[numOfBuckets];
+  List<IndexRequestBuilder> builders=new ArrayList<IndexRequestBuilder>();
+  for (int i=0; i < numOfBuckets; i++) {
+    if (i == emptyBucketIndex) {
+      docCounts[i]=0;
+    }
+ else {
+      int docCount=randomIntBetween(1,3);
+      for (int j=0; j < docCount; j++) {
+        DateTime date=baseKey.plusDays(i * interval + randomIntBetween(0,interval - 1));
+        builders.add(indexDoc("idx2",date,j));
+      }
+      docCounts[i]=docCount;
+    }
+  }
+  indexRandom(true,builders);
+  ensureSearchable("idx2");
+  DateTime lastDataBucketKey=baseKey.plusDays((numOfBuckets - 1) * interval);
+  int addedBucketsLeft=randomIntBetween(0,numOfBuckets);
+  DateTime boundsMinKey;
+  if (frequently()) {
+    boundsMinKey=baseKey.minusDays(addedBucketsLeft * interval);
+  }
+ else {
+    boundsMinKey=baseKey.plus(addedBucketsLeft * interval);
+    addedBucketsLeft=0;
+  }
+  DateTime boundsMin=boundsMinKey.plusDays(randomIntBetween(0,interval - 1));
+  int addedBucketsRight=randomIntBetween(0,numOfBuckets);
+  int boundsMaxKeyDelta=addedBucketsRight * interval;
+  if (rarely()) {
+    addedBucketsRight=0;
+    boundsMaxKeyDelta=-boundsMaxKeyDelta;
+  }
+  DateTime boundsMaxKey=lastDataBucketKey.plusDays(boundsMaxKeyDelta);
+  DateTime boundsMax=boundsMaxKey.plusDays(randomIntBetween(0,interval - 1));
+  boolean invalidBoundsError=boundsMin.isAfter(boundsMax);
+  int bucketsCount=numOfBuckets + addedBucketsLeft + addedBucketsRight;
+  long[] extendedValueCounts=new long[bucketsCount];
+  System.arraycopy(docCounts,0,extendedValueCounts,addedBucketsLeft,docCounts.length);
+  SearchResponse response=null;
+  try {
+    response=client().prepareSearch("idx2").addAggregation(dateHistogram("histo").field("date").interval(DateHistogram.Interval.days(interval)).minDocCount(0).extendedBounds(boundsMin,boundsMax).format(pattern)).execute().actionGet();
+    if (invalidBoundsError) {
+      fail("Expected an exception to be thrown when bounds.min is greater than bounds.max");
+      return;
+    }
+  }
+ catch (  Exception e) {
+    if (invalidBoundsError) {
+      return;
+    }
+ else {
+      throw e;
+    }
+  }
+  assertSearchResponse(response);
+  DateHistogram histo=response.getAggregations().get("histo");
+  assertThat(histo,notNullValue());
+  assertThat(histo.getName(),equalTo("histo"));
+  assertThat(histo.getBuckets().size(),equalTo(bucketsCount));
+  DateTime key=baseKey.isBefore(boundsMinKey) ? baseKey : boundsMinKey;
+  for (int i=0; i < bucketsCount; i++) {
+    DateHistogram.Bucket bucket=histo.getBucketByKey(format(key,pattern));
+    assertThat(bucket,notNullValue());
+    assertThat(bucket.getKeyAsDate(),equalTo(key));
+    assertThat(bucket.getDocCount(),equalTo(extendedValueCounts[i]));
+    key=key.plusDays(interval);
+  }
+}
