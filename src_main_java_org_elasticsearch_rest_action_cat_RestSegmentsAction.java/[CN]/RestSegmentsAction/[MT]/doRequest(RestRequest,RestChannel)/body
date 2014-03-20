@@ -1,17 +1,34 @@
 {
   final String[] indices=Strings.splitStringByCommaToArray(request.param("index"));
-  final IndicesSegmentsRequest indicesSegmentsRequest=new IndicesSegmentsRequest();
-  indicesSegmentsRequest.indices(indices);
-  client.admin().indices().segments(indicesSegmentsRequest,new ActionListener<IndicesSegmentResponse>(){
-    @Override public void onResponse(    final IndicesSegmentResponse indicesSegmentResponse){
-      final Map<String,IndexSegments> indicesSegments=indicesSegmentResponse.getIndices();
-      try {
-        Table tab=buildTable(request,indicesSegments);
-        channel.sendResponse(RestTable.buildResponse(tab,request,channel));
+  final ClusterStateRequest clusterStateRequest=new ClusterStateRequest();
+  clusterStateRequest.local(request.paramAsBoolean("local",clusterStateRequest.local()));
+  clusterStateRequest.masterNodeTimeout(request.paramAsTime("master_timeout",clusterStateRequest.masterNodeTimeout()));
+  clusterStateRequest.clear().nodes(true).routingTable(true).indices(indices);
+  client.admin().cluster().state(clusterStateRequest,new AbstractRestResponseActionListener<ClusterStateResponse>(request,channel,logger){
+    @Override public void onResponse(    final ClusterStateResponse clusterStateResponse){
+      final IndicesSegmentsRequest indicesSegmentsRequest=new IndicesSegmentsRequest();
+      indicesSegmentsRequest.indices(indices);
+      client.admin().indices().segments(indicesSegmentsRequest,new ActionListener<IndicesSegmentResponse>(){
+        @Override public void onResponse(        final IndicesSegmentResponse indicesSegmentResponse){
+          final Map<String,IndexSegments> indicesSegments=indicesSegmentResponse.getIndices();
+          try {
+            Table tab=buildTable(request,clusterStateResponse,indicesSegments);
+            channel.sendResponse(RestTable.buildResponse(tab,request,channel));
+          }
+ catch (          Throwable e) {
+            onFailure(e);
+          }
+        }
+        @Override public void onFailure(        Throwable e){
+          try {
+            channel.sendResponse(new XContentThrowableRestResponse(request,e));
+          }
+ catch (          IOException e1) {
+            logger.error("Failed to send failure response",e1);
+          }
+        }
       }
- catch (      Throwable e) {
-        onFailure(e);
-      }
+);
     }
     @Override public void onFailure(    Throwable e){
       try {
