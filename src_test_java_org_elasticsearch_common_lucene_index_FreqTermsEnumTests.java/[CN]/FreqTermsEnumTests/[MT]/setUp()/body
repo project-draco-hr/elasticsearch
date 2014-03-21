@@ -1,0 +1,60 @@
+{
+  super.setUp();
+  referenceAll=Maps.newHashMap();
+  referenceNotDeleted=Maps.newHashMap();
+  referenceFilter=Maps.newHashMap();
+  Directory dir=newDirectory();
+  IndexWriterConfig conf=newIndexWriterConfig(TEST_VERSION_CURRENT,new MockAnalyzer(random()));
+  conf.setMergeScheduler(NoMergeScheduler.INSTANCE);
+  iw=new IndexWriter(dir,conf);
+  terms=new String[scaledRandomIntBetween(10,300)];
+  for (int i=0; i < terms.length; i++) {
+    terms[i]=randomAsciiOfLength(5);
+  }
+  int numberOfDocs=scaledRandomIntBetween(30,300);
+  Document[] docs=new Document[numberOfDocs];
+  for (int i=0; i < numberOfDocs; i++) {
+    Document doc=new Document();
+    doc.add(new StringField("id",Integer.toString(i),Field.Store.YES));
+    docs[i]=doc;
+    for (    String term : terms) {
+      if (randomBoolean()) {
+        continue;
+      }
+      int freq=randomIntBetween(1,3);
+      for (int j=0; j < freq; j++) {
+        doc.add(new TextField("field",term,Field.Store.YES));
+      }
+    }
+  }
+  for (int i=0; i < docs.length; i++) {
+    Document doc=docs[i];
+    iw.addDocument(doc);
+    if (rarely()) {
+      iw.commit();
+    }
+  }
+  Set<String> deletedIds=Sets.newHashSet();
+  for (int i=0; i < docs.length; i++) {
+    Document doc=docs[i];
+    if (randomInt(5) == 2) {
+      Term idTerm=new Term("id",Integer.toString(i));
+      deletedIds.add(idTerm.text());
+      iw.deleteDocuments(idTerm);
+    }
+  }
+  reader=DirectoryReader.open(iw,true);
+  List<Term> filterTerms=Lists.newArrayList();
+  for (int docId=0; docId < reader.maxDoc(); docId++) {
+    Document doc=reader.document(docId);
+    addFreqs(doc,referenceAll);
+    if (!deletedIds.contains(doc.getField("id").stringValue())) {
+      addFreqs(doc,referenceNotDeleted);
+      if (randomBoolean()) {
+        filterTerms.add(new Term("id",doc.getField("id").stringValue()));
+        addFreqs(doc,referenceFilter);
+      }
+    }
+  }
+  filter=new TermsFilter(filterTerms);
+}

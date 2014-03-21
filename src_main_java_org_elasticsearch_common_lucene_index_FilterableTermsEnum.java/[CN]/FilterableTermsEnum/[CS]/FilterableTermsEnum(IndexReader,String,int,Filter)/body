@@ -1,0 +1,43 @@
+{
+  if ((docsEnumFlag != DocsEnum.FLAG_FREQS) && (docsEnumFlag != DocsEnum.FLAG_NONE)) {
+    throw new ElasticsearchIllegalArgumentException("invalid docsEnumFlag of " + docsEnumFlag);
+  }
+  this.docsEnumFlag=docsEnumFlag;
+  if (filter == null) {
+    numDocs=reader.numDocs();
+  }
+  List<AtomicReaderContext> leaves=reader.leaves();
+  List<Holder> enums=Lists.newArrayListWithExpectedSize(leaves.size());
+  for (  AtomicReaderContext context : leaves) {
+    Terms terms=context.reader().terms(field);
+    if (terms == null) {
+      continue;
+    }
+    TermsEnum termsEnum=terms.iterator(null);
+    if (termsEnum == null) {
+      continue;
+    }
+    Bits bits=null;
+    if (filter != null) {
+      if (filter == Queries.MATCH_ALL_FILTER) {
+        bits=context.reader().getLiveDocs();
+      }
+ else {
+        filter=new ApplyAcceptedDocsFilter(filter);
+        DocIdSet docIdSet=filter.getDocIdSet(context,context.reader().getLiveDocs());
+        if (DocIdSets.isEmpty(docIdSet)) {
+          continue;
+        }
+        bits=DocIdSets.toSafeBits(context.reader(),docIdSet);
+        DocIdSetIterator iterator=docIdSet.iterator();
+        if (iterator != null) {
+          while (iterator.nextDoc() != DocIdSetIterator.NO_MORE_DOCS) {
+            numDocs++;
+          }
+        }
+      }
+    }
+    enums.add(new Holder(termsEnum,bits));
+  }
+  this.enums=enums.toArray(new Holder[enums.size()]);
+}
