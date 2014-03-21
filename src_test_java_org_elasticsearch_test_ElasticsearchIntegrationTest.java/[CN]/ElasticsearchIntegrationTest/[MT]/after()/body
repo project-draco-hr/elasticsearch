@@ -1,21 +1,25 @@
 {
   try {
     logger.info("[{}#{}]: cleaning up after test",getTestClass().getSimpleName(),getTestName());
-    Scope currentClusterScope=getCurrentClusterScope();
-    if (currentClusterScope == Scope.TEST) {
-      clearClusters();
+    final Scope currentClusterScope=getCurrentClusterScope();
+    try {
+      if (currentClusterScope != Scope.TEST) {
+        MetaData metaData=client().admin().cluster().prepareState().execute().actionGet().getState().getMetaData();
+        assertThat("test leaves persistent cluster metadata behind: " + metaData.persistentSettings().getAsMap(),metaData.persistentSettings().getAsMap().size(),equalTo(0));
+        assertThat("test leaves transient cluster metadata behind: " + metaData.transientSettings().getAsMap(),metaData.transientSettings().getAsMap().size(),equalTo(0));
+      }
+      wipeIndices("_all");
+      wipeTemplates();
+      wipeRepositories();
+      ensureAllSearchersClosed();
+      ensureAllFilesClosed();
+      ensureEstimatedStats();
     }
- else {
-      MetaData metaData=client().admin().cluster().prepareState().execute().actionGet().getState().getMetaData();
-      assertThat("test leaves persistent cluster metadata behind: " + metaData.persistentSettings().getAsMap(),metaData.persistentSettings().getAsMap().size(),equalTo(0));
-      assertThat("test leaves transient cluster metadata behind: " + metaData.transientSettings().getAsMap(),metaData.transientSettings().getAsMap().size(),equalTo(0));
+  finally {
+      if (currentClusterScope == Scope.TEST) {
+        clearClusters();
+      }
     }
-    wipeIndices("_all");
-    wipeTemplates();
-    wipeRepositories();
-    ensureAllSearchersClosed();
-    ensureAllFilesClosed();
-    ensureEstimatedStats();
     logger.info("[{}#{}]: cleaned up after test",getTestClass().getSimpleName(),getTestName());
   }
  catch (  OutOfMemoryError e) {
