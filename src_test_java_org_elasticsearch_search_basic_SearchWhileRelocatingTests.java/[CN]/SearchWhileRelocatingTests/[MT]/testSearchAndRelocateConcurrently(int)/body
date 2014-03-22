@@ -1,5 +1,5 @@
 {
-  final int numShards=between(10,20);
+  final int numShards=between(1,20);
   client().admin().indices().prepareCreate("test").setSettings(settingsBuilder().put("index.number_of_shards",numShards).put("index.number_of_replicas",numberOfReplicas)).addMapping("type1","loc","type=geo_point","test","type=string").execute().actionGet();
   ensureGreen();
   List<IndexRequestBuilder> indexBuilders=new ArrayList<IndexRequestBuilder>();
@@ -9,24 +9,33 @@
   }
   indexRandom(true,indexBuilders.toArray(new IndexRequestBuilder[indexBuilders.size()]));
   assertHitCount(client().prepareSearch().get(),(long)(numDocs));
-  final int numIters=scaledRandomIntBetween(10,20);
+  final int numIters=scaledRandomIntBetween(5,20);
   for (int i=0; i < numIters; i++) {
     final AtomicBoolean stop=new AtomicBoolean(false);
     final List<Throwable> thrownExceptions=new CopyOnWriteArrayList<Throwable>();
+    final List<Throwable> nonCriticalExceptions=new CopyOnWriteArrayList<Throwable>();
     Thread[] threads=new Thread[scaledRandomIntBetween(1,3)];
     for (int j=0; j < threads.length; j++) {
       threads[j]=new Thread(){
         public void run(){
+          boolean criticalException=true;
           try {
             while (!stop.get()) {
               SearchResponse sr=client().prepareSearch().setSize(numDocs).get();
+              criticalException=sr.getTotalShards() == sr.getSuccessfulShards() || sr.getFailedShards() > 0;
               assertHitCount(sr,(long)(numDocs));
+              criticalException=true;
               final SearchHits sh=sr.getHits();
               assertThat("Expected hits to be the same size the actual hits array",sh.getTotalHits(),equalTo((long)(sh.getHits().length)));
             }
           }
  catch (          Throwable t) {
-            thrownExceptions.add(t);
+            if (!criticalException) {
+              nonCriticalExceptions.add(t);
+            }
+ else {
+              thrownExceptions.add(t);
+            }
           }
         }
       }
@@ -43,16 +52,20 @@
       threads[j].join();
     }
     assertThat(resp.isTimedOut(),equalTo(false));
-    if (!thrownExceptions.isEmpty()) {
+    if (!thrownExceptions.isEmpty() || !nonCriticalExceptions.isEmpty()) {
       Client client=client();
+      boolean postSearchOK=true;
       String verified="POST SEARCH OK";
       for (int j=0; j < 10; j++) {
         if (client.prepareSearch().get().getHits().getTotalHits() != numDocs) {
           verified="POST SEARCH FAIL";
+          postSearchOK=false;
           break;
         }
       }
-      assertThat("failed in iteration " + i + ", verification: "+ verified,thrownExceptions,Matchers.emptyIterable());
+      assertThat("numberOfReplicas: " + numberOfReplicas + " failed in iteration "+ i+ ", verification: "+ verified,thrownExceptions,Matchers.emptyIterable());
+      logger.info("Non-CriticalExceptions: " + nonCriticalExceptions.toString());
+      assertThat("numberOfReplicas: " + numberOfReplicas + " failed in iteration "+ i+ ", verification: "+ verified,postSearchOK,is(true));
     }
   }
 }
