@@ -1,0 +1,28 @@
+{
+  createIndex("test-idx-1");
+  ensureGreen();
+  logger.info("--> indexing some data");
+  for (int i=0; i < 100; i++) {
+    index("test-idx-1","doc",Integer.toString(i),"foo","bar" + i);
+  }
+  refresh();
+  assertThat(client.prepareCount("test-idx-1").get().getCount(),equalTo(100L));
+  logger.info("--> snapshot");
+  CreateSnapshotResponse createSnapshotResponse=client.admin().cluster().prepareCreateSnapshot(repository,"test-snap").setWaitForCompletion(true).setIndices("test-idx-*").get();
+  assertThat(createSnapshotResponse.getSnapshotInfo().successfulShards(),greaterThan(0));
+  assertThat(createSnapshotResponse.getSnapshotInfo().successfulShards(),equalTo(createSnapshotResponse.getSnapshotInfo().totalShards()));
+  assertThat(client.admin().cluster().prepareGetSnapshots(repository).setSnapshots("test-snap").get().getSnapshots().get(0).state(),equalTo(SnapshotState.SUCCESS));
+  logger.info("--> delete some data");
+  for (int i=0; i < 50; i++) {
+    client.prepareDelete("test-idx-1","doc",Integer.toString(i)).get();
+  }
+  refresh();
+  assertThat(client.prepareCount("test-idx-1").get().getCount(),equalTo(50L));
+  logger.info("--> close indices");
+  client.admin().indices().prepareClose("test-idx-1").get();
+  logger.info("--> restore all indices from the snapshot");
+  RestoreSnapshotResponse restoreSnapshotResponse=client.admin().cluster().prepareRestoreSnapshot(repository,"test-snap").setWaitForCompletion(true).execute().actionGet();
+  assertThat(restoreSnapshotResponse.getRestoreInfo().totalShards(),greaterThan(0));
+  ensureGreen();
+  assertThat(client.prepareCount("test-idx-1").get().getCount(),equalTo(100L));
+}

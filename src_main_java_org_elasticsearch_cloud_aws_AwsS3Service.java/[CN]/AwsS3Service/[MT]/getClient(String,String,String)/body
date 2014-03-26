@@ -1,0 +1,43 @@
+{
+  Tuple<String,String> clientDescriptor=new Tuple<String,String>(endpoint,account);
+  AmazonS3Client client=clients.get(clientDescriptor);
+  if (client != null) {
+    return client;
+  }
+  ClientConfiguration clientConfiguration=new ClientConfiguration();
+  String protocol=componentSettings.get("protocol","http").toLowerCase();
+  if ("http".equals(protocol)) {
+    clientConfiguration.setProtocol(Protocol.HTTP);
+  }
+ else   if ("https".equals(protocol)) {
+    clientConfiguration.setProtocol(Protocol.HTTPS);
+  }
+ else {
+    throw new ElasticsearchIllegalArgumentException("No protocol supported [" + protocol + "], can either be [http] or [https]");
+  }
+  String proxyHost=componentSettings.get("proxy_host");
+  if (proxyHost != null) {
+    String portString=componentSettings.get("proxy_port","80");
+    Integer proxyPort;
+    try {
+      proxyPort=Integer.parseInt(portString,10);
+    }
+ catch (    NumberFormatException ex) {
+      throw new ElasticsearchIllegalArgumentException("The configured proxy port value [" + portString + "] is invalid",ex);
+    }
+    clientConfiguration.withProxyHost(proxyHost).setProxyPort(proxyPort);
+  }
+  AWSCredentialsProvider credentials;
+  if (account == null && key == null) {
+    credentials=new AWSCredentialsProviderChain(new EnvironmentVariableCredentialsProvider(),new SystemPropertiesCredentialsProvider(),new InstanceProfileCredentialsProvider());
+  }
+ else {
+    credentials=new AWSCredentialsProviderChain(new StaticCredentialsProvider(new BasicAWSCredentials(account,key)));
+  }
+  client=new AmazonS3Client(credentials,clientConfiguration);
+  if (endpoint != null) {
+    client.setEndpoint(endpoint);
+  }
+  clients.put(clientDescriptor,client);
+  return client;
+}

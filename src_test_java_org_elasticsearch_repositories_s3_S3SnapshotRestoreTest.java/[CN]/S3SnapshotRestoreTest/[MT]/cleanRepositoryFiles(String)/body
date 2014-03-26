@@ -1,41 +1,44 @@
 {
-  String bucket=cluster().getInstance(Settings.class).get("repositories.s3.bucket");
-  AmazonS3 client=cluster().getInstance(AwsS3Service.class).client();
-  try {
-    ObjectListing prevListing=null;
-    DeleteObjectsRequest multiObjectDeleteRequest=null;
-    ArrayList<DeleteObjectsRequest.KeyVersion> keys=new ArrayList<DeleteObjectsRequest.KeyVersion>();
-    while (true) {
-      ObjectListing list;
-      if (prevListing != null) {
-        list=client.listNextBatchOfObjects(prevListing);
-      }
+  Settings settings=cluster().getInstance(Settings.class);
+  Settings[] buckets={settings.getByPrefix("repositories.s3."),settings.getByPrefix("repositories.s3.private-bucket."),settings.getByPrefix("repositories.s3.remote-bucket.")};
+  for (  Settings bucket : buckets) {
+    AmazonS3 client=cluster().getInstance(AwsS3Service.class).client(bucket.get("region",settings.get("repositories.s3.region")),bucket.get("access_key",settings.get("cloud.aws.access_key")),bucket.get("secret_key",settings.get("cloud.aws.secret_key")));
+    try {
+      ObjectListing prevListing=null;
+      DeleteObjectsRequest multiObjectDeleteRequest=null;
+      ArrayList<DeleteObjectsRequest.KeyVersion> keys=new ArrayList<DeleteObjectsRequest.KeyVersion>();
+      while (true) {
+        ObjectListing list;
+        if (prevListing != null) {
+          list=client.listNextBatchOfObjects(prevListing);
+        }
  else {
-        list=client.listObjects(bucket,basePath);
-        multiObjectDeleteRequest=new DeleteObjectsRequest(list.getBucketName());
-      }
-      for (      S3ObjectSummary summary : list.getObjectSummaries()) {
-        keys.add(new DeleteObjectsRequest.KeyVersion(summary.getKey()));
-        if (keys.size() > 500) {
-          multiObjectDeleteRequest.setKeys(keys);
-          client.deleteObjects(multiObjectDeleteRequest);
+          list=client.listObjects(bucket.get("bucket"),basePath);
           multiObjectDeleteRequest=new DeleteObjectsRequest(list.getBucketName());
-          keys.clear();
+        }
+        for (        S3ObjectSummary summary : list.getObjectSummaries()) {
+          keys.add(new DeleteObjectsRequest.KeyVersion(summary.getKey()));
+          if (keys.size() > 500) {
+            multiObjectDeleteRequest.setKeys(keys);
+            client.deleteObjects(multiObjectDeleteRequest);
+            multiObjectDeleteRequest=new DeleteObjectsRequest(list.getBucketName());
+            keys.clear();
+          }
+        }
+        if (list.isTruncated()) {
+          prevListing=list;
+        }
+ else {
+          break;
         }
       }
-      if (list.isTruncated()) {
-        prevListing=list;
-      }
- else {
-        break;
+      if (!keys.isEmpty()) {
+        multiObjectDeleteRequest.setKeys(keys);
+        client.deleteObjects(multiObjectDeleteRequest);
       }
     }
-    if (!keys.isEmpty()) {
-      multiObjectDeleteRequest.setKeys(keys);
-      client.deleteObjects(multiObjectDeleteRequest);
+ catch (    Throwable ex) {
+      logger.warn("Failed to delete S3 repository",ex);
     }
-  }
- catch (  Throwable ex) {
-    logger.warn("Failed to delete S3 repository",ex);
   }
 }
