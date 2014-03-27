@@ -1,54 +1,54 @@
 {
   assertAcked(prepareCreate("test").addMapping("type1",XContentFactory.jsonBuilder().startObject().startObject("type1").startObject("_timestamp").field("enabled",true).field("store","yes").endObject().startObject("_ttl").field("enabled",true).field("store","yes").endObject().endObject().endObject()).addMapping("type2",XContentFactory.jsonBuilder().startObject().startObject("type2").startObject("_timestamp").field("enabled",true).field("store","yes").endObject().startObject("_ttl").field("enabled",true).field("store","yes").field("default","1d").endObject().endObject().endObject()));
-  ensureGreen();
+  ensureYellow("test");
   final NumShards test=getNumShards("test");
   long providedTTLValue=3000;
   logger.info("--> checking ttl");
-  client().prepareIndex("test","type1","1").setSource("field1","value1").setTTL(providedTTLValue).setRefresh(true).execute().actionGet();
   long now=System.currentTimeMillis();
-  client().prepareIndex("test","type1","with_routing").setSource("field1","value1").setTTL(providedTTLValue).setRouting("routing").setRefresh(true).execute().actionGet();
-  client().prepareIndex("test","type1","no_ttl").setSource("field1","value1").execute().actionGet();
-  client().prepareIndex("test","type2","default_ttl").setSource("field1","value1").execute().actionGet();
+  IndexResponse indexResponse=client().prepareIndex("test","type1","1").setSource("field1","value1").setTimestamp(String.valueOf(now)).setTTL(providedTTLValue).setRefresh(true).get();
+  assertThat(indexResponse.isCreated(),is(true));
+  indexResponse=client().prepareIndex("test","type1","with_routing").setSource("field1","value1").setTimestamp(String.valueOf(now)).setTTL(providedTTLValue).setRouting("routing").setRefresh(true).get();
+  assertThat(indexResponse.isCreated(),is(true));
+  indexResponse=client().prepareIndex("test","type1","no_ttl").setSource("field1","value1").get();
+  assertThat(indexResponse.isCreated(),is(true));
+  indexResponse=client().prepareIndex("test","type2","default_ttl").setSource("field1","value1").get();
+  assertThat(indexResponse.isCreated(),is(true));
   long currentTime=System.currentTimeMillis();
-  GetResponse getResponse=client().prepareGet("test","type1","1").setFields("_ttl").setRealtime(true).execute().actionGet();
+  GetResponse getResponse=client().prepareGet("test","type1","1").setFields("_ttl").get();
   long ttl0;
   if (getResponse.isExists()) {
     ttl0=((Number)getResponse.getField("_ttl").getValue()).longValue();
-    assertThat(ttl0,greaterThan(-PURGE_INTERVAL));
-    assertThat(ttl0,lessThan(providedTTLValue - (currentTime - now)));
+    assertThat(ttl0,lessThanOrEqualTo(providedTTLValue - (currentTime - now)));
   }
  else {
-    assertThat(providedTTLValue - (currentTime - now),lessThan(0l));
+    assertThat(providedTTLValue - (currentTime - now),lessThanOrEqualTo(0l));
   }
   currentTime=System.currentTimeMillis();
-  getResponse=client().prepareGet("test","type1","1").setFields("_ttl").setRealtime(true).execute().actionGet();
+  getResponse=client().prepareGet("test","type1","1").setFields("_ttl").get();
   if (getResponse.isExists()) {
     ttl0=((Number)getResponse.getField("_ttl").getValue()).longValue();
-    assertThat(ttl0,greaterThan(-PURGE_INTERVAL));
-    assertThat(ttl0,lessThan(providedTTLValue - (currentTime - now)));
+    assertThat(ttl0,lessThanOrEqualTo(providedTTLValue - (currentTime - now)));
   }
  else {
-    assertThat(providedTTLValue - (currentTime - now),lessThan(0l));
+    assertThat(providedTTLValue - (currentTime - now),lessThanOrEqualTo(0l));
   }
   currentTime=System.currentTimeMillis();
-  getResponse=client().prepareGet("test","type1","1").setFields("_ttl").setRealtime(false).execute().actionGet();
+  getResponse=client().prepareGet("test","type1","1").setFields("_ttl").setRealtime(false).get();
   if (getResponse.isExists()) {
     ttl0=((Number)getResponse.getField("_ttl").getValue()).longValue();
-    assertThat(ttl0,greaterThan(-PURGE_INTERVAL));
-    assertThat(ttl0,lessThan(providedTTLValue - (currentTime - now)));
+    assertThat(ttl0,lessThanOrEqualTo(providedTTLValue - (currentTime - now)));
   }
  else {
-    assertThat(providedTTLValue - (currentTime - now),lessThan(0l));
+    assertThat(providedTTLValue - (currentTime - now),lessThanOrEqualTo(0l));
   }
   currentTime=System.currentTimeMillis();
-  getResponse=client().prepareGet("test","type1","1").setFields("_ttl").setRealtime(false).execute().actionGet();
+  getResponse=client().prepareGet("test","type1","1").setFields("_ttl").setRealtime(false).get();
   if (getResponse.isExists()) {
     ttl0=((Number)getResponse.getField("_ttl").getValue()).longValue();
-    assertThat(ttl0,greaterThan(-PURGE_INTERVAL));
-    assertThat(ttl0,lessThan(providedTTLValue - (currentTime - now)));
+    assertThat(ttl0,lessThanOrEqualTo(providedTTLValue - (currentTime - now)));
   }
  else {
-    assertThat(providedTTLValue - (currentTime - now),lessThan(0l));
+    assertThat(providedTTLValue - (currentTime - now),lessThanOrEqualTo(0l));
   }
   getResponse=client().prepareGet("test","type1","no_ttl").setFields("_ttl").setRealtime(true).execute().actionGet();
   assertThat(getResponse.getField("_ttl"),nullValue());
