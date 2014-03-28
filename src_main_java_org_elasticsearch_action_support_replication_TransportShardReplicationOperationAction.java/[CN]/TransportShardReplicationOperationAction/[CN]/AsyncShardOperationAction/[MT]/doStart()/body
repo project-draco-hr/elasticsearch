@@ -1,0 +1,130 @@
+{
+  try {
+    ClusterBlockException blockException=checkGlobalBlock(observer.observedState(),request);
+    if (blockException != null) {
+      if (blockException.retryable()) {
+        logger.trace("cluster is blocked ({}), scheduling a retry",blockException.getMessage());
+        retry(blockException);
+        return false;
+      }
+ else {
+        throw blockException;
+      }
+    }
+    if (!resolveRequest(observer.observedState(),request,listener)) {
+      return true;
+    }
+    blockException=checkRequestBlock(observer.observedState(),request);
+    if (blockException != null) {
+      if (blockException.retryable()) {
+        logger.trace("cluster is blocked ({}), scheduling a retry",blockException.getMessage());
+        retry(blockException);
+        return false;
+      }
+ else {
+        throw blockException;
+      }
+    }
+    shardIt=shards(observer.observedState(),request);
+  }
+ catch (  Throwable e) {
+    listener.onFailure(e);
+    return true;
+  }
+  if (shardIt.size() == 0) {
+    logger.trace("no shard instances known for shard [{}], scheduling a retry",shardIt.shardId());
+    retry(null);
+    return false;
+  }
+  boolean foundPrimary=false;
+  ShardRouting shardX;
+  while ((shardX=shardIt.nextOrNull()) != null) {
+    final ShardRouting shard=shardX;
+    if (!shard.primary()) {
+      continue;
+    }
+    if (!shard.active() || !observer.observedState().nodes().nodeExists(shard.currentNodeId())) {
+      logger.trace("primary shard [{}] is not yet active or we do not know the node it is assigned to [{}], scheduling a retry.",shard.shardId(),shard.currentNodeId());
+      retry(null);
+      return false;
+    }
+    if (checkWriteConsistency) {
+      WriteConsistencyLevel consistencyLevel=defaultWriteConsistencyLevel;
+      if (request.consistencyLevel() != WriteConsistencyLevel.DEFAULT) {
+        consistencyLevel=request.consistencyLevel();
+      }
+      int requiredNumber=1;
+      if (consistencyLevel == WriteConsistencyLevel.QUORUM && shardIt.size() > 2) {
+        requiredNumber=(shardIt.size() / 2) + 1;
+      }
+ else       if (consistencyLevel == WriteConsistencyLevel.ALL) {
+        requiredNumber=shardIt.size();
+      }
+      if (shardIt.sizeActive() < requiredNumber) {
+        logger.trace("not enough active copies of shard [{}] to meet write consistency of [{}] (have {}, needed {}), scheduling a retry.",shard.shardId(),consistencyLevel,shardIt.sizeActive(),requiredNumber);
+        retry(null);
+        return false;
+      }
+    }
+    if (!primaryOperationStarted.compareAndSet(false,true)) {
+      return true;
+    }
+    foundPrimary=true;
+    if (shard.currentNodeId().equals(observer.observedState().nodes().localNodeId())) {
+      try {
+        if (request.operationThreaded()) {
+          request.beforeLocalFork();
+          threadPool.executor(executor).execute(new Runnable(){
+            @Override public void run(){
+              try {
+                performOnPrimary(shard.id(),shard,observer.observedState());
+              }
+ catch (              Throwable t) {
+                listener.onFailure(t);
+              }
+            }
+          }
+);
+        }
+ else {
+          performOnPrimary(shard.id(),shard,observer.observedState());
+        }
+      }
+ catch (      Throwable t) {
+        listener.onFailure(t);
+      }
+    }
+ else {
+      DiscoveryNode node=observer.observedState().nodes().get(shard.currentNodeId());
+      transportService.sendRequest(node,transportAction,request,transportOptions,new BaseTransportResponseHandler<Response>(){
+        @Override public Response newInstance(){
+          return newResponseInstance();
+        }
+        @Override public String executor(){
+          return ThreadPool.Names.SAME;
+        }
+        @Override public void handleResponse(        Response response){
+          listener.onResponse(response);
+        }
+        @Override public void handleException(        TransportException exp){
+          if (exp.unwrapCause() instanceof ConnectTransportException || exp.unwrapCause() instanceof NodeClosedException || retryPrimaryException(exp)) {
+            primaryOperationStarted.set(false);
+            logger.trace("received an error from node the primary was assigned to ({}), scheduling a retry",exp.getMessage());
+            retry(null);
+          }
+ else {
+            listener.onFailure(exp);
+          }
+        }
+      }
+);
+    }
+    break;
+  }
+  if (!foundPrimary) {
+    logger.trace("couldn't find a eligible primary shard, scheduling for retry.");
+    retry(null);
+    return false;
+  }
+  return true;
+}

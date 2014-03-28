@@ -7,7 +7,9 @@
   for (int i=0; i < 10; i++) {
     client().prepareIndex("test","type","" + (i + 100)).setSource(jsonBuilder().startObject().field("foo","" + i).endObject()).execute().actionGet();
   }
+  logger.info("done indexing. issue a refresh.");
   flushAndRefresh();
+  final AtomicInteger searchId=new AtomicInteger(0);
   ConcurrentDuel<Facets> duel=new ConcurrentDuel<>(5);
 {
     final Client cl=client();
@@ -35,7 +37,11 @@
       AtomicInteger count=new AtomicInteger();
       @Override public Facets run(){
         final SearchRequestBuilder facetRequest;
-        if (count.incrementAndGet() % 2 == 0) {
+        int searchId=count.incrementAndGet();
+        if (searchId % 100 == 0) {
+          logger.info("-> run {} searches",searchId);
+        }
+        if (searchId % 2 == 0) {
           facetRequest=cl.prepareSearch().setQuery(matchAllQuery()).addFacet(termsFacet("double").field("double").size(10)).addFacet(termsFacet("float").field("float").size(10)).addFacet(termsFacet("integer").field("integer").size(10)).addFacet(termsFacet("long").field("long").size(10)).addFacet(termsFacet("short").field("short").size(10)).addFacet(termsFacet("byte").field("byte").size(10)).addFacet(termsFacet("termFacet").field("name").size(10));
         }
  else {
@@ -47,6 +53,7 @@
     }
 ,5000);
   }
+  logger.info("starting second duel");
 {
     duel.duel(new ConcurrentDuel.DuelJudge<Facets>(){
       @Override public void judge(      Facets firstRun,      Facets result){
@@ -72,7 +79,11 @@
       AtomicInteger count=new AtomicInteger();
       @Override public Facets run(){
         final SearchRequestBuilder facetRequest;
-switch (count.incrementAndGet() % 6) {
+        int searchId=count.incrementAndGet();
+        if (searchId % 100 == 0) {
+          logger.info("->  run {} searches",searchId);
+        }
+switch (searchId % 6) {
 case 4:
           facetRequest=client().prepareSearch().setQuery(matchAllQuery()).addFacet(termsFacet("termFacet").executionHint("map").field("name").script("\"\" + (Integer.parseInt(term) % 100)").size(10));
         break;
