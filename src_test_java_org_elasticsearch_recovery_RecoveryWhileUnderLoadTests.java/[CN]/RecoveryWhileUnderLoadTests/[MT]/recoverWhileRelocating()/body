@@ -4,48 +4,10 @@
   logger.info("--> creating test index ...");
   int allowNodes=2;
   assertAcked(prepareCreate("test",3,settingsBuilder().put(SETTING_NUMBER_OF_SHARDS,numShards).put(SETTING_NUMBER_OF_REPLICAS,numReplicas)));
-  final AtomicLong idGenerator=new AtomicLong();
-  final AtomicLong indexCounter=new AtomicLong();
-  final AtomicBoolean stop=new AtomicBoolean(false);
-  Thread[] writers=new Thread[scaledRandomIntBetween(3,10)];
-  final CountDownLatch stopLatch=new CountDownLatch(writers.length);
-  logger.info("--> starting {} indexing threads",writers.length);
-  final CopyOnWriteArrayList<Throwable> failures=new CopyOnWriteArrayList<>();
-  final CountDownLatch startLatch=new CountDownLatch(1);
-  for (int i=0; i < writers.length; i++) {
-    final int indexerId=i;
-    final Client client=client();
-    writers[i]=new Thread(){
-      @Override public void run(){
-        long id=-1;
-        try {
-          startLatch.await();
-          logger.info("**** starting indexing thread {}",indexerId);
-          while (!stop.get()) {
-            id=idGenerator.incrementAndGet();
-            client.prepareIndex("test","type1",Long.toString(id) + "-" + indexerId).setSource(MapBuilder.<String,Object>newMapBuilder().put("test","value" + id).map()).execute().actionGet();
-            indexCounter.incrementAndGet();
-          }
-          logger.info("**** done indexing thread {}",indexerId);
-        }
- catch (        Throwable e) {
-          failures.add(e);
-          logger.warn("**** failed indexing thread {} on doc id {}",e,indexerId,id);
-        }
- finally {
-          stopLatch.countDown();
-        }
-      }
-    }
-;
-    writers[i].start();
-  }
-  try {
-    final int numDocs=scaledRandomIntBetween(200,50000);
-    logger.info("--> indexing {} docs in total ...",numDocs);
-    startLatch.countDown();
+  final int numDocs=scaledRandomIntBetween(200,50000);
+  try (BackgroundIndexer indexer=new BackgroundIndexer()){
     for (int i=0; i < numDocs; i+=scaledRandomIntBetween(100,Math.min(1000,numDocs))) {
-      assertThat(failures,emptyIterable());
+      indexer.assertNoFailures();
       logger.info("--> waiting for {} docs to be indexed ...",i);
       waitForDocs(i);
       logger.info("--> {} docs indexed",i);
@@ -55,9 +17,7 @@
       assertThat(client().admin().cluster().prepareHealth().setWaitForEvents(Priority.LANGUID).setTimeout("1m").setWaitForGreenStatus().execute().actionGet().isTimedOut(),equalTo(false));
     }
     logger.info("--> marking and waiting for indexing threads to stop ...");
-    stop.set(true);
-    stopLatch.await();
-    assertThat(failures,emptyIterable());
+    indexer.stop();
     logger.info("--> indexing threads stopped");
     logger.info("--> bump up number of replicas to 1 and allow all nodes to hold the index");
     allowNodes("test",3);
@@ -66,10 +26,6 @@
     logger.info("--> refreshing the index");
     refreshAndAssert();
     logger.info("--> verifying indexed content");
-    iterateAssertCount(numShards,indexCounter.get(),10);
+    iterateAssertCount(numShards,indexer.totalIndexedDocs(),10);
   }
-  finally {
-    stop.set(true);
-    stopLatch.await();
-  }
-}
+ }
