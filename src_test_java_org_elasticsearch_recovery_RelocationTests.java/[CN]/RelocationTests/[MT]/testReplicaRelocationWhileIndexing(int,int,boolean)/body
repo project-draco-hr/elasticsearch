@@ -17,6 +17,7 @@
   final AtomicBoolean stop=new AtomicBoolean(false);
   Thread[] writers=new Thread[numberOfWriters];
   final CountDownLatch stopLatch=new CountDownLatch(writers.length);
+  final CountDownLatch startLatch=new CountDownLatch(1);
   logger.info("--> starting {} indexing threads",writers.length);
   for (int i=0; i < writers.length; i++) {
     final Client perThreadClient=client();
@@ -24,6 +25,7 @@
     writers[i]=new Thread(){
       @Override public void run(){
         try {
+          startLatch.await();
           logger.info("**** starting indexing thread {}",indexerId);
           while (!stop.get()) {
             if (batch) {
@@ -67,12 +69,17 @@
 ;
     writers[i].start();
   }
-  logger.info("--> waiting for 2000 docs to be indexed ...");
-  while (client().prepareCount().setQuery(matchAllQuery()).execute().actionGet().getCount() < 2000) {
-    Thread.sleep(100);
-    client().admin().indices().prepareRefresh().execute().actionGet();
+  startLatch.countDown();
+  final int numDocs=scaledRandomIntBetween(200,2500);
+  logger.info("--> waiting for {} docs to be indexed ...",numDocs);
+  awaitBusy(new Predicate<Object>(){
+    @Override public boolean apply(    Object input){
+      client().admin().indices().prepareRefresh().execute().actionGet();
+      return client().prepareCount().setQuery(matchAllQuery()).execute().actionGet().getCount() >= numDocs;
+    }
   }
-  logger.info("--> 2000 docs indexed");
+);
+  logger.info("--> {} docs indexed",numDocs);
   logger.info("--> starting relocations...");
   for (int i=0; i < numberOfRelocations; i++) {
     int fromNode=(1 + (i % 2));

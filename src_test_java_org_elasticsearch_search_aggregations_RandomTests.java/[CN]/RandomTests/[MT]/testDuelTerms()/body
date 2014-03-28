@@ -1,9 +1,10 @@
 {
   final int numDocs=scaledRandomIntBetween(10000,20000);
-  final int maxNumTerms=randomIntBetween(10,100000);
+  final int maxNumTerms=randomIntBetween(10,50000);
   final IntOpenHashSet valuesSet=new IntOpenHashSet();
   immutableCluster().wipeIndices("idx");
   prepareCreate("idx").addMapping("type",jsonBuilder().startObject().startObject("type").startObject("properties").startObject("string_values").field("type","string").field("index","not_analyzed").endObject().startObject("long_values").field("type","long").endObject().startObject("double_values").field("type","double").endObject().endObject().endObject()).execute().actionGet();
+  List<IndexRequestBuilder> indexingRequests=Lists.newArrayList();
   for (int i=0; i < numDocs; ++i) {
     final int[] values=new int[randomInt(4)];
     for (int j=0; j < values.length; ++j) {
@@ -23,11 +24,17 @@
       source=source.value(Integer.toString(values[j]));
     }
     source=source.endArray().endObject();
-    client().prepareIndex("idx","type").setSource(source).execute().actionGet();
+    indexingRequests.add(client().prepareIndex("idx","type").setSource(source));
+    if (indexingRequests.size() == 5000) {
+      indexRandom(false,indexingRequests);
+      indexingRequests.clear();
+    }
   }
+  indexRandom(true,indexingRequests);
   assertNoFailures(client().admin().indices().prepareRefresh("idx").setIndicesOptions(IndicesOptions.lenient()).execute().get());
   SearchResponse resp=client().prepareSearch("idx").addAggregation(terms("long").field("long_values").size(maxNumTerms).subAggregation(min("min").field("num"))).addAggregation(terms("double").field("double_values").size(maxNumTerms).subAggregation(max("max").field("num"))).addAggregation(terms("string_map").field("string_values").executionHint(TermsAggregatorFactory.ExecutionMode.MAP.toString()).size(maxNumTerms).subAggregation(stats("stats").field("num"))).addAggregation(terms("string_ordinals").field("string_values").executionHint(TermsAggregatorFactory.ExecutionMode.ORDINALS.toString()).size(maxNumTerms).subAggregation(extendedStats("stats").field("num"))).execute().actionGet();
-  assertEquals(0,resp.getFailedShards());
+  assertAllSuccessful(resp);
+  assertEquals(numDocs,resp.getHits().getTotalHits());
   final Terms longTerms=resp.getAggregations().get("long");
   final Terms doubleTerms=resp.getAggregations().get("double");
   final Terms stringMapTerms=resp.getAggregations().get("string_map");
