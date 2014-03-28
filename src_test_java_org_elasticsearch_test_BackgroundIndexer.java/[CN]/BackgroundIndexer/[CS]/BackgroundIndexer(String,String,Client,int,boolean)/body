@@ -1,0 +1,56 @@
+{
+  failures=new CopyOnWriteArrayList<>();
+  writers=new Thread[writerCount];
+  stopLatch=new CountDownLatch(writers.length);
+  logger.info("--> starting {} indexing threads",writerCount);
+  for (int i=0; i < writers.length; i++) {
+    final int indexerId=i;
+    final boolean batch=RandomizedTest.getRandom().nextBoolean();
+    writers[i]=new Thread(){
+      @Override public void run(){
+        long id=-1;
+        try {
+          startLatch.await();
+          logger.info("**** starting indexing thread {}",indexerId);
+          while (!stop.get()) {
+            if (batch) {
+              int batchSize=RandomizedTest.getRandom().nextInt(20) + 1;
+              BulkRequestBuilder bulkRequest=client.prepareBulk();
+              for (int i=0; i < batchSize; i++) {
+                id=idGenerator.incrementAndGet();
+                bulkRequest.add(client.prepareIndex(index,type,Long.toString(id)).setSource("test","value" + id));
+              }
+              BulkResponse bulkResponse=bulkRequest.get();
+              for (              BulkItemResponse bulkItemResponse : bulkResponse) {
+                if (!bulkItemResponse.isFailed()) {
+                  indexCounter.incrementAndGet();
+                }
+ else {
+                  throw new ElasticsearchException("bulk request failure, id: [" + bulkItemResponse.getFailure().getId() + "] message: "+ bulkItemResponse.getFailure().getMessage());
+                }
+              }
+            }
+ else {
+              id=idGenerator.incrementAndGet();
+              client.prepareIndex(index,type,Long.toString(id) + "-" + indexerId).setSource("test","value" + id).get();
+              indexCounter.incrementAndGet();
+            }
+          }
+          logger.info("**** done indexing thread {}",indexerId);
+        }
+ catch (        Throwable e) {
+          failures.add(e);
+          logger.warn("**** failed indexing thread {} on doc id {}",e,indexerId,id);
+        }
+ finally {
+          stopLatch.countDown();
+        }
+      }
+    }
+;
+    writers[i].start();
+  }
+  if (autoStart) {
+    startLatch.countDown();
+  }
+}
