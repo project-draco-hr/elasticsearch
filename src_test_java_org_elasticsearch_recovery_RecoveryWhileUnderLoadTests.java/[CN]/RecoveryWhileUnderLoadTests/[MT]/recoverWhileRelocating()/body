@@ -11,6 +11,7 @@
   final CountDownLatch stopLatch=new CountDownLatch(writers.length);
   logger.info("--> starting {} indexing threads",writers.length);
   final CopyOnWriteArrayList<Throwable> failures=new CopyOnWriteArrayList<>();
+  final CountDownLatch startLatch=new CountDownLatch(1);
   for (int i=0; i < writers.length; i++) {
     final int indexerId=i;
     final Client client=client();
@@ -18,6 +19,7 @@
       @Override public void run(){
         long id=-1;
         try {
+          startLatch.await();
           logger.info("**** starting indexing thread {}",indexerId);
           while (!stop.get()) {
             id=idGenerator.incrementAndGet();
@@ -39,8 +41,10 @@
     writers[i].start();
   }
   try {
-    final int numDocs=between(10000,50000);
-    for (int i=0; i < numDocs; i+=between(100,1000)) {
+    final int numDocs=scaledRandomIntBetween(200,50000);
+    logger.info("--> indexing {} docs in total ...",numDocs);
+    startLatch.countDown();
+    for (int i=0; i < numDocs; i+=scaledRandomIntBetween(100,Math.min(1000,numDocs))) {
       assertThat(failures,emptyIterable());
       logger.info("--> waiting for {} docs to be indexed ...",i);
       waitForDocs(i);
