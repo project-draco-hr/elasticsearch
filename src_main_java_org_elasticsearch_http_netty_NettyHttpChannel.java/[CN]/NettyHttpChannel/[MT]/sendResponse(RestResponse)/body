@@ -1,6 +1,6 @@
 {
-  boolean http10=request.getProtocolVersion().equals(HttpVersion.HTTP_1_0);
-  boolean close=HttpHeaders.Values.CLOSE.equalsIgnoreCase(request.headers().get(HttpHeaders.Names.CONNECTION)) || (http10 && !HttpHeaders.Values.KEEP_ALIVE.equalsIgnoreCase(request.headers().get(HttpHeaders.Names.CONNECTION)));
+  boolean http10=nettyRequest.getProtocolVersion().equals(HttpVersion.HTTP_1_0);
+  boolean close=HttpHeaders.Values.CLOSE.equalsIgnoreCase(nettyRequest.headers().get(HttpHeaders.Names.CONNECTION)) || (http10 && !HttpHeaders.Values.KEEP_ALIVE.equalsIgnoreCase(nettyRequest.headers().get(HttpHeaders.Names.CONNECTION)));
   HttpResponseStatus status=getStatus(response.status());
   org.jboss.netty.handler.codec.http.HttpResponse resp;
   if (http10) {
@@ -12,17 +12,17 @@
  else {
     resp=new DefaultHttpResponse(HttpVersion.HTTP_1_1,status);
   }
-  if (RestUtils.isBrowser(request.headers().get(HttpHeaders.Names.USER_AGENT))) {
+  if (RestUtils.isBrowser(nettyRequest.headers().get(HttpHeaders.Names.USER_AGENT))) {
     if (transport.settings().getAsBoolean("http.cors.enabled",true)) {
       resp.headers().add("Access-Control-Allow-Origin",transport.settings().get("http.cors.allow-origin","*"));
-      if (request.getMethod() == HttpMethod.OPTIONS) {
+      if (nettyRequest.getMethod() == HttpMethod.OPTIONS) {
         resp.headers().add("Access-Control-Max-Age",transport.settings().getAsInt("http.cors.max-age",1728000));
         resp.headers().add("Access-Control-Allow-Methods",transport.settings().get("http.cors.allow-methods","OPTIONS, HEAD, GET, POST, PUT, DELETE"));
         resp.headers().add("Access-Control-Allow-Headers",transport.settings().get("http.cors.allow-headers","X-Requested-With, Content-Type, Content-Length"));
       }
     }
   }
-  String opaque=request.headers().get("X-Opaque-Id");
+  String opaque=nettyRequest.headers().get("X-Opaque-Id");
   if (opaque != null) {
     resp.headers().add("X-Opaque-Id",opaque);
   }
@@ -34,59 +34,53 @@
       }
     }
   }
-  ChannelBuffer buf;
+  BytesReference content=response.content();
+  ChannelBuffer buffer;
+  boolean addedReleaseListener=false;
   try {
-    if (response instanceof XContentRestResponse) {
-      XContentBuilder builder=((XContentRestResponse)response).builder();
-      if (response.contentThreadSafe()) {
-        buf=builder.bytes().toChannelBuffer();
-      }
- else {
-        buf=builder.bytes().copyBytesArray().toChannelBuffer();
-      }
+    if (response.contentThreadSafe()) {
+      buffer=content.toChannelBuffer();
     }
  else {
-      if (response.contentThreadSafe()) {
-        buf=ChannelBuffers.wrappedBuffer(response.content(),response.contentOffset(),response.contentLength());
-      }
- else {
-        buf=ChannelBuffers.copiedBuffer(response.content(),response.contentOffset(),response.contentLength());
-      }
+      buffer=content.copyBytesArray().toChannelBuffer();
     }
-  }
- catch (  IOException e) {
-    throw new HttpException("Failed to convert response to bytes",e);
-  }
-  if (response.prefixContent() != null || response.suffixContent() != null) {
-    ChannelBuffer prefixBuf=ChannelBuffers.EMPTY_BUFFER;
-    if (response.prefixContent() != null) {
-      prefixBuf=ChannelBuffers.copiedBuffer(response.prefixContent(),response.prefixContentOffset(),response.prefixContentLength());
+    String callback=request.param("callback");
+    if (callback != null) {
+      final BytesRef callbackBytes=new BytesRef(callback.length() * 4 + 1);
+      UnicodeUtil.UTF16toUTF8(callback,0,callback.length(),callbackBytes);
+      callbackBytes.bytes[callbackBytes.length]='(';
+      callbackBytes.length++;
+      buffer=ChannelBuffers.wrappedBuffer(ChannelBuffers.wrappedBuffer(callbackBytes.bytes,callbackBytes.offset,callbackBytes.length),buffer,ChannelBuffers.wrappedBuffer(END_JSONP));
     }
-    ChannelBuffer suffixBuf=ChannelBuffers.EMPTY_BUFFER;
-    if (response.suffixContent() != null) {
-      suffixBuf=ChannelBuffers.copiedBuffer(response.suffixContent(),response.suffixContentOffset(),response.suffixContentLength());
-    }
-    buf=ChannelBuffers.wrappedBuffer(prefixBuf,buf,suffixBuf);
-  }
-  resp.setContent(buf);
-  resp.headers().add(HttpHeaders.Names.CONTENT_TYPE,response.contentType());
-  resp.headers().add(HttpHeaders.Names.CONTENT_LENGTH,String.valueOf(buf.readableBytes()));
-  if (transport.resetCookies) {
-    String cookieString=request.headers().get(HttpHeaders.Names.COOKIE);
-    if (cookieString != null) {
-      CookieDecoder cookieDecoder=new CookieDecoder();
-      Set<Cookie> cookies=cookieDecoder.decode(cookieString);
-      if (!cookies.isEmpty()) {
-        CookieEncoder cookieEncoder=new CookieEncoder(true);
-        for (        Cookie cookie : cookies) {
-          cookieEncoder.addCookie(cookie);
+    resp.setContent(buffer);
+    resp.headers().add(HttpHeaders.Names.CONTENT_TYPE,response.contentType());
+    resp.headers().add(HttpHeaders.Names.CONTENT_LENGTH,String.valueOf(buffer.readableBytes()));
+    if (transport.resetCookies) {
+      String cookieString=nettyRequest.headers().get(HttpHeaders.Names.COOKIE);
+      if (cookieString != null) {
+        CookieDecoder cookieDecoder=new CookieDecoder();
+        Set<Cookie> cookies=cookieDecoder.decode(cookieString);
+        if (!cookies.isEmpty()) {
+          CookieEncoder cookieEncoder=new CookieEncoder(true);
+          for (          Cookie cookie : cookies) {
+            cookieEncoder.addCookie(cookie);
+          }
+          resp.headers().add(HttpHeaders.Names.SET_COOKIE,cookieEncoder.encode());
         }
-        resp.headers().add(HttpHeaders.Names.SET_COOKIE,cookieEncoder.encode());
       }
     }
+    ChannelFuture future=channel.write(resp);
+    if (response.contentThreadSafe() && content instanceof Releasable) {
+      future.addListener(new ReleaseChannelFutureListener((Releasable)content));
+      addedReleaseListener=true;
+    }
+    if (close) {
+      future.addListener(ChannelFutureListener.CLOSE);
+    }
   }
-  ChannelFuture future=channel.write(resp);
-  if (close) {
-    future.addListener(ChannelFutureListener.CLOSE);
+  finally {
+    if (!addedReleaseListener && content instanceof Releasable) {
+      ((Releasable)content).release();
+    }
   }
 }
