@@ -1,0 +1,32 @@
+{
+  final ConfigCacheKey cacheKey=new ConfigCacheKey(config);
+  ValuesSource dataSource=fieldDataSources.get(cacheKey);
+  if (dataSource == null) {
+    final IndexFieldData<?> indexFieldData=config.fieldContext.indexFieldData();
+    ValuesSource.MetaData metaData=ValuesSource.MetaData.load(config.fieldContext.indexFieldData(),searchContext);
+    if (indexFieldData instanceof IndexFieldData.WithOrdinals) {
+      dataSource=new ValuesSource.Bytes.WithOrdinals.FieldData((IndexFieldData.WithOrdinals)indexFieldData,metaData);
+    }
+ else {
+      dataSource=new ValuesSource.Bytes.FieldData(indexFieldData,metaData);
+    }
+    setReaderIfNeeded((ReaderContextAware)dataSource);
+    readerAwares.add((ReaderContextAware)dataSource);
+    fieldDataSources.put(cacheKey,dataSource);
+  }
+  if (config.script != null) {
+    setScorerIfNeeded(config.script);
+    setReaderIfNeeded(config.script);
+    scorerAwares.add(config.script);
+    readerAwares.add(config.script);
+    dataSource=new ValuesSource.WithScript(dataSource,config.script);
+  }
+  if ((config.ensureUnique && !dataSource.metaData().uniqueness().unique()) || config.ensureSorted) {
+    dataSource=new ValuesSource.Bytes.SortedAndUnique(dataSource);
+    readerAwares.add((ReaderContextAware)dataSource);
+  }
+  if (config.needsHashes) {
+    dataSource.setNeedsHashes(true);
+  }
+  return dataSource;
+}

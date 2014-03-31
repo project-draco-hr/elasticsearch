@@ -1,5 +1,5 @@
 {
-  ValuesSourceConfig<NumericValuesSource> config=new ValuesSourceConfig<>(NumericValuesSource.class);
+  ValuesSourceConfig<ValuesSource.Numeric> config=new ValuesSourceConfig<>(ValuesSource.Numeric.class);
   String field=null;
   List<RangeAggregator.Range> ranges=null;
   String script=null;
@@ -7,6 +7,7 @@
   Map<String,Object> scriptParams=null;
   boolean keyed=false;
   boolean assumeSorted=false;
+  String format=null;
   XContentParser.Token token;
   String currentFieldName=null;
   while ((token=parser.nextToken()) != XContentParser.Token.END_OBJECT) {
@@ -22,6 +23,9 @@
       }
  else       if ("lang".equals(currentFieldName)) {
         scriptLang=parser.text();
+      }
+ else       if ("format".equals(currentFieldName)) {
+        format=parser.text();
       }
  else {
         throw new SearchParseException(context,"Unknown key for a " + token + " in ["+ aggregationName+ "]: ["+ currentFieldName+ "].");
@@ -101,14 +105,16 @@
     config.ensureSorted(true);
   }
   if (field == null) {
-    return new RangeAggregator.Factory(aggregationName,config,InternalRange.FACTORY,ranges,keyed);
+    return new RangeAggregator.Factory(aggregationName,config,null,null,InternalRange.FACTORY,ranges,keyed);
   }
+  ValueFormatter valueFormatter=format == null ? ValueFormatter.RAW : new ValueFormatter.Number.Pattern(format);
+  ValueParser valueParser=format == null ? ValueParser.RAW : new ValueParser.Number.Pattern(format);
   FieldMapper<?> mapper=context.smartNameFieldMapper(field);
   if (mapper == null) {
     config.unmapped(true);
-    return new RangeAggregator.Factory(aggregationName,config,InternalRange.FACTORY,ranges,keyed);
+    return new RangeAggregator.Factory(aggregationName,config,valueFormatter,valueParser,InternalRange.FACTORY,ranges,keyed);
   }
   IndexFieldData<?> indexFieldData=context.fieldData().getForField(mapper);
   config.fieldContext(new FieldContext(field,indexFieldData));
-  return new RangeAggregator.Factory(aggregationName,config,InternalRange.FACTORY,ranges,keyed);
+  return new RangeAggregator.Factory(aggregationName,config,valueFormatter,valueParser,InternalRange.FACTORY,ranges,keyed);
 }
