@@ -1,0 +1,51 @@
+{
+  serviceA.registerHandler("sayHello",new BaseTransportRequestHandler<StringMessageRequest>(){
+    @Override public StringMessageRequest newInstance(){
+      return new StringMessageRequest();
+    }
+    @Override public String executor(){
+      return ThreadPool.Names.GENERIC;
+    }
+    @Override public void messageReceived(    StringMessageRequest request,    TransportChannel channel) throws Exception {
+      assertThat("moshe",equalTo(request.message));
+      throw new RuntimeException("bad message !!!");
+    }
+  }
+);
+  serviceB.addFailToSendNoConnectRule(nodeA);
+  TransportFuture<StringMessageResponse> res=serviceB.submitRequest(nodeA,"sayHello",new StringMessageRequest("moshe"),new BaseTransportResponseHandler<StringMessageResponse>(){
+    @Override public StringMessageResponse newInstance(){
+      return new StringMessageResponse();
+    }
+    @Override public String executor(){
+      return ThreadPool.Names.GENERIC;
+    }
+    @Override public void handleResponse(    StringMessageResponse response){
+      assertThat("got response instead of exception",false,equalTo(true));
+    }
+    @Override public void handleException(    TransportException exp){
+      assertThat(exp.getCause().getMessage(),endsWith("DISCONNECT: simulated"));
+    }
+  }
+);
+  try {
+    res.txGet();
+    assertThat("exception should be thrown",false,equalTo(true));
+  }
+ catch (  Exception e) {
+    assertThat(e.getCause().getMessage(),endsWith("DISCONNECT: simulated"));
+  }
+  try {
+    serviceB.connectToNode(nodeA);
+    assertThat("exception should be thrown",false,equalTo(true));
+  }
+ catch (  ConnectTransportException e) {
+  }
+  try {
+    serviceB.connectToNodeLight(nodeA);
+    assertThat("exception should be thrown",false,equalTo(true));
+  }
+ catch (  ConnectTransportException e) {
+  }
+  serviceA.removeHandler("sayHello");
+}
