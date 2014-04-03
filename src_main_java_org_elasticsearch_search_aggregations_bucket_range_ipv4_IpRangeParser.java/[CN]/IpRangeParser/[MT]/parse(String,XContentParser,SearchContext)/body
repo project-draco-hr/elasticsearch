@@ -1,31 +1,15 @@
 {
-  ValuesSourceConfig<ValuesSource.Numeric> config=new ValuesSourceConfig<>(ValuesSource.Numeric.class);
-  String field=null;
+  ValuesSourceParser<ValuesSource.Numeric> vsParser=ValuesSourceParser.numeric(aggregationName,InternalIPv4Range.TYPE,context).targetValueType(ValueType.IP).requiresSortedValues(true).formattable(false).build();
   List<RangeAggregator.Range> ranges=null;
-  String script=null;
-  String scriptLang=null;
-  Map<String,Object> scriptParams=null;
   boolean keyed=false;
-  boolean assumeSorted=false;
   XContentParser.Token token;
   String currentFieldName=null;
   while ((token=parser.nextToken()) != XContentParser.Token.END_OBJECT) {
     if (token == XContentParser.Token.FIELD_NAME) {
       currentFieldName=parser.currentName();
     }
- else     if (token == XContentParser.Token.VALUE_STRING) {
-      if ("field".equals(currentFieldName)) {
-        field=parser.text();
-      }
- else       if ("script".equals(currentFieldName)) {
-        script=parser.text();
-      }
- else       if ("lang".equals(currentFieldName)) {
-        scriptLang=parser.text();
-      }
- else {
-        throw new SearchParseException(context,"Unknown key for a " + token + " in ["+ aggregationName+ "]: ["+ currentFieldName+ "].");
-      }
+ else     if (vsParser.token(currentFieldName,token,parser)) {
+      continue;
     }
  else     if (token == XContentParser.Token.START_ARRAY) {
       if ("ranges".equals(currentFieldName)) {
@@ -76,20 +60,9 @@
         throw new SearchParseException(context,"Unknown key for a " + token + " in ["+ aggregationName+ "]: ["+ currentFieldName+ "].");
       }
     }
- else     if (token == XContentParser.Token.START_OBJECT) {
-      if ("params".equals(currentFieldName)) {
-        scriptParams=parser.map();
-      }
- else {
-        throw new SearchParseException(context,"Unknown key for a " + token + " in ["+ aggregationName+ "]: ["+ currentFieldName+ "].");
-      }
-    }
  else     if (token == XContentParser.Token.VALUE_BOOLEAN) {
       if ("keyed".equals(currentFieldName)) {
         keyed=parser.booleanValue();
-      }
- else       if ("script_values_sorted".equals(currentFieldName) || "scriptValuesSorted".equals(currentFieldName)) {
-        assumeSorted=parser.booleanValue();
       }
  else {
         throw new SearchParseException(context,"Unknown key for a " + token + " in ["+ aggregationName+ "]: ["+ currentFieldName+ "].");
@@ -102,24 +75,5 @@
   if (ranges == null) {
     throw new SearchParseException(context,"Missing [ranges] in ranges aggregator [" + aggregationName + "]");
   }
-  if (script != null) {
-    config.script(context.scriptService().search(context.lookup(),scriptLang,script,scriptParams));
-  }
-  if (!assumeSorted) {
-    config.ensureSorted(true);
-  }
-  if (field == null) {
-    return new RangeAggregator.Factory(aggregationName,config,ValueFormatter.IPv4,ValueParser.IPv4,InternalIPv4Range.FACTORY,ranges,keyed);
-  }
-  FieldMapper<?> mapper=context.smartNameFieldMapper(field);
-  if (mapper == null) {
-    config.unmapped(true);
-    return new RangeAggregator.Factory(aggregationName,config,ValueFormatter.IPv4,ValueParser.IPv4,InternalIPv4Range.FACTORY,ranges,keyed);
-  }
-  if (!(mapper instanceof IpFieldMapper)) {
-    throw new AggregationExecutionException("ip_range aggregation can only be applied to ip fields which is not the case with field [" + field + "]");
-  }
-  IndexFieldData<?> indexFieldData=context.fieldData().getForField(mapper);
-  config.fieldContext(new FieldContext(field,indexFieldData));
-  return new RangeAggregator.Factory(aggregationName,config,ValueFormatter.IPv4,ValueParser.IPv4,InternalIPv4Range.FACTORY,ranges,keyed);
+  return new RangeAggregator.Factory(aggregationName,vsParser.config(),InternalIPv4Range.FACTORY,ranges,keyed);
 }

@@ -1,0 +1,54 @@
+{
+  ValueType valueType=input.valueType != null ? input.valueType : targetValueType;
+  if (input.field == null) {
+    if (input.script == null) {
+      return new ValuesSourceConfig(ValuesSource.class);
+    }
+    Class valuesSourceType=valueType != null ? (Class<VS>)valueType.getValuesSourceType() : this.valuesSourceType;
+    if (valuesSourceType == null || valuesSourceType == ValuesSource.class) {
+      valuesSourceType=ValuesSource.Bytes.class;
+    }
+    ValuesSourceConfig<VS> config=new ValuesSourceConfig<VS>(valuesSourceType);
+    config.format=resolveFormat(input.format,valueType);
+    config.script=createScript();
+    config.scriptValueType=valueType;
+    config.ensureUnique=requiresUniqueValues && !input.assumeUnique;
+    config.ensureSorted=requiresSortedValues && !input.assumeSorted;
+    return config;
+  }
+  FieldMapper<?> mapper=context.smartNameFieldMapper(input.field);
+  if (mapper == null) {
+    Class<VS> valuesSourceType=valueType != null ? (Class<VS>)valueType.getValuesSourceType() : this.valuesSourceType;
+    ValuesSourceConfig<VS> config=new ValuesSourceConfig<>(valuesSourceType);
+    config.format=resolveFormat(input.format,valueType);
+    config.unmapped=true;
+    if (valueType != null) {
+      config.scriptValueType=valueType;
+    }
+    return config;
+  }
+  IndexFieldData<?> indexFieldData=context.fieldData().getForField(mapper);
+  ValuesSourceConfig config;
+  if (valuesSourceType == ValuesSource.class) {
+    if (indexFieldData instanceof IndexNumericFieldData) {
+      config=new ValuesSourceConfig<>(ValuesSource.Numeric.class);
+    }
+ else     if (indexFieldData instanceof IndexGeoPointFieldData) {
+      config=new ValuesSourceConfig<>(ValuesSource.GeoPoint.class);
+    }
+ else {
+      config=new ValuesSourceConfig<>(ValuesSource.Bytes.class);
+    }
+  }
+ else {
+    config=new ValuesSourceConfig(valuesSourceType);
+  }
+  config.fieldContext=new FieldContext(input.field,indexFieldData,mapper);
+  config.script=createScript();
+  if (config.script != null) {
+    config.ensureUnique=requiresUniqueValues && !input.assumeUnique;
+    config.ensureSorted=requiresSortedValues && !input.assumeSorted;
+  }
+  config.format=resolveFormat(input.format,mapper);
+  return config;
+}
