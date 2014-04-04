@@ -4,18 +4,30 @@
   }
   byte status=0;
   status=TransportStatus.setResponse(status);
-  BytesStreamOutput bStream=new BytesStreamOutput();
-  bStream.skip(NettyHeader.HEADER_SIZE);
-  StreamOutput stream=bStream;
-  if (options.compress()) {
-    status=TransportStatus.setCompress(status);
-    stream=CompressorFactory.defaultCompressor().streamOutput(stream);
+  ReleasableBytesStreamOutput bStream=new ReleasableBytesStreamOutput(transport.bigArrays);
+  boolean addedReleaseListener=false;
+  try {
+    bStream.skip(NettyHeader.HEADER_SIZE);
+    StreamOutput stream=bStream;
+    if (options.compress()) {
+      status=TransportStatus.setCompress(status);
+      stream=CompressorFactory.defaultCompressor().streamOutput(stream);
+    }
+    stream=new HandlesStreamOutput(stream);
+    stream.setVersion(version);
+    response.writeTo(stream);
+    stream.close();
+    ReleasableBytesReference bytes=bStream.bytes();
+    ChannelBuffer buffer=bytes.toChannelBuffer();
+    NettyHeader.writeHeader(buffer,requestId,status,version);
+    ChannelFuture future=channel.write(buffer);
+    ReleaseChannelFutureListener listener=new ReleaseChannelFutureListener(bytes);
+    future.addListener(listener);
+    addedReleaseListener=true;
   }
-  stream=new HandlesStreamOutput(stream);
-  stream.setVersion(version);
-  response.writeTo(stream);
-  stream.close();
-  ChannelBuffer buffer=bStream.bytes().toChannelBuffer();
-  NettyHeader.writeHeader(buffer,requestId,status,version);
-  channel.write(buffer);
+  finally {
+    if (!addedReleaseListener) {
+      Releasables.release(bStream.bytes());
+    }
+  }
 }

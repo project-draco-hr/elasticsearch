@@ -1,7 +1,8 @@
 {
   rwl.readLock().lock();
+  ReleasableBytesStreamOutput out=new ReleasableBytesStreamOutput(bigArrays);
+  boolean released=false;
   try {
-    BytesStreamOutput out=new BytesStreamOutput();
     out.writeInt(0);
     TranslogStreams.writeTranslogOperation(out,operation);
     out.flush();
@@ -9,7 +10,7 @@
     out.seek(0);
     out.writeInt(size - 4);
     out.seek(size);
-    BytesReference bytes=out.bytes();
+    ReleasableBytesReference bytes=out.bytes();
     Location location=current.add(bytes);
     if (syncOnEachOperation) {
       current.sync();
@@ -22,12 +23,17 @@
  catch (      ClosedChannelException e) {
       }
     }
+    Releasables.release(bytes);
+    released=true;
     return location;
   }
- catch (  Exception e) {
+ catch (  Throwable e) {
     throw new TranslogException(shardId,"Failed to write operation [" + operation + "]",e);
   }
  finally {
     rwl.readLock().unlock();
+    if (!released) {
+      Releasables.release(out.bytes());
+    }
   }
 }
