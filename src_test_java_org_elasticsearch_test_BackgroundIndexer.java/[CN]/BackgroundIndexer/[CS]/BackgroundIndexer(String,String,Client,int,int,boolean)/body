@@ -2,7 +2,7 @@
   failures=new CopyOnWriteArrayList<>();
   writers=new Thread[writerCount];
   stopLatch=new CountDownLatch(writers.length);
-  logger.info("--> starting {} indexing threads",writerCount);
+  logger.info("--> creating {} indexing threads (auto start: [{}], numOfDocs: [{}])",writerCount,autoStart,numOfDocs);
   for (int i=0; i < writers.length; i++) {
     final int indexerId=i;
     final boolean batch=RandomizedTest.getRandom().nextBoolean();
@@ -12,9 +12,15 @@
         try {
           startLatch.await();
           logger.info("**** starting indexing thread {}",indexerId);
-          while (!stop.get() && indexCounter.get() < maxNumDocs) {
+          while (!stop.get()) {
             if (batch) {
               int batchSize=RandomizedTest.getRandom().nextInt(20) + 1;
+              if (hasBudget.get()) {
+                batchSize=Math.max(Math.min(batchSize,availableBudget.availablePermits()),1);
+                if (!availableBudget.tryAcquire(batchSize,250,TimeUnit.MILLISECONDS)) {
+                  continue;
+                }
+              }
               BulkRequestBuilder bulkRequest=client.prepareBulk();
               for (int i=0; i < batchSize; i++) {
                 id=idGenerator.incrementAndGet();
@@ -31,12 +37,15 @@
               }
             }
  else {
+              if (hasBudget.get() && !availableBudget.tryAcquire(250,TimeUnit.MILLISECONDS)) {
+                continue;
+              }
               id=idGenerator.incrementAndGet();
               client.prepareIndex(index,type,Long.toString(id) + "-" + indexerId).setSource("test","value" + id).get();
               indexCounter.incrementAndGet();
             }
           }
-          logger.info("**** done indexing thread {}  stop: {} numDocsIndexed: {} maxNumDocs: {}",indexerId,stop.get(),indexCounter.get(),maxNumDocs);
+          logger.info("**** done indexing thread {}  stop: {} numDocsIndexed: {}",indexerId,stop.get(),indexCounter.get());
         }
  catch (        Throwable e) {
           failures.add(e);
@@ -51,6 +60,6 @@
     writers[i].start();
   }
   if (autoStart) {
-    startLatch.countDown();
+    start(numOfDocs);
   }
 }
