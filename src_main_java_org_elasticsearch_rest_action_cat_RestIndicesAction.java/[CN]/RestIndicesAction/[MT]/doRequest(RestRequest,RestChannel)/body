@@ -4,54 +4,25 @@
   clusterStateRequest.clear().indices(indices).metaData(true);
   clusterStateRequest.local(request.paramAsBoolean("local",clusterStateRequest.local()));
   clusterStateRequest.masterNodeTimeout(request.paramAsTime("master_timeout",clusterStateRequest.masterNodeTimeout()));
-  client.admin().cluster().state(clusterStateRequest,new ActionListener<ClusterStateResponse>(){
-    @Override public void onResponse(    final ClusterStateResponse clusterStateResponse){
+  client.admin().cluster().state(clusterStateRequest,new RestActionListener<ClusterStateResponse>(channel){
+    @Override public void processResponse(    final ClusterStateResponse clusterStateResponse){
       final String[] concreteIndices=clusterStateResponse.getState().metaData().concreteIndicesIgnoreMissing(indices);
       ClusterHealthRequest clusterHealthRequest=Requests.clusterHealthRequest(concreteIndices);
       clusterHealthRequest.local(request.paramAsBoolean("local",clusterHealthRequest.local()));
-      client.admin().cluster().health(clusterHealthRequest,new ActionListener<ClusterHealthResponse>(){
-        @Override public void onResponse(        final ClusterHealthResponse clusterHealthResponse){
+      client.admin().cluster().health(clusterHealthRequest,new RestActionListener<ClusterHealthResponse>(channel){
+        @Override public void processResponse(        final ClusterHealthResponse clusterHealthResponse){
           IndicesStatsRequest indicesStatsRequest=new IndicesStatsRequest();
           indicesStatsRequest.all();
-          client.admin().indices().stats(indicesStatsRequest,new ActionListener<IndicesStatsResponse>(){
-            @Override public void onResponse(            IndicesStatsResponse indicesStatsResponse){
-              try {
-                Table tab=buildTable(request,concreteIndices,clusterHealthResponse,indicesStatsResponse);
-                channel.sendResponse(RestTable.buildResponse(tab,request,channel));
-              }
- catch (              Throwable e) {
-                onFailure(e);
-              }
-            }
-            @Override public void onFailure(            Throwable e){
-              try {
-                channel.sendResponse(new BytesRestResponse(request,e));
-              }
- catch (              IOException e1) {
-                logger.error("Failed to send failure response",e1);
-              }
+          client.admin().indices().stats(indicesStatsRequest,new RestResponseListener<IndicesStatsResponse>(channel){
+            @Override public RestResponse buildResponse(            IndicesStatsResponse indicesStatsResponse) throws Exception {
+              Table tab=buildTable(request,concreteIndices,clusterHealthResponse,indicesStatsResponse);
+              return RestTable.buildResponse(tab,channel);
             }
           }
 );
         }
-        @Override public void onFailure(        Throwable e){
-          try {
-            channel.sendResponse(new BytesRestResponse(request,e));
-          }
- catch (          IOException e1) {
-            logger.error("Failed to send failure response",e1);
-          }
-        }
       }
 );
-    }
-    @Override public void onFailure(    Throwable e){
-      try {
-        channel.sendResponse(new BytesRestResponse(request,e));
-      }
- catch (      IOException e1) {
-        logger.error("Failed to send failure response",e1);
-      }
     }
   }
 );

@@ -3,25 +3,14 @@
   clusterUpdateSettingsRequest.listenerThreaded(false);
   clusterUpdateSettingsRequest.timeout(request.paramAsTime("timeout",clusterUpdateSettingsRequest.timeout()));
   clusterUpdateSettingsRequest.masterNodeTimeout(request.paramAsTime("master_timeout",clusterUpdateSettingsRequest.masterNodeTimeout()));
-  try {
-    Map<String,Object> source=XContentFactory.xContent(request.content()).createParser(request.content()).mapAndClose();
-    if (source.containsKey("transient")) {
-      clusterUpdateSettingsRequest.transientSettings((Map)source.get("transient"));
-    }
-    if (source.containsKey("persistent")) {
-      clusterUpdateSettingsRequest.persistentSettings((Map)source.get("persistent"));
-    }
+  Map<String,Object> source=XContentFactory.xContent(request.content()).createParser(request.content()).mapAndClose();
+  if (source.containsKey("transient")) {
+    clusterUpdateSettingsRequest.transientSettings((Map)source.get("transient"));
   }
- catch (  Exception e) {
-    try {
-      channel.sendResponse(new BytesRestResponse(request,e));
-    }
- catch (    IOException e1) {
-      logger.warn("Failed to send response",e1);
-    }
-    return;
+  if (source.containsKey("persistent")) {
+    clusterUpdateSettingsRequest.persistentSettings((Map)source.get("persistent"));
   }
-  client.admin().cluster().updateSettings(clusterUpdateSettingsRequest,new AcknowledgedRestResponseActionListener<ClusterUpdateSettingsResponse>(request,channel,logger){
+  client.admin().cluster().updateSettings(clusterUpdateSettingsRequest,new AcknowledgedRestListener<ClusterUpdateSettingsResponse>(channel){
     @Override protected void addCustomFields(    XContentBuilder builder,    ClusterUpdateSettingsResponse response) throws IOException {
       builder.startObject("persistent");
       response.getPersistentSettings().toXContent(builder,request);
@@ -29,12 +18,6 @@
       builder.startObject("transient");
       response.getTransientSettings().toXContent(builder,request);
       builder.endObject();
-    }
-    @Override public void onFailure(    Throwable e){
-      if (logger.isDebugEnabled()) {
-        logger.debug("failed to handle cluster state",e);
-      }
-      super.onFailure(e);
     }
   }
 );

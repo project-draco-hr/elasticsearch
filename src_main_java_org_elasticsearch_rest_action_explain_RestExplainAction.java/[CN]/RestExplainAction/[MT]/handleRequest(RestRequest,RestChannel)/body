@@ -42,29 +42,23 @@
     }
   }
   explainRequest.fetchSourceContext(FetchSourceContext.parseFromRestRequest(request));
-  client.explain(explainRequest,new ActionListener<ExplainResponse>(){
-    @Override public void onResponse(    ExplainResponse response){
-      try {
-        XContentBuilder builder=restContentBuilder(request);
-        builder.startObject();
-        builder.field(Fields._INDEX,explainRequest.index()).field(Fields._TYPE,explainRequest.type()).field(Fields._ID,explainRequest.id()).field(Fields.MATCHED,response.isMatch());
-        if (response.hasExplanation()) {
-          builder.startObject(Fields.EXPLANATION);
-          buildExplanation(builder,response.getExplanation());
-          builder.endObject();
-        }
-        GetResult getResult=response.getGetResult();
-        if (getResult != null) {
-          builder.startObject(Fields.GET);
-          response.getGetResult().toXContentEmbedded(builder,request);
-          builder.endObject();
-        }
+  client.explain(explainRequest,new RestBuilderListener<ExplainResponse>(channel){
+    @Override public RestResponse buildResponse(    ExplainResponse response,    XContentBuilder builder) throws Exception {
+      builder.startObject();
+      builder.field(Fields._INDEX,explainRequest.index()).field(Fields._TYPE,explainRequest.type()).field(Fields._ID,explainRequest.id()).field(Fields.MATCHED,response.isMatch());
+      if (response.hasExplanation()) {
+        builder.startObject(Fields.EXPLANATION);
+        buildExplanation(builder,response.getExplanation());
         builder.endObject();
-        channel.sendResponse(new BytesRestResponse(response.isExists() ? OK : NOT_FOUND,builder));
       }
- catch (      Throwable e) {
-        onFailure(e);
+      GetResult getResult=response.getGetResult();
+      if (getResult != null) {
+        builder.startObject(Fields.GET);
+        response.getGetResult().toXContentEmbedded(builder,request);
+        builder.endObject();
       }
+      builder.endObject();
+      return new BytesRestResponse(response.isExists() ? OK : NOT_FOUND,builder);
     }
     private void buildExplanation(    XContentBuilder builder,    Explanation explanation) throws IOException {
       builder.field(Fields.VALUE,explanation.getValue());
@@ -78,14 +72,6 @@
           builder.endObject();
         }
         builder.endArray();
-      }
-    }
-    @Override public void onFailure(    Throwable e){
-      try {
-        channel.sendResponse(new BytesRestResponse(request,e));
-      }
- catch (      IOException e1) {
-        logger.error("Failed to send failure response",e1);
       }
     }
   }

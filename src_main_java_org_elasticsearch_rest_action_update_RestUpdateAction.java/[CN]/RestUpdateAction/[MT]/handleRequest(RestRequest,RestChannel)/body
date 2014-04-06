@@ -32,69 +32,44 @@
   updateRequest.version(RestActions.parseVersion(request));
   updateRequest.versionType(VersionType.fromString(request.param("version_type"),updateRequest.versionType()));
   if (request.hasContent()) {
-    try {
-      updateRequest.source(request.content());
-      IndexRequest upsertRequest=updateRequest.upsertRequest();
-      if (upsertRequest != null) {
-        upsertRequest.routing(request.param("routing"));
-        upsertRequest.parent(request.param("parent"));
-        upsertRequest.timestamp(request.param("timestamp"));
-        if (request.hasParam("ttl")) {
-          upsertRequest.ttl(request.paramAsTime("ttl",null).millis());
-        }
-        upsertRequest.version(RestActions.parseVersion(request));
-        upsertRequest.versionType(VersionType.fromString(request.param("version_type"),upsertRequest.versionType()));
+    updateRequest.source(request.content());
+    IndexRequest upsertRequest=updateRequest.upsertRequest();
+    if (upsertRequest != null) {
+      upsertRequest.routing(request.param("routing"));
+      upsertRequest.parent(request.param("parent"));
+      upsertRequest.timestamp(request.param("timestamp"));
+      if (request.hasParam("ttl")) {
+        upsertRequest.ttl(request.paramAsTime("ttl",null).millis());
       }
-      IndexRequest doc=updateRequest.doc();
-      if (doc != null) {
-        doc.routing(request.param("routing"));
-        doc.parent(request.param("parent"));
-        doc.timestamp(request.param("timestamp"));
-        if (request.hasParam("ttl")) {
-          doc.ttl(request.paramAsTime("ttl",null).millis());
-        }
-        doc.version(RestActions.parseVersion(request));
-        doc.versionType(VersionType.fromString(request.param("version_type"),doc.versionType()));
-      }
+      upsertRequest.version(RestActions.parseVersion(request));
+      upsertRequest.versionType(VersionType.fromString(request.param("version_type"),upsertRequest.versionType()));
     }
- catch (    Exception e) {
-      try {
-        channel.sendResponse(new BytesRestResponse(request,e));
+    IndexRequest doc=updateRequest.doc();
+    if (doc != null) {
+      doc.routing(request.param("routing"));
+      doc.parent(request.param("parent"));
+      doc.timestamp(request.param("timestamp"));
+      if (request.hasParam("ttl")) {
+        doc.ttl(request.paramAsTime("ttl",null).millis());
       }
- catch (      IOException e1) {
-        logger.warn("Failed to send response",e1);
-      }
-      return;
+      doc.version(RestActions.parseVersion(request));
+      doc.versionType(VersionType.fromString(request.param("version_type"),doc.versionType()));
     }
   }
-  client.update(updateRequest,new ActionListener<UpdateResponse>(){
-    @Override public void onResponse(    UpdateResponse response){
-      try {
-        XContentBuilder builder=RestXContentBuilder.restContentBuilder(request);
-        builder.startObject().field(Fields._INDEX,response.getIndex()).field(Fields._TYPE,response.getType()).field(Fields._ID,response.getId()).field(Fields._VERSION,response.getVersion());
-        if (response.getGetResult() != null) {
-          builder.startObject(Fields.GET);
-          response.getGetResult().toXContentEmbedded(builder,request);
-          builder.endObject();
-        }
+  client.update(updateRequest,new RestBuilderListener<UpdateResponse>(channel){
+    @Override public RestResponse buildResponse(    UpdateResponse response,    XContentBuilder builder) throws Exception {
+      builder.startObject().field(Fields._INDEX,response.getIndex()).field(Fields._TYPE,response.getType()).field(Fields._ID,response.getId()).field(Fields._VERSION,response.getVersion());
+      if (response.getGetResult() != null) {
+        builder.startObject(Fields.GET);
+        response.getGetResult().toXContentEmbedded(builder,request);
         builder.endObject();
-        RestStatus status=OK;
-        if (response.isCreated()) {
-          status=CREATED;
-        }
-        channel.sendResponse(new BytesRestResponse(status,builder));
       }
- catch (      Throwable e) {
-        onFailure(e);
+      builder.endObject();
+      RestStatus status=OK;
+      if (response.isCreated()) {
+        status=CREATED;
       }
-    }
-    @Override public void onFailure(    Throwable e){
-      try {
-        channel.sendResponse(new BytesRestResponse(request,e));
-      }
- catch (      IOException e1) {
-        logger.error("Failed to send failure response",e1);
-      }
+      return new BytesRestResponse(status,builder);
     }
   }
 );

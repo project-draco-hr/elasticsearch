@@ -4,13 +4,7 @@
     text=request.content().toUtf8();
   }
   if (text == null) {
-    try {
-      channel.sendResponse(new BytesRestResponse(request,new ElasticsearchIllegalArgumentException("text is missing")));
-    }
- catch (    IOException e1) {
-      logger.warn("Failed to send response",e1);
-    }
-    return;
+    throw new ElasticsearchIllegalArgumentException("text is missing");
   }
   AnalyzeRequest analyzeRequest=new AnalyzeRequest(request.param("index"),text);
   analyzeRequest.listenerThreaded(false);
@@ -20,27 +14,5 @@
   analyzeRequest.tokenizer(request.param("tokenizer"));
   analyzeRequest.tokenFilters(request.paramAsStringArray("token_filters",request.paramAsStringArray("filters",analyzeRequest.tokenFilters())));
   analyzeRequest.charFilters(request.paramAsStringArray("char_filters",analyzeRequest.charFilters()));
-  client.admin().indices().analyze(analyzeRequest,new ActionListener<AnalyzeResponse>(){
-    @Override public void onResponse(    AnalyzeResponse response){
-      try {
-        XContentBuilder builder=restContentBuilder(request,null);
-        builder.startObject();
-        response.toXContent(builder,request);
-        builder.endObject();
-        channel.sendResponse(new BytesRestResponse(OK,builder));
-      }
- catch (      Throwable e) {
-        onFailure(e);
-      }
-    }
-    @Override public void onFailure(    Throwable e){
-      try {
-        channel.sendResponse(new BytesRestResponse(request,e));
-      }
- catch (      IOException e1) {
-        logger.error("Failed to send failure response",e1);
-      }
-    }
-  }
-);
+  client.admin().indices().analyze(analyzeRequest,new RestToXContentListener<AnalyzeResponse>(channel));
 }

@@ -6,38 +6,23 @@
   getWarmersRequest.indices(indices).types(types).warmers(names);
   getWarmersRequest.local(request.paramAsBoolean("local",getWarmersRequest.local()));
   getWarmersRequest.indicesOptions(IndicesOptions.fromRequest(request,getWarmersRequest.indicesOptions()));
-  client.admin().indices().getWarmers(getWarmersRequest,new ActionListener<GetWarmersResponse>(){
-    @Override public void onResponse(    GetWarmersResponse response){
-      try {
-        if (indices.length > 0 && response.warmers().isEmpty()) {
-          channel.sendResponse(new BytesRestResponse(OK,RestXContentBuilder.emptyBuilder(request)));
-          return;
-        }
-        XContentBuilder builder=RestXContentBuilder.restContentBuilder(request);
-        builder.startObject();
-        for (        ObjectObjectCursor<String,ImmutableList<IndexWarmersMetaData.Entry>> entry : response.warmers()) {
-          builder.startObject(entry.key,XContentBuilder.FieldCaseConversion.NONE);
-          builder.startObject(IndexWarmersMetaData.TYPE,XContentBuilder.FieldCaseConversion.NONE);
-          for (          IndexWarmersMetaData.Entry warmerEntry : entry.value) {
-            IndexWarmersMetaData.FACTORY.toXContent(warmerEntry,builder,request);
-          }
-          builder.endObject();
-          builder.endObject();
+  client.admin().indices().getWarmers(getWarmersRequest,new RestBuilderListener<GetWarmersResponse>(channel){
+    @Override public RestResponse buildResponse(    GetWarmersResponse response,    XContentBuilder builder) throws Exception {
+      if (indices.length > 0 && response.warmers().isEmpty()) {
+        return new BytesRestResponse(OK,builder.startObject().endObject());
+      }
+      builder.startObject();
+      for (      ObjectObjectCursor<String,ImmutableList<IndexWarmersMetaData.Entry>> entry : response.warmers()) {
+        builder.startObject(entry.key,XContentBuilder.FieldCaseConversion.NONE);
+        builder.startObject(IndexWarmersMetaData.TYPE,XContentBuilder.FieldCaseConversion.NONE);
+        for (        IndexWarmersMetaData.Entry warmerEntry : entry.value) {
+          IndexWarmersMetaData.FACTORY.toXContent(warmerEntry,builder,request);
         }
         builder.endObject();
-        channel.sendResponse(new BytesRestResponse(OK,builder));
+        builder.endObject();
       }
- catch (      Throwable e) {
-        onFailure(e);
-      }
-    }
-    @Override public void onFailure(    Throwable e){
-      try {
-        channel.sendResponse(new BytesRestResponse(request,e));
-      }
- catch (      IOException e1) {
-        logger.error("Failed to send failure response",e1);
-      }
+      builder.endObject();
+      return new BytesRestResponse(OK,builder);
     }
   }
 );
