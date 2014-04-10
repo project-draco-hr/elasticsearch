@@ -1,25 +1,34 @@
 {
-  final BenchmarkStateListener benchListener=new BenchmarkStateListener(){
-    @Override public void onResponse(    final ClusterState newState,    final BenchmarkMetaData.Entry entry){
-      threadPool.executor(ThreadPool.Names.GENERIC).execute(new Runnable(){
-        @Override public void run(){
-          final ImmutableOpenMap<String,DiscoveryNode> nodes=newState.nodes().nodes();
-          final BenchmarkSearchAsyncHandler async=new BenchmarkSearchAsyncHandler(entry.nodes().length,request,listener);
-          for (          String nodeId : entry.nodes()) {
-            final DiscoveryNode node=nodes.get(nodeId);
-            if (node == null) {
-              async.handleExceptionInternal(new ElasticsearchIllegalStateException("Node for ID [" + nodeId + "] not found in cluster state - skipping"));
+  final List<DiscoveryNode> nodes=availableBenchmarkNodes();
+  if (nodes.size() == 0) {
+    listener.onFailure(new BenchmarkNodeMissingException("No available nodes for executing benchmark [" + request.benchmarkName() + "]"));
+  }
+ else {
+    final BenchmarkStateListener benchListener=new BenchmarkStateListener(){
+      @Override public void onResponse(      final ClusterState newState,      final BenchmarkMetaData.Entry entry){
+        threadPool.executor(ThreadPool.Names.GENERIC).execute(new Runnable(){
+          @Override public void run(){
+            final ImmutableOpenMap<String,DiscoveryNode> nodes=newState.nodes().nodes();
+            final BenchmarkSearchAsyncHandler async=new BenchmarkSearchAsyncHandler(entry.nodes().length,request,listener);
+            for (            String nodeId : entry.nodes()) {
+              final DiscoveryNode node=nodes.get(nodeId);
+              if (node == null) {
+                async.handleExceptionInternal(new ElasticsearchIllegalStateException("Node for ID [" + nodeId + "] not found in cluster state - skipping"));
+              }
+ else {
+                logger.debug("Starting benchmark [{}] node [{}]",request.benchmarkName(),node.name());
+                transportService.sendRequest(node,BenchExecutionHandler.ACTION,new NodeBenchRequest(request),async);
+              }
             }
-            transportService.sendRequest(node,BenchExecutionHandler.ACTION,new NodeBenchRequest(request),async);
           }
         }
-      }
 );
+      }
+      @Override public void onFailure(      Throwable t){
+        listener.onFailure(t);
+      }
     }
-    @Override public void onFailure(    Throwable t){
-      listener.onFailure(t);
-    }
-  }
 ;
-  clusterService.submitStateUpdateTask("start_benchmark",new StartBenchmarkTask(request,benchListener));
+    clusterService.submitStateUpdateTask("start_benchmark",new StartBenchmarkTask(request,benchListener));
+  }
 }
