@@ -1,0 +1,33 @@
+{
+  final int numOfShards=5;
+  assertAcked(prepareCreate("test").setSettings(ImmutableSettings.builder().put(IndexMetaData.SETTING_NUMBER_OF_SHARDS,numOfShards).put(LogDocMergePolicyProvider.MIN_MERGE_DOCS_KEY,10).put(LogDocMergePolicyProvider.MERGE_FACTORY_KEY,5).put(LogByteSizeMergePolicy.DEFAULT_MIN_MERGE_MB,0.5).build()));
+  long id=0;
+  final int rounds=scaledRandomIntBetween(50,300);
+  logger.info("Starting rounds [{}] ",rounds);
+  for (int i=0; i < rounds; ++i) {
+    final int numDocs=scaledRandomIntBetween(100,1000);
+    BulkRequestBuilder request=client().prepareBulk();
+    for (int j=0; j < numDocs; ++j) {
+      request.add(Requests.indexRequest("test").type("type1").id(Long.toString(id++)).source(jsonBuilder().startObject().field("l",randomLong()).endObject()));
+    }
+    BulkResponse response=request.execute().actionGet();
+    refresh();
+    assertNoFailures(response);
+    IndicesStatsResponse stats=client().admin().indices().prepareStats("test").setSegments(true).setMerge(true).get();
+    logger.info("index round [{}] - segments {}, total merges {}, current merge {}",i,stats.getPrimaries().getSegments().getCount(),stats.getPrimaries().getMerge().getTotal(),stats.getPrimaries().getMerge().getCurrent());
+  }
+  awaitBusy(new Predicate<Object>(){
+    @Override public boolean apply(    Object input){
+      IndicesStatsResponse stats=client().admin().indices().prepareStats().setSegments(true).setMerge(true).get();
+      logger.info("numshards {}, segments {}, total merges {}, current merge {}",numOfShards,stats.getPrimaries().getSegments().getCount(),stats.getPrimaries().getMerge().getTotal(),stats.getPrimaries().getMerge().getCurrent());
+      long current=stats.getPrimaries().getMerge().getCurrent();
+      long count=stats.getPrimaries().getSegments().getCount();
+      return count < 50 && current == 0;
+    }
+  }
+);
+  IndicesStatsResponse stats=client().admin().indices().prepareStats().setSegments(true).setMerge(true).get();
+  logger.info("numshards {}, segments {}, total merges {}, current merge {}",numOfShards,stats.getPrimaries().getSegments().getCount(),stats.getPrimaries().getMerge().getTotal(),stats.getPrimaries().getMerge().getCurrent());
+  long count=stats.getPrimaries().getSegments().getCount();
+  assertThat(count,Matchers.lessThanOrEqualTo(50l));
+}
