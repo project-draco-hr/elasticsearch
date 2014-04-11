@@ -1,6 +1,7 @@
 {
   CommonSettings.MemoryStorageFormat format;
-  int bitsRequired=valuesDelta < 0 ? 64 : PackedInts.bitsRequired(valuesDelta);
+  long packedDelta=maxValue - minValue + 1;
+  int bitsRequired=packedDelta < 0 ? 64 : PackedInts.bitsRequired(packedDelta);
   PackedInts.FormatAndBits formatAndBits=PackedInts.fastestFormatAndBits(reader.maxDoc(),bitsRequired,acceptableOverheadRatio);
   final long singleValuesSize=formatAndBits.format.longCount(PackedInts.VERSION_CURRENT,reader.maxDoc(),formatAndBits.bitsPerValue) * 8L;
   final long ordinalsSize=build.getMemorySizeInBytes() + values.ramBytesUsed();
@@ -15,46 +16,14 @@
       pageMinOrdinal=Math.min(ordinal,pageMinOrdinal);
     }
     if (pageIndex == pageSize - 1) {
-      if (pageMaxOrdinal == Long.MIN_VALUE) {
-        pagedSingleValuesSize+=RamUsageEstimator.alignObjectSize(RamUsageEstimator.NUM_BYTES_OBJECT_HEADER + RamUsageEstimator.NUM_BYTES_INT);
-      }
- else {
-        long pageMinValue=values.get(pageMinOrdinal - 1);
-        long pageMaxValue=values.get(pageMaxOrdinal - 1);
-        long pageDelta=pageMaxValue - pageMinValue;
-        if (pageDelta != 0) {
-          bitsRequired=valuesDelta < 0 ? 64 : PackedInts.bitsRequired(pageDelta);
-          formatAndBits=PackedInts.fastestFormatAndBits(pageSize,bitsRequired,acceptableOverheadRatio);
-          pagedSingleValuesSize+=formatAndBits.format.longCount(PackedInts.VERSION_CURRENT,pageSize,formatAndBits.bitsPerValue) * RamUsageEstimator.NUM_BYTES_LONG;
-          pagedSingleValuesSize+=RamUsageEstimator.NUM_BYTES_LONG;
-        }
- else {
-          pagedSingleValuesSize+=RamUsageEstimator.alignObjectSize(RamUsageEstimator.NUM_BYTES_OBJECT_HEADER + RamUsageEstimator.NUM_BYTES_INT);
-        }
-      }
+      pagedSingleValuesSize+=getPageMemoryUsage(values,acceptableOverheadRatio,pageSize,pageMinOrdinal,pageMaxOrdinal);
       pageMinOrdinal=Long.MAX_VALUE;
       pageMaxOrdinal=Long.MIN_VALUE;
     }
   }
   if (pageIndex > 0) {
     pageIndex++;
-    if (pageMaxOrdinal == Long.MIN_VALUE) {
-      pagedSingleValuesSize+=RamUsageEstimator.alignObjectSize(RamUsageEstimator.NUM_BYTES_OBJECT_HEADER + RamUsageEstimator.NUM_BYTES_INT);
-    }
- else {
-      long pageMinValue=values.get(pageMinOrdinal - 1);
-      long pageMaxValue=values.get(pageMaxOrdinal - 1);
-      long pageDelta=pageMaxValue - pageMinValue;
-      if (pageDelta != 0) {
-        bitsRequired=valuesDelta < 0 ? 64 : PackedInts.bitsRequired(pageDelta);
-        formatAndBits=PackedInts.fastestFormatAndBits(pageSize,bitsRequired,acceptableOverheadRatio);
-        pagedSingleValuesSize+=formatAndBits.format.longCount(PackedInts.VERSION_CURRENT,pageSize,formatAndBits.bitsPerValue) * RamUsageEstimator.NUM_BYTES_LONG;
-        pagedSingleValuesSize+=RamUsageEstimator.NUM_BYTES_LONG;
-      }
- else {
-        pagedSingleValuesSize+=RamUsageEstimator.alignObjectSize(RamUsageEstimator.NUM_BYTES_OBJECT_HEADER + RamUsageEstimator.NUM_BYTES_INT);
-      }
-    }
+    pagedSingleValuesSize+=getPageMemoryUsage(values,acceptableOverheadRatio,pageSize,pageMinOrdinal,pageMaxOrdinal);
   }
   if (ordinalsSize < singleValuesSize) {
     if (ordinalsSize < pagedSingleValuesSize) {
