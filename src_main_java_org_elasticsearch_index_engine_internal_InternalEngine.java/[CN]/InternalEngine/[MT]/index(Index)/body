@@ -1,6 +1,5 @@
 {
-  rwl.readLock().lock();
-  try {
+  try (InternalLock _=readLock.acquire()){
     IndexWriter writer=this.indexWriter;
     if (writer == null) {
       throw new EngineClosedException(shardId,failedEngine);
@@ -10,20 +9,8 @@
     possibleMergeNeeded=true;
     flushNeeded=true;
   }
- catch (  IOException e) {
-    throw new IndexFailedEngineException(shardId,index,e);
-  }
-catch (  OutOfMemoryError e) {
-    failEngine(e);
-    throw new IndexFailedEngineException(shardId,index,e);
-  }
-catch (  IllegalStateException e) {
-    if (e.getMessage().contains("OutOfMemoryError")) {
-      failEngine(e);
-    }
-    throw new IndexFailedEngineException(shardId,index,e);
-  }
- finally {
-    rwl.readLock().unlock();
+ catch (  OutOfMemoryError|IllegalStateException|IOException t) {
+    maybeFailEngine(t);
+    throw new IndexFailedEngineException(shardId,index,t);
   }
 }

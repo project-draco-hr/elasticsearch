@@ -1,15 +1,11 @@
 {
-  rwl.writeLock().lock();
-  try {
+  try (InternalLock _=writeLock.acquire()){
     if (closed) {
       throw new EngineClosedException(shardId);
     }
     onGoingRecoveries.startRecovery();
   }
-  finally {
-    rwl.writeLock().unlock();
-  }
-  SnapshotIndexCommit phase1Snapshot;
+   SnapshotIndexCommit phase1Snapshot;
   try {
     phase1Snapshot=deletionPolicy.snapshot();
   }
@@ -22,10 +18,7 @@
   }
  catch (  Throwable e) {
     Releasables.closeWhileHandlingException(onGoingRecoveries,phase1Snapshot);
-    if (closed) {
-      e=new EngineClosedException(shardId,e);
-    }
-    throw new RecoveryEngineException(shardId,1,"Execution failed",e);
+    throw new RecoveryEngineException(shardId,1,"Execution failed",wrapIfClosed(e));
   }
   Translog.Snapshot phase2Snapshot;
   try {
@@ -33,22 +26,16 @@
   }
  catch (  Throwable e) {
     Releasables.closeWhileHandlingException(onGoingRecoveries,phase1Snapshot);
-    if (closed) {
-      e=new EngineClosedException(shardId,e);
-    }
-    throw new RecoveryEngineException(shardId,2,"Snapshot failed",e);
+    throw new RecoveryEngineException(shardId,2,"Snapshot failed",wrapIfClosed(e));
   }
   try {
     recoveryHandler.phase2(phase2Snapshot);
   }
  catch (  Throwable e) {
     Releasables.closeWhileHandlingException(onGoingRecoveries,phase1Snapshot,phase2Snapshot);
-    if (closed) {
-      e=new EngineClosedException(shardId,e);
-    }
-    throw new RecoveryEngineException(shardId,2,"Execution failed",e);
+    throw new RecoveryEngineException(shardId,2,"Execution failed",wrapIfClosed(e));
   }
-  rwl.writeLock().lock();
+  writeLock.acquire();
   Translog.Snapshot phase3Snapshot=null;
   boolean success=false;
   try {
@@ -57,11 +44,9 @@
     success=true;
   }
  catch (  Throwable e) {
-    throw new RecoveryEngineException(shardId,3,"Execution failed",e);
+    throw new RecoveryEngineException(shardId,3,"Execution failed",wrapIfClosed(e));
   }
  finally {
-    Releasables.close(success,onGoingRecoveries);
-    rwl.writeLock().unlock();
-    Releasables.close(success,phase1Snapshot,phase2Snapshot,phase3Snapshot);
+    Releasables.close(success,onGoingRecoveries,writeLock,phase1Snapshot,phase2Snapshot,phase3Snapshot);
   }
 }

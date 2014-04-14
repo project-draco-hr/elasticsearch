@@ -4,52 +4,41 @@
   }
   if (optimizeMutex.compareAndSet(false,true)) {
     ElasticsearchMergePolicy elasticsearchMergePolicy=null;
-    rwl.readLock().lock();
-    try {
-      ensureOpen();
-      if (indexWriter.getConfig().getMergePolicy() instanceof ElasticsearchMergePolicy) {
-        elasticsearchMergePolicy=(ElasticsearchMergePolicy)indexWriter.getConfig().getMergePolicy();
+    try (InternalLock _=readLock.acquire()){
+      final IndexWriter writer=currentIndexWriter();
+      if (writer.getConfig().getMergePolicy() instanceof ElasticsearchMergePolicy) {
+        elasticsearchMergePolicy=(ElasticsearchMergePolicy)writer.getConfig().getMergePolicy();
       }
       if (optimize.force() && elasticsearchMergePolicy == null) {
-        throw new ElasticsearchIllegalStateException("The `force` flag can only be used if the merge policy is an instance of " + ElasticsearchMergePolicy.class.getSimpleName() + ", got ["+ indexWriter.getConfig().getMergePolicy().getClass().getName()+ "]");
+        throw new ElasticsearchIllegalStateException("The `force` flag can only be used if the merge policy is an instance of " + ElasticsearchMergePolicy.class.getSimpleName() + ", got ["+ writer.getConfig().getMergePolicy().getClass().getName()+ "]");
       }
       if (optimize.force()) {
         elasticsearchMergePolicy.setForce(true);
       }
       if (optimize.onlyExpungeDeletes()) {
-        Merges.forceMergeDeletes(indexWriter,false);
+        Merges.forceMergeDeletes(writer,false);
       }
  else       if (optimize.maxNumSegments() <= 0) {
-        Merges.maybeMerge(indexWriter);
+        Merges.maybeMerge(writer);
         possibleMergeNeeded=false;
       }
  else {
-        Merges.forceMerge(indexWriter,optimize.maxNumSegments(),false);
+        Merges.forceMerge(writer,optimize.maxNumSegments(),false);
       }
     }
- catch (    OutOfMemoryError e) {
-      failEngine(e);
-      throw new OptimizeFailedEngineException(shardId,e);
-    }
-catch (    IllegalStateException e) {
-      if (e.getMessage().contains("OutOfMemoryError")) {
-        failEngine(e);
-      }
-      throw new OptimizeFailedEngineException(shardId,e);
-    }
-catch (    Throwable e) {
-      throw new OptimizeFailedEngineException(shardId,e);
+ catch (    Throwable t) {
+      maybeFailEngine(t);
+      throw new OptimizeFailedEngineException(shardId,t);
     }
  finally {
       if (elasticsearchMergePolicy != null) {
         elasticsearchMergePolicy.setForce(false);
       }
-      rwl.readLock().unlock();
       optimizeMutex.set(false);
     }
   }
   if (optimize.waitForMerge()) {
-    indexWriter.waitForMerges();
+    currentIndexWriter().waitForMerges();
   }
   if (optimize.flush()) {
     flush(new Flush().force(true).waitIfOngoing(true));

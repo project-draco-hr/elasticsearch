@@ -13,15 +13,13 @@
   flushLock.lock();
   try {
     if (flush.type() == Flush.Type.NEW_WRITER) {
-      rwl.writeLock().lock();
-      try {
-        ensureOpen();
+      try (InternalLock _=writeLock.acquire()){
         if (onGoingRecoveries.get() > 0) {
           throw new FlushNotAllowedEngineException(shardId,"Recovery is in progress, flush is not allowed");
         }
         dirty=false;
         try {
-          indexWriter.close(false);
+          currentIndexWriter().close(false);
           indexWriter=createWriter();
           if (flushNeeded || flush.force()) {
             flushNeeded=false;
@@ -40,28 +38,14 @@
           }
           refreshVersioningTable(threadPool.estimatedTimeInMillis());
         }
- catch (        OutOfMemoryError e) {
-          failEngine(e);
-          throw new FlushFailedEngineException(shardId,e);
-        }
-catch (        IllegalStateException e) {
-          if (e.getMessage().contains("OutOfMemoryError")) {
-            failEngine(e);
-          }
-          throw new FlushFailedEngineException(shardId,e);
-        }
-catch (        Throwable e) {
-          throw new FlushFailedEngineException(shardId,e);
+ catch (        Throwable t) {
+          throw new FlushFailedEngineException(shardId,t);
         }
       }
-  finally {
-        rwl.writeLock().unlock();
-      }
-    }
+     }
  else     if (flush.type() == Flush.Type.COMMIT_TRANSLOG) {
-      rwl.readLock().lock();
-      try {
-        ensureOpen();
+      try (InternalLock _=readLock.acquire()){
+        final IndexWriter indexWriter=currentIndexWriter();
         if (onGoingRecoveries.get() > 0) {
           throw new FlushNotAllowedEngineException(shardId,"Recovery is in progress, flush is not allowed");
         }
@@ -75,60 +59,30 @@ catch (        Throwable e) {
             refreshVersioningTable(threadPool.estimatedTimeInMillis());
             translog.makeTransientCurrent();
           }
- catch (          OutOfMemoryError e) {
-            translog.revertTransient();
-            failEngine(e);
-            throw new FlushFailedEngineException(shardId,e);
-          }
-catch (          IllegalStateException e) {
-            if (e.getMessage().contains("OutOfMemoryError")) {
-              failEngine(e);
-            }
-            throw new FlushFailedEngineException(shardId,e);
-          }
-catch (          Throwable e) {
+ catch (          Throwable e) {
             translog.revertTransient();
             throw new FlushFailedEngineException(shardId,e);
           }
         }
       }
-  finally {
-        rwl.readLock().unlock();
-      }
-    }
+     }
  else     if (flush.type() == Flush.Type.COMMIT) {
-      rwl.readLock().lock();
-      try {
-        ensureOpen();
+      try (InternalLock _=readLock.acquire()){
+        final IndexWriter indexWriter=currentIndexWriter();
         try {
           long translogId=translog.currentId();
           indexWriter.setCommitData(MapBuilder.<String,String>newMapBuilder().put(Translog.TRANSLOG_ID_KEY,Long.toString(translogId)).map());
           indexWriter.commit();
         }
- catch (        OutOfMemoryError e) {
-          translog.revertTransient();
-          failEngine(e);
-          throw new FlushFailedEngineException(shardId,e);
-        }
-catch (        IllegalStateException e) {
-          if (e.getMessage().contains("OutOfMemoryError")) {
-            failEngine(e);
-          }
-          throw new FlushFailedEngineException(shardId,e);
-        }
-catch (        Throwable e) {
+ catch (        Throwable e) {
           throw new FlushFailedEngineException(shardId,e);
         }
       }
-  finally {
-        rwl.readLock().unlock();
-      }
-    }
+     }
  else {
       throw new ElasticsearchIllegalStateException("flush type [" + flush.type() + "] not supported");
     }
-    rwl.readLock().lock();
-    try {
+    try (InternalLock _=readLock.acquire()){
       ensureOpen();
       readLastCommittedSegmentsInfo();
     }
@@ -137,11 +91,12 @@ catch (        Throwable e) {
         logger.warn("failed to read latest segment infos on flush",e);
       }
     }
- finally {
-      rwl.readLock().unlock();
-    }
   }
-  finally {
+ catch (  FlushFailedEngineException ex) {
+    maybeFailEngine(ex.getCause());
+    throw ex;
+  }
+ finally {
     flushLock.unlock();
     flushing.decrementAndGet();
   }
