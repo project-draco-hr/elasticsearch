@@ -1,37 +1,26 @@
 {
   XContentParser parser=parseContext.parser();
-  Query query=null;
   boolean queryFound=false;
+  boolean filterFound=false;
   String childType=null;
   int shortCircuitParentDocSet=8192;
   String filterName=null;
   String currentFieldName=null;
   XContentParser.Token token;
+  XContentStructure.InnerQuery innerQuery=null;
+  XContentStructure.InnerFilter innerFilter=null;
   while ((token=parser.nextToken()) != XContentParser.Token.END_OBJECT) {
     if (token == XContentParser.Token.FIELD_NAME) {
       currentFieldName=parser.currentName();
     }
  else     if (token == XContentParser.Token.START_OBJECT) {
       if ("query".equals(currentFieldName)) {
-        String[] origTypes=QueryParseContext.setTypesWithPrevious(childType == null ? null : new String[]{childType});
-        try {
-          query=parseContext.parseInnerQuery();
-          queryFound=true;
-        }
-  finally {
-          QueryParseContext.setTypes(origTypes);
-        }
+        innerQuery=new XContentStructure.InnerQuery(parseContext,childType == null ? null : new String[]{childType});
+        queryFound=true;
       }
  else       if ("filter".equals(currentFieldName)) {
-        String[] origTypes=QueryParseContext.setTypesWithPrevious(childType == null ? null : new String[]{childType});
-        try {
-          Filter innerFilter=parseContext.parseInnerFilter();
-          query=new XConstantScoreQuery(innerFilter);
-          queryFound=true;
-        }
-  finally {
-          QueryParseContext.setTypes(origTypes);
-        }
+        innerFilter=new XContentStructure.InnerFilter(parseContext,childType == null ? null : new String[]{childType});
+        filterFound=true;
       }
  else {
         throw new QueryParsingException(parseContext.index(),"[has_child] filter does not support [" + currentFieldName + "]");
@@ -59,14 +48,21 @@
       }
     }
   }
-  if (!queryFound) {
-    throw new QueryParsingException(parseContext.index(),"[has_child] filter requires 'query' field");
-  }
-  if (query == null) {
-    return null;
+  if (!queryFound && !filterFound) {
+    throw new QueryParsingException(parseContext.index(),"[has_child] filter requires 'query' or 'filter' field");
   }
   if (childType == null) {
     throw new QueryParsingException(parseContext.index(),"[has_child] filter requires 'type' field");
+  }
+  Query query;
+  if (queryFound) {
+    query=innerQuery.asQuery(childType);
+  }
+ else {
+    query=innerFilter.asFilter(childType);
+  }
+  if (query == null) {
+    return null;
   }
   DocumentMapper childDocMapper=parseContext.mapperService().documentMapper(childType);
   if (childDocMapper == null) {
