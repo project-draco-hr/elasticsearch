@@ -6,8 +6,10 @@
   List<String> moreLikeFields=null;
   boolean failOnUnsupportedField=true;
   String queryName=null;
+  boolean exclude=true;
   XContentParser.Token token;
   String currentFieldName=null;
+  List<MultiGetRequest.Item> items=new ArrayList<MultiGetRequest.Item>();
   while ((token=parser.nextToken()) != XContentParser.Token.END_OBJECT) {
     if (token == XContentParser.Token.FIELD_NAME) {
       currentFieldName=parser.currentName();
@@ -56,6 +58,9 @@
  else       if ("_name".equals(currentFieldName)) {
         queryName=parser.text();
       }
+ else       if (Fields.EXCLUDE.match(currentFieldName,parseContext.parseFlags())) {
+        exclude=parser.booleanValue();
+      }
  else {
         throw new QueryParsingException(parseContext.index(),"[mlt] query does not support [" + currentFieldName + "]");
       }
@@ -74,13 +79,19 @@
           moreLikeFields.add(parseContext.indexName(parser.text()));
         }
       }
+ else       if (Fields.DOCUMENT_IDS.match(currentFieldName,parseContext.parseFlags())) {
+        MultiGetRequest.parseIds(parser,items);
+      }
+ else       if (Fields.DOCUMENTS.match(currentFieldName,parseContext.parseFlags())) {
+        MultiGetRequest.parseDocuments(parser,items);
+      }
  else {
         throw new QueryParsingException(parseContext.index(),"[mlt] query does not support [" + currentFieldName + "]");
       }
     }
   }
-  if (mltQuery.getLikeText() == null) {
-    throw new QueryParsingException(parseContext.index(),"more_like_this requires 'like_text' to be specified");
+  if ((mltQuery.getLikeText() == null && items.isEmpty()) || (mltQuery.getLikeText() != null && !items.isEmpty())) {
+    throw new QueryParsingException(parseContext.index(),"more_like_this requires either 'like_text' or 'ids/docs' to be specified");
   }
   if (analyzer == null) {
     analyzer=parseContext.mapperService().searchAnalyzer();
@@ -92,23 +103,45 @@
  else   if (moreLikeFields.isEmpty()) {
     throw new QueryParsingException(parseContext.index(),"more_like_this requires 'fields' to be non-empty");
   }
-  for (Iterator<String> it=moreLikeFields.iterator(); it.hasNext(); ) {
-    final String fieldName=it.next();
-    if (!Analysis.generatesCharacterTokenStream(analyzer,fieldName)) {
-      if (failOnUnsupportedField) {
-        throw new ElasticsearchIllegalArgumentException("more_like_this doesn't support binary/numeric fields: [" + fieldName + "]");
-      }
- else {
-        it.remove();
-      }
-    }
-  }
+  removeUnsupportedFields(moreLikeFields,analyzer,failOnUnsupportedField);
   if (moreLikeFields.isEmpty()) {
     return null;
   }
   mltQuery.setMoreLikeFields(moreLikeFields.toArray(Strings.EMPTY_ARRAY));
   if (queryName != null) {
     parseContext.addNamedQuery(queryName,mltQuery);
+  }
+  if (!items.isEmpty()) {
+    for (    MultiGetRequest.Item item : items) {
+      if (item.index() == null) {
+        item.index(parseContext.index().name());
+      }
+      if (item.type() == null) {
+        if (parseContext.queryTypes().size() > 1) {
+          throw new QueryParsingException(parseContext.index(),"ambiguous type for item with id: " + item.id() + " and index: "+ item.index());
+        }
+ else {
+          item.type(parseContext.queryTypes().iterator().next());
+        }
+      }
+      if (item.fields() == null && item.fetchSourceContext() == null) {
+        item.fields(moreLikeFields.toArray(new String[moreLikeFields.size()]));
+      }
+ else {
+        removeUnsupportedFields(item,analyzer,failOnUnsupportedField);
+      }
+    }
+    List<MoreLikeThisFetchService.LikeText> likeTexts=fetchService.fetch(items);
+    BooleanQuery boolQuery=new BooleanQuery();
+    for (    MoreLikeThisFetchService.LikeText likeText : likeTexts) {
+      addMoreLikeThis(boolQuery,mltQuery,likeText.field,likeText.text);
+    }
+    if (exclude) {
+      TermsFilter filter=new TermsFilter(UidFieldMapper.NAME,Uid.createUids(items));
+      ConstantScoreQuery query=new ConstantScoreQuery(filter);
+      boolQuery.add(query,BooleanClause.Occur.MUST_NOT);
+    }
+    return boolQuery;
   }
   return mltQuery;
 }
