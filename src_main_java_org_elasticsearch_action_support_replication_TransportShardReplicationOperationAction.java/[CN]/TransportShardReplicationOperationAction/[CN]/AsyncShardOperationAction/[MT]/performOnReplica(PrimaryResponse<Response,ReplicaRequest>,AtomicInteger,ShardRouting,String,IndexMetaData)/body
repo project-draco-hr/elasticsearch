@@ -7,15 +7,15 @@
   }
   final ReplicaOperationRequest shardRequest=new ReplicaOperationRequest(shardIt.shardId().id(),response.replicaRequest());
   if (!nodeId.equals(clusterState.nodes().localNodeId())) {
-    DiscoveryNode node=clusterState.nodes().get(nodeId);
+    final DiscoveryNode node=clusterState.nodes().get(nodeId);
     transportService.sendRequest(node,transportReplicaAction,shardRequest,transportOptions,new EmptyTransportResponseHandler(ThreadPool.Names.SAME){
       @Override public void handleResponse(      TransportResponse.Empty vResponse){
         finishIfPossible();
       }
       @Override public void handleException(      TransportException exp){
         if (!ignoreReplicaException(exp.unwrapCause())) {
-          logger.warn("Failed to perform " + transportAction + " on replica "+ shardIt.shardId(),exp);
-          shardStateAction.shardFailed(shard,indexMetaData.getUUID(),"Failed to perform [" + transportAction + "] on replica, message ["+ detailedMessage(exp)+ "]");
+          logger.warn("Failed to perform " + transportAction + " on remote replica "+ node+ shardIt.shardId(),exp);
+          shardStateAction.shardFailed(shard,indexMetaData.getUUID(),"Failed to perform [" + transportAction + "] on replica, message ["+ ExceptionsHelper.detailedMessage(exp)+ "]");
         }
         finishIfPossible();
       }
@@ -37,10 +37,7 @@
               shardOperationOnReplica(shardRequest);
             }
  catch (            Throwable e) {
-              if (!ignoreReplicaException(e)) {
-                logger.warn("Failed to perform " + transportAction + " on replica "+ shardIt.shardId(),e);
-                shardStateAction.shardFailed(shard,indexMetaData.getUUID(),"Failed to perform [" + transportAction + "] on replica, message ["+ detailedMessage(e)+ "]");
-              }
+              failReplicaIfNeeded(shard.index(),shard.id(),e);
             }
             if (counter.decrementAndGet() == 0) {
               listener.onResponse(response.response());
@@ -53,10 +50,7 @@
 );
       }
  catch (      Throwable e) {
-        if (!ignoreReplicaException(e)) {
-          logger.warn("Failed to perform " + transportAction + " on replica "+ shardIt.shardId(),e);
-          shardStateAction.shardFailed(shard,indexMetaData.getUUID(),"Failed to perform [" + transportAction + "] on replica, message ["+ detailedMessage(e)+ "]");
-        }
+        failReplicaIfNeeded(shard.index(),shard.id(),e);
         if (counter.decrementAndGet() == 0) {
           listener.onResponse(response.response());
         }
@@ -67,10 +61,7 @@
         shardOperationOnReplica(shardRequest);
       }
  catch (      Throwable e) {
-        if (!ignoreReplicaException(e)) {
-          logger.warn("Failed to perform " + transportAction + " on replica"+ shardIt.shardId(),e);
-          shardStateAction.shardFailed(shard,indexMetaData.getUUID(),"Failed to perform [" + transportAction + "] on replica, message ["+ detailedMessage(e)+ "]");
-        }
+        failReplicaIfNeeded(shard.index(),shard.id(),e);
       }
       if (counter.decrementAndGet() == 0) {
         listener.onResponse(response.response());
