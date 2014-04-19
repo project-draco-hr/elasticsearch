@@ -1,15 +1,28 @@
 {
-  SearcherManager manager=this.searcherManager;
-  if (manager == null) {
-    throw new EngineClosedException(shardId);
-  }
+  boolean success=false;
   try {
-    IndexSearcher searcher=manager.acquire();
-    return newSearcher(source,searcher,manager);
+    store.incRef();
+    final SearcherManager manager=this.searcherManager;
+    final IndexSearcher searcher=manager.acquire();
+    try {
+      final Searcher retVal=newSearcher(source,searcher,manager);
+      success=true;
+      return retVal;
+    }
+  finally {
+      if (!success) {
+        manager.release(searcher);
+      }
+    }
   }
  catch (  Throwable ex) {
     ensureOpen();
     logger.error("failed to acquire searcher, source {}",ex,source);
     throw new EngineException(shardId,"failed to acquire searcher, source " + source,ex);
+  }
+ finally {
+    if (!success) {
+      store.decRef();
+    }
   }
 }
