@@ -1,10 +1,10 @@
 {
   String bloomFileName=IndexFileNames.segmentFileName(state.segmentInfo.name,state.segmentSuffix,BLOOM_EXTENSION);
-  IndexInput bloomIn=null;
+  ChecksumIndexInput bloomIn=null;
   boolean success=false;
   try {
-    bloomIn=state.directory.openInput(bloomFileName,state.context);
-    CodecUtil.checkHeader(bloomIn,BLOOM_CODEC_NAME,BLOOM_CODEC_VERSION,BLOOM_CODEC_VERSION);
+    bloomIn=state.directory.openChecksumInput(bloomFileName,state.context);
+    int version=CodecUtil.checkHeader(bloomIn,BLOOM_CODEC_NAME,BLOOM_CODEC_VERSION,BLOOM_CODEC_VERSION_CURRENT);
     PostingsFormat delegatePostingsFormat=PostingsFormat.forName(bloomIn.readString());
     this.delegateFieldsProducer=delegatePostingsFormat.fieldsProducer(state);
     int numBlooms=bloomIn.readInt();
@@ -19,6 +19,12 @@
         BloomFilter bloom=BloomFilter.deserialize(bloomIn);
         FieldInfo fieldInfo=state.fieldInfos.fieldInfo(fieldNum);
         bloomsByFieldName.put(fieldInfo.name,bloom);
+      }
+      if (version >= BLOOM_CODEC_VERSION_CHECKSUM) {
+        CodecUtil.checkFooter(bloomIn);
+      }
+ else {
+        CodecUtil.checkEOF(bloomIn);
       }
     }
     IOUtils.close(bloomIn);
