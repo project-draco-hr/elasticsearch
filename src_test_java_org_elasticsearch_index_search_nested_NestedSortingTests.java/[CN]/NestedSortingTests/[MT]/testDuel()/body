@@ -1,0 +1,40 @@
+{
+  final int numDocs=scaledRandomIntBetween(100,1000);
+  for (int i=0; i < numDocs; ++i) {
+    final int numChildren=randomInt(2);
+    List<Document> docs=new ArrayList<>(numChildren + 1);
+    for (int j=0; j < numChildren; ++j) {
+      Document doc=new Document();
+      doc.add(new StringField("f",TestUtil.randomSimpleString(getRandom(),2),Field.Store.NO));
+      doc.add(new StringField("__type","child",Field.Store.NO));
+      docs.add(doc);
+    }
+    if (randomBoolean()) {
+      docs.add(new Document());
+    }
+    Document parent=new Document();
+    parent.add(new StringField("__type","parent",Field.Store.NO));
+    docs.add(parent);
+    writer.addDocuments(docs);
+    if (rarely()) {
+      DirectoryReader.open(writer,false).close();
+    }
+  }
+  writer.commit();
+  MultiValueMode sortMode=randomFrom(Arrays.asList(MultiValueMode.MIN,MultiValueMode.MAX));
+  IndexSearcher searcher=new IndexSearcher(DirectoryReader.open(writer,false));
+  PagedBytesIndexFieldData indexFieldData1=getForField("f");
+  IndexFieldData<?> indexFieldData2=NoOrdinalsStringFieldDataTests.hideOrdinals(indexFieldData1);
+  final String missingValue=randomBoolean() ? null : TestUtil.randomSimpleString(getRandom(),2);
+  final int n=randomIntBetween(1,numDocs + 2);
+  final boolean reverse=randomBoolean();
+  final TopDocs topDocs1=getTopDocs(searcher,indexFieldData1,missingValue,sortMode,n,reverse);
+  final TopDocs topDocs2=getTopDocs(searcher,indexFieldData2,missingValue,sortMode,n,reverse);
+  for (int i=0; i < topDocs1.scoreDocs.length; ++i) {
+    final FieldDoc fieldDoc1=(FieldDoc)topDocs1.scoreDocs[i];
+    final FieldDoc fieldDoc2=(FieldDoc)topDocs2.scoreDocs[i];
+    assertEquals(fieldDoc1.doc,fieldDoc2.doc);
+    assertArrayEquals(fieldDoc1.fields,fieldDoc2.fields);
+  }
+  searcher.getIndexReader().close();
+}
