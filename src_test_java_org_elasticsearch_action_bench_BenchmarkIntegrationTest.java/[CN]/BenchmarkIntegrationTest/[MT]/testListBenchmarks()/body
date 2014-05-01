@@ -1,0 +1,37 @@
+{
+  final BenchmarkRequest request=BenchmarkTestUtil.randomRequest(client(),indices,numExecutorNodes,competitionSettingsMap);
+  logger.info("--> submitting benchmark - competitors [{}] iterations [{}]",request.competitors().size(),request.settings().iterations());
+  final CountDownLatch countdown=new CountDownLatch(1);
+  final List<Throwable> throwables=new ArrayList<>();
+  client().bench(request,new ActionListener<BenchmarkResponse>(){
+    @Override public void onResponse(    BenchmarkResponse benchmarkResponse){
+      countdown.countDown();
+    }
+    @Override public void onFailure(    Throwable e){
+      throwables.add(e);
+      countdown.countDown();
+    }
+  }
+);
+  Thread.sleep(1000);
+  final BenchmarkStatusResponse response=client().prepareBenchStatus().execute().actionGet();
+  assertThat(response.benchmarkResponses().size(),greaterThanOrEqualTo(0));
+  for (  BenchmarkResponse benchmarkResponse : response.benchmarkResponses()) {
+    assertThat(benchmarkResponse.benchmarkName(),equalTo(BENCHMARK_NAME));
+    assertThat(benchmarkResponse.state(),equalTo(BenchmarkResponse.State.RUNNING));
+    assertFalse(benchmarkResponse.hasErrors());
+    for (    CompetitionResult result : benchmarkResponse.competitionResults().values()) {
+      assertThat(result.nodeResults().size(),equalTo(numExecutorNodes));
+      validateCompetitionResult(result,competitionSettingsMap.get(result.competitionName()),false);
+    }
+  }
+  if (!countdown.await(TIMEOUT,TIME_UNIT)) {
+    logger.warn("Timeout waiting to for benchmark to complete");
+  }
+  if (throwables.size() > 0) {
+    for (    Throwable t : throwables) {
+      logger.error(t.getMessage(),t);
+    }
+    fail("Failed to execute benchmark");
+  }
+}
