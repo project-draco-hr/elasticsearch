@@ -1,0 +1,52 @@
+{
+  assertAcked(prepareCreate("test").addMapping("article").addMapping("comment","_parent","type=article"));
+  List<IndexRequestBuilder> requests=new ArrayList<>();
+  String[] uniqueCategories=new String[randomIntBetween(1,25)];
+  for (int i=0; i < uniqueCategories.length; i++) {
+    uniqueCategories[i]=Integer.toString(i);
+  }
+  int catIndex=0;
+  int numParentDocs=randomIntBetween(uniqueCategories.length,uniqueCategories.length * 5);
+  for (int i=0; i < numParentDocs; i++) {
+    String id=Integer.toString(i);
+    String[] categories=new String[randomIntBetween(1,1)];
+    for (int j=0; j < categories.length; j++) {
+      String category=categories[j]=uniqueCategories[catIndex++ % uniqueCategories.length];
+      Control control=categoryToControl.get(category);
+      if (control == null) {
+        categoryToControl.put(category,control=new Control(category));
+      }
+      control.articleIds.add(id);
+    }
+    requests.add(client().prepareIndex("test","article",id).setCreate(true).setSource("category",categories,"randomized",true));
+  }
+  String[] commenters=new String[randomIntBetween(5,50)];
+  for (int i=0; i < commenters.length; i++) {
+    commenters[i]=Integer.toString(i);
+  }
+  int id=0;
+  for (  Control control : categoryToControl.values()) {
+    for (    String articleId : control.articleIds) {
+      int numChildDocsPerParent=randomIntBetween(0,5);
+      for (int i=0; i < numChildDocsPerParent; i++) {
+        String commenter=commenters[id % commenters.length];
+        String idValue=Integer.toString(id++);
+        control.commentIds.add(idValue);
+        Set<String> ids=control.commenterToCommentId.get(commenter);
+        if (ids == null) {
+          control.commenterToCommentId.put(commenter,ids=new HashSet<>());
+        }
+        ids.add(idValue);
+        requests.add(client().prepareIndex("test","comment",idValue).setCreate(true).setParent(articleId).setSource("commenter",commenter));
+      }
+    }
+  }
+  requests.add(client().prepareIndex("test","article","a").setSource("category",new String[]{"a"},"randomized",false));
+  requests.add(client().prepareIndex("test","article","b").setSource("category",new String[]{"a","b"},"randomized",false));
+  requests.add(client().prepareIndex("test","article","c").setSource("category",new String[]{"a","b","c"},"randomized",false));
+  requests.add(client().prepareIndex("test","article","d").setSource("category",new String[]{"c"},"randomized",false));
+  requests.add(client().prepareIndex("test","comment","a").setParent("a").setSource("{}"));
+  requests.add(client().prepareIndex("test","comment","c").setParent("c").setSource("{}"));
+  indexRandom(true,requests);
+  ensureSearchable("test");
+}
