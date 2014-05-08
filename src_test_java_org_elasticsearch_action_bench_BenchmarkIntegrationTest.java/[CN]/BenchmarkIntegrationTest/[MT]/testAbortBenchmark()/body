@@ -1,37 +1,18 @@
 {
-  final BenchmarkRequest request=BenchmarkTestUtil.randomRequest(client(),indices,numExecutorNodes,competitionSettingsMap);
+  final BenchmarkRequest request=BenchmarkTestUtil.randomRequest(client(),indices,numExecutorNodes,competitionSettingsMap,BenchmarkTestUtil.MIN_LARGE_INTERVAL,BenchmarkTestUtil.MAX_LARGE_INTERVAL);
   logger.info("--> Submitting benchmark - competitors [{}] iterations [{}]",request.competitors().size(),request.settings().iterations());
-  final CountDownLatch countdown=new CountDownLatch(1);
-  final List<Throwable> throwables=new ArrayList<>();
-  client().bench(request,new ActionListener<BenchmarkResponse>(){
-    @Override public void onResponse(    BenchmarkResponse benchmarkResponse){
-      countdown.countDown();
-      assertThat(benchmarkResponse.state(),equalTo(BenchmarkResponse.State.ABORTED));
-    }
-    @Override public void onFailure(    Throwable e){
-      throwables.add(e);
-      countdown.countDown();
-    }
-  }
-);
-  Thread.sleep(1000);
-  final AbortBenchmarkResponse response=client().prepareAbortBench(BENCHMARK_NAME).execute().actionGet();
-  assertThat(response.getNodeResponses().size(),lessThanOrEqualTo(numExecutorNodes));
-  assertThat(response.getBenchmarkName(),equalTo(BENCHMARK_NAME));
-  for (  AbortBenchmarkNodeResponse nodeResponse : response.getNodeResponses()) {
+  final ActionFuture<BenchmarkResponse> benchmarkResponse=client().bench(request);
+  final boolean ret=awaitBusy(statusPredicate,TIMEOUT,TIME_UNIT);
+  assertTrue(ret);
+  final AbortBenchmarkResponse abortResponse=client().prepareAbortBench(BENCHMARK_NAME).execute().actionGet();
+  assertThat(abortResponse.getNodeResponses().size(),lessThanOrEqualTo(numExecutorNodes));
+  assertThat(abortResponse.getBenchmarkName(),equalTo(BENCHMARK_NAME));
+  for (  AbortBenchmarkNodeResponse nodeResponse : abortResponse.getNodeResponses()) {
     assertThat(nodeResponse.benchmarkName(),equalTo(BENCHMARK_NAME));
     assertThat(nodeResponse.errorMessage(),nullValue());
     assertThat(nodeResponse.nodeName(),notNullValue());
   }
   final BenchmarkStatusResponse statusResponse=client().prepareBenchStatus().execute().actionGet();
-  assertThat(statusResponse.benchmarkResponses().size(),equalTo(0));
-  if (!countdown.await(TIMEOUT,TIME_UNIT)) {
-    logger.warn("Timeout waiting to for benchmark to complete");
-  }
-  if (throwables.size() > 0) {
-    for (    Throwable t : throwables) {
-      logger.error(t.getMessage(),t);
-    }
-    fail("Failed to execute benchmark");
-  }
+  assertThat(statusResponse.totalActiveBenchmarks(),equalTo(0));
+  assertThat(benchmarkResponse.get().state(),equalTo(BenchmarkResponse.State.ABORTED));
 }

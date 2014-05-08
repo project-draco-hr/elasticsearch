@@ -2,12 +2,9 @@
   final StoppableSemaphore semaphore=new StoppableSemaphore(1);
   final Map<String,CompetitionResult> competitionResults=new HashMap<String,CompetitionResult>();
   final BenchmarkResponse benchmarkResponse=new BenchmarkResponse(request.benchmarkName(),competitionResults);
-  if (this.nodeName == null) {
-    this.nodeName=clusterService.localNode().name();
-  }
 synchronized (lock) {
     if (activeBenchmarks.containsKey(request.benchmarkName())) {
-      throw new ElasticsearchException("Benchmark with id [" + request.benchmarkName() + "] is already running");
+      throw new ElasticsearchException("Benchmark [" + request.benchmarkName() + "] is already running on ["+ nodeName()+ "]");
     }
     activeBenchmarks=ImmutableOpenMap.builder(activeBenchmarks).fPut(request.benchmarkName(),new BenchmarkState(request,benchmarkResponse,semaphore)).build();
   }
@@ -15,10 +12,10 @@ synchronized (lock) {
     for (    BenchmarkCompetitor competitor : request.competitors()) {
       final BenchmarkSettings settings=competitor.settings();
       final int iterations=settings.iterations();
-      logger.debug("Executing [{}] iterations for benchmark [{}][{}] ",iterations,request.benchmarkName(),competitor.name());
+      logger.debug("Executing [iterations: {}] [multiplier: {}] for [{}] on [{}]",iterations,settings.multiplier(),request.benchmarkName(),nodeName());
       final List<CompetitionIteration> competitionIterations=new ArrayList<>(iterations);
       final CompetitionResult competitionResult=new CompetitionResult(competitor.name(),settings.concurrency(),settings.multiplier(),request.percentiles());
-      final CompetitionNodeResult competitionNodeResult=new CompetitionNodeResult(competitor.name(),nodeName,iterations,competitionIterations);
+      final CompetitionNodeResult competitionNodeResult=new CompetitionNodeResult(competitor.name(),nodeName(),iterations,competitionIterations);
       competitionResult.addCompetitionNodeResult(competitionNodeResult);
       benchmarkResponse.competitionResults.put(competitor.name(),competitionResult);
       final List<SearchRequest> searchRequests=competitor.settings().searchRequests();
