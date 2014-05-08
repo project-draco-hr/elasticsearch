@@ -1,0 +1,30 @@
+{
+  List<InternalAggregation> aggregations=reduceContext.aggregations();
+  if (aggregations.size() == 1) {
+    return aggregations.get(0);
+  }
+  TopDocs[] shardDocs=new TopDocs[aggregations.size()];
+  InternalSearchHits[] shardHits=new InternalSearchHits[aggregations.size()];
+  for (int i=0; i < shardDocs.length; i++) {
+    InternalTopHits topHitsAgg=(InternalTopHits)aggregations.get(i);
+    shardDocs[i]=topHitsAgg.topDocs;
+    shardHits[i]=topHitsAgg.searchHits;
+  }
+  try {
+    int[] tracker=new int[shardHits.length];
+    TopDocs reducedTopDocs=TopDocs.merge(sort,size,shardDocs);
+    InternalSearchHit[] hits=new InternalSearchHit[reducedTopDocs.scoreDocs.length];
+    for (int i=0; i < reducedTopDocs.scoreDocs.length; i++) {
+      ScoreDoc scoreDoc=reducedTopDocs.scoreDocs[i];
+      hits[i]=(InternalSearchHit)shardHits[scoreDoc.shardIndex].getAt(tracker[scoreDoc.shardIndex]++);
+      if (scoreDoc instanceof FieldDoc) {
+        FieldDoc fieldDoc=(FieldDoc)scoreDoc;
+        hits[i].sortValues(fieldDoc.fields);
+      }
+    }
+    return new InternalTopHits(name,new InternalSearchHits(hits,reducedTopDocs.totalHits,reducedTopDocs.getMaxScore()));
+  }
+ catch (  IOException e) {
+    throw ExceptionsHelper.convertToElastic(e);
+  }
+}
