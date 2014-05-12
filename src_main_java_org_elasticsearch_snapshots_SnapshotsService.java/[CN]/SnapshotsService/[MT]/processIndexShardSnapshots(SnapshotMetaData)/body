@@ -5,40 +5,44 @@
       survivors.put(entry.getKey(),entry.getValue());
     }
   }
-  HashMap<SnapshotId,SnapshotShards> newSnapshots=null;
+  Map<SnapshotId,Map<ShardId,IndexShardSnapshotStatus>> newSnapshots=newHashMap();
   final String localNodeId=clusterService.localNode().id();
   for (  SnapshotMetaData.Entry entry : snapshotMetaData.entries()) {
-    HashMap<ShardId,IndexShardSnapshotStatus> startedShards=null;
-    for (    Map.Entry<ShardId,SnapshotMetaData.ShardSnapshotStatus> shard : entry.shards().entrySet()) {
-      if (localNodeId.equals(shard.getValue().nodeId())) {
-        if (entry.state() == State.STARTED) {
-          if (startedShards == null) {
-            startedShards=newHashMap();
+    if (entry.state() == State.STARTED) {
+      Map<ShardId,IndexShardSnapshotStatus> startedShards=newHashMap();
+      SnapshotShards snapshotShards=shardSnapshots.get(entry.snapshotId());
+      for (      Map.Entry<ShardId,SnapshotMetaData.ShardSnapshotStatus> shard : entry.shards().entrySet()) {
+        if (localNodeId.equals(shard.getValue().nodeId())) {
+          if (shard.getValue().state() == State.INIT && (snapshotShards == null || !snapshotShards.shards.containsKey(shard.getKey()))) {
+            logger.trace("[{}] - Adding shard to the queue",shard.getKey());
+            startedShards.put(shard.getKey(),new IndexShardSnapshotStatus());
           }
-          startedShards.put(shard.getKey(),new IndexShardSnapshotStatus());
         }
- else         if (entry.state() == State.ABORTED) {
-          SnapshotShards snapshotShards=shardSnapshots.get(entry.snapshotId());
-          if (snapshotShards != null) {
-            IndexShardSnapshotStatus snapshotStatus=snapshotShards.shards.get(shard.getKey());
-            if (snapshotStatus != null) {
-              snapshotStatus.abort();
-            }
+      }
+      if (!startedShards.isEmpty()) {
+        newSnapshots.put(entry.snapshotId(),startedShards);
+        if (snapshotShards != null) {
+          ImmutableMap.Builder<ShardId,IndexShardSnapshotStatus> shards=ImmutableMap.builder();
+          shards.putAll(snapshotShards.shards);
+          shards.putAll(startedShards);
+          survivors.put(entry.snapshotId(),new SnapshotShards(shards.build()));
+        }
+ else {
+          survivors.put(entry.snapshotId(),new SnapshotShards(ImmutableMap.copyOf(startedShards)));
+        }
+      }
+    }
+ else     if (entry.state() == State.ABORTED) {
+      SnapshotShards snapshotShards=shardSnapshots.get(entry.snapshotId());
+      if (snapshotShards != null) {
+        for (        Map.Entry<ShardId,SnapshotMetaData.ShardSnapshotStatus> shard : entry.shards().entrySet()) {
+          IndexShardSnapshotStatus snapshotStatus=snapshotShards.shards.get(shard.getKey());
+          if (snapshotStatus != null) {
+            snapshotStatus.abort();
           }
         }
       }
     }
-    if (startedShards != null) {
-      if (!survivors.containsKey(entry.snapshotId())) {
-        if (newSnapshots == null) {
-          newSnapshots=newHashMapWithExpectedSize(2);
-        }
-        newSnapshots.put(entry.snapshotId(),new SnapshotShards(ImmutableMap.copyOf(startedShards)));
-      }
-    }
-  }
-  if (newSnapshots != null) {
-    survivors.putAll(newSnapshots);
   }
   shutdownLock.lock();
   try {
@@ -50,9 +54,9 @@
   finally {
     shutdownLock.unlock();
   }
-  if (newSnapshots != null) {
-    for (    final Map.Entry<SnapshotId,SnapshotShards> entry : newSnapshots.entrySet()) {
-      for (      final Map.Entry<ShardId,IndexShardSnapshotStatus> shardEntry : entry.getValue().shards.entrySet()) {
+  if (!newSnapshots.isEmpty()) {
+    for (    final Map.Entry<SnapshotId,Map<ShardId,IndexShardSnapshotStatus>> entry : newSnapshots.entrySet()) {
+      for (      final Map.Entry<ShardId,IndexShardSnapshotStatus> shardEntry : entry.getValue().entrySet()) {
         try {
           final IndexShardSnapshotAndRestoreService shardSnapshotService=indicesService.indexServiceSafe(shardEntry.getKey().getIndex()).shardInjectorSafe(shardEntry.getKey().id()).getInstance(IndexShardSnapshotAndRestoreService.class);
           threadPool.executor(ThreadPool.Names.SNAPSHOT).execute(new Runnable(){

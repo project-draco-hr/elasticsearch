@@ -1,0 +1,43 @@
+{
+  if (waitingShardsStartedOrUnassigned(event)) {
+    clusterService.submitStateUpdateTask("update snapshot state after shards started",new ClusterStateUpdateTask(){
+      @Override public ClusterState execute(      ClusterState currentState) throws Exception {
+        MetaData metaData=currentState.metaData();
+        RoutingTable routingTable=currentState.routingTable();
+        MetaData.Builder mdBuilder=MetaData.builder(currentState.metaData());
+        SnapshotMetaData snapshots=metaData.custom(SnapshotMetaData.TYPE);
+        if (snapshots != null) {
+          boolean changed=false;
+          ArrayList<SnapshotMetaData.Entry> entries=newArrayList();
+          for (          final SnapshotMetaData.Entry snapshot : snapshots.entries()) {
+            SnapshotMetaData.Entry updatedSnapshot=snapshot;
+            if (snapshot.state() == State.STARTED) {
+              ImmutableMap<ShardId,ShardSnapshotStatus> shards=processWaitingShards(snapshot.shards(),routingTable);
+              if (shards != null) {
+                changed=true;
+                if (!snapshot.state().completed() && completed(shards.values())) {
+                  updatedSnapshot=new SnapshotMetaData.Entry(snapshot.snapshotId(),snapshot.includeGlobalState(),State.SUCCESS,snapshot.indices(),shards);
+                  endSnapshot(updatedSnapshot);
+                }
+ else {
+                  updatedSnapshot=new SnapshotMetaData.Entry(snapshot.snapshotId(),snapshot.includeGlobalState(),snapshot.state(),snapshot.indices(),shards);
+                }
+              }
+              entries.add(updatedSnapshot);
+            }
+          }
+          if (changed) {
+            snapshots=new SnapshotMetaData(entries.toArray(new SnapshotMetaData.Entry[entries.size()]));
+            mdBuilder.putCustom(SnapshotMetaData.TYPE,snapshots);
+            return ClusterState.builder(currentState).metaData(mdBuilder).build();
+          }
+        }
+        return currentState;
+      }
+      @Override public void onFailure(      String source,      Throwable t){
+        logger.warn("failed to update snapshot state after shards started from [{}] ",t,source);
+      }
+    }
+);
+  }
+}
