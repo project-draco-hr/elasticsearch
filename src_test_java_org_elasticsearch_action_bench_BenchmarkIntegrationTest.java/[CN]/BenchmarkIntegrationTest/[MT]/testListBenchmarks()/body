@@ -1,7 +1,7 @@
 {
   final BenchmarkRequest request=BenchmarkTestUtil.randomRequest(client(),indices,numExecutorNodes,competitionSettingsMap,BenchmarkTestUtil.MIN_LARGE_INTERVAL,BenchmarkTestUtil.MAX_LARGE_INTERVAL);
   logger.info("--> Submitting benchmark - competitors [{}] iterations [{}]",request.competitors().size(),request.settings().iterations());
-  client().bench(request);
+  final ActionFuture<BenchmarkResponse> future=client().bench(request);
   final boolean ret=awaitBusy(statusPredicate,TIMEOUT,TIME_UNIT);
   assertTrue(ret);
   final BenchmarkStatusResponse statusResponse=client().prepareBenchStatus().execute().actionGet();
@@ -15,4 +15,7 @@
       validateCompetitionResult(result,competitionSettingsMap.get(result.competitionName()),false);
     }
   }
+  client().prepareAbortBench(BENCHMARK_NAME).get();
+  assertThat(client().prepareBenchStatus().execute().actionGet().totalActiveBenchmarks(),equalTo(0));
+  assertThat(future.get().state(),isOneOf(BenchmarkResponse.State.ABORTED,BenchmarkResponse.State.COMPLETE));
 }
