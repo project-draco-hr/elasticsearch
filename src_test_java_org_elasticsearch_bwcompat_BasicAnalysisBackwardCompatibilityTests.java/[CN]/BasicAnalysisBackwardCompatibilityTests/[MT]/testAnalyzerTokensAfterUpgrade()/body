@@ -1,0 +1,42 @@
+{
+  int numFields=randomIntBetween(PreBuiltAnalyzers.values().length,PreBuiltAnalyzers.values().length * 10);
+  StringBuilder builder=new StringBuilder();
+  String[] fields=new String[numFields * 2];
+  int fieldId=0;
+  for (int i=0; i < fields.length; i++) {
+    fields[i++]="field_" + fieldId++;
+    String analyzer=RandomPicks.randomFrom(getRandom(),PreBuiltAnalyzers.values()).name().toLowerCase(Locale.ROOT);
+    fields[i]="type=string,analyzer=" + analyzer;
+  }
+  assertAcked(prepareCreate("test").addMapping("type",fields).setSettings(indexSettings()));
+  ensureYellow();
+  InputOutput[] inout=new InputOutput[numFields];
+  for (int i=0; i < numFields; i++) {
+    String input=randomRealisticUnicodeOfCodepointLengthBetween(1,100);
+    AnalyzeResponse test=client().admin().indices().prepareAnalyze("test",input).setField("field_" + i).get();
+    inout[i]=new InputOutput(test,input,"field_" + i);
+  }
+  logClusterState();
+  boolean upgraded;
+  do {
+    logClusterState();
+    upgraded=backwardsCluster().upgradeOneNode();
+    ensureYellow();
+  }
+ while (upgraded);
+  for (int i=0; i < inout.length; i++) {
+    InputOutput inputOutput=inout[i];
+    AnalyzeResponse test=client().admin().indices().prepareAnalyze("test",inputOutput.input).setField(inputOutput.field).get();
+    List<AnalyzeResponse.AnalyzeToken> tokens=test.getTokens();
+    List<AnalyzeResponse.AnalyzeToken> expectedTokens=inputOutput.response.getTokens();
+    assertThat("size mismatch field: " + fields[i * 2] + " analyzer: "+ fields[i * 2 + 1]+ " input: "+ inputOutput.input,expectedTokens.size(),equalTo(tokens.size()));
+    for (int j=0; j < tokens.size(); j++) {
+      String msg="failed for term: " + expectedTokens.get(j).getTerm() + " field: "+ fields[i * 2]+ " analyzer: "+ fields[i * 2 + 1]+ " input: "+ inputOutput.input;
+      assertThat(msg,expectedTokens.get(j).getTerm(),equalTo(tokens.get(j).getTerm()));
+      assertThat(msg,expectedTokens.get(j).getPosition(),equalTo(tokens.get(j).getPosition()));
+      assertThat(msg,expectedTokens.get(j).getStartOffset(),equalTo(tokens.get(j).getStartOffset()));
+      assertThat(msg,expectedTokens.get(j).getEndOffset(),equalTo(tokens.get(j).getEndOffset()));
+      assertThat(msg,expectedTokens.get(j).getType(),equalTo(tokens.get(j).getType()));
+    }
+  }
+}
