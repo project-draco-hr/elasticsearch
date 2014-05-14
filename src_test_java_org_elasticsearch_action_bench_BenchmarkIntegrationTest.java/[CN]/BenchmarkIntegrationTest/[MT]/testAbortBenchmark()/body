@@ -1,10 +1,12 @@
 {
-  final BenchmarkRequest request=BenchmarkTestUtil.randomRequest(client(),indices,numExecutorNodes,competitionSettingsMap,BenchmarkTestUtil.MIN_LARGE_INTERVAL,BenchmarkTestUtil.MAX_LARGE_INTERVAL);
-  logger.info("--> Submitting benchmark - competitors [{}] iterations [{}]",request.competitors().size(),request.settings().iterations());
+  SearchRequest searchRequest=prepareBlockingScriptQuery();
+  final BenchmarkRequest request=BenchmarkTestUtil.randomRequest(client(),indices,numExecutorNodes,competitionSettingsMap,searchRequest);
+  request.settings().iterations(Integer.MAX_VALUE,true);
+  logger.info("--> Submitting benchmark - competitors [{}] iterations [{}] [{}]",request.competitors().size(),request.settings().iterations(),request);
   final ActionFuture<BenchmarkResponse> benchmarkResponse=client().bench(request);
-  final boolean ret=awaitBusy(statusPredicate,TIMEOUT,TIME_UNIT);
-  assertTrue(ret);
+  assertTrue(waitForQuery.await(5l,TimeUnit.SECONDS));
   final AbortBenchmarkResponse abortResponse=client().prepareAbortBench(BENCHMARK_NAME).execute().actionGet();
+  waitForTestLatch.countDown();
   assertThat(abortResponse.getNodeResponses().size(),lessThanOrEqualTo(numExecutorNodes));
   assertThat(abortResponse.getBenchmarkName(),equalTo(BENCHMARK_NAME));
   for (  AbortBenchmarkNodeResponse nodeResponse : abortResponse.getNodeResponses()) {
@@ -14,5 +16,5 @@
   }
   final BenchmarkStatusResponse statusResponse=client().prepareBenchStatus().execute().actionGet();
   assertThat(statusResponse.totalActiveBenchmarks(),equalTo(0));
-  assertThat(benchmarkResponse.get().state(),isOneOf(BenchmarkResponse.State.ABORTED,BenchmarkResponse.State.COMPLETE));
+  assertThat(benchmarkResponse.get().state(),is(BenchmarkResponse.State.ABORTED));
 }
