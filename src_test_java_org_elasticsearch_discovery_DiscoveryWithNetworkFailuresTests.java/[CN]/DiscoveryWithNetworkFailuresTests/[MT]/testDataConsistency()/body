@@ -21,60 +21,57 @@
     assertThat((long)searchHit.sortValues()[0],equalTo((long)i));
   }
   ensureGreen("test");
-  final String isolatedNode=nodes.get(0);
-  final String nonIsolatedNode=nodes.get(1);
-  randomIsolateNode(isolatedNode,nodes);
-  try {
-    logger.info("wait until elected master has removed [{}]",isolatedNode);
-    boolean applied=awaitBusy(new Predicate<Object>(){
-      @Override public boolean apply(      Object input){
-        return client(nonIsolatedNode).admin().cluster().prepareState().setLocal(true).get().getState().nodes().size() == 2;
-      }
+  NetworkPartition networkPartition=addRandomPartition();
+  final String isolatedNode=networkPartition.getMinoritySide().get(0);
+  final String nonIsolatedNode=networkPartition.getMjaoritySide().get(0);
+  networkPartition.startDisrupting();
+  logger.info("wait until elected master has removed [{}]",isolatedNode);
+  boolean applied=awaitBusy(new Predicate<Object>(){
+    @Override public boolean apply(    Object input){
+      return client(nonIsolatedNode).admin().cluster().prepareState().setLocal(true).get().getState().nodes().size() == 2;
     }
+  }
 ,1,TimeUnit.MINUTES);
-    assertThat(applied,is(true));
-    logger.info("waiting for isolated node [{}] to have no master",isolatedNode);
-    applied=awaitBusy(new Predicate<Object>(){
-      @Override public boolean apply(      Object input){
-        ClusterState localClusterState=client(isolatedNode).admin().cluster().prepareState().setLocal(true).get().getState();
-        DiscoveryNodes localDiscoveryNodes=localClusterState.nodes();
-        logger.info("localDiscoveryNodes=" + localDiscoveryNodes.prettyPrint());
-        return localDiscoveryNodes.masterNode() == null;
-      }
+  assertThat(applied,is(true));
+  logger.info("waiting for isolated node [{}] to have no master",isolatedNode);
+  applied=awaitBusy(new Predicate<Object>(){
+    @Override public boolean apply(    Object input){
+      ClusterState localClusterState=client(isolatedNode).admin().cluster().prepareState().setLocal(true).get().getState();
+      DiscoveryNodes localDiscoveryNodes=localClusterState.nodes();
+      logger.info("localDiscoveryNodes=" + localDiscoveryNodes.prettyPrint());
+      return localDiscoveryNodes.masterNode() == null;
     }
+  }
 ,10,TimeUnit.SECONDS);
-    assertThat(applied,is(true));
-    ensureStableCluster(2,nonIsolatedNode);
-    logger.info("verifying healthy part of cluster returns data");
-    searchResponse=client(nonIsolatedNode).prepareSearch("test").setTypes("type").addSort("field",SortOrder.ASC).get();
-    assertHitCount(searchResponse,indexRequests.length);
-    for (int i=0; i < searchResponse.getHits().getHits().length; i++) {
-      SearchHit searchHit=searchResponse.getHits().getAt(i);
-      assertThat(searchHit.id(),equalTo(String.valueOf(i)));
-      assertThat((long)searchHit.sortValues()[0],equalTo((long)i));
-    }
-    logger.info("verifying isolated node [{}] returns partial data",isolatedNode);
-    searchResponse=client(isolatedNode).prepareSearch("test").setTypes("type").addSort("field",SortOrder.ASC).setPreference("_only_local").get();
-    assertThat(searchResponse.getSuccessfulShards(),lessThan(searchResponse.getTotalShards()));
-    assertThat(searchResponse.getHits().totalHits(),lessThan((long)indexRequests.length));
-    logger.info("verifying writes on healthy cluster");
-    UpdateResponse updateResponse=client(nonIsolatedNode).prepareUpdate("test","type","0").setDoc("field2",2).get();
-    assertThat(updateResponse.getVersion(),equalTo(2l));
-    try {
-      logger.info("verifying writes on isolated [{}] fail",isolatedNode);
-      client(isolatedNode).prepareUpdate("test","type","0").setDoc("field2",2).setTimeout("1s").get();
-      fail();
-    }
- catch (    ClusterBlockException exception) {
-      assertThat(exception.status(),equalTo(RestStatus.SERVICE_UNAVAILABLE));
-      assertThat(exception.blocks().size(),equalTo(1));
-      ClusterBlock clusterBlock=exception.blocks().iterator().next();
-      assertThat(clusterBlock.id(),equalTo(DiscoverySettings.NO_MASTER_BLOCK_ID));
-    }
+  assertThat(applied,is(true));
+  ensureStableCluster(2,nonIsolatedNode);
+  logger.info("verifying healthy part of cluster returns data");
+  searchResponse=client(nonIsolatedNode).prepareSearch("test").setTypes("type").addSort("field",SortOrder.ASC).get();
+  assertHitCount(searchResponse,indexRequests.length);
+  for (int i=0; i < searchResponse.getHits().getHits().length; i++) {
+    SearchHit searchHit=searchResponse.getHits().getAt(i);
+    assertThat(searchHit.id(),equalTo(String.valueOf(i)));
+    assertThat((long)searchHit.sortValues()[0],equalTo((long)i));
   }
-  finally {
-    restoreIsolation(isolatedNode,nodes);
+  logger.info("verifying isolated node [{}] returns partial data",isolatedNode);
+  searchResponse=client(isolatedNode).prepareSearch("test").setTypes("type").addSort("field",SortOrder.ASC).setPreference("_only_local").get();
+  assertThat(searchResponse.getSuccessfulShards(),lessThan(searchResponse.getTotalShards()));
+  assertThat(searchResponse.getHits().totalHits(),lessThan((long)indexRequests.length));
+  logger.info("verifying writes on healthy cluster");
+  UpdateResponse updateResponse=client(nonIsolatedNode).prepareUpdate("test","type","0").setDoc("field2",2).get();
+  assertThat(updateResponse.getVersion(),equalTo(2l));
+  try {
+    logger.info("verifying writes on isolated [{}] fail",isolatedNode);
+    client(isolatedNode).prepareUpdate("test","type","0").setDoc("field2",2).setTimeout("1s").get();
+    fail();
   }
+ catch (  ClusterBlockException exception) {
+    assertThat(exception.status(),equalTo(RestStatus.SERVICE_UNAVAILABLE));
+    assertThat(exception.blocks().size(),equalTo(1));
+    ClusterBlock clusterBlock=exception.blocks().iterator().next();
+    assertThat(clusterBlock.id(),equalTo(DiscoverySettings.NO_MASTER_BLOCK_ID));
+  }
+  networkPartition.stopDisrupting();
   ensureStableCluster(3);
   logger.info("verifying all nodes return all data");
   for (  Client client : clients()) {

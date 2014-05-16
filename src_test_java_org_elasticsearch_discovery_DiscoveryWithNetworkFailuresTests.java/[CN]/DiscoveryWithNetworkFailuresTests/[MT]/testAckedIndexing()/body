@@ -1,0 +1,93 @@
+{
+  final List<String> nodes=internalCluster().startNodesAsync(3,nodeSettings).get();
+  ensureStableCluster(3);
+  assertAcked(prepareCreate("test").setSettings(ImmutableSettings.builder().put(IndexMetaData.SETTING_NUMBER_OF_SHARDS,1 + randomInt(2)).put(IndexMetaData.SETTING_NUMBER_OF_REPLICAS,randomInt(2))));
+  ensureGreen();
+  ServiceDisruptionScheme disruptionScheme=addRandomDisruptionScheme();
+  logger.info("disruption scheme [{}] added",disruptionScheme);
+  final ConcurrentHashMap<String,String> ackedDocs=new ConcurrentHashMap<>();
+  final AtomicBoolean stop=new AtomicBoolean(false);
+  List<Thread> indexers=new ArrayList<>(nodes.size());
+  List<Semaphore> semaphores=new ArrayList<>(nodes.size());
+  final AtomicInteger idGenerator=new AtomicInteger(0);
+  final AtomicReference<CountDownLatch> countDownLatch=new AtomicReference<>();
+  logger.info("starting indexers");
+  for (  final String node : nodes) {
+    final Semaphore semaphore=new Semaphore(0);
+    semaphores.add(semaphore);
+    final Client client=client(node);
+    final String name="indexer_" + indexers.size();
+    Thread thread=new Thread(new Runnable(){
+      @Override public void run(){
+        while (!stop.get()) {
+          try {
+            if (!semaphore.tryAcquire(10,TimeUnit.SECONDS)) {
+              continue;
+            }
+            try {
+              String id=Integer.toString(idGenerator.incrementAndGet());
+              logger.trace("[{}] indexing id [{}] through node [{}]",name,id,node);
+              IndexResponse response=client.prepareIndex("test","type",id).setSource("{}").setTimeout("1s").get();
+              ackedDocs.put(id,node);
+            }
+  finally {
+              countDownLatch.get().countDown();
+              logger.trace("[{}] decreased counter : {}",name,countDownLatch.get().getCount());
+            }
+          }
+ catch (          ElasticsearchException|InterruptedException e) {
+          }
+catch (          Throwable t) {
+            logger.info("unexpected exception in background thread of [{}]",t,node);
+          }
+        }
+      }
+    }
+);
+    thread.setName(name);
+    thread.setDaemon(true);
+    thread.start();
+    indexers.add(thread);
+  }
+  logger.info("indexing some docs before partition");
+  int docsPerIndexer=randomInt(3);
+  countDownLatch.set(new CountDownLatch(docsPerIndexer * indexers.size()));
+  for (  Semaphore semaphore : semaphores) {
+    semaphore.release(docsPerIndexer);
+  }
+  assertTrue(countDownLatch.get().await(1,TimeUnit.MINUTES));
+  for (int iter=1 + randomInt(2); iter > 0; iter--) {
+    logger.info("starting disruptions & indexing (iteration [{}])",iter);
+    disruptionScheme.startDisrupting();
+    docsPerIndexer=1 + randomInt(5);
+    countDownLatch.set(new CountDownLatch(docsPerIndexer * indexers.size()));
+    Collections.shuffle(semaphores);
+    for (    Semaphore semaphore : semaphores) {
+      semaphore.release(docsPerIndexer);
+    }
+    assertTrue(countDownLatch.get().await(1,TimeUnit.MINUTES));
+    logger.info("stopping disruption");
+    disruptionScheme.stopDisrupting();
+    ensureStableCluster(3);
+    ensureGreen("test");
+    logger.info("validating successful docs");
+    for (    String node : nodes) {
+      try {
+        logger.debug("validating through node [{}]",node);
+        for (        String id : ackedDocs.keySet()) {
+          assertTrue("doc [" + id + "] indexed via node ["+ ackedDocs.get(id)+ "] not found",client(node).prepareGet("test","type",id).setPreference("_local").get().isExists());
+        }
+      }
+ catch (      AssertionError e) {
+        throw new AssertionError(e.getMessage() + " (checked via node [" + node+ "]",e);
+      }
+    }
+    logger.info("done validating (iteration [{}])",iter);
+  }
+  logger.info("shutting down indexers");
+  stop.set(true);
+  for (  Thread indexer : indexers) {
+    indexer.interrupt();
+    indexer.join(60000);
+  }
+}
