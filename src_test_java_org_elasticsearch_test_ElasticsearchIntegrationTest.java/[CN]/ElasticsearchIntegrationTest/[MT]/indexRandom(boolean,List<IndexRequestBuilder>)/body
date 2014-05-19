@@ -4,6 +4,19 @@
   for (  IndexRequestBuilder builder : builders) {
     indicesSet.add(builder.request().index());
   }
+  Set<Tuple<String,String>> bogusIds=new HashSet<>();
+  if (random.nextBoolean() && !builders.isEmpty() && forceRefresh) {
+    builders=new ArrayList<>(builders);
+    final String[] indices=indicesSet.toArray(new String[0]);
+    final int numBogusDocs=scaledRandomIntBetween(1,builders.size() * 2);
+    final int unicodeLen=between(1,10);
+    for (int i=0; i < numBogusDocs; i++) {
+      String id=randomRealisticUnicodeOfLength(unicodeLen);
+      String index=RandomPicks.randomFrom(random,indices);
+      bogusIds.add(new Tuple<String,String>(index,id));
+      builders.add(client().prepareIndex(index,RANDOM_BOGUS_TYPE,id).setSource("{}"));
+    }
+  }
   final String[] indices=indicesSet.toArray(new String[indicesSet.size()]);
   Collections.shuffle(builders,random);
   final CopyOnWriteArrayList<Tuple<IndexRequestBuilder,Throwable>> errors=new CopyOnWriteArrayList<>();
@@ -48,6 +61,11 @@
     }
   }
   assertThat(actualErrors,emptyIterable());
+  if (!bogusIds.isEmpty()) {
+    for (    Tuple<String,String> doc : bogusIds) {
+      client().prepareDelete(doc.v1(),RANDOM_BOGUS_TYPE,doc.v2()).get();
+    }
+  }
   if (forceRefresh) {
     assertNoFailures(client().admin().indices().prepareRefresh(indices).setIndicesOptions(IndicesOptions.lenientExpandOpen()).execute().get());
   }
