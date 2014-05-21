@@ -1,15 +1,16 @@
 {
   final int size=scaledRandomIntBetween(5,1 << 22);
   for (  String type : Arrays.asList("Byte","Int","Long","Float","Double","Object")) {
-    BigArrays bigArrays=new BigArrays(ImmutableSettings.builder().put(BigArrays.MAX_SIZE_IN_BYTES_SETTING,randomIntBetween(1,size)).build(),null);
+    HierarchyCircuitBreakerService hcbs=new HierarchyCircuitBreakerService(ImmutableSettings.builder().put(HierarchyCircuitBreakerService.REQUEST_CIRCUIT_BREAKER_LIMIT_SETTING,size).build(),new NodeSettingsService(ImmutableSettings.EMPTY));
+    BigArrays bigArrays=new BigArrays(ImmutableSettings.EMPTY,null,hcbs).withCircuitBreaking();
     Method create=BigArrays.class.getMethod("new" + type + "Array",long.class);
     try {
       create.invoke(bigArrays,size);
       fail("expected an exception on " + create);
     }
  catch (    InvocationTargetException e) {
-      assertTrue(e.getCause() instanceof ElasticsearchIllegalStateException);
+      assertTrue(e.getCause() instanceof CircuitBreakingException);
     }
-    assertEquals(0,bigArrays.sizeInBytes());
+    assertEquals(0,hcbs.getBreaker(CircuitBreaker.Name.REQUEST).getUsed());
   }
 }

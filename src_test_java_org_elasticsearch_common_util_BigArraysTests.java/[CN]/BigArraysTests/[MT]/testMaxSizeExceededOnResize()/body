@@ -1,24 +1,24 @@
 {
   for (  String type : Arrays.asList("Byte","Int","Long","Float","Double","Object")) {
     final long maxSize=randomIntBetween(1 << 10,1 << 22);
-    BigArrays bigArrays=new BigArrays(ImmutableSettings.builder().put(BigArrays.MAX_SIZE_IN_BYTES_SETTING,maxSize).build(),null);
+    HierarchyCircuitBreakerService hcbs=new HierarchyCircuitBreakerService(ImmutableSettings.builder().put(HierarchyCircuitBreakerService.REQUEST_CIRCUIT_BREAKER_LIMIT_SETTING,maxSize).build(),new NodeSettingsService(ImmutableSettings.EMPTY));
+    BigArrays bigArrays=new BigArrays(ImmutableSettings.EMPTY,null,hcbs).withCircuitBreaking();
     Method create=BigArrays.class.getMethod("new" + type + "Array",long.class);
     final int size=scaledRandomIntBetween(1,20);
     BigArray array=(BigArray)create.invoke(bigArrays,size);
     Method resize=BigArrays.class.getMethod("resize",array.getClass().getInterfaces()[0],long.class);
     while (true) {
       long newSize=array.size() * 2;
-      assertEquals(array.ramBytesUsed(),bigArrays.sizeInBytes());
       try {
         array=(BigArray)resize.invoke(bigArrays,array,newSize);
       }
  catch (      InvocationTargetException e) {
-        assertTrue(e.getCause() instanceof ElasticsearchIllegalStateException);
+        assertTrue(e.getCause() instanceof CircuitBreakingException);
         break;
       }
     }
-    assertEquals(array.ramBytesUsed(),bigArrays.sizeInBytes());
+    assertEquals(array.ramBytesUsed(),hcbs.getBreaker(CircuitBreaker.Name.REQUEST).getUsed());
     array.close();
-    assertEquals(0,bigArrays.sizeInBytes());
+    assertEquals(0,hcbs.getBreaker(CircuitBreaker.Name.REQUEST).getUsed());
   }
 }
