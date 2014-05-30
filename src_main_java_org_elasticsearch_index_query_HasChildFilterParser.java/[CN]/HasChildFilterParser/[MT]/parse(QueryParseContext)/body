@@ -5,6 +5,8 @@
   boolean filterFound=false;
   String childType=null;
   int shortCircuitParentDocSet=8192;
+  int minChildren=0;
+  int maxChildren=0;
   String filterName=null;
   String currentFieldName=null;
   XContentParser.Token token;
@@ -44,6 +46,12 @@
  else       if ("short_circuit_cutoff".equals(currentFieldName)) {
         shortCircuitParentDocSet=parser.intValue();
       }
+ else       if ("min_children".equals(currentFieldName) || "minChildren".equals(currentFieldName)) {
+        minChildren=parser.intValue(true);
+      }
+ else       if ("max_children".equals(currentFieldName) || "maxChildren".equals(currentFieldName)) {
+        maxChildren=parser.intValue(true);
+      }
  else {
         throw new QueryParsingException(parseContext.index(),"[has_child] filter does not support [" + currentFieldName + "]");
       }
@@ -79,15 +87,24 @@
   if (parentDocMapper == null) {
     throw new QueryParsingException(parseContext.index(),"[has_child]  Type [" + childType + "] points to a non existent parent type ["+ parentType+ "]");
   }
+  if (maxChildren > 0 && maxChildren < minChildren) {
+    throw new QueryParsingException(parseContext.index(),"[has_child] 'max_children' is less than 'min_children'");
+  }
   Filter nonNestedDocsFilter=null;
   if (parentDocMapper.hasNestedObjects()) {
     nonNestedDocsFilter=parseContext.cacheFilter(NonNestedDocsFilter.INSTANCE,null);
   }
   Filter parentFilter=parseContext.cacheFilter(parentDocMapper.typeFilter(),null);
   ParentChildIndexFieldData parentChildIndexFieldData=parseContext.fieldData().getForField(parentFieldMapper);
-  Query childrenConstantScoreQuery=new ChildrenConstantScoreQuery(parentChildIndexFieldData,query,parentType,childType,parentFilter,shortCircuitParentDocSet,nonNestedDocsFilter);
-  if (filterName != null) {
-    parseContext.addNamedFilter(filterName,new CustomQueryWrappingFilter(childrenConstantScoreQuery));
+  Query childrenQuery;
+  if (minChildren > 1 || maxChildren > 0) {
+    childrenQuery=new ChildrenQuery(parentChildIndexFieldData,parentType,childType,parentFilter,query,ScoreType.NONE,minChildren,maxChildren,shortCircuitParentDocSet,nonNestedDocsFilter);
   }
-  return new CustomQueryWrappingFilter(childrenConstantScoreQuery);
+ else {
+    childrenQuery=new ChildrenConstantScoreQuery(parentChildIndexFieldData,query,parentType,childType,parentFilter,shortCircuitParentDocSet,nonNestedDocsFilter);
+  }
+  if (filterName != null) {
+    parseContext.addNamedFilter(filterName,new CustomQueryWrappingFilter(childrenQuery));
+  }
+  return new CustomQueryWrappingFilter(childrenQuery);
 }
