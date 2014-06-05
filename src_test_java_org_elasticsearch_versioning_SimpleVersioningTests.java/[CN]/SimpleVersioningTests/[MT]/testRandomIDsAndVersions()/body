@@ -1,0 +1,148 @@
+{
+  createIndex("test");
+  ensureGreen();
+  HashMap<String,Object> newSettings=new HashMap<>();
+  newSettings.put("index.gc_deletes","1000000h");
+  client().admin().indices().prepareUpdateSettings("test").setSettings(newSettings).execute().actionGet();
+  Random random=getRandom();
+  IDSource idSource=getRandomIDs();
+  Set<String> idsSet=new HashSet<>();
+  String idPrefix;
+  if (randomBoolean()) {
+    idPrefix="";
+  }
+ else {
+    idPrefix=TestUtil.randomSimpleString(random);
+    if (VERBOSE) {
+      System.out.println("TEST: use id prefix: " + idPrefix);
+    }
+  }
+  int numIDs;
+  if (isNightly()) {
+    numIDs=scaledRandomIntBetween(10000,20000);
+  }
+ else {
+    numIDs=scaledRandomIntBetween(500,1000);
+  }
+  while (idsSet.size() < numIDs) {
+    idsSet.add(idPrefix + idSource.next());
+  }
+  String[] ids=idsSet.toArray(new String[numIDs]);
+  boolean useMonotonicVersion=randomBoolean();
+  long version=0;
+  final IDAndVersion[] idVersions=new IDAndVersion[TestUtil.nextInt(random,numIDs / 2,numIDs * (isNightly() ? 10 : 2))];
+  final Map<String,IDAndVersion> truth=new HashMap<>();
+  if (VERBOSE) {
+    System.out.println("TEST: use " + numIDs + " ids; "+ idVersions.length+ " operations");
+  }
+  for (int i=0; i < idVersions.length; i++) {
+    if (useMonotonicVersion) {
+      version+=TestUtil.nextInt(random,1,10);
+    }
+ else {
+      version=random.nextLong() & 0x3fffffffffffffffL;
+    }
+    idVersions[i]=new IDAndVersion();
+    idVersions[i].id=ids[random.nextInt(numIDs)];
+    idVersions[i].version=version;
+    idVersions[i].delete=random.nextInt(5) == 2;
+    IDAndVersion curVersion=truth.get(idVersions[i].id);
+    if (curVersion == null || idVersions[i].version > curVersion.version) {
+      truth.put(idVersions[i].id,idVersions[i]);
+    }
+  }
+  for (int i=idVersions.length - 1; i > 0; i--) {
+    int index=random.nextInt(i + 1);
+    IDAndVersion x=idVersions[index];
+    idVersions[index]=idVersions[i];
+    idVersions[i]=x;
+  }
+  if (VERBOSE) {
+    for (    IDAndVersion idVersion : idVersions) {
+      System.out.println("id=" + idVersion.id + " version="+ idVersion.version+ " delete?="+ idVersion.delete+ " truth?="+ (truth.get(idVersion.id) == idVersion));
+    }
+  }
+  final AtomicInteger upto=new AtomicInteger();
+  final CountDownLatch startingGun=new CountDownLatch(1);
+  Thread[] threads=new Thread[TestUtil.nextInt(random,1,isNightly() ? 20 : 5)];
+  for (int i=0; i < threads.length; i++) {
+    threads[i]=new Thread(){
+      @Override public void run(){
+        try {
+          final Random threadRandom=getRandom();
+          startingGun.await();
+          while (true) {
+            int index=upto.getAndIncrement();
+            if (index >= idVersions.length) {
+              break;
+            }
+            if (VERBOSE && index % 100 == 0) {
+              System.out.println(Thread.currentThread().getName() + ": index=" + index);
+            }
+            String id=idVersions[index].id;
+            long version=idVersions[index].version;
+            if (idVersions[index].delete) {
+              try {
+                client().prepareDelete("test","type",id).setVersion(version).setVersionType(VersionType.EXTERNAL).execute().actionGet();
+              }
+ catch (              VersionConflictEngineException vcee) {
+                assertThat(version,lessThanOrEqualTo(truth.get(id).version));
+              }
+            }
+ else {
+              for (int x=0; x < 2; x++) {
+                IndexRequest.OpType op;
+                if (x == 0) {
+                  op=IndexRequest.OpType.CREATE;
+                }
+ else {
+                  op=IndexRequest.OpType.INDEX;
+                }
+                try {
+                  client().prepareIndex("test","type",id).setSource("foo","bar").setOpType(op).setVersion(version).setVersionType(VersionType.EXTERNAL).execute().actionGet();
+                  break;
+                }
+ catch (                DocumentAlreadyExistsException vcee) {
+                  if (x == 0) {
+                  }
+ else {
+                    throw vcee;
+                  }
+                }
+catch (                VersionConflictEngineException vcee) {
+                  assertThat(version,lessThanOrEqualTo(truth.get(id).version));
+                }
+              }
+            }
+            if (threadRandom.nextInt(10) == 7) {
+              refresh();
+            }
+            if (threadRandom.nextInt(20) == 7) {
+              flush();
+            }
+          }
+        }
+ catch (        Exception e) {
+          throw new RuntimeException(e);
+        }
+      }
+    }
+;
+    threads[i].start();
+  }
+  startingGun.countDown();
+  for (  Thread thread : threads) {
+    thread.join();
+  }
+  for (  String id : ids) {
+    long expected;
+    IDAndVersion idVersion=truth.get(id);
+    if (idVersion != null && idVersion.delete == false) {
+      expected=idVersion.version;
+    }
+ else {
+      expected=-1;
+    }
+    assertThat("id=" + id + " idVersion="+ idVersion,client().prepareGet("test","type",id).execute().actionGet().getVersion(),equalTo(expected));
+  }
+}
