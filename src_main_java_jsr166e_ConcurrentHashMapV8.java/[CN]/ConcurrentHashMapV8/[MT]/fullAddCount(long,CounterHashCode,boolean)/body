@@ -1,0 +1,79 @@
+{
+  int h;
+  if (hc == null) {
+    hc=new CounterHashCode();
+    int s=counterHashCodeGenerator.addAndGet(SEED_INCREMENT);
+    h=hc.code=(s == 0) ? 1 : s;
+    threadCounterHashCode.set(hc);
+  }
+ else   h=hc.code;
+  boolean collide=false;
+  for (; ; ) {
+    CounterCell[] as;
+    CounterCell a;
+    int n;
+    long v;
+    if ((as=counterCells) != null && (n=as.length) > 0) {
+      if ((a=as[(n - 1) & h]) == null) {
+        if (cellsBusy == 0) {
+          CounterCell r=new CounterCell(x);
+          if (cellsBusy == 0 && U.compareAndSwapInt(this,CELLSBUSY,0,1)) {
+            boolean created=false;
+            try {
+              CounterCell[] rs;
+              int m, j;
+              if ((rs=counterCells) != null && (m=rs.length) > 0 && rs[j=(m - 1) & h] == null) {
+                rs[j]=r;
+                created=true;
+              }
+            }
+  finally {
+              cellsBusy=0;
+            }
+            if (created)             break;
+            continue;
+          }
+        }
+        collide=false;
+      }
+ else       if (!wasUncontended)       wasUncontended=true;
+ else       if (U.compareAndSwapLong(a,CELLVALUE,v=a.value,v + x))       break;
+ else       if (counterCells != as || n >= NCPU)       collide=false;
+ else       if (!collide)       collide=true;
+ else       if (cellsBusy == 0 && U.compareAndSwapInt(this,CELLSBUSY,0,1)) {
+        try {
+          if (counterCells == as) {
+            CounterCell[] rs=new CounterCell[n << 1];
+            for (int i=0; i < n; ++i)             rs[i]=as[i];
+            counterCells=rs;
+          }
+        }
+  finally {
+          cellsBusy=0;
+        }
+        collide=false;
+        continue;
+      }
+      h^=h << 13;
+      h^=h >>> 17;
+      h^=h << 5;
+    }
+ else     if (cellsBusy == 0 && counterCells == as && U.compareAndSwapInt(this,CELLSBUSY,0,1)) {
+      boolean init=false;
+      try {
+        if (counterCells == as) {
+          CounterCell[] rs=new CounterCell[2];
+          rs[h & 1]=new CounterCell(x);
+          counterCells=rs;
+          init=true;
+        }
+      }
+  finally {
+        cellsBusy=0;
+      }
+      if (init)       break;
+    }
+ else     if (U.compareAndSwapLong(this,BASECOUNT,v=baseCount,v + x))     break;
+  }
+  hc.code=h;
+}
