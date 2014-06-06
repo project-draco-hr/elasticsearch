@@ -1,0 +1,50 @@
+{
+  ValuesSourceParser<ValuesSource.Numeric> vsParser=ValuesSourceParser.numeric(aggregationName,InternalPercentiles.TYPE,context).requiresSortedValues(true).build();
+  double[] keys=null;
+  boolean keyed=true;
+  double compression=100;
+  XContentParser.Token token;
+  String currentFieldName=null;
+  while ((token=parser.nextToken()) != XContentParser.Token.END_OBJECT) {
+    if (token == XContentParser.Token.FIELD_NAME) {
+      currentFieldName=parser.currentName();
+    }
+ else     if (vsParser.token(currentFieldName,token,parser)) {
+      continue;
+    }
+ else     if (token == XContentParser.Token.START_ARRAY) {
+      if (keysFieldName().equals(currentFieldName)) {
+        DoubleArrayList values=new DoubleArrayList(10);
+        while ((token=parser.nextToken()) != XContentParser.Token.END_ARRAY) {
+          double value=parser.doubleValue();
+          values.add(value);
+        }
+        keys=values.toArray();
+        Arrays.sort(keys);
+      }
+ else {
+        throw new SearchParseException(context,"Unknown key for a " + token + " in ["+ aggregationName+ "]: ["+ currentFieldName+ "].");
+      }
+    }
+ else     if (token == XContentParser.Token.VALUE_BOOLEAN) {
+      if ("keyed".equals(currentFieldName)) {
+        keyed=parser.booleanValue();
+      }
+ else {
+        throw new SearchParseException(context,"Unknown key for a " + token + " in ["+ aggregationName+ "]: ["+ currentFieldName+ "].");
+      }
+    }
+ else     if (token == XContentParser.Token.VALUE_NUMBER) {
+      if ("compression".equals(currentFieldName)) {
+        compression=parser.doubleValue();
+      }
+ else {
+        throw new SearchParseException(context,"Unknown key for a " + token + " in ["+ aggregationName+ "]: ["+ currentFieldName+ "].");
+      }
+    }
+ else {
+      throw new SearchParseException(context,"Unexpected token " + token + " in ["+ aggregationName+ "].");
+    }
+  }
+  return buildFactory(context,aggregationName,vsParser.config(),keys,compression,keyed);
+}
