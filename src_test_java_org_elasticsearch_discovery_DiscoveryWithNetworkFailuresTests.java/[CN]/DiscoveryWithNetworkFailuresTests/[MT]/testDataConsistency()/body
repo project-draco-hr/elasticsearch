@@ -1,7 +1,6 @@
 {
   List<String> nodes=internalCluster().startNodesAsync(3,nodeSettings).get();
-  ClusterHealthResponse clusterHealthResponse=client().admin().cluster().prepareHealth().setWaitForEvents(Priority.LANGUID).setWaitForNodes("3").get();
-  assertThat(clusterHealthResponse.isTimedOut(),is(false));
+  ensureStableCluster(3);
   assertAcked(prepareCreate("test").addMapping("type","field","type=long").get());
   IndexRequestBuilder[] indexRequests=new IndexRequestBuilder[scaledRandomIntBetween(1,1000)];
   for (int i=0; i < indexRequests.length; i++) {
@@ -22,27 +21,22 @@
     assertThat((long)searchHit.sortValues()[0],equalTo((long)i));
   }
   ensureGreen("test");
-  String isolatedNode=nodes.get(0);
-  String nonIsolatedNode=nodes.get(1);
-  final Client nonIsolatedNodeClient=internalCluster().client(nonIsolatedNode);
-  for (  String nodeId : nodes) {
-    if (!nodeId.equals(isolatedNode)) {
-      addFailToSendNoConnectRule(nodeId,isolatedNode);
-      addFailToSendNoConnectRule(isolatedNode,nodeId);
-    }
-  }
+  final String isolatedNode=nodes.get(0);
+  final String nonIsolatedNode=nodes.get(1);
+  randomIsolateNode(isolatedNode,nodes);
   try {
+    logger.info("wait until elected master has removed [{}]",isolatedNode);
     boolean applied=awaitBusy(new Predicate<Object>(){
       @Override public boolean apply(      Object input){
-        return nonIsolatedNodeClient.admin().cluster().prepareState().setLocal(true).get().getState().nodes().size() == 2;
+        return client(nonIsolatedNode).admin().cluster().prepareState().setLocal(true).get().getState().nodes().size() == 2;
       }
     }
 ,1,TimeUnit.MINUTES);
     assertThat(applied,is(true));
-    final Client isolatedNodeClient=internalCluster().client(isolatedNode);
+    logger.info("waiting for isolated node [{}] to have no master",isolatedNode);
     applied=awaitBusy(new Predicate<Object>(){
       @Override public boolean apply(      Object input){
-        ClusterState localClusterState=isolatedNodeClient.admin().cluster().prepareState().setLocal(true).get().getState();
+        ClusterState localClusterState=client(isolatedNode).admin().cluster().prepareState().setLocal(true).get().getState();
         DiscoveryNodes localDiscoveryNodes=localClusterState.nodes();
         logger.info("localDiscoveryNodes=" + localDiscoveryNodes.prettyPrint());
         return localDiscoveryNodes.masterNode() == null;
@@ -50,23 +44,27 @@
     }
 ,10,TimeUnit.SECONDS);
     assertThat(applied,is(true));
-    ClusterHealthResponse healthResponse=nonIsolatedNodeClient.admin().cluster().prepareHealth("test").setWaitForYellowStatus().get();
+    ClusterHealthResponse healthResponse=client(nonIsolatedNode).admin().cluster().prepareHealth("test").setWaitForYellowStatus().get();
     assertThat(healthResponse.isTimedOut(),is(false));
     assertThat(healthResponse.getStatus(),equalTo(ClusterHealthStatus.YELLOW));
-    searchResponse=nonIsolatedNodeClient.prepareSearch("test").setTypes("type").addSort("field",SortOrder.ASC).get();
+    logger.info("verifying healthy part of cluster returns data");
+    searchResponse=client(nonIsolatedNode).prepareSearch("test").setTypes("type").addSort("field",SortOrder.ASC).get();
     assertHitCount(searchResponse,indexRequests.length);
     for (int i=0; i < searchResponse.getHits().getHits().length; i++) {
       SearchHit searchHit=searchResponse.getHits().getAt(i);
       assertThat(searchHit.id(),equalTo(String.valueOf(i)));
       assertThat((long)searchHit.sortValues()[0],equalTo((long)i));
     }
-    searchResponse=isolatedNodeClient.prepareSearch("test").setTypes("type").addSort("field",SortOrder.ASC).get();
+    logger.info("verifying isolated node [{}] returns partial data",isolatedNode);
+    searchResponse=client(isolatedNode).prepareSearch("test").setTypes("type").addSort("field",SortOrder.ASC).setPreference("_only_local").get();
     assertThat(searchResponse.getSuccessfulShards(),lessThan(searchResponse.getTotalShards()));
     assertThat(searchResponse.getHits().totalHits(),lessThan((long)indexRequests.length));
-    UpdateResponse updateResponse=nonIsolatedNodeClient.prepareUpdate("test","type","0").setDoc("field2",2).get();
+    logger.info("verifying writes on healthy cluster");
+    UpdateResponse updateResponse=client(nonIsolatedNode).prepareUpdate("test","type","0").setDoc("field2",2).get();
     assertThat(updateResponse.getVersion(),equalTo(2l));
     try {
-      isolatedNodeClient.prepareUpdate("test","type","0").setDoc("field2",2).setTimeout(TimeValue.timeValueSeconds(5)).get();
+      logger.info("verifying writes on isolated [{}] fail",isolatedNode);
+      client(isolatedNode).prepareUpdate("test","type","0").setDoc("field2",2).setTimeout("1s").get();
       fail();
     }
  catch (    ClusterBlockException exception) {
@@ -77,16 +75,10 @@
     }
   }
   finally {
-    for (    String nodeId : nodes) {
-      if (!nodeId.equals(isolatedNode)) {
-        clearNoConnectRule(nodeId,isolatedNode);
-        clearNoConnectRule(isolatedNode,nodeId);
-      }
-    }
+    restoreIsolation(isolatedNode,nodes);
   }
-  clusterHealthResponse=nonIsolatedNodeClient.admin().cluster().prepareHealth().setWaitForGreenStatus().setWaitForEvents(Priority.LANGUID).setWaitForNodes("3").get();
-  assertThat(clusterHealthResponse.getStatus(),equalTo(ClusterHealthStatus.GREEN));
-  assertThat(clusterHealthResponse.isTimedOut(),is(false));
+  ensureStableCluster(3);
+  logger.info("verifying all nodes return all data");
   for (  Client client : clients()) {
     searchResponse=client.prepareSearch("test").setTypes("type").addSort("field",SortOrder.ASC).get();
     for (int i=0; i < searchResponse.getHits().getHits().length; i++) {
