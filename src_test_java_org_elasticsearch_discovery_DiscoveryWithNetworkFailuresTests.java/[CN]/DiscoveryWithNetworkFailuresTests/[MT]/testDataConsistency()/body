@@ -1,2 +1,108 @@
 {
+  List<String> nodes=internalCluster().startNodesAsync(3,nodeSettings).get();
+  ClusterHealthResponse clusterHealthResponse=client().admin().cluster().prepareHealth().setWaitForEvents(Priority.LANGUID).setWaitForNodes("3").get();
+  assertThat(clusterHealthResponse.isTimedOut(),is(false));
+  assertAcked(prepareCreate("test").addMapping("type","field","type=long").get());
+  IndexRequestBuilder[] indexRequests=new IndexRequestBuilder[scaledRandomIntBetween(1,1000)];
+  for (int i=0; i < indexRequests.length; i++) {
+    indexRequests[i]=client().prepareIndex("test","type",String.valueOf(i)).setSource("field",i);
+  }
+  indexRandom(true,indexRequests);
+  for (int i=0; i < indexRequests.length; i++) {
+    GetResponse getResponse=client().prepareGet("test","type",String.valueOf(i)).get();
+    assertThat(getResponse.isExists(),is(true));
+    assertThat(getResponse.getVersion(),equalTo(1l));
+    assertThat(getResponse.getId(),equalTo(String.valueOf(i)));
+  }
+  SearchResponse searchResponse=client().prepareSearch("test").setTypes("type").addSort("field",SortOrder.ASC).get();
+  assertHitCount(searchResponse,indexRequests.length);
+  for (int i=0; i < searchResponse.getHits().getHits().length; i++) {
+    SearchHit searchHit=searchResponse.getHits().getAt(i);
+    assertThat(searchHit.id(),equalTo(String.valueOf(i)));
+    assertThat((long)searchHit.sortValues()[0],equalTo((long)i));
+  }
+  ensureGreen("test");
+  String isolatedNode=nodes.get(0);
+  String nonIsolatedNode=nodes.get(1);
+  final Client nonIsolatedNodeClient=internalCluster().client(nonIsolatedNode);
+  for (  String nodeId : nodes) {
+    if (!nodeId.equals(isolatedNode)) {
+      addFailToSendNoConnectRule(nodeId,isolatedNode);
+      addFailToSendNoConnectRule(isolatedNode,nodeId);
+    }
+  }
+  try {
+    boolean applied=awaitBusy(new Predicate<Object>(){
+      @Override public boolean apply(      Object input){
+        return nonIsolatedNodeClient.admin().cluster().prepareState().setLocal(true).get().getState().nodes().size() == 2;
+      }
+    }
+,1,TimeUnit.MINUTES);
+    assertThat(applied,is(true));
+    final Client isolatedNodeClient=internalCluster().client(isolatedNode);
+    applied=awaitBusy(new Predicate<Object>(){
+      @Override public boolean apply(      Object input){
+        ClusterState localClusterState=isolatedNodeClient.admin().cluster().prepareState().setLocal(true).get().getState();
+        DiscoveryNodes localDiscoveryNodes=localClusterState.nodes();
+        logger.info("localDiscoveryNodes=" + localDiscoveryNodes.prettyPrint());
+        return localDiscoveryNodes.masterNode() == null;
+      }
+    }
+,10,TimeUnit.SECONDS);
+    assertThat(applied,is(true));
+    ClusterHealthResponse healthResponse=nonIsolatedNodeClient.admin().cluster().prepareHealth("test").setWaitForYellowStatus().get();
+    assertThat(healthResponse.isTimedOut(),is(false));
+    assertThat(healthResponse.getStatus(),equalTo(ClusterHealthStatus.YELLOW));
+    searchResponse=nonIsolatedNodeClient.prepareSearch("test").setTypes("type").addSort("field",SortOrder.ASC).get();
+    assertHitCount(searchResponse,indexRequests.length);
+    for (int i=0; i < searchResponse.getHits().getHits().length; i++) {
+      SearchHit searchHit=searchResponse.getHits().getAt(i);
+      assertThat(searchHit.id(),equalTo(String.valueOf(i)));
+      assertThat((long)searchHit.sortValues()[0],equalTo((long)i));
+    }
+    searchResponse=isolatedNodeClient.prepareSearch("test").setTypes("type").addSort("field",SortOrder.ASC).get();
+    assertThat(searchResponse.getSuccessfulShards(),lessThan(searchResponse.getTotalShards()));
+    assertThat(searchResponse.getHits().totalHits(),lessThan((long)indexRequests.length));
+    UpdateResponse updateResponse=nonIsolatedNodeClient.prepareUpdate("test","type","0").setDoc("field2",2).get();
+    assertThat(updateResponse.getVersion(),equalTo(2l));
+    try {
+      isolatedNodeClient.prepareUpdate("test","type","0").setDoc("field2",2).setTimeout(TimeValue.timeValueSeconds(5)).get();
+      fail();
+    }
+ catch (    ClusterBlockException exception) {
+      assertThat(exception.status(),equalTo(RestStatus.SERVICE_UNAVAILABLE));
+      assertThat(exception.blocks().size(),equalTo(1));
+      ClusterBlock clusterBlock=exception.blocks().iterator().next();
+      assertThat(clusterBlock.id(),equalTo(DiscoverySettings.NO_MASTER_BLOCK_ID));
+    }
+  }
+  finally {
+    for (    String nodeId : nodes) {
+      if (!nodeId.equals(isolatedNode)) {
+        clearNoConnectRule(nodeId,isolatedNode);
+        clearNoConnectRule(isolatedNode,nodeId);
+      }
+    }
+  }
+  clusterHealthResponse=nonIsolatedNodeClient.admin().cluster().prepareHealth().setWaitForGreenStatus().setWaitForEvents(Priority.LANGUID).setWaitForNodes("3").get();
+  assertThat(clusterHealthResponse.getStatus(),equalTo(ClusterHealthStatus.GREEN));
+  assertThat(clusterHealthResponse.isTimedOut(),is(false));
+  for (  Client client : clients()) {
+    searchResponse=client.prepareSearch("test").setTypes("type").addSort("field",SortOrder.ASC).get();
+    for (int i=0; i < searchResponse.getHits().getHits().length; i++) {
+      SearchHit searchHit=searchResponse.getHits().getAt(i);
+      assertThat(searchHit.id(),equalTo(String.valueOf(i)));
+      assertThat((long)searchHit.sortValues()[0],equalTo((long)i));
+    }
+    GetResponse getResponse=client.prepareGet("test","type","0").setPreference("_local").get();
+    assertThat(getResponse.isExists(),is(true));
+    assertThat(getResponse.getId(),equalTo("0"));
+    assertThat(getResponse.getVersion(),equalTo(2l));
+    for (int i=1; i < indexRequests.length; i++) {
+      getResponse=client.prepareGet("test","type",String.valueOf(i)).setPreference("_local").get();
+      assertThat(getResponse.isExists(),is(true));
+      assertThat(getResponse.getVersion(),equalTo(1l));
+      assertThat(getResponse.getId(),equalTo(String.valueOf(i)));
+    }
+  }
 }
