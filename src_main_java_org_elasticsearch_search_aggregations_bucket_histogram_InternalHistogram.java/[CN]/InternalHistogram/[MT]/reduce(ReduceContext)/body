@@ -1,79 +1,5 @@
 {
   List<InternalAggregation> aggregations=reduceContext.aggregations();
-  if (aggregations.size() == 1) {
-    InternalHistogram<B> histo=(InternalHistogram<B>)aggregations.get(0);
-    if (minDocCount == 1) {
-      for (      B bucket : histo.buckets) {
-        bucket.aggregations.reduce(reduceContext.bigArrays());
-      }
-      return histo;
-    }
-    CollectionUtil.introSort(histo.buckets,order.asc ? InternalOrder.KEY_ASC.comparator() : InternalOrder.KEY_DESC.comparator());
-    List<B> list=order.asc ? histo.buckets : Lists.reverse(histo.buckets);
-    B lastBucket=null;
-    ListIterator<B> iter=list.listIterator();
-    if (minDocCount == 0) {
-      ExtendedBounds bounds=emptyBucketInfo.bounds;
-      if (bounds != null) {
-        B firstBucket=iter.hasNext() ? list.get(iter.nextIndex()) : null;
-        if (firstBucket == null) {
-          if (bounds.min != null && bounds.max != null) {
-            long key=bounds.min;
-            long max=bounds.max;
-            while (key <= max) {
-              iter.add(createBucket(key,0,emptyBucketInfo.subAggregations,formatter));
-              key=emptyBucketInfo.rounding.nextRoundingValue(key);
-            }
-          }
-        }
- else {
-          if (bounds.min != null) {
-            long key=bounds.min;
-            while (key < firstBucket.key) {
-              iter.add(createBucket(key,0,emptyBucketInfo.subAggregations,formatter));
-              key=emptyBucketInfo.rounding.nextRoundingValue(key);
-            }
-          }
-        }
-      }
-      while (iter.hasNext()) {
-        B nextBucket=list.get(iter.nextIndex());
-        nextBucket.aggregations.reduce(reduceContext.bigArrays());
-        if (lastBucket != null) {
-          long key=emptyBucketInfo.rounding.nextRoundingValue(lastBucket.key);
-          while (key != nextBucket.key) {
-            iter.add(createBucket(key,0,emptyBucketInfo.subAggregations,formatter));
-            key=emptyBucketInfo.rounding.nextRoundingValue(key);
-          }
-        }
-        lastBucket=iter.next();
-      }
-      if (bounds != null && lastBucket != null && bounds.max != null && bounds.max > lastBucket.key) {
-        long key=emptyBucketInfo.rounding.nextRoundingValue(lastBucket.key);
-        long max=bounds.max;
-        while (key <= max) {
-          iter.add(createBucket(key,0,emptyBucketInfo.subAggregations,formatter));
-          key=emptyBucketInfo.rounding.nextRoundingValue(key);
-        }
-      }
-    }
- else {
-      while (iter.hasNext()) {
-        InternalHistogram.Bucket bucket=iter.next();
-        if (bucket.getDocCount() < minDocCount) {
-          iter.remove();
-        }
- else {
-          bucket.aggregations.reduce(reduceContext.bigArrays());
-        }
-      }
-    }
-    if (order != InternalOrder.KEY_ASC && order != InternalOrder.KEY_DESC) {
-      CollectionUtil.introSort(histo.buckets,order.comparator());
-    }
-    return histo;
-  }
-  InternalHistogram reduced=(InternalHistogram)aggregations.get(0);
   LongObjectPagedHashMap<List<B>> bucketsByKey=new LongObjectPagedHashMap<>(reduceContext.bigArrays());
   for (  InternalAggregation aggregation : aggregations) {
     InternalHistogram<B> histogram=(InternalHistogram)aggregation;
@@ -151,6 +77,5 @@
  else {
     CollectionUtil.introSort(reducedBuckets,order.comparator());
   }
-  reduced.buckets=reducedBuckets;
-  return reduced;
+  return getFactory().create(getName(),reducedBuckets,order,minDocCount,emptyBucketInfo,formatter,keyed);
 }

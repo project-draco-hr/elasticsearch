@@ -1,40 +1,19 @@
 {
   List<InternalAggregation> aggregations=reduceContext.aggregations();
-  if (aggregations.size() == 1) {
-    InternalRange<B> reduced=(InternalRange<B>)aggregations.get(0);
-    for (    B bucket : reduced.ranges) {
-      bucket.aggregations.reduce(reduceContext.bigArrays());
-    }
-    return reduced;
+  @SuppressWarnings("unchecked") List<Bucket>[] rangeList=new List[ranges.size()];
+  for (int i=0; i < rangeList.length; ++i) {
+    rangeList[i]=new ArrayList<Bucket>();
   }
-  List<List<Bucket>> rangesList=null;
   for (  InternalAggregation aggregation : aggregations) {
-    InternalRange<Bucket> ranges=(InternalRange)aggregation;
-    if (ranges.unmapped) {
-      continue;
-    }
-    if (rangesList == null) {
-      rangesList=new ArrayList<>(ranges.ranges.size());
-      for (      Bucket bucket : ranges.ranges) {
-        List<Bucket> sameRangeList=new ArrayList<>(aggregations.size());
-        sameRangeList.add(bucket);
-        rangesList.add(sameRangeList);
-      }
-    }
- else {
-      int i=0;
-      for (      Bucket range : ranges.ranges) {
-        rangesList.get(i++).add(range);
-      }
+    InternalRange<?> ranges=(InternalRange<?>)aggregation;
+    int i=0;
+    for (    Bucket range : ranges.ranges) {
+      rangeList[i++].add(range);
     }
   }
-  if (rangesList == null) {
-    return aggregations.get(0);
+  final List<B> ranges=new ArrayList<>();
+  for (int i=0; i < this.ranges.size(); ++i) {
+    ranges.add((B)rangeList[i].get(0).reduce(rangeList[i],reduceContext.bigArrays()));
   }
-  InternalRange reduced=(InternalRange)aggregations.get(0);
-  int i=0;
-  for (  List<Bucket> sameRangeList : rangesList) {
-    reduced.ranges.set(i++,(sameRangeList.get(0)).reduce(sameRangeList,reduceContext.bigArrays()));
-  }
-  return reduced;
+  return getFactory().create(name,ranges,formatter,keyed);
 }
