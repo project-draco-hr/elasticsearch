@@ -18,14 +18,52 @@
     client().prepareIndex("locations","location","p" + i).setCreate(true).setSource("pin",iterator.next()).execute().actionGet();
   }
   client().admin().indices().prepareRefresh("locations").execute().actionGet();
-  SearchResponse results1=client().prepareSearch("locations").setQuery(QueryBuilders.matchAllQuery()).setPostFilter("{\"geohash_cell\": {\"pin\": \"" + geohash + "\", \"neighbors\": false}}").execute().actionGet();
-  assertHitCount(results1,1);
-  results1=client().prepareSearch("locations").setQuery(QueryBuilders.matchAllQuery()).setPostFilter(geoHashCellFilter("pin",geohash,false)).execute().actionGet();
-  assertHitCount(results1,1);
-  SearchResponse results2=client().prepareSearch("locations").setQuery(QueryBuilders.matchAllQuery()).setPostFilter("{\"geohash_cell\": {\"pin\": \"" + geohash.substring(0,geohash.length() - 1) + "\", \"neighbors\": true}}").execute().actionGet();
-  assertHitCount(results2,2 + neighbors.size() + parentNeighbors.size());
+  Map<GeohashCellFilter.Builder,Long> expectedCounts=new HashMap<>();
+  Map<GeohashCellFilter.Builder,String[]> expectedResults=new HashMap<>();
+  Map<GeohashCellFilter.Builder,String> cacheKeys=new HashMap<>();
+  expectedCounts.put(geoHashCellFilter("pin",geohash,false),1L);
+  expectedCounts.put(geoHashCellFilter("pin",geohash.substring(0,geohash.length() - 1),true),2L + neighbors.size() + parentNeighbors.size());
   GeoPoint point=GeoHashUtils.decode(geohash);
   int precision=geohash.length();
+  expectedCounts.put(geoHashCellFilter("pin",point).neighbors(true).precision(precision),1L + neighbors.size());
+  logger.info("random testing of setting");
+  List<GeohashCellFilter.Builder> filterBuilders=new ArrayList<>(expectedCounts.keySet());
+  for (int j=filterBuilders.size() * 2 * randomIntBetween(1,5); j > 0; j--) {
+    Collections.shuffle(filterBuilders,getRandom());
+    for (    GeohashCellFilter.Builder builder : filterBuilders) {
+      if (randomBoolean()) {
+        builder.cache(randomBoolean());
+      }
+      if (randomBoolean()) {
+        String cacheKey=cacheKeys.get(builder);
+        if (cacheKey == null) {
+          cacheKey=randomUnicodeOfLength(6);
+          cacheKeys.put(builder,cacheKey);
+        }
+        builder.cacheKey(cacheKey);
+      }
+ else {
+        builder.cacheKey(null);
+      }
+      try {
+        SearchResponse response=client().prepareSearch("locations").setQuery(QueryBuilders.matchAllQuery()).setPostFilter(builder).get();
+        assertHitCount(response,expectedCounts.get(builder));
+        String[] expectedIds=expectedResults.get(builder);
+        if (expectedIds == null) {
+          ArrayList<String> ids=new ArrayList<>();
+          for (          SearchHit hit : response.getHits()) {
+            ids.add(hit.id());
+          }
+          expectedResults.put(builder,ids.toArray(Strings.EMPTY_ARRAY));
+          continue;
+        }
+        assertSearchHits(response,expectedIds);
+      }
+ catch (      AssertionError error) {
+        throw new AssertionError(error.getMessage() + "\n geohash_cell filter:" + builder,error);
+      }
+    }
+  }
   logger.info("Testing lat/lon format");
   String pointTest1="{\"geohash_cell\": {\"pin\": {\"lat\": " + point.lat() + ",\"lon\": "+ point.lon()+ "},\"precision\": "+ precision+ ",\"neighbors\": true}}";
   SearchResponse results3=client().prepareSearch("locations").setQuery(QueryBuilders.matchAllQuery()).setPostFilter(pointTest1).execute().actionGet();
