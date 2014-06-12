@@ -2,18 +2,17 @@
   if (!master) {
     throw new ElasticsearchIllegalStateException("Node [" + localNode + "] not master for join request from ["+ node+ "]");
   }
-  ClusterState state=clusterService.state();
   if (!transportService.addressSupported(node.address().getClass())) {
     logger.warn("received a wrong address type from [{}], ignoring...",node);
   }
  else {
     transportService.connectToNode(node);
-    state=clusterService.state();
+    ClusterState state=clusterService.state();
     membership.sendValidateJoinRequestBlocking(node,state,joinTimeout);
-    clusterService.submitStateUpdateTask("zen-disco-receive(join from node[" + node + "])",Priority.IMMEDIATE,new ClusterStateUpdateTask(){
+    clusterService.submitStateUpdateTask("zen-disco-receive(join from node[" + node + "])",Priority.IMMEDIATE,new ProcessedClusterStateUpdateTask(){
       @Override public ClusterState execute(      ClusterState currentState){
         if (currentState.nodes().nodeExists(node.id())) {
-          logger.warn("received a join request for an existing node [{}]",node);
+          logger.info("received a join request for an existing node [{}]",node);
           return ClusterState.builder(currentState).build();
         }
         DiscoveryNodes.Builder builder=DiscoveryNodes.builder(currentState.nodes());
@@ -28,9 +27,12 @@
       }
       @Override public void onFailure(      String source,      Throwable t){
         logger.error("unexpected failure during [{}]",t,source);
+        callback.onFailure(t);
+      }
+      @Override public void clusterStateProcessed(      String source,      ClusterState oldState,      ClusterState newState){
+        callback.onSuccess(newState);
       }
     }
 );
   }
-  return state;
 }
