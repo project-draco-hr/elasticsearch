@@ -10,7 +10,7 @@
     size=(int)Math.min(maxBucketOrd(),bucketCountThresholds.getShardSize());
   }
   BucketPriorityQueue ordered=new BucketPriorityQueue(size,order.comparator(this));
-  StringTerms.Bucket spare=null;
+  OrdBucket spare=new OrdBucket(-1,0,null);
   for (long globalTermOrd=Ordinals.MIN_ORDINAL; globalTermOrd < globalOrdinals.getMaxOrd(); ++globalTermOrd) {
     if (includeExclude != null && !acceptedGlobalOrdinals.get(globalTermOrd)) {
       continue;
@@ -20,22 +20,25 @@
     if (bucketCountThresholds.getMinDocCount() > 0 && bucketDocCount == 0) {
       continue;
     }
-    if (spare == null) {
-      spare=new StringTerms.Bucket(new BytesRef(),0,null);
-    }
+    spare.globalOrd=globalTermOrd;
     spare.bucketOrd=bucketOrd;
     spare.docCount=bucketDocCount;
-    copy(globalValues.getValueByOrd(globalTermOrd),spare.termBytes);
     if (bucketCountThresholds.getShardMinDocCount() <= spare.docCount) {
-      spare=(StringTerms.Bucket)ordered.insertWithOverflow(spare);
+      spare=(OrdBucket)ordered.insertWithOverflow(spare);
+      if (spare == null) {
+        spare=new OrdBucket(-1,0,null);
+      }
     }
   }
   final InternalTerms.Bucket[] list=new InternalTerms.Bucket[ordered.size()];
   long survivingBucketOrds[]=new long[ordered.size()];
   for (int i=ordered.size() - 1; i >= 0; --i) {
-    final StringTerms.Bucket bucket=(StringTerms.Bucket)ordered.pop();
+    final OrdBucket bucket=(OrdBucket)ordered.pop();
     survivingBucketOrds[i]=bucket.bucketOrd;
-    list[i]=bucket;
+    BytesRef scratch=new BytesRef();
+    copy(globalValues.getValueByOrd(bucket.globalOrd),scratch);
+    list[i]=new StringTerms.Bucket(scratch,bucket.docCount,null);
+    list[i].bucketOrd=bucket.bucketOrd;
   }
   runDeferredCollections(survivingBucketOrds);
   for (int i=0; i < list.length; i++) {
