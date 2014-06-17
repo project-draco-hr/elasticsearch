@@ -1,0 +1,67 @@
+{
+  int numberOfRelocations=scaledRandomIntBetween(1,rarely() ? 10 : 4);
+  int numberOfReplicas=randomBoolean() ? 0 : 1;
+  int numberOfNodes=numberOfReplicas == 0 ? 2 : 3;
+  logger.info("testRelocationWhileIndexingRandom(numRelocations={}, numberOfReplicas={}, numberOfNodes={})",numberOfRelocations,numberOfReplicas,numberOfNodes);
+  String[] nodes=new String[numberOfNodes];
+  logger.info("--> starting [node1] ...");
+  nodes[0]=internalCluster().startNode();
+  logger.info("--> creating test index ...");
+  client().admin().indices().prepareCreate("test").setSettings(settingsBuilder().put("index.number_of_shards",1).put("index.number_of_replicas",numberOfReplicas).put("index.refresh_interval",-1)).execute().actionGet();
+  for (int i=1; i < numberOfNodes; i++) {
+    logger.info("--> starting [node{}] ...",i + 1);
+    nodes[i]=internalCluster().startNode();
+    if (i != numberOfNodes - 1) {
+      ClusterHealthResponse healthResponse=client().admin().cluster().prepareHealth().setWaitForEvents(Priority.LANGUID).setWaitForNodes(Integer.toString(i + 1)).setWaitForGreenStatus().execute().actionGet();
+      assertThat(healthResponse.isTimedOut(),equalTo(false));
+    }
+  }
+  final Semaphore postRecoveryShards=new Semaphore(0);
+  for (  IndicesLifecycle indicesLifecycle : internalCluster().getInstances(IndicesLifecycle.class)) {
+    indicesLifecycle.addListener(new IndicesLifecycle.Listener(){
+      @Override public void indexShardStateChanged(      IndexShard indexShard,      @Nullable IndexShardState previousState,      IndexShardState currentState,      @Nullable String reason){
+        if (currentState == IndexShardState.POST_RECOVERY) {
+          postRecoveryShards.release();
+        }
+      }
+    }
+);
+  }
+  logger.info("--> starting relocations...");
+  int nodeShiftBased=numberOfReplicas;
+  for (int i=0; i < numberOfRelocations; i++) {
+    int fromNode=(i % 2);
+    int toNode=fromNode == 0 ? 1 : 0;
+    fromNode+=nodeShiftBased;
+    toNode+=nodeShiftBased;
+    List<IndexRequestBuilder> builders1=new ArrayList<>();
+    for (int numDocs=randomIntBetween(10,30); numDocs > 0; numDocs--) {
+      builders1.add(client().prepareIndex("test","type").setSource("{}"));
+    }
+    List<IndexRequestBuilder> builders2=new ArrayList<>();
+    for (int numDocs=randomIntBetween(10,30); numDocs > 0; numDocs--) {
+      builders2.add(client().prepareIndex("test","type").setSource("{}"));
+    }
+    logger.info("--> START relocate the shard from {} to {}",nodes[fromNode],nodes[toNode]);
+    client().admin().cluster().prepareReroute().add(new MoveAllocationCommand(new ShardId("test",0),nodes[fromNode],nodes[toNode])).get();
+    logger.debug("--> index [{}] documents",builders1.size());
+    indexRandom(false,true,builders1);
+    postRecoveryShards.acquire(1);
+    logger.debug("--> index [{}] documents",builders2.size());
+    indexRandom(true,true,builders2);
+    assertFalse(client().admin().cluster().prepareHealth().setWaitForRelocatingShards(0).setTimeout("30s").get().isTimedOut());
+    logger.info("--> DONE relocate the shard from {} to {}",fromNode,toNode);
+    logger.debug("--> verifying all searches return the same number of docs");
+    long expectedCount=-1;
+    for (    Client client : clients()) {
+      SearchResponse response=client.prepareSearch("test").setPreference("_local").setSearchType(SearchType.COUNT).get();
+      assertNoFailures(response);
+      if (expectedCount < 0) {
+        expectedCount=response.getHits().totalHits();
+      }
+ else {
+        assertEquals(expectedCount,response.getHits().totalHits());
+      }
+    }
+  }
+}
