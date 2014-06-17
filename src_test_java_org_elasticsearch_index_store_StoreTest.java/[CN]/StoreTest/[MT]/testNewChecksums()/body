@@ -1,0 +1,45 @@
+{
+  final ShardId shardId=new ShardId(new Index("index"),1);
+  DirectoryService directoryService=new LuceneManagedDirectoryService();
+  Store store=new Store(shardId,ImmutableSettings.EMPTY,null,null,directoryService,randomDistributor(directoryService));
+  IndexWriter writer=new IndexWriter(store.directory(),newIndexWriterConfig(random(),TEST_VERSION_CURRENT,new MockAnalyzer(random())).setCodec(actualDefaultCodec()));
+  int docs=1 + random().nextInt(100);
+  for (int i=0; i < docs; i++) {
+    Document doc=new Document();
+    doc.add(new TextField("id","" + i,random().nextBoolean() ? Field.Store.YES : Field.Store.NO));
+    doc.add(new TextField("body",TestUtil.randomRealisticUnicodeString(random()),random().nextBoolean() ? Field.Store.YES : Field.Store.NO));
+    doc.add(new SortedDocValuesField("dv",new BytesRef(TestUtil.randomRealisticUnicodeString(random()))));
+    writer.addDocument(doc);
+  }
+  if (random().nextBoolean()) {
+    for (int i=0; i < docs; i++) {
+      if (random().nextBoolean()) {
+        Document doc=new Document();
+        doc.add(new TextField("id","" + i,random().nextBoolean() ? Field.Store.YES : Field.Store.NO));
+        doc.add(new TextField("body",TestUtil.randomRealisticUnicodeString(random()),random().nextBoolean() ? Field.Store.YES : Field.Store.NO));
+        writer.updateDocument(new Term("id","" + i),doc);
+      }
+    }
+  }
+  if (random().nextBoolean()) {
+    DirectoryReader.open(writer,random().nextBoolean()).close();
+  }
+  Store.MetadataSnapshot metadata=store.getMetadata();
+  assertThat(metadata.asMap().isEmpty(),is(true));
+  writer.commit();
+  writer.close();
+  metadata=store.getMetadata();
+  assertThat(metadata.asMap().isEmpty(),is(false));
+  for (  StoreFileMetaData meta : metadata) {
+    try (IndexInput input=store.directory().openInput(meta.name(),IOContext.DEFAULT)){
+      String checksum=Store.digestToString(CodecUtil.retrieveChecksum(input));
+      assertThat("File: " + meta.name() + " has a different checksum",meta.checksum(),equalTo(checksum));
+      assertThat(meta.hasLegacyChecksum(),equalTo(false));
+      assertThat(meta.writtenBy(),equalTo(TEST_VERSION_CURRENT));
+    }
+   }
+  assertConsistent(store,metadata);
+  TestUtil.checkIndex(store.directory());
+  assertDeleteContent(store,directoryService);
+  IOUtils.close(store);
+}

@@ -1,0 +1,53 @@
+{
+  int numDocs=scaledRandomIntBetween(100,1000);
+  assertThat(cluster().numDataNodes(),greaterThanOrEqualTo(2));
+  assertAcked(prepareCreate("test").setSettings(ImmutableSettings.builder().put(IndexMetaData.SETTING_NUMBER_OF_REPLICAS,"0").put(MergePolicyModule.MERGE_POLICY_TYPE_KEY,NoMergePolicyProvider.class).put(MockFSDirectoryService.CHECK_INDEX_ON_CLOSE,false).put(InternalEngine.ENGINE_FAIL_ON_CORRUPTION,true).put("indices.recovery.concurrent_streams",10)));
+  ensureGreen();
+  IndexRequestBuilder[] builders=new IndexRequestBuilder[numDocs];
+  for (int i=0; i < builders.length; i++) {
+    builders[i]=client().prepareIndex("test","type").setSource("field","value");
+  }
+  indexRandom(true,builders);
+  ensureGreen();
+  assertAllSuccessful(client().admin().indices().prepareFlush().setForce(true).execute().actionGet());
+  CountResponse countResponse=client().prepareCount().get();
+  assertHitCount(countResponse,numDocs);
+  ShardRouting shardRouting=corruptRandomFile();
+  Settings build=ImmutableSettings.builder().put(IndexMetaData.SETTING_NUMBER_OF_REPLICAS,"1").build();
+  client().admin().indices().prepareUpdateSettings("test").setSettings(build).get();
+  client().admin().cluster().prepareReroute().get();
+  awaitBusy(new Predicate<Object>(){
+    @Override public boolean apply(    Object input){
+      ClusterHealthStatus test=client().admin().cluster().health(Requests.clusterHealthRequest("test")).actionGet().getStatus();
+      return test == ClusterHealthStatus.RED;
+    }
+  }
+);
+  final ClusterHealthResponse response=client().admin().cluster().health(Requests.clusterHealthRequest("test")).get();
+  if (response.getStatus() != ClusterHealthStatus.RED) {
+    logger.info("cluster state:\n{}\n{}",client().admin().cluster().prepareState().get().getState().prettyPrint(),client().admin().cluster().preparePendingClusterTasks().get().prettyPrint());
+  }
+  assertThat(response.getStatus(),is(ClusterHealthStatus.RED));
+  ClusterState state=client().admin().cluster().prepareState().get().getState();
+  GroupShardsIterator shardIterators=state.getRoutingNodes().getRoutingTable().activePrimaryShardsGrouped(new String[]{"test"},false);
+  for (  ShardIterator iterator : shardIterators.iterators()) {
+    ShardRouting routing;
+    while ((routing=iterator.nextOrNull()) != null) {
+      if (routing.getId() == shardRouting.getId()) {
+        assertThat(routing.state(),equalTo(ShardRoutingState.UNASSIGNED));
+      }
+ else {
+        assertThat(routing.state(),equalTo(ShardRoutingState.STARTED));
+      }
+    }
+  }
+  final List<File> files=listShardFiles(shardRouting);
+  File corruptedFile=null;
+  for (  File file : files) {
+    if (file.getName().startsWith("corrupted_")) {
+      corruptedFile=file;
+      break;
+    }
+  }
+  assertThat(corruptedFile,notNullValue());
+}

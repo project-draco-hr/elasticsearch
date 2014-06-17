@@ -8,15 +8,17 @@
     long totalSize=0;
     int numberOfReusedFiles=0;
     long reusedTotalSize=0;
+    Map<String,StoreFileMetaData> metadata=Collections.emptyMap();
+    try {
+      metadata=store.getMetadata().asMap();
+    }
+ catch (    Throwable e) {
+      logger.warn("{} Can't read metadata from store",e,shardId);
+    }
     List<FileInfo> filesToRecover=Lists.newArrayList();
     for (    FileInfo fileInfo : snapshot.indexFiles()) {
       String fileName=fileInfo.physicalName();
-      StoreFileMetaData md=null;
-      try {
-        md=store.metaData(fileName);
-      }
- catch (      IOException e) {
-      }
+      final StoreFileMetaData md=metadata.get(fileName);
       numberOfFiles++;
       if (!fileName.startsWith("segments") && md != null && fileInfo.isSame(md)) {
         totalSize+=md.length();
@@ -41,7 +43,11 @@
         }
       }
     }
-    recoveryState.getIndex().files(numberOfFiles,totalSize,numberOfReusedFiles,reusedTotalSize);
+    final RecoveryState.Index index=recoveryState.getIndex();
+    index.totalFileCount(numberOfFiles);
+    index.totalByteCount(totalSize);
+    index.reusedFileCount(numberOfReusedFiles);
+    index.reusedByteCount(reusedTotalSize);
     if (filesToRecover.isEmpty()) {
       logger.trace("no files to recover, all exists within the local store");
     }

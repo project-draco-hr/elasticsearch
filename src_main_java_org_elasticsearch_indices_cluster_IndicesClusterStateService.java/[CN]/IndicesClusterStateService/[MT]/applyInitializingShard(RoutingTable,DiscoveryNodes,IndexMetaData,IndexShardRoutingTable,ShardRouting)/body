@@ -90,10 +90,20 @@ catch (      Throwable e1) {
   if (sourceNode != null) {
     try {
       RecoveryState.Type type=shardRouting.primary() ? RecoveryState.Type.RELOCATION : RecoveryState.Type.REPLICA;
-      final StartRecoveryRequest request=new StartRecoveryRequest(indexShard.shardId(),sourceNode,nodes.localNode(),false,indexShard.store().list(),type,recoveryIdGenerator.incrementAndGet());
+      final Store store=indexShard.store();
+      final StartRecoveryRequest request;
+      store.incRef();
+      try {
+        store.failIfCorrupted();
+        request=new StartRecoveryRequest(indexShard.shardId(),sourceNode,nodes.localNode(),false,store.getMetadata().asMap(),type,recoveryIdGenerator.incrementAndGet());
+      }
+  finally {
+        store.decRef();
+      }
       recoveryTarget.startRecovery(request,indexShard,new PeerRecoveryListener(request,shardRouting,indexService,indexMetaData));
     }
  catch (    Throwable e) {
+      indexShard.engine().failEngine("corrupted preexisting index",e);
       handleRecoveryFailure(indexService,indexMetaData,shardRouting,true,e);
     }
   }

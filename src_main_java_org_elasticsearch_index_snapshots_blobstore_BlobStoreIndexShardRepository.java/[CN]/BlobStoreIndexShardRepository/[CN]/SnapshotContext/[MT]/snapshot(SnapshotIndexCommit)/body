@@ -16,19 +16,20 @@
     int indexNumberOfFiles=0;
     long indexTotalFilesSize=0;
     ArrayList<FileInfo> filesToSnapshot=newArrayList();
+    final Store.MetadataSnapshot metadata;
+    try {
+      metadata=store.getMetadata();
+    }
+ catch (    IOException e) {
+      throw new IndexShardSnapshotFailedException(shardId,"Failed to get store file metadata",e);
+    }
     for (    String fileName : snapshotIndexCommit.getFiles()) {
       if (snapshotStatus.aborted()) {
         logger.debug("[{}] [{}] Aborted on the file [{}], exiting",shardId,snapshotId,fileName);
         throw new IndexShardSnapshotFailedException(shardId,"Aborted");
       }
       logger.trace("[{}] [{}] Processing [{}]",shardId,snapshotId,fileName);
-      final StoreFileMetaData md;
-      try {
-        md=store.metaData(fileName);
-      }
- catch (      IOException e) {
-        throw new IndexShardSnapshotFailedException(shardId,"Failed to get store file metadata",e);
-      }
+      final StoreFileMetaData md=metadata.get(fileName);
       boolean snapshotRequired=false;
       BlobStoreIndexShardSnapshot.FileInfo fileInfo=snapshots.findPhysicalIndexFile(fileName);
       if (fileInfo == null || !fileInfo.isSame(md) || !snapshotFileExistsInBlobs(fileInfo,blobs)) {
@@ -37,7 +38,7 @@
       if (snapshotRequired) {
         indexNumberOfFiles++;
         indexTotalFilesSize+=md.length();
-        BlobStoreIndexShardSnapshot.FileInfo snapshotFileInfo=new BlobStoreIndexShardSnapshot.FileInfo(fileNameFromGeneration(++generation),fileName,md.length(),chunkSize,md.checksum());
+        BlobStoreIndexShardSnapshot.FileInfo snapshotFileInfo=new BlobStoreIndexShardSnapshot.FileInfo(fileNameFromGeneration(++generation),md,chunkSize);
         indexCommitPointFiles.add(snapshotFileInfo);
         filesToSnapshot.add(snapshotFileInfo);
       }
