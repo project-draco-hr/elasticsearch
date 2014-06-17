@@ -1,8 +1,7 @@
 {
 synchronized (dirtyLock(index.uid())) {
-    HashedBytesRef versionKey=versionKey(index.uid());
     final long currentVersion;
-    VersionValue versionValue=versionMap.get(versionKey);
+    VersionValue versionValue=versionMap.getUnderLock(index.uid().bytes());
     if (versionValue == null) {
       currentVersion=loadCurrentVersionFromIndex(index.uid());
     }
@@ -16,7 +15,7 @@ synchronized (dirtyLock(index.uid())) {
     }
     long updatedVersion;
     long expectedVersion=index.version();
-    if (index.versionType().isVersionConflict(currentVersion,expectedVersion)) {
+    if (index.versionType().isVersionConflictForWrites(currentVersion,expectedVersion)) {
       if (index.origin() == Operation.Origin.RECOVERY) {
         return;
       }
@@ -25,7 +24,7 @@ synchronized (dirtyLock(index.uid())) {
       }
     }
     updatedVersion=index.versionType().updateVersion(currentVersion,expectedVersion);
-    index.version(updatedVersion);
+    index.updateVersion(updatedVersion);
     if (currentVersion == Versions.NOT_FOUND) {
       index.created(true);
       if (index.docs().size() > 1) {
@@ -47,7 +46,7 @@ synchronized (dirtyLock(index.uid())) {
       }
     }
     Translog.Location translogLocation=translog.add(new Translog.Index(index));
-    versionMap.put(versionKey,new VersionValue(updatedVersion,false,threadPool.estimatedTimeInMillis(),translogLocation));
+    versionMap.putUnderLock(index.uid().bytes(),new VersionValue(updatedVersion,translogLocation));
     indexingService.postIndexUnderLock(index);
   }
 }

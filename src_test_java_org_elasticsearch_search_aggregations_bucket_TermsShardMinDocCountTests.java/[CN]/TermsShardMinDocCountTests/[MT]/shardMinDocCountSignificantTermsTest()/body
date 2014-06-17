@@ -1,0 +1,27 @@
+{
+  String termtype="string";
+  if (randomBoolean()) {
+    termtype="long";
+  }
+  assertAcked(prepareCreate(index).setSettings(SETTING_NUMBER_OF_SHARDS,1,SETTING_NUMBER_OF_REPLICAS,0).addMapping(type,"{\"properties\":{\"text\": {\"type\": \"" + termtype + "\"}}}"));
+  ensureYellow(index);
+  List<IndexRequestBuilder> indexBuilders=new ArrayList<>();
+  addTermsDocs("1",1,0,indexBuilders);
+  addTermsDocs("2",1,0,indexBuilders);
+  addTermsDocs("3",1,0,indexBuilders);
+  addTermsDocs("4",1,0,indexBuilders);
+  addTermsDocs("5",3,1,indexBuilders);
+  addTermsDocs("6",3,1,indexBuilders);
+  addTermsDocs("7",0,3,indexBuilders);
+  indexRandom(true,indexBuilders);
+  SearchResponse response=client().prepareSearch(index).addAggregation((new FilterAggregationBuilder("inclass").filter(FilterBuilders.termFilter("class",true))).subAggregation(new SignificantTermsBuilder("mySignificantTerms").field("text").minDocCount(2).size(2).executionHint(randomExecutionHint()))).execute().actionGet();
+  assertSearchResponse(response);
+  InternalFilter filteredBucket=response.getAggregations().get("inclass");
+  SignificantTerms sigterms=filteredBucket.getAggregations().get("mySignificantTerms");
+  assertThat(sigterms.getBuckets().size(),equalTo(0));
+  response=client().prepareSearch(index).addAggregation((new FilterAggregationBuilder("inclass").filter(FilterBuilders.termFilter("class",true))).subAggregation(new SignificantTermsBuilder("mySignificantTerms").field("text").minDocCount(2).shardMinDocCount(2).size(2).executionHint(randomExecutionHint()))).execute().actionGet();
+  assertSearchResponse(response);
+  filteredBucket=response.getAggregations().get("inclass");
+  sigterms=filteredBucket.getAggregations().get("mySignificantTerms");
+  assertThat(sigterms.getBuckets().size(),equalTo(2));
+}

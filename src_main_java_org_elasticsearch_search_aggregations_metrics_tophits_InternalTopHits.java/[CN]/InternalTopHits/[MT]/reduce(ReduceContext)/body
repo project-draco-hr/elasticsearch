@@ -1,0 +1,28 @@
+{
+  List<InternalAggregation> aggregations=reduceContext.aggregations();
+  TopDocs[] shardDocs=new TopDocs[aggregations.size()];
+  InternalSearchHits[] shardHits=new InternalSearchHits[aggregations.size()];
+  for (int i=0; i < shardDocs.length; i++) {
+    InternalTopHits topHitsAgg=(InternalTopHits)aggregations.get(i);
+    shardDocs[i]=topHitsAgg.topDocs;
+    shardHits[i]=topHitsAgg.searchHits;
+  }
+  try {
+    int[] tracker=new int[shardHits.length];
+    TopDocs reducedTopDocs=TopDocs.merge(sort,from,size,shardDocs);
+    InternalSearchHit[] hits=new InternalSearchHit[reducedTopDocs.scoreDocs.length];
+    for (int i=0; i < reducedTopDocs.scoreDocs.length; i++) {
+      ScoreDoc scoreDoc=reducedTopDocs.scoreDocs[i];
+      int position;
+      do {
+        position=tracker[scoreDoc.shardIndex]++;
+      }
+ while (shardDocs[scoreDoc.shardIndex].scoreDocs[position] != scoreDoc);
+      hits[i]=(InternalSearchHit)shardHits[scoreDoc.shardIndex].getAt(position);
+    }
+    return new InternalTopHits(name,new InternalSearchHits(hits,reducedTopDocs.totalHits,reducedTopDocs.getMaxScore()));
+  }
+ catch (  IOException e) {
+    throw ExceptionsHelper.convertToElastic(e);
+  }
+}

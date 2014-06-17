@@ -1,0 +1,39 @@
+{
+  if (observingContext.get() != null) {
+    throw new ElasticsearchException("already waiting for a cluster state change");
+  }
+  long timeoutTimeLeft;
+  if (timeOutValue == null) {
+    timeOutValue=this.timeOutValue;
+    long timeSinceStart=System.currentTimeMillis() - startTime;
+    timeoutTimeLeft=timeOutValue.millis() - timeSinceStart;
+    if (timeoutTimeLeft <= 0l) {
+      logger.debug("observer timed out. notifying listener. timeout setting [{}], time since start [{}]",timeOutValue,new TimeValue(timeSinceStart));
+      timedOut=true;
+      lastObservedState.set(new ObservedState(clusterService.state()));
+      listener.onTimeout(timeOutValue);
+      return;
+    }
+  }
+ else {
+    this.startTime=System.currentTimeMillis();
+    this.timeOutValue=timeOutValue;
+    timeoutTimeLeft=timeOutValue.millis();
+    timedOut=false;
+  }
+  ObservedState newState=new ObservedState(clusterService.state());
+  ObservedState lastState=lastObservedState.get();
+  if (changePredicate.apply(lastState.clusterState,lastState.status,newState.clusterState,newState.status)) {
+    logger.trace("observer: sampled state accepted by predicate ({})",newState);
+    lastObservedState.set(newState);
+    listener.onNewClusterState(newState.clusterState);
+  }
+ else {
+    logger.trace("observer: sampled state rejected by predicate ({}). adding listener to ClusterService",newState);
+    ObservingContext context=new ObservingContext(listener,changePredicate);
+    if (!observingContext.compareAndSet(null,context)) {
+      throw new ElasticsearchException("already waiting for a cluster state change");
+    }
+    clusterService.add(new TimeValue(timeoutTimeLeft),clusterStateListener);
+  }
+}

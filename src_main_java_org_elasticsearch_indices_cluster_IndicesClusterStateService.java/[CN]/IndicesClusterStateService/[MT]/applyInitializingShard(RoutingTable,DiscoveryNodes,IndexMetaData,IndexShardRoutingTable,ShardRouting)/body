@@ -8,15 +8,43 @@
     IndexShard indexShard=indexService.shardSafe(shardId);
     if (indexShard.state() == IndexShardState.STARTED || indexShard.state() == IndexShardState.POST_RECOVERY) {
       if (logger.isTraceEnabled()) {
-        logger.trace("{} master marked shard as initializing, but shard has state [{}], resending shard started",indexShard.shardId(),indexShard.state());
+        logger.trace("{} master marked shard as initializing, but shard has state [{}], resending shard started to {}",indexShard.shardId(),indexShard.state(),nodes.masterNode());
       }
-      shardStateAction.shardStarted(shardRouting,indexMetaData.getUUID(),"master " + nodes.masterNode() + " marked shard as initializing, but shard state is ["+ indexShard.state()+ "], mark shard as started");
+      if (nodes.masterNode() != null) {
+        shardStateAction.shardStarted(shardRouting,indexMetaData.getUUID(),"master " + nodes.masterNode() + " marked shard as initializing, but shard state is ["+ indexShard.state()+ "], mark shard as started",nodes.masterNode());
+      }
       return;
     }
  else {
       if (indexShard.ignoreRecoveryAttempt()) {
+        logger.trace("ignoring recovery instruction for an existing shard {} (shard state: [{}])",indexShard.shardId(),indexShard.state());
         return;
       }
+    }
+  }
+  DiscoveryNode sourceNode=null;
+  if (!shardRouting.primary()) {
+    IndexShardRoutingTable shardRoutingTable=routingTable.index(shardRouting.index()).shard(shardRouting.id());
+    for (    ShardRouting entry : shardRoutingTable) {
+      if (entry.primary() && entry.started()) {
+        sourceNode=nodes.get(entry.currentNodeId());
+        if (sourceNode == null) {
+          logger.trace("can't recover replica because primary shard {} is assigned to an unknown node. ignoring.",entry);
+          return;
+        }
+        break;
+      }
+    }
+    if (sourceNode == null) {
+      logger.trace("can't recover replica for {} because a primary shard can not be found. ignoring.",shardRouting.shardId());
+      return;
+    }
+  }
+ else   if (shardRouting.relocatingNodeId() != null) {
+    sourceNode=nodes.get(shardRouting.relocatingNodeId());
+    if (sourceNode == null) {
+      logger.trace("can't recover from remote primary shard {} because it is assigned to an unknown node [{}]. ignoring.",shardRouting.shardId(),shardRouting.relocatingNodeId());
+      return;
     }
   }
   if (!indexService.hasShard(shardId)) {
@@ -45,56 +73,43 @@ catch (      Throwable e1) {
         logger.warn("[{}][{}] failed to remove shard after failed creation",e1,shardRouting.index(),shardRouting.id());
       }
       failedShards.put(shardRouting.shardId(),new FailedShard(shardRouting.version()));
-      shardStateAction.shardFailed(shardRouting,indexMetaData.getUUID(),"Failed to create shard, message [" + detailedMessage(e) + "]");
+      if (nodes.masterNode() != null) {
+        shardStateAction.shardFailed(shardRouting,indexMetaData.getUUID(),"Failed to create shard, message [" + detailedMessage(e) + "]",nodes.masterNode());
+      }
+ else {
+        logger.debug("can't send shard failed for {} as there is no current master",shardRouting.shardId());
+      }
       return;
     }
   }
   final InternalIndexShard indexShard=(InternalIndexShard)indexService.shardSafe(shardId);
   if (indexShard.ignoreRecoveryAttempt()) {
+    logger.trace("ignoring recovery instruction for shard {} (shard state: [{}])",indexShard.shardId(),indexShard.state());
     return;
   }
-  if (!shardRouting.primary()) {
-    IndexShardRoutingTable shardRoutingTable=routingTable.index(shardRouting.index()).shard(shardRouting.id());
-    for (    ShardRouting entry : shardRoutingTable) {
-      if (entry.primary() && entry.started()) {
-        final DiscoveryNode sourceNode=nodes.get(entry.currentNodeId());
-        try {
-          final StartRecoveryRequest request=new StartRecoveryRequest(indexShard.shardId(),sourceNode,nodes.localNode(),false,indexShard.store().list(),RecoveryState.Type.REPLICA);
-          recoveryTarget.startRecovery(request,indexShard,new PeerRecoveryListener(request,shardRouting,indexService,indexMetaData));
-        }
- catch (        Throwable e) {
-          handleRecoveryFailure(indexService,indexMetaData,shardRouting,true,e);
-          break;
-        }
-        break;
-      }
+  if (sourceNode != null) {
+    try {
+      RecoveryState.Type type=shardRouting.primary() ? RecoveryState.Type.RELOCATION : RecoveryState.Type.REPLICA;
+      final StartRecoveryRequest request=new StartRecoveryRequest(indexShard.shardId(),sourceNode,nodes.localNode(),false,indexShard.store().list(),type,recoveryIdGenerator.incrementAndGet());
+      recoveryTarget.startRecovery(request,indexShard,new PeerRecoveryListener(request,shardRouting,indexService,indexMetaData));
+    }
+ catch (    Throwable e) {
+      handleRecoveryFailure(indexService,indexMetaData,shardRouting,true,e);
     }
   }
  else {
-    if (shardRouting.relocatingNodeId() == null) {
-      boolean indexShouldExists=indexShardRouting.primaryAllocatedPostApi();
-      IndexShardGatewayService shardGatewayService=indexService.shardInjector(shardId).getInstance(IndexShardGatewayService.class);
-      shardGatewayService.recover(indexShouldExists,new IndexShardGatewayService.RecoveryListener(){
-        @Override public void onRecoveryDone(){
-          shardStateAction.shardStarted(shardRouting,indexMetaData.getUUID(),"after recovery from gateway");
-        }
-        @Override public void onIgnoreRecovery(        String reason){
-        }
-        @Override public void onRecoveryFailed(        IndexShardGatewayRecoveryException e){
-          handleRecoveryFailure(indexService,indexMetaData,shardRouting,true,e);
-        }
+    boolean indexShouldExists=indexShardRouting.primaryAllocatedPostApi();
+    IndexShardGatewayService shardGatewayService=indexService.shardInjector(shardId).getInstance(IndexShardGatewayService.class);
+    shardGatewayService.recover(indexShouldExists,new IndexShardGatewayService.RecoveryListener(){
+      @Override public void onRecoveryDone(){
+        shardStateAction.shardStarted(shardRouting,indexMetaData.getUUID(),"after recovery from gateway");
       }
-);
-    }
- else {
-      final DiscoveryNode sourceNode=nodes.get(shardRouting.relocatingNodeId());
-      try {
-        final StartRecoveryRequest request=new StartRecoveryRequest(indexShard.shardId(),sourceNode,nodes.localNode(),false,indexShard.store().list(),RecoveryState.Type.RELOCATION);
-        recoveryTarget.startRecovery(request,indexShard,new PeerRecoveryListener(request,shardRouting,indexService,indexMetaData));
+      @Override public void onIgnoreRecovery(      String reason){
       }
- catch (      Throwable e) {
+      @Override public void onRecoveryFailed(      IndexShardGatewayRecoveryException e){
         handleRecoveryFailure(indexService,indexMetaData,shardRouting,true,e);
       }
     }
+);
   }
 }

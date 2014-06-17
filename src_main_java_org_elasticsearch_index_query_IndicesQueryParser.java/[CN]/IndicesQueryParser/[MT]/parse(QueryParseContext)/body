@@ -1,34 +1,25 @@
 {
   XContentParser parser=parseContext.parser();
-  Query query=null;
-  Query noMatchQuery=Queries.newMatchAllQuery();
+  Query noMatchQuery=null;
   boolean queryFound=false;
   boolean indicesFound=false;
   boolean currentIndexMatchesIndices=false;
   String queryName=null;
   String currentFieldName=null;
   XContentParser.Token token;
+  XContentStructure.InnerQuery innerQuery=null;
+  XContentStructure.InnerQuery innerNoMatchQuery=null;
   while ((token=parser.nextToken()) != XContentParser.Token.END_OBJECT) {
     if (token == XContentParser.Token.FIELD_NAME) {
       currentFieldName=parser.currentName();
     }
  else     if (token == XContentParser.Token.START_OBJECT) {
       if ("query".equals(currentFieldName)) {
+        innerQuery=new XContentStructure.InnerQuery(parseContext,null);
         queryFound=true;
-        if (indicesFound && !currentIndexMatchesIndices) {
-          parseContext.parser().skipChildren();
-        }
- else {
-          query=parseContext.parseInnerQuery();
-        }
       }
  else       if ("no_match_query".equals(currentFieldName)) {
-        if (indicesFound && currentIndexMatchesIndices) {
-          parseContext.parser().skipChildren();
-        }
- else {
-          noMatchQuery=parseContext.parseInnerQuery();
-        }
+        innerNoMatchQuery=new XContentStructure.InnerQuery(parseContext,null);
       }
  else {
         throw new QueryParsingException(parseContext.index(),"[indices] query does not support [" + currentFieldName + "]");
@@ -87,10 +78,20 @@
   }
   Query chosenQuery;
   if (currentIndexMatchesIndices) {
-    chosenQuery=query;
+    chosenQuery=innerQuery.asQuery();
   }
  else {
-    chosenQuery=noMatchQuery;
+    if (noMatchQuery != null) {
+      chosenQuery=noMatchQuery;
+    }
+ else {
+      if (innerNoMatchQuery == null) {
+        chosenQuery=Queries.newMatchAllQuery();
+      }
+ else {
+        chosenQuery=innerNoMatchQuery.asQuery();
+      }
+    }
   }
   if (queryName != null) {
     parseContext.addNamedQuery(queryName,chosenQuery);

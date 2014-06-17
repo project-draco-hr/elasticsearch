@@ -1,6 +1,6 @@
 {
   ClusterState clusterState=clusterService.state();
-  final String concreteIndex=clusterState.metaData().concreteIndex(request.index());
+  final String concreteIndex=clusterState.metaData().concreteSingleIndex(request.index());
   Iterable<MutableShardRouting> routingNode=clusterState.getRoutingNodes().routingNodeIter(clusterService.localNode().getId());
   if (routingNode == null) {
     redirect(request,concreteIndex,listener,clusterState);
@@ -70,9 +70,11 @@
           listener.onFailure(new ElasticsearchException("No fields found to fetch the 'likeText' from"));
           return;
         }
-        Term uidTerm=docMapper.uidMapper().term(request.type(),request.id());
-        boolBuilder.mustNot(termQuery(uidTerm.field(),uidTerm.text()));
-        boolBuilder.adjustPureNegative(false);
+        if (!request.include()) {
+          Term uidTerm=docMapper.uidMapper().term(request.type(),request.id());
+          boolBuilder.mustNot(termQuery(uidTerm.field(),uidTerm.text()));
+          boolBuilder.adjustPureNegative(false);
+        }
       }
  catch (      Throwable e) {
         listener.onFailure(e);
@@ -86,9 +88,15 @@
       if (searchTypes == null) {
         searchTypes=new String[]{request.type()};
       }
-      int size=request.searchSize() != 0 ? request.searchSize() : 10;
-      int from=request.searchFrom() != 0 ? request.searchFrom() : 0;
-      SearchRequest searchRequest=searchRequest(searchIndices).types(searchTypes).searchType(request.searchType()).scroll(request.searchScroll()).extraSource(searchSource().query(boolBuilder).from(from).size(size)).listenerThreaded(request.listenerThreaded());
+      SearchRequest searchRequest=searchRequest(searchIndices).types(searchTypes).searchType(request.searchType()).scroll(request.searchScroll()).listenerThreaded(request.listenerThreaded());
+      SearchSourceBuilder extraSource=searchSource().query(boolBuilder);
+      if (request.searchFrom() != 0) {
+        extraSource.from(request.searchFrom());
+      }
+      if (request.searchSize() != 0) {
+        extraSource.size(request.searchSize());
+      }
+      searchRequest.extraSource(extraSource);
       if (request.searchSource() != null) {
         searchRequest.source(request.searchSource(),request.searchSourceUnsafe());
       }

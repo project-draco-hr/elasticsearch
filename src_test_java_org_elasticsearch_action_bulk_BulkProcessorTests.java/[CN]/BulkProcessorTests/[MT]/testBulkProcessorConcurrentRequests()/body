@@ -1,0 +1,33 @@
+{
+  int bulkActions=randomIntBetween(10,100);
+  int numDocs=randomIntBetween(bulkActions,bulkActions + 100);
+  int concurrentRequests=randomIntBetween(0,10);
+  int expectedBulkActions=numDocs / bulkActions;
+  final CountDownLatch latch=new CountDownLatch(expectedBulkActions);
+  int totalExpectedBulkActions=numDocs % bulkActions == 0 ? expectedBulkActions : expectedBulkActions + 1;
+  final CountDownLatch closeLatch=new CountDownLatch(totalExpectedBulkActions);
+  BulkProcessorTestListener listener=new BulkProcessorTestListener(latch,closeLatch);
+  MultiGetRequestBuilder multiGetRequestBuilder;
+  try (BulkProcessor processor=BulkProcessor.builder(client(),listener).setConcurrentRequests(concurrentRequests).setBulkActions(bulkActions).setFlushInterval(TimeValue.timeValueHours(24)).setBulkSize(new ByteSizeValue(1,ByteSizeUnit.GB)).build()){
+    multiGetRequestBuilder=indexDocs(client(),processor,numDocs);
+    latch.await();
+    assertThat(listener.beforeCounts.get(),equalTo(expectedBulkActions));
+    assertThat(listener.afterCounts.get(),equalTo(expectedBulkActions));
+    assertThat(listener.bulkFailures.size(),equalTo(0));
+    assertThat(listener.bulkItems.size(),equalTo(numDocs - numDocs % bulkActions));
+  }
+   closeLatch.await();
+  assertThat(listener.beforeCounts.get(),equalTo(totalExpectedBulkActions));
+  assertThat(listener.afterCounts.get(),equalTo(totalExpectedBulkActions));
+  assertThat(listener.bulkFailures.size(),equalTo(0));
+  assertThat(listener.bulkItems.size(),equalTo(numDocs));
+  Set<String> ids=new HashSet<>();
+  for (  BulkItemResponse bulkItemResponse : listener.bulkItems) {
+    assertThat(bulkItemResponse.isFailed(),equalTo(false));
+    assertThat(bulkItemResponse.getIndex(),equalTo("test"));
+    assertThat(bulkItemResponse.getType(),equalTo("test"));
+    assertThat(Integer.valueOf(bulkItemResponse.getId()),both(greaterThan(0)).and(lessThanOrEqualTo(numDocs)));
+    assertThat(ids.add(bulkItemResponse.getId()),equalTo(true));
+  }
+  assertMultiGetResponse(multiGetRequestBuilder.get(),numDocs);
+}

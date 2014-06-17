@@ -1,6 +1,6 @@
 {
+  ensureNotDeleteByQuery(NAME,parseContext);
   XContentParser parser=parseContext.parser();
-  Query innerQuery=null;
   boolean queryFound=false;
   float boost=1.0f;
   String parentType=null;
@@ -8,20 +8,15 @@
   String queryName=null;
   String currentFieldName=null;
   XContentParser.Token token;
+  XContentStructure.InnerQuery iq=null;
   while ((token=parser.nextToken()) != XContentParser.Token.END_OBJECT) {
     if (token == XContentParser.Token.FIELD_NAME) {
       currentFieldName=parser.currentName();
     }
  else     if (token == XContentParser.Token.START_OBJECT) {
       if ("query".equals(currentFieldName)) {
-        String[] origTypes=QueryParseContext.setTypesWithPrevious(parentType == null ? null : new String[]{parentType});
-        try {
-          innerQuery=parseContext.parseInnerQuery();
-          queryFound=true;
-        }
-  finally {
-          QueryParseContext.setTypes(origTypes);
-        }
+        iq=new XContentStructure.InnerQuery(parseContext,parentType == null ? null : new String[]{parentType});
+        queryFound=true;
       }
  else {
         throw new QueryParsingException(parseContext.index(),"[has_parent] query does not support [" + currentFieldName + "]");
@@ -66,11 +61,12 @@
   if (!queryFound) {
     throw new QueryParsingException(parseContext.index(),"[has_parent] query requires 'query' field");
   }
-  if (innerQuery == null) {
-    return null;
-  }
   if (parentType == null) {
     throw new QueryParsingException(parseContext.index(),"[has_parent] query requires 'parent_type' field");
+  }
+  Query innerQuery=iq.asQuery(parentType);
+  if (innerQuery == null) {
+    return null;
   }
   DocumentMapper parentDocMapper=parseContext.mapperService().documentMapper(parentType);
   if (parentDocMapper == null) {
@@ -109,16 +105,12 @@
     parentFilter=parentsFilter;
   }
   Filter childrenFilter=parseContext.cacheFilter(new NotFilter(parentFilter),null);
-  boolean deleteByQuery="delete_by_query".equals(SearchContext.current().source());
   Query query;
-  if (!deleteByQuery && score) {
+  if (score) {
     query=new ParentQuery(parentChildIndexFieldData,innerQuery,parentType,childrenFilter);
   }
  else {
     query=new ParentConstantScoreQuery(parentChildIndexFieldData,innerQuery,parentType,childrenFilter);
-    if (deleteByQuery) {
-      query=new XConstantScoreQuery(new DeleteByQueryWrappingFilter(query));
-    }
   }
   query.setBoost(boost);
   if (queryName != null) {

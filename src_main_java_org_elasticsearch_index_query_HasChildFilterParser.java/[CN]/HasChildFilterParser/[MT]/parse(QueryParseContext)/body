@@ -1,37 +1,29 @@
 {
+  ensureNotDeleteByQuery(NAME,parseContext);
   XContentParser parser=parseContext.parser();
-  Query query=null;
   boolean queryFound=false;
+  boolean filterFound=false;
   String childType=null;
   int shortCircuitParentDocSet=8192;
+  int minChildren=0;
+  int maxChildren=0;
   String filterName=null;
   String currentFieldName=null;
   XContentParser.Token token;
+  XContentStructure.InnerQuery innerQuery=null;
+  XContentStructure.InnerFilter innerFilter=null;
   while ((token=parser.nextToken()) != XContentParser.Token.END_OBJECT) {
     if (token == XContentParser.Token.FIELD_NAME) {
       currentFieldName=parser.currentName();
     }
  else     if (token == XContentParser.Token.START_OBJECT) {
       if ("query".equals(currentFieldName)) {
-        String[] origTypes=QueryParseContext.setTypesWithPrevious(childType == null ? null : new String[]{childType});
-        try {
-          query=parseContext.parseInnerQuery();
-          queryFound=true;
-        }
-  finally {
-          QueryParseContext.setTypes(origTypes);
-        }
+        innerQuery=new XContentStructure.InnerQuery(parseContext,childType == null ? null : new String[]{childType});
+        queryFound=true;
       }
  else       if ("filter".equals(currentFieldName)) {
-        String[] origTypes=QueryParseContext.setTypesWithPrevious(childType == null ? null : new String[]{childType});
-        try {
-          Filter innerFilter=parseContext.parseInnerFilter();
-          query=new XConstantScoreQuery(innerFilter);
-          queryFound=true;
-        }
-  finally {
-          QueryParseContext.setTypes(origTypes);
-        }
+        innerFilter=new XContentStructure.InnerFilter(parseContext,childType == null ? null : new String[]{childType});
+        filterFound=true;
       }
  else {
         throw new QueryParsingException(parseContext.index(),"[has_child] filter does not support [" + currentFieldName + "]");
@@ -54,19 +46,32 @@
  else       if ("short_circuit_cutoff".equals(currentFieldName)) {
         shortCircuitParentDocSet=parser.intValue();
       }
+ else       if ("min_children".equals(currentFieldName) || "minChildren".equals(currentFieldName)) {
+        minChildren=parser.intValue(true);
+      }
+ else       if ("max_children".equals(currentFieldName) || "maxChildren".equals(currentFieldName)) {
+        maxChildren=parser.intValue(true);
+      }
  else {
         throw new QueryParsingException(parseContext.index(),"[has_child] filter does not support [" + currentFieldName + "]");
       }
     }
   }
-  if (!queryFound) {
-    throw new QueryParsingException(parseContext.index(),"[has_child] filter requires 'query' field");
-  }
-  if (query == null) {
-    return null;
+  if (!queryFound && !filterFound) {
+    throw new QueryParsingException(parseContext.index(),"[has_child] filter requires 'query' or 'filter' field");
   }
   if (childType == null) {
     throw new QueryParsingException(parseContext.index(),"[has_child] filter requires 'type' field");
+  }
+  Query query;
+  if (queryFound) {
+    query=innerQuery.asQuery(childType);
+  }
+ else {
+    query=innerFilter.asFilter(childType);
+  }
+  if (query == null) {
+    return null;
   }
   DocumentMapper childDocMapper=parseContext.mapperService().documentMapper(childType);
   if (childDocMapper == null) {
@@ -82,21 +87,24 @@
   if (parentDocMapper == null) {
     throw new QueryParsingException(parseContext.index(),"[has_child]  Type [" + childType + "] points to a non existent parent type ["+ parentType+ "]");
   }
+  if (maxChildren > 0 && maxChildren < minChildren) {
+    throw new QueryParsingException(parseContext.index(),"[has_child] 'max_children' is less than 'min_children'");
+  }
   Filter nonNestedDocsFilter=null;
   if (parentDocMapper.hasNestedObjects()) {
     nonNestedDocsFilter=parseContext.cacheFilter(NonNestedDocsFilter.INSTANCE,null);
   }
   Filter parentFilter=parseContext.cacheFilter(parentDocMapper.typeFilter(),null);
   ParentChildIndexFieldData parentChildIndexFieldData=parseContext.fieldData().getForField(parentFieldMapper);
-  Query childrenConstantScoreQuery=new ChildrenConstantScoreQuery(parentChildIndexFieldData,query,parentType,childType,parentFilter,shortCircuitParentDocSet,nonNestedDocsFilter);
-  if (filterName != null) {
-    parseContext.addNamedFilter(filterName,new CustomQueryWrappingFilter(childrenConstantScoreQuery));
-  }
-  boolean deleteByQuery="delete_by_query".equals(SearchContext.current().source());
-  if (deleteByQuery) {
-    return new DeleteByQueryWrappingFilter(childrenConstantScoreQuery);
+  Query childrenQuery;
+  if (minChildren > 1 || maxChildren > 0) {
+    childrenQuery=new ChildrenQuery(parentChildIndexFieldData,parentType,childType,parentFilter,query,ScoreType.NONE,minChildren,maxChildren,shortCircuitParentDocSet,nonNestedDocsFilter);
   }
  else {
-    return new CustomQueryWrappingFilter(childrenConstantScoreQuery);
+    childrenQuery=new ChildrenConstantScoreQuery(parentChildIndexFieldData,query,parentType,childType,parentFilter,shortCircuitParentDocSet,nonNestedDocsFilter);
   }
+  if (filterName != null) {
+    parseContext.addNamedFilter(filterName,new CustomQueryWrappingFilter(childrenQuery));
+  }
+  return new CustomQueryWrappingFilter(childrenQuery);
 }

@@ -1,0 +1,29 @@
+{
+  if (observer.isTimedOut()) {
+    return;
+  }
+  request.beforeLocalFork();
+  observer.waitForNextChange(new ClusterStateObserver.Listener(){
+    @Override public void onNewClusterState(    ClusterState state){
+      doStart();
+    }
+    @Override public void onClusterServiceClose(){
+      listener.onFailure(new NodeClosedException(nodes.localNode()));
+    }
+    @Override public void onTimeout(    TimeValue timeout){
+      if (!doStart()) {
+        Throwable listenFailure=failure;
+        if (listenFailure == null) {
+          if (shardIt == null) {
+            listenFailure=new UnavailableShardsException(new ShardId(request.index(),-1),"Timeout waiting for [" + timeout + "], request: "+ request.toString());
+          }
+ else {
+            listenFailure=new UnavailableShardsException(shardIt.shardId(),"[" + shardIt.size() + "] shardIt, ["+ shardIt.sizeActive()+ "] active : Timeout waiting for ["+ timeout+ "], request: "+ request.toString());
+          }
+        }
+        listener.onFailure(listenFailure);
+      }
+    }
+  }
+,request.timeout());
+}

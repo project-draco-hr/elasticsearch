@@ -3,8 +3,6 @@
   return (FD)cache.get(key,new Callable<AtomicFieldData>(){
     @Override public AtomicFieldData call() throws Exception {
       SegmentReaderUtils.registerCoreListener(context.reader(),IndexFieldCache.this);
-      AtomicFieldData fieldData=indexFieldData.loadDirect(context);
-      key.sizeInBytes=fieldData.getMemorySizeInBytes();
       key.listeners.add(indicesFieldDataCacheListener);
       final ShardId shardId=ShardUtils.extractShardId(context.reader());
       if (shardId != null) {
@@ -13,9 +11,16 @@
           key.listeners.add(shard.fieldData());
         }
       }
+      final AtomicFieldData fieldData=indexFieldData.loadDirect(context);
       for (      Listener listener : key.listeners) {
-        listener.onLoad(fieldNames,fieldDataType,fieldData);
+        try {
+          listener.onLoad(fieldNames,fieldDataType,fieldData);
+        }
+ catch (        Throwable e) {
+          logger.error("Failed to call listener on atomic field data loading",e);
+        }
       }
+      key.sizeInBytes=fieldData.getMemorySizeInBytes();
       return fieldData;
     }
   }

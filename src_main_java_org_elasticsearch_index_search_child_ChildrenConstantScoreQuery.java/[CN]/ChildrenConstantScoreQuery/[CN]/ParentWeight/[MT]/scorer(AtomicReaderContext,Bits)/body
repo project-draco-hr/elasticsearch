@@ -1,0 +1,30 @@
+{
+  if (remaining == 0) {
+    return null;
+  }
+  if (shortCircuitFilter != null) {
+    DocIdSet docIdSet=shortCircuitFilter.getDocIdSet(context,acceptDocs);
+    if (!DocIdSets.isEmpty(docIdSet)) {
+      DocIdSetIterator iterator=docIdSet.iterator();
+      if (iterator != null) {
+        return ConstantScorer.create(iterator,this,queryWeight);
+      }
+    }
+    return null;
+  }
+  DocIdSet parentDocIdSet=this.parentFilter.getDocIdSet(context,acceptDocs);
+  if (!DocIdSets.isEmpty(parentDocIdSet)) {
+    parentDocIdSet=BitsFilteredDocIdSet.wrap(parentDocIdSet,context.reader().getLiveDocs());
+    DocIdSetIterator innerIterator=parentDocIdSet.iterator();
+    if (innerIterator != null) {
+      LongBitSet parentOrds=collector.parentOrds;
+      BytesValues.WithOrdinals globalValues=globalIfd.load(context).getBytesValues();
+      if (globalValues != null) {
+        Ordinals.Docs globalOrdinals=globalValues.ordinals();
+        DocIdSetIterator parentIdIterator=new ParentOrdIterator(innerIterator,parentOrds,globalOrdinals,this);
+        return ConstantScorer.create(parentIdIterator,this,queryWeight);
+      }
+    }
+  }
+  return null;
+}

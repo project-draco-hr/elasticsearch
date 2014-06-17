@@ -1,21 +1,28 @@
 {
-  String currentFieldName=null;
+  String currentFieldName;
   XContentParser.Token token;
-  ScoreFunction scoreFunction=null;
-  token=parser.nextToken();
-  if (token == XContentParser.Token.FIELD_NAME) {
+  AbstractDistanceScoreFunction scoreFunction=null;
+  String multiValueMode="MIN";
+  XContentBuilder variableContent=XContentFactory.jsonBuilder();
+  String fieldName=null;
+  while ((token=parser.nextToken()) == XContentParser.Token.FIELD_NAME) {
     currentFieldName=parser.currentName();
     token=parser.nextToken();
     if (token == XContentParser.Token.START_OBJECT) {
-      scoreFunction=parseVariable(currentFieldName,parser,parseContext);
+      variableContent.copyCurrentStructure(parser);
+      fieldName=currentFieldName;
+    }
+ else     if (MULTI_VALUE_MODE.match(currentFieldName)) {
+      multiValueMode=parser.text();
     }
  else {
       throw new ElasticsearchParseException("Malformed score function score parameters.");
     }
   }
- else {
+  if (fieldName == null) {
     throw new ElasticsearchParseException("Malformed score function score parameters.");
   }
-  parser.nextToken();
+  XContentParser variableParser=XContentFactory.xContent(variableContent.string()).createParser(variableContent.string());
+  scoreFunction=parseVariable(fieldName,variableParser,parseContext,MultiValueMode.fromString(multiValueMode.toUpperCase(Locale.ROOT)));
   return scoreFunction;
 }

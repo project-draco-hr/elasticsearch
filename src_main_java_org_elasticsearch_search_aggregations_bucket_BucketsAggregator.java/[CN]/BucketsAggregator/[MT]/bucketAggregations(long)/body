@@ -1,8 +1,24 @@
 {
-  final InternalAggregation[] aggregations=new InternalAggregation[subAggregators.length];
+  final ArrayList<InternalAggregation> childAggs=new ArrayList<>();
   final long bucketDocCount=bucketDocCount(bucketOrd);
-  for (int i=0; i < subAggregators.length; i++) {
-    aggregations[i]=bucketDocCount == 0L ? subAggregators[i].buildEmptyAggregation() : subAggregators[i].buildAggregation(bucketOrd);
+  if (bucketDocCount == 0L) {
+    for (int i=0; i < subAggregators.length; i++) {
+      childAggs.add(subAggregators[i].buildEmptyAggregation());
+    }
   }
-  return new InternalAggregations(Arrays.asList(aggregations));
+ else {
+    BucketAnalysisCollector analysisCollector=new BucketAnalysisCollector(){
+      @Override public void add(      Aggregation analysis){
+        childAggs.add((InternalAggregation)analysis);
+      }
+    }
+;
+    collectableSubAggregators.gatherAnalysis(analysisCollector,bucketOrd);
+    for (int i=0; i < subAggregators.length; i++) {
+      if (!subAggregators[i].shouldCollect()) {
+        childAggs.add(subAggregators[i].buildAggregation(bucketOrd));
+      }
+    }
+  }
+  return new InternalAggregations(childAggs);
 }

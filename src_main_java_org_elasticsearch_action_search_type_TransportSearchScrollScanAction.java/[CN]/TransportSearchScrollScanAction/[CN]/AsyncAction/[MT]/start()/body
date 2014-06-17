@@ -4,18 +4,12 @@
     listener.onResponse(new SearchResponse(internalResponse,request.scrollId(),0,0,0l,buildShardFailures()));
     return;
   }
-  int localOperations=0;
   Tuple<String,Long>[] context=scrollId.getContext();
   for (int i=0; i < context.length; i++) {
     Tuple<String,Long> target=context[i];
     DiscoveryNode node=nodes.get(target.v1());
     if (node != null) {
-      if (nodes.localNodeId().equals(node.id())) {
-        localOperations++;
-      }
- else {
-        executePhase(i,node,target.v2());
-      }
+      executePhase(i,node,target.v2());
     }
  else {
       if (logger.isDebugEnabled()) {
@@ -24,50 +18,6 @@
       successfulOps.decrementAndGet();
       if (counter.decrementAndGet() == 0) {
         finishHim();
-      }
-    }
-  }
-  if (localOperations > 0) {
-    if (request.operationThreading() == SearchOperationThreading.SINGLE_THREAD) {
-      threadPool.executor(ThreadPool.Names.SEARCH).execute(new Runnable(){
-        @Override public void run(){
-          Tuple<String,Long>[] context1=scrollId.getContext();
-          for (int i=0; i < context1.length; i++) {
-            Tuple<String,Long> target=context1[i];
-            DiscoveryNode node=nodes.get(target.v1());
-            if (node != null && nodes.localNodeId().equals(node.id())) {
-              executePhase(i,node,target.v2());
-            }
-          }
-        }
-      }
-);
-    }
- else {
-      boolean localAsync=request.operationThreading() == SearchOperationThreading.THREAD_PER_SHARD;
-      Tuple<String,Long>[] context1=scrollId.getContext();
-      for (int i=0; i < context1.length; i++) {
-        final Tuple<String,Long> target=context1[i];
-        final int shardIndex=i;
-        final DiscoveryNode node=nodes.get(target.v1());
-        if (node != null && nodes.localNodeId().equals(node.id())) {
-          try {
-            if (localAsync) {
-              threadPool.executor(ThreadPool.Names.SEARCH).execute(new Runnable(){
-                @Override public void run(){
-                  executePhase(shardIndex,node,target.v2());
-                }
-              }
-);
-            }
- else {
-              executePhase(shardIndex,node,target.v2());
-            }
-          }
- catch (          Throwable t) {
-            onPhaseFailure(t,target.v2(),shardIndex);
-          }
-        }
       }
     }
   }

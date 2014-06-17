@@ -1,39 +1,16 @@
 {
   List<InternalAggregation> aggregations=reduceContext.aggregations();
-  if (aggregations.size() == 1) {
-    InternalTerms terms=(InternalTerms)aggregations.get(0);
-    terms.trimExcessEntries(reduceContext.bigArrays());
-    return terms;
-  }
-  InternalTerms reduced=null;
-  Map<Text,List<InternalTerms.Bucket>> buckets=null;
+  Multimap<Object,InternalTerms.Bucket> buckets=ArrayListMultimap.create();
   for (  InternalAggregation aggregation : aggregations) {
     InternalTerms terms=(InternalTerms)aggregation;
-    if (terms instanceof UnmappedTerms) {
-      continue;
-    }
-    if (reduced == null) {
-      reduced=terms;
-    }
-    if (buckets == null) {
-      buckets=new HashMap<>(terms.buckets.size());
-    }
     for (    Bucket bucket : terms.buckets) {
-      List<Bucket> existingBuckets=buckets.get(bucket.getKeyAsText());
-      if (existingBuckets == null) {
-        existingBuckets=new ArrayList<>(aggregations.size());
-        buckets.put(bucket.getKeyAsText(),existingBuckets);
-      }
-      existingBuckets.add(bucket);
+      buckets.put(bucket.getKeyAsObject(),bucket);
     }
-  }
-  if (reduced == null) {
-    return (UnmappedTerms)aggregations.get(0);
   }
   final int size=Math.min(requiredSize,buckets.size());
   BucketPriorityQueue ordered=new BucketPriorityQueue(size,order.comparator(null));
-  for (  Map.Entry<Text,List<Bucket>> entry : buckets.entrySet()) {
-    List<Bucket> sameTermBuckets=entry.getValue();
+  for (  Collection<Bucket> l : buckets.asMap().values()) {
+    List<Bucket> sameTermBuckets=(List<Bucket>)l;
     final Bucket b=sameTermBuckets.get(0).reduce(sameTermBuckets,reduceContext.bigArrays());
     if (b.docCount >= minDocCount) {
       ordered.insertWithOverflow(b);
@@ -43,6 +20,5 @@
   for (int i=ordered.size() - 1; i >= 0; i--) {
     list[i]=(Bucket)ordered.pop();
   }
-  reduced.buckets=Arrays.asList(list);
-  return reduced;
+  return newAggregation(name,Arrays.asList(list));
 }

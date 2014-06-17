@@ -1,0 +1,22 @@
+{
+  Client transportClient=new TransportClient();
+  int bulkActions=randomIntBetween(10,100);
+  int numDocs=randomIntBetween(bulkActions,bulkActions + 100);
+  int concurrentRequests=randomIntBetween(0,10);
+  int expectedBulkActions=numDocs / bulkActions;
+  final CountDownLatch latch=new CountDownLatch(expectedBulkActions);
+  int totalExpectedBulkActions=numDocs % bulkActions == 0 ? expectedBulkActions : expectedBulkActions + 1;
+  final CountDownLatch closeLatch=new CountDownLatch(totalExpectedBulkActions);
+  BulkProcessorTestListener listener=new BulkProcessorTestListener(latch,closeLatch);
+  try (BulkProcessor processor=BulkProcessor.builder(transportClient,listener).setConcurrentRequests(concurrentRequests).setBulkActions(bulkActions).setFlushInterval(TimeValue.timeValueHours(24)).setBulkSize(new ByteSizeValue(1,ByteSizeUnit.GB)).build()){
+    indexDocs(transportClient,processor,numDocs);
+    latch.await();
+    assertThat(listener.beforeCounts.get(),equalTo(expectedBulkActions));
+    assertThat(listener.afterCounts.get(),equalTo(expectedBulkActions));
+    assertThat(listener.bulkFailures.size(),equalTo(expectedBulkActions));
+    assertThat(listener.bulkItems.size(),equalTo(0));
+  }
+   closeLatch.await();
+  assertThat(listener.bulkFailures.size(),equalTo(totalExpectedBulkActions));
+  assertThat(listener.bulkItems.size(),equalTo(0));
+}

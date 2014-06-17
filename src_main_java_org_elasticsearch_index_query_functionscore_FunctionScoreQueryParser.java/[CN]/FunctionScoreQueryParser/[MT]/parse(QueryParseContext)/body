@@ -8,6 +8,9 @@
   String currentFieldName=null;
   XContentParser.Token token;
   CombineFunction combineFunction=CombineFunction.MULT;
+  boolean functionArrayFound=false;
+  boolean singleFunctionFound=false;
+  String singleFunctionName=null;
   while ((token=parser.nextToken()) != XContentParser.Token.END_OBJECT) {
     if (token == XContentParser.Token.FIELD_NAME) {
       currentFieldName=parser.currentName();
@@ -31,10 +34,22 @@
       boost=parser.floatValue();
     }
  else     if ("functions".equals(currentFieldName)) {
+      if (singleFunctionFound) {
+        String errorString="Found \"" + singleFunctionName + "\" already, now encountering \"functions\": [...].";
+        handleMisplacedFunctionsDeclaration(errorString,singleFunctionName);
+      }
       currentFieldName=parseFiltersAndFunctions(parseContext,parser,filterFunctions,currentFieldName);
+      functionArrayFound=true;
     }
  else {
-      filterFunctions.add(new FiltersFunctionScoreQuery.FilterFunction(null,funtionParserMapper.get(parseContext.index(),currentFieldName).parse(parseContext,parser)));
+      ScoreFunctionParser currentFunctionParser=funtionParserMapper.get(parseContext.index(),currentFieldName);
+      singleFunctionName=currentFieldName;
+      if (functionArrayFound) {
+        String errorString="Found \"functions\": [...] already, now encountering \"" + currentFieldName + "\".";
+        handleMisplacedFunctionsDeclaration(errorString,currentFieldName);
+      }
+      filterFunctions.add(new FiltersFunctionScoreQuery.FilterFunction(null,currentFunctionParser.parse(parseContext,parser)));
+      singleFunctionFound=true;
     }
   }
   if (query == null) {

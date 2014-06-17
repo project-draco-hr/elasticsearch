@@ -1,0 +1,44 @@
+{
+  for (int i=0; i < 10; i++) {
+    client().prepareIndex("test","type",Integer.toString(i)).setSource("field","1").get();
+  }
+  int numberOfAsyncOps=randomIntBetween(200,700);
+  final CountDownLatch latch=new CountDownLatch(numberOfAsyncOps);
+  final CopyOnWriteArrayList<Object> responses=Lists.newCopyOnWriteArrayList();
+  for (int i=0; i < numberOfAsyncOps; i++) {
+    client().prepareSearch("test").setSearchType(SearchType.QUERY_THEN_FETCH).setQuery(QueryBuilders.matchQuery("field","1")).execute(new ActionListener<SearchResponse>(){
+      @Override public void onResponse(      SearchResponse searchResponse){
+        responses.add(searchResponse);
+        latch.countDown();
+      }
+      @Override public void onFailure(      Throwable e){
+        responses.add(e);
+        latch.countDown();
+      }
+    }
+);
+  }
+  latch.await();
+  assertThat(responses.size(),equalTo(numberOfAsyncOps));
+  for (  Object response : responses) {
+    if (response instanceof SearchResponse) {
+      SearchResponse searchResponse=(SearchResponse)response;
+      for (      ShardSearchFailure failure : searchResponse.getShardFailures()) {
+        assertTrue("got unexpected reason..." + failure.reason(),failure.reason().toLowerCase(Locale.ENGLISH).contains("rejected"));
+      }
+    }
+ else {
+      Throwable t=(Throwable)response;
+      Throwable unwrap=ExceptionsHelper.unwrapCause(t);
+      if (unwrap instanceof SearchPhaseExecutionException) {
+        SearchPhaseExecutionException e=(SearchPhaseExecutionException)unwrap;
+        for (        ShardSearchFailure failure : e.shardFailures()) {
+          assertTrue("got unexpected reason..." + failure.reason(),failure.reason().toLowerCase(Locale.ENGLISH).contains("rejected"));
+        }
+      }
+ else {
+        throw new AssertionError("unexpected failure",(Throwable)response);
+      }
+    }
+  }
+}
