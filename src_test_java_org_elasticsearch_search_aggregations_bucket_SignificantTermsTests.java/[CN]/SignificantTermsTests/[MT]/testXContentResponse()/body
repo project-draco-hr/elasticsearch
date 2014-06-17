@@ -1,0 +1,32 @@
+{
+  String indexName="10index";
+  String docType="doc";
+  String classField="class";
+  String textField="text";
+  cluster().wipeIndices(indexName);
+  String type=randomBoolean() ? "string" : "long";
+  index01Docs(indexName,docType,classField,textField,type);
+  SearchResponse response=client().prepareSearch(indexName).setTypes(docType).addAggregation(new TermsBuilder("class").field(classField).subAggregation(new SignificantTermsBuilder("sig_terms").field(textField))).execute().actionGet();
+  assertSearchResponse(response);
+  StringTerms classes=(StringTerms)response.getAggregations().get("class");
+  assertThat(classes.getBuckets().size(),equalTo(2));
+  for (  Terms.Bucket classBucket : classes.getBuckets()) {
+    Map<String,Aggregation> aggs=classBucket.getAggregations().asMap();
+    assertTrue(aggs.containsKey("sig_terms"));
+    SignificantTerms agg=(SignificantTerms)aggs.get("sig_terms");
+    assertThat(agg.getBuckets().size(),equalTo(1));
+    String term=agg.iterator().next().getKey();
+    String classTerm=classBucket.getKey();
+    assertTrue(term.equals(classTerm));
+  }
+  XContentBuilder responseBuilder=XContentFactory.jsonBuilder();
+  classes.toXContent(responseBuilder,null);
+  String result=null;
+  if (type.equals("long")) {
+    result="\"class\"{\"buckets\":[{\"key\":\"0\",\"doc_count\":4,\"sig_terms\":{\"doc_count\":4,\"buckets\":[{\"key\":0,\"key_as_string\":\"0\",\"doc_count\":4,\"score\":0.39999999999999997,\"bg_count\":5}]}},{\"key\":\"1\",\"doc_count\":3,\"sig_terms\":{\"doc_count\":3,\"buckets\":[{\"key\":1,\"key_as_string\":\"1\",\"doc_count\":3,\"score\":0.75,\"bg_count\":4}]}}]}";
+  }
+ else {
+    result="\"class\"{\"buckets\":[{\"key\":\"0\",\"doc_count\":4,\"sig_terms\":{\"doc_count\":4,\"buckets\":[{\"key\":\"0\",\"doc_count\":4,\"score\":0.39999999999999997,\"bg_count\":5}]}},{\"key\":\"1\",\"doc_count\":3,\"sig_terms\":{\"doc_count\":3,\"buckets\":[{\"key\":\"1\",\"doc_count\":3,\"score\":0.75,\"bg_count\":4}]}}]}";
+  }
+  assertThat(responseBuilder.string(),equalTo(result));
+}
