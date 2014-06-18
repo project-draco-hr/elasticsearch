@@ -1,0 +1,36 @@
+{
+  clusterService.submitStateUpdateTask(request.cause,new AckedClusterStateUpdateTask<ClusterStateUpdateResponse>(request,listener){
+    @Override protected ClusterStateUpdateResponse newResponse(    boolean acknowledged){
+      return new ClusterStateUpdateResponse(acknowledged);
+    }
+    @Override public ClusterState execute(    ClusterState currentState){
+      ensureRepositoryNotInUse(currentState,request.name);
+      MetaData metaData=currentState.metaData();
+      MetaData.Builder mdBuilder=MetaData.builder(currentState.metaData());
+      RepositoriesMetaData repositories=metaData.custom(RepositoriesMetaData.TYPE);
+      if (repositories != null && repositories.repositories().size() > 0) {
+        List<RepositoryMetaData> repositoriesMetaData=new ArrayList<>(repositories.repositories().size());
+        boolean changed=false;
+        for (        RepositoryMetaData repositoryMetaData : repositories.repositories()) {
+          if (Regex.simpleMatch(request.name,repositoryMetaData.name())) {
+            logger.info("delete repository [{}]",repositoryMetaData.name());
+            changed=true;
+          }
+ else {
+            repositoriesMetaData.add(repositoryMetaData);
+          }
+        }
+        if (changed) {
+          repositories=new RepositoriesMetaData(repositoriesMetaData.toArray(new RepositoryMetaData[repositoriesMetaData.size()]));
+          mdBuilder.putCustom(RepositoriesMetaData.TYPE,repositories);
+          return ClusterState.builder(currentState).metaData(mdBuilder).build();
+        }
+      }
+      throw new RepositoryMissingException(request.name);
+    }
+    @Override public boolean mustAck(    DiscoveryNode discoveryNode){
+      return discoveryNode.masterNode();
+    }
+  }
+);
+}
