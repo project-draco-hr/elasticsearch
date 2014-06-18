@@ -1,2 +1,65 @@
 {
+  IndexService percolateIndexService=indicesService.indexServiceSafe(request.index());
+  IndexShard indexShard=percolateIndexService.shardSafe(request.shardId());
+  indexShard.readAllowed();
+  ShardPercolateService shardPercolateService=indexShard.shardPercolateService();
+  shardPercolateService.prePercolate();
+  long startTime=System.nanoTime();
+  SearchShardTarget searchShardTarget=new SearchShardTarget(clusterService.localNode().id(),request.index(),request.shardId());
+  final PercolateContext context=new PercolateContext(request,searchShardTarget,indexShard,percolateIndexService,cacheRecycler,pageCacheRecycler,bigArrays,scriptService);
+  try {
+    ParsedDocument parsedDocument=parseRequest(percolateIndexService,request,context);
+    if (context.percolateQueries().isEmpty()) {
+      return new PercolateShardResponse(context,request.index(),request.shardId());
+    }
+    if (request.docSource() != null && request.docSource().length() != 0) {
+      parsedDocument=parseFetchedDoc(context,request.docSource(),percolateIndexService,request.documentType());
+    }
+ else     if (parsedDocument == null) {
+      throw new ElasticsearchIllegalArgumentException("Nothing to percolate");
+    }
+    if (context.percolateQuery() == null && (context.trackScores() || context.doSort || context.facets() != null || context.aggregations() != null)) {
+      context.percolateQuery(new MatchAllDocsQuery());
+    }
+    if (context.doSort && !context.limit) {
+      throw new ElasticsearchIllegalArgumentException("Can't sort if size isn't specified");
+    }
+    if (context.highlight() != null && !context.limit) {
+      throw new ElasticsearchIllegalArgumentException("Can't highlight if size isn't specified");
+    }
+    if (context.size() < 0) {
+      context.size(0);
+    }
+    PercolatorIndex percolatorIndex;
+    boolean isNested=indexShard.mapperService().documentMapper(request.documentType()).hasNestedObjects();
+    if (parsedDocument.docs().size() > 1) {
+      assert isNested;
+      percolatorIndex=multi;
+    }
+ else {
+      percolatorIndex=single;
+    }
+    PercolatorType action;
+    if (request.onlyCount()) {
+      action=context.percolateQuery() != null ? queryCountPercolator : countPercolator;
+    }
+ else {
+      if (context.doSort) {
+        action=topMatchingPercolator;
+      }
+ else       if (context.percolateQuery() != null) {
+        action=context.trackScores() ? scoringPercolator : queryPercolator;
+      }
+ else {
+        action=matchPercolator;
+      }
+    }
+    context.percolatorTypeId=action.id();
+    percolatorIndex.prepare(context,parsedDocument);
+    return action.doPercolate(request,context,isNested);
+  }
+  finally {
+    context.close();
+    shardPercolateService.postPercolate(System.nanoTime() - startTime);
+  }
 }
