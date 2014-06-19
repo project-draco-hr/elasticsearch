@@ -1,8 +1,10 @@
 {
   client().admin().indices().prepareCreate("my-index").setSettings(ImmutableSettings.settingsBuilder().put("index.refresh_interval",-1)).addMapping("my-type2",jsonBuilder().startObject().startObject("my-type2").startObject("properties").startObject("field1").field("type","object").startObject("field2").field("type","object").startObject("field3").field("type","object").startObject("field4").field("type","string").field("store","yes").endObject().endObject().endObject().endObject().endObject().endObject()).get();
   BytesReference source=jsonBuilder().startObject().startArray("field1").startObject().startObject("field2").startArray("field3").startObject().field("field4","value1").endObject().endArray().endObject().endObject().startObject().startObject("field2").startArray("field3").startObject().field("field4","value2").endObject().endArray().endObject().endObject().endArray().endObject().bytes();
+  logger.info("indexing documents");
   client().prepareIndex("my-index","my-type1","1").setSource(source).get();
   client().prepareIndex("my-index","my-type2","1").setSource(source).get();
+  logger.info("checking real time retrieval");
   String field="field1.field2.field3.field4";
   GetResponse getResponse=client().prepareGet("my-index","my-type1","1").setFields(field).get();
   assertThat(getResponse.isExists(),equalTo(true));
@@ -16,6 +18,7 @@
   assertThat(getResponse.getField(field).getValues().size(),equalTo(2));
   assertThat(getResponse.getField(field).getValues().get(0).toString(),equalTo("value1"));
   assertThat(getResponse.getField(field).getValues().get(1).toString(),equalTo("value2"));
+  logger.info("waiting for recoveries to complete");
   awaitBusy(new Predicate<Object>(){
     @Override public boolean apply(    Object input){
       RecoveryResponse response=client().admin().indices().prepareRecoveries("my-index").setActiveOnly(true).get();
@@ -28,8 +31,16 @@
     }
   }
 ,1,TimeUnit.MINUTES);
+  logger.info("flushing");
   FlushResponse flushResponse=client().admin().indices().prepareFlush("my-index").setForce(true).get();
-  assertThat(flushResponse.getSuccessfulShards(),greaterThanOrEqualTo(1));
+  if (flushResponse.getSuccessfulShards() == 0) {
+    StringBuilder sb=new StringBuilder("failed to flush at least one shard. total shards [").append(flushResponse.getTotalShards()).append("], failed shards: [").append(flushResponse.getFailedShards()).append("]");
+    for (    ShardOperationFailedException failure : flushResponse.getShardFailures()) {
+      sb.append("\nShard failure: ").append(failure);
+    }
+    fail(sb.toString());
+  }
+  logger.info("checking post-flush retrieval");
   getResponse=client().prepareGet("my-index","my-type1","1").setFields(field).get();
   assertThat(getResponse.isExists(),equalTo(true));
   assertThat(getResponse.getField(field).isMetadataField(),equalTo(false));
