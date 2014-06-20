@@ -1,11 +1,25 @@
 {
-  try {
-    if (!raf.increaseRefCount()) {
-      return null;
+  if (raf.increaseRefCount()) {
+    boolean success=false;
+    try {
+      rwl.writeLock().lock();
+      try {
+        FsChannelSnapshot snapshot=new FsChannelSnapshot(this.id,raf,lastWrittenPosition,operationCounter);
+        success=true;
+        return snapshot;
+      }
+  finally {
+        rwl.writeLock().unlock();
+      }
     }
-    return new FsChannelSnapshot(this.id,raf,lastWrittenPosition.get(),operationCounter.get());
+ catch (    FileNotFoundException e) {
+      throw new TranslogException(shardId,"failed to create snapshot",e);
+    }
+ finally {
+      if (!success) {
+        raf.decreaseRefCount(false);
+      }
+    }
   }
- catch (  Exception e) {
-    throw new TranslogException(shardId,"Failed to snapshot",e);
-  }
+  return null;
 }
