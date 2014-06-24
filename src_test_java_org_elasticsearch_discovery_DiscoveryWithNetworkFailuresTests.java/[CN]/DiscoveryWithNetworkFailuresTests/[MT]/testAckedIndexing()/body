@@ -38,14 +38,16 @@
                 ackedDocs.put(id,node);
                 logger.trace("[{}] indexed id [{}] through node [{}]",name,id,node);
               }
-  finally {
+ catch (              ElasticsearchException e) {
+                exceptedExceptions.add(e);
+                logger.trace("[{}] failed id [{}] through node [{}]",e,name,id,node);
+              }
+ finally {
                 countDownLatchRef.get().countDown();
                 logger.trace("[{}] decreased counter : {}",name,countDownLatchRef.get().getCount());
               }
             }
- catch (            ElasticsearchException|InterruptedException e) {
-              exceptedExceptions.add(e);
-              logger.trace("[{}] failed id [{}] through node [{}]",e,name,id,node);
+ catch (            InterruptedException e) {
             }
 catch (            Throwable t) {
               logger.info("unexpected exception in background thread of [{}]",t,node);
@@ -77,7 +79,7 @@ catch (            Throwable t) {
         assertThat(semaphore.availablePermits(),equalTo(0));
         semaphore.release(docsPerIndexer);
       }
-      assertTrue(countDownLatchRef.get().await(30000 + disruptionScheme.expectedTimeToHeal().millis() * (docsPerIndexer * indexers.size()),TimeUnit.MILLISECONDS));
+      assertTrue(countDownLatchRef.get().await(60000 + disruptionScheme.expectedTimeToHeal().millis() * (docsPerIndexer * indexers.size()),TimeUnit.MILLISECONDS));
       logger.info("stopping disruption");
       disruptionScheme.stopDisrupting();
       ensureStableCluster(3,TimeValue.timeValueMillis(disruptionScheme.expectedTimeToHeal().millis() + 30000));
@@ -98,7 +100,13 @@ catch (            Throwable t) {
     }
   }
   finally {
-    logger.debug("Excepted exception during disruption [{}]",exceptedExceptions);
+    if (exceptedExceptions.size() > 0) {
+      StringBuilder sb=new StringBuilder("Indexing exceptions during disruption:");
+      for (      Exception e : exceptedExceptions) {
+        sb.append("\n").append(e.getMessage());
+      }
+      logger.debug(sb.toString());
+    }
     logger.info("shutting down indexers");
     stop.set(true);
     for (    Thread indexer : indexers) {
