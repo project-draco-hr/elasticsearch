@@ -1,5 +1,6 @@
 {
-  assertAcked(client().admin().indices().prepareCreate("idx").addMapping("type",XContentBuilder.builder(JsonXContent.jsonXContent).startObject().startObject("type").startObject(FieldNamesFieldMapper.NAME).field("index",randomFrom("no","not_analyzed")).field("store",randomFrom("no","yes")).endObject().endObject().endObject()));
+  XContentBuilder mapping=XContentBuilder.builder(JsonXContent.jsonXContent).startObject().startObject("type").startObject(FieldNamesFieldMapper.NAME).field("index",randomFrom("no","not_analyzed")).field("store",randomFrom("no","yes")).endObject().endObject().endObject();
+  assertAcked(client().admin().indices().prepareCreate("idx").addMapping("type",mapping));
   @SuppressWarnings("unchecked") Map<String,Object>[] sources=new Map[]{ImmutableMap.of("foo","bar"),ImmutableMap.of("bar",ImmutableMap.of("foo","bar","bar",ImmutableMap.of("bar","foo"))),ImmutableMap.of("bar",ImmutableMap.of("baz",42)),ImmutableMap.of()};
   List<IndexRequestBuilder> reqs=new ArrayList<IndexRequestBuilder>();
   for (  Map<String,Object> source : sources) {
@@ -22,9 +23,9 @@
     final int count=entry.getValue();
     SearchResponse resp=client().prepareSearch("idx").setQuery(QueryBuilders.filteredQuery(QueryBuilders.matchAllQuery(),FilterBuilders.existsFilter(fieldName))).execute().actionGet();
     assertSearchResponse(resp);
-    assertEquals(count,resp.getHits().totalHits());
+    assertEquals(String.format(Locale.ROOT,"exists(%s, %d) mapping: %s",fieldName,count,mapping.string()),count,resp.getHits().totalHits());
     resp=client().prepareSearch("idx").setQuery(QueryBuilders.filteredQuery(QueryBuilders.matchAllQuery(),FilterBuilders.missingFilter(fieldName))).execute().actionGet();
     assertSearchResponse(resp);
-    assertEquals(numDocs - count,resp.getHits().totalHits());
+    assertEquals(String.format(Locale.ROOT,"missing(%s, %d) mapping: %s",fieldName,count,mapping.string()),numDocs - count,resp.getHits().totalHits());
   }
 }
