@@ -1,0 +1,33 @@
+{
+  assertAcked(client().admin().indices().prepareCreate("idx").setSettings(IndicesQueryCache.INDEX_CACHE_QUERY_ENABLED,true).get());
+  ensureGreen();
+  int numDocs=randomIntBetween(2,100);
+  IndexRequestBuilder[] builders=new IndexRequestBuilder[numDocs];
+  for (int i=0; i < numDocs; ++i) {
+    builders[i]=client().prepareIndex("idx","type",Integer.toString(i)).setSource(jsonBuilder().startObject().field("common","field").field("str_value","s" + i).endObject());
+  }
+  indexRandom(true,builders);
+  assertThat(client().admin().indices().prepareStats("idx").setQueryCache(true).get().getTotal().getQueryCache().getMemorySizeInBytes(),equalTo(0l));
+  for (int i=0; i < 10; i++) {
+    assertThat(client().prepareSearch("idx").setSearchType(SearchType.COUNT).get().getHits().getTotalHits(),equalTo((long)numDocs));
+    assertThat(client().admin().indices().prepareStats("idx").setQueryCache(true).get().getTotal().getQueryCache().getMemorySizeInBytes(),greaterThan(0l));
+  }
+  builders=new IndexRequestBuilder[numDocs];
+  for (int i=0; i < numDocs; ++i) {
+    builders[i]=client().prepareIndex("idx","type",Integer.toString(i)).setSource(jsonBuilder().startObject().field("common","field").field("str_value","s" + i).endObject());
+  }
+  indexRandom(true,builders);
+  refresh();
+  assertBusy(new Runnable(){
+    @Override public void run(){
+      assertThat(client().admin().indices().prepareStats("idx").setQueryCache(true).get().getTotal().getQueryCache().getMemorySizeInBytes(),equalTo(0l));
+    }
+  }
+);
+  for (int i=0; i < 10; i++) {
+    assertThat(client().prepareSearch("idx").setSearchType(SearchType.COUNT).get().getHits().getTotalHits(),equalTo((long)numDocs));
+    assertThat(client().admin().indices().prepareStats("idx").setQueryCache(true).get().getTotal().getQueryCache().getMemorySizeInBytes(),greaterThan(0l));
+  }
+  client().admin().indices().prepareClearCache().setQueryCache(true).get();
+  assertThat(client().admin().indices().prepareStats("idx").setQueryCache(true).get().getTotal().getQueryCache().getMemorySizeInBytes(),equalTo(0l));
+}
