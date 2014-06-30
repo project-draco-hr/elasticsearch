@@ -1,0 +1,69 @@
+{
+  internalCluster().startNodesAsync(3,nodeSettings).get();
+  ensureStableCluster(3);
+  createIndex("test");
+  ensureGreen("test");
+  NetworkPartition networkPartition=addRandomPartition();
+  final String isolatedNode=networkPartition.getMinoritySide().get(0);
+  final String nonIsolatedNode=networkPartition.getMjaoritySide().get(0);
+  networkPartition.startDisrupting();
+  logger.info("wait until elected master has removed [{}]",isolatedNode);
+  boolean applied=awaitBusy(new Predicate<Object>(){
+    @Override public boolean apply(    Object input){
+      return client(nonIsolatedNode).admin().cluster().prepareState().setLocal(true).get().getState().nodes().size() == 2;
+    }
+  }
+,1,TimeUnit.MINUTES);
+  assertThat(applied,is(true));
+  logger.info("waiting for isolated node [{}] to have no master",isolatedNode);
+  applied=awaitBusy(new Predicate<Object>(){
+    @Override public boolean apply(    Object input){
+      ClusterState localClusterState=client(isolatedNode).admin().cluster().prepareState().setLocal(true).get().getState();
+      DiscoveryNodes localDiscoveryNodes=localClusterState.nodes();
+      logger.info("localDiscoveryNodes=" + localDiscoveryNodes.prettyPrint());
+      return localDiscoveryNodes.masterNode() == null;
+    }
+  }
+,10,TimeUnit.SECONDS);
+  assertThat(applied,is(true));
+  ensureStableCluster(2,nonIsolatedNode);
+  client(isolatedNode).prepareSearch("test").setTypes("type").setPreference("_only_local").get();
+  client(isolatedNode).preparePercolate().setDocumentType("type").setIndices("test").setPreference("_only_local").setSource("{\"doc\" : {}}").get();
+  client(isolatedNode).prepareCount("test").setTypes("type").setPreference("_only_local").get();
+  client(isolatedNode).prepareGet("test","type","0").setPreference("_only_local").get();
+  executeBlockedApi(client(isolatedNode).prepareIndex("test","type","0").setSource("{}").setTimeout("1s"));
+  executeBlockedApi(client(isolatedNode).prepareUpdate("test","type","0").setDoc("{}").setTimeout("1s"));
+  networkPartition.stopDisrupting();
+  ensureStableCluster(3,new TimeValue(30000 + networkPartition.expectedTimeToHeal().millis()));
+  logger.info("Verify no master block with {} set to {}",DiscoverySettings.NO_MASTER_BLOCK,"all");
+  client().admin().cluster().prepareUpdateSettings().setTransientSettings(ImmutableSettings.builder().put(DiscoverySettings.NO_MASTER_BLOCK,"all")).get();
+  networkPartition.startDisrupting();
+  logger.info("wait until elected master has removed [{}]",isolatedNode);
+  applied=awaitBusy(new Predicate<Object>(){
+    @Override public boolean apply(    Object input){
+      return client(nonIsolatedNode).admin().cluster().prepareState().setLocal(true).get().getState().nodes().size() == 2;
+    }
+  }
+,1,TimeUnit.MINUTES);
+  assertThat(applied,is(true));
+  logger.info("waiting for isolated node [{}] to have no master",isolatedNode);
+  applied=awaitBusy(new Predicate<Object>(){
+    @Override public boolean apply(    Object input){
+      ClusterState localClusterState=client(isolatedNode).admin().cluster().prepareState().setLocal(true).get().getState();
+      DiscoveryNodes localDiscoveryNodes=localClusterState.nodes();
+      logger.info("localDiscoveryNodes=" + localDiscoveryNodes.prettyPrint());
+      return localDiscoveryNodes.masterNode() == null;
+    }
+  }
+,10,TimeUnit.SECONDS);
+  assertThat(applied,is(true));
+  ensureStableCluster(2,nonIsolatedNode);
+  executeBlockedApi(client(isolatedNode).prepareSearch("test").setTypes("type").setPreference("_only_local"));
+  executeBlockedApi(client(isolatedNode).preparePercolate().setDocumentType("type").setIndices("test").setPreference("_only_local").setSource("{\"doc\" : {}}"));
+  executeBlockedApi(client(isolatedNode).prepareCount("test").setTypes("type").setPreference("_only_local"));
+  executeBlockedApi(client(isolatedNode).prepareGet("test","type","0").setPreference("_only_local"));
+  executeBlockedApi(client(isolatedNode).prepareIndex("test","type","0").setSource("{}").setTimeout("1s"));
+  executeBlockedApi(client(isolatedNode).prepareUpdate("test","type","0").setDoc("{}").setTimeout("1s"));
+  networkPartition.stopDisrupting();
+  ensureStableCluster(3,new TimeValue(30000 + networkPartition.expectedTimeToHeal().millis()));
+}
