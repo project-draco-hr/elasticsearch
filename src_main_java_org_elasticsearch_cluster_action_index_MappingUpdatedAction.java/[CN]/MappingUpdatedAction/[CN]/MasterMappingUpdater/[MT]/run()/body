@@ -1,0 +1,53 @@
+{
+  while (running) {
+    try {
+      MappingChange polledChange=queue.poll(10,TimeUnit.MINUTES);
+      if (polledChange == null) {
+        continue;
+      }
+      List<MappingChange> changes=Lists.newArrayList(polledChange);
+      if (additionalMappingChangeTime.millis() > 0) {
+        Thread.sleep(additionalMappingChangeTime.millis());
+      }
+      queue.drainTo(changes);
+      Collections.reverse(changes);
+      Set<Tuple<String,String>> seenIndexAndTypes=Sets.newHashSet();
+      for (      MappingChange change : changes) {
+        Tuple<String,String> checked=Tuple.tuple(change.indexUUID,change.documentMapper.type());
+        if (seenIndexAndTypes.contains(checked)) {
+          continue;
+        }
+        seenIndexAndTypes.add(checked);
+        final MappingUpdatedAction.MappingUpdatedRequest mappingRequest;
+        try {
+          long orderId=mappingUpdateOrderGen.incrementAndGet();
+          change.documentMapper.refreshSource();
+          DiscoveryNode node=clusterService.localNode();
+          mappingRequest=new MappingUpdatedAction.MappingUpdatedRequest(change.index,change.indexUUID,change.documentMapper.type(),change.documentMapper.mappingSource(),orderId,node != null ? node.id() : null);
+        }
+ catch (        Throwable t) {
+          logger.warn("Failed to update master on updated mapping for index [" + change.index + "], type ["+ change.documentMapper.type()+ "]",t);
+          continue;
+        }
+        logger.trace("sending mapping updated to master: {}",mappingRequest);
+        execute(mappingRequest,new ActionListener<MappingUpdatedAction.MappingUpdatedResponse>(){
+          @Override public void onResponse(          MappingUpdatedAction.MappingUpdatedResponse mappingUpdatedResponse){
+            logger.debug("successfully updated master with mapping update: {}",mappingRequest);
+          }
+          @Override public void onFailure(          Throwable e){
+            logger.warn("failed to update master on updated mapping for {}",e,mappingRequest);
+          }
+        }
+);
+      }
+    }
+ catch (    InterruptedException e) {
+      if (running) {
+        logger.warn("failed to process mapping updates",e);
+      }
+    }
+catch (    Throwable t) {
+      logger.warn("failed to process mapping updates",t);
+    }
+  }
+}

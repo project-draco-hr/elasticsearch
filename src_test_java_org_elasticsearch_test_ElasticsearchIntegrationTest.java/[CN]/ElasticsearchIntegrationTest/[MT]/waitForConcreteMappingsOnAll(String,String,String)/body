@@ -1,0 +1,38 @@
+{
+  boolean applied=awaitBusy(new Predicate<Object>(){
+    @Override public boolean apply(    Object input){
+      try {
+        Set<String> nodes=internalCluster().nodesInclude(index);
+        if (nodes.isEmpty()) {
+          return false;
+        }
+        for (        String node : nodes) {
+          IndicesService indicesService=internalCluster().getInstance(IndicesService.class,node);
+          IndexService indexService=indicesService.indexService(index);
+          if (indexService == null) {
+            return false;
+          }
+          DocumentMapper documentMapper=indexService.mapperService().documentMapper(type);
+          if (documentMapper == null) {
+            return false;
+          }
+          for (          String fieldName : fieldNames) {
+            Set<String> matches=documentMapper.mappers().simpleMatchToFullName(fieldName);
+            if (matches.isEmpty()) {
+              return false;
+            }
+          }
+        }
+      }
+ catch (      Exception e) {
+        logger.info("got exception waiting for concrete mappings",e);
+        return false;
+      }
+      return true;
+    }
+  }
+);
+  if (!applied) {
+    fail("failed to find mappings on all nodes for index " + index + ", type "+ type+ ", and fieldName "+ Arrays.toString(fieldNames));
+  }
+}
