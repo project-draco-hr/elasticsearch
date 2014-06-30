@@ -2,12 +2,12 @@
   logger.info("--> start node A");
   String nodeA=internalCluster().startNode(settingsBuilder().put("gateway.type","local"));
   logger.info("--> create index on node: {}",nodeA);
-  createAndPopulateIndex(INDEX_NAME,1,SHARD_COUNT,REPLICA_COUNT);
+  ByteSizeValue shardSize=createAndPopulateIndex(INDEX_NAME,1,SHARD_COUNT,REPLICA_COUNT).getShards()[0].getStats().getStore().size();
   logger.info("--> start node B");
   String nodeB=internalCluster().startNode(settingsBuilder().put("gateway.type","local"));
   ensureGreen();
   logger.info("--> slowing down recoveries");
-  slowDownRecovery();
+  slowDownRecovery(shardSize);
   logger.info("--> move shard from: {} to: {}",nodeA,nodeB);
   client().admin().cluster().prepareReroute().add(new MoveAllocationCommand(new ShardId(INDEX_NAME,0),nodeA,nodeB)).execute().actionGet().getState();
   logger.info("--> request recoveries");
@@ -36,7 +36,7 @@
   String nodeC=internalCluster().startNode(settingsBuilder().put("gateway.type","local"));
   assertFalse(client().admin().cluster().prepareHealth().setWaitForNodes("3").get().isTimedOut());
   logger.info("--> slowing down recoveries");
-  slowDownRecovery();
+  slowDownRecovery(shardSize);
   logger.info("--> move replica shard from: {} to: {}",nodeA,nodeC);
   client().admin().cluster().prepareReroute().add(new MoveAllocationCommand(new ShardId(INDEX_NAME,0),nodeA,nodeC)).execute().actionGet().getState();
   response=client().admin().indices().prepareRecoveries(INDEX_NAME).execute().actionGet();
