@@ -1,3 +1,40 @@
 {
+  logger.info(">> put mapping start {}",format);
   client().admin().indices().preparePutMapping("test").setType("type").setSource(XContentFactory.jsonBuilder().startObject().startObject("type").startObject("properties").startObject("s").field("type","string").startObject("fielddata").field("format",format).endObject().endObject().endObject().endObject().endObject()).execute().actionGet();
+  logger.info(">> put mapping end {}",format);
+  boolean applied=awaitBusy(new Predicate<Object>(){
+    @Override public boolean apply(    Object input){
+      try {
+        Set<String> nodes=internalCluster().nodesInclude("test");
+        if (nodes.isEmpty()) {
+          return false;
+        }
+        for (        String node : nodes) {
+          IndicesService indicesService=internalCluster().getInstance(IndicesService.class,node);
+          IndexService indexService=indicesService.indexService("test");
+          if (indexService == null) {
+            return false;
+          }
+          final SmartNameFieldMappers mappers=indexService.mapperService().smartName("s");
+          if (mappers == null || !mappers.hasMapper()) {
+            return false;
+          }
+          final String currentFormat=mappers.mapper().fieldDataType().getFormat(ImmutableSettings.EMPTY);
+          if (!format.equals(currentFormat)) {
+            return false;
+          }
+        }
+      }
+ catch (      Exception e) {
+        logger.info("got exception waiting for concrete mappings",e);
+        return false;
+      }
+      return true;
+    }
+  }
+);
+  logger.info(">> put mapping verified {}, applies {}",format,applied);
+  if (!applied) {
+    fail();
+  }
 }
