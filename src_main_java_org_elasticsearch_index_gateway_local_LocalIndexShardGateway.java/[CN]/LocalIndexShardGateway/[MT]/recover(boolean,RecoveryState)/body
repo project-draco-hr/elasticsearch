@@ -100,6 +100,7 @@
   recoveryState.getTranslog().startTime(System.currentTimeMillis());
   recoveryState.setStage(RecoveryState.Stage.TRANSLOG);
   FileInputStream fs=null;
+  final Set<String> typesToUpdate=Sets.newHashSet();
   try {
     fs=new FileInputStream(recoveringTranslogFile);
     InputStreamStreamInput si=new InputStreamStreamInput(fs);
@@ -117,8 +118,10 @@ catch (      IOException e) {
       }
       try {
         Engine.IndexingOperation potentialIndexOperation=indexShard.performRecoveryOperation(operation);
-        if (potentialIndexOperation != null) {
-          mappingUpdatedAction.updateMappingOnMaster(indexService.index().name(),potentialIndexOperation.docMapper(),indexService.indexUUID());
+        if (potentialIndexOperation != null && potentialIndexOperation.parsedDoc().mappingsModified()) {
+          if (!typesToUpdate.contains(potentialIndexOperation.docMapper().type())) {
+            typesToUpdate.add(potentialIndexOperation.docMapper().type());
+          }
         }
         recoveryState.getTranslog().addTranslogOperations(1);
       }
@@ -145,5 +148,27 @@ catch (      IOException e) {
   }
   indexShard.performRecoveryFinalization(true);
   recoveringTranslogFile.delete();
+  for (  final String type : typesToUpdate) {
+    final CountDownLatch latch=new CountDownLatch(1);
+    mappingUpdatedAction.updateMappingOnMaster(indexService.index().name(),indexService.mapperService().documentMapper(type),indexService.indexUUID(),new MappingUpdatedAction.MappingUpdateListener(){
+      @Override public void onMappingUpdate(){
+        latch.countDown();
+      }
+      @Override public void onFailure(      Throwable t){
+        latch.countDown();
+        logger.debug("failed to send mapping update post recovery to master for [{}]",t,type);
+      }
+    }
+);
+    try {
+      boolean waited=latch.await(waitForMappingUpdatePostRecovery.millis(),TimeUnit.MILLISECONDS);
+      if (!waited) {
+        logger.debug("waited for mapping update on master for [{}], yet timed out");
+      }
+    }
+ catch (    InterruptedException e) {
+      logger.debug("interrupted while waiting for mapping update");
+    }
+  }
   recoveryState.getTranslog().time(System.currentTimeMillis() - recoveryState.getTranslog().startTime());
 }

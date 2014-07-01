@@ -1,4 +1,5 @@
 {
+  Map<UpdateKey,UpdateValue> pendingUpdates=Maps.newHashMap();
   while (running) {
     try {
       MappingChange polledChange=queue.poll(10,TimeUnit.MINUTES);
@@ -11,13 +12,21 @@
       }
       queue.drainTo(changes);
       Collections.reverse(changes);
-      Set<Tuple<String,String>> seenIndexAndTypes=Sets.newHashSet();
       for (      MappingChange change : changes) {
-        Tuple<String,String> checked=Tuple.tuple(change.indexUUID,change.documentMapper.type());
-        if (seenIndexAndTypes.contains(checked)) {
-          continue;
+        UpdateKey key=new UpdateKey(change.indexUUID,change.documentMapper.type());
+        UpdateValue updateValue=pendingUpdates.get(key);
+        if (updateValue == null) {
+          updateValue=new UpdateValue(change);
+          pendingUpdates.put(key,updateValue);
         }
-        seenIndexAndTypes.add(checked);
+        if (change.listener != null) {
+          updateValue.listeners.add(change.listener);
+        }
+      }
+      for (Iterator<UpdateValue> iterator=pendingUpdates.values().iterator(); iterator.hasNext(); ) {
+        final UpdateValue updateValue=iterator.next();
+        iterator.remove();
+        MappingChange change=updateValue.mainChange;
         final MappingUpdatedAction.MappingUpdatedRequest mappingRequest;
         try {
           long orderId=mappingUpdateOrderGen.incrementAndGet();
@@ -27,27 +36,34 @@
         }
  catch (        Throwable t) {
           logger.warn("Failed to update master on updated mapping for index [" + change.index + "], type ["+ change.documentMapper.type()+ "]",t);
+          updateValue.notifyListeners(t);
           continue;
         }
         logger.trace("sending mapping updated to master: {}",mappingRequest);
         execute(mappingRequest,new ActionListener<MappingUpdatedAction.MappingUpdatedResponse>(){
           @Override public void onResponse(          MappingUpdatedAction.MappingUpdatedResponse mappingUpdatedResponse){
             logger.debug("successfully updated master with mapping update: {}",mappingRequest);
+            updateValue.notifyListeners(null);
           }
           @Override public void onFailure(          Throwable e){
             logger.warn("failed to update master on updated mapping for {}",e,mappingRequest);
+            updateValue.notifyListeners(e);
           }
         }
 );
       }
     }
- catch (    InterruptedException e) {
-      if (running) {
-        logger.warn("failed to process mapping updates",e);
+ catch (    Throwable t) {
+      if (t instanceof InterruptedException && !running) {
       }
-    }
-catch (    Throwable t) {
-      logger.warn("failed to process mapping updates",t);
+ else {
+        logger.warn("failed to process mapping updates",t);
+      }
+      for (Iterator<Map.Entry<UpdateKey,UpdateValue>> iterator=pendingUpdates.entrySet().iterator(); iterator.hasNext(); ) {
+        Map.Entry<UpdateKey,UpdateValue> entry=iterator.next();
+        iterator.remove();
+        entry.getValue().notifyListeners(t);
+      }
     }
   }
 }
