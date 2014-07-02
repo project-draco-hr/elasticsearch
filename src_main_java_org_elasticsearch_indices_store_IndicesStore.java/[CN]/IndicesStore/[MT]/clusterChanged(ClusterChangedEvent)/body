@@ -7,61 +7,11 @@
   }
   for (  IndexRoutingTable indexRoutingTable : event.state().routingTable()) {
     for (    IndexShardRoutingTable indexShardRoutingTable : indexRoutingTable) {
-      ShardId shardId=indexShardRoutingTable.shardId();
-      boolean shardCanBeDeleted=true;
-      if (indexShardRoutingTable.size() == 0) {
-        shardCanBeDeleted=false;
-      }
- else {
-        for (        ShardRouting shardRouting : indexShardRoutingTable) {
-          if (!shardRouting.started()) {
-            shardCanBeDeleted=false;
-            break;
-          }
-          DiscoveryNode node=event.state().nodes().get(shardRouting.currentNodeId());
-          if (node == null || !transportService.nodeConnected(node)) {
-            shardCanBeDeleted=false;
-            break;
-          }
-          if (shardRouting.relocatingNodeId() != null) {
-            node=event.state().nodes().get(shardRouting.relocatingNodeId());
-            if (node == null || !transportService.nodeConnected(node)) {
-              shardCanBeDeleted=false;
-              break;
-            }
-          }
-          String localNodeId=clusterService.localNode().id();
-          if (localNodeId.equals(shardRouting.currentNodeId()) || localNodeId.equals(shardRouting.relocatingNodeId())) {
-            shardCanBeDeleted=false;
-            break;
-          }
-        }
-      }
-      if (shardCanBeDeleted) {
-        IndexService indexService=indicesService.indexService(indexRoutingTable.index());
-        if (indexService == null) {
-          if (nodeEnv.hasNodeFile()) {
-            File[] shardLocations=nodeEnv.shardLocations(shardId);
-            if (FileSystemUtils.exists(shardLocations)) {
-              logger.debug("[{}][{}] deleting shard that is no longer used",shardId.index().name(),shardId.id());
-              FileSystemUtils.deleteRecursively(shardLocations);
-            }
-          }
-        }
- else {
-          if (!indexService.hasShard(shardId.id())) {
-            if (indexService.store().canDeleteUnallocated(shardId)) {
-              logger.debug("[{}][{}] deleting shard that is no longer used",shardId.index().name(),shardId.id());
-              try {
-                indexService.store().deleteUnallocated(indexShardRoutingTable.shardId());
-              }
- catch (              Exception e) {
-                logger.debug("[{}][{}] failed to delete unallocated shard, ignoring",e,indexShardRoutingTable.shardId().index().name(),indexShardRoutingTable.shardId().id());
-              }
-            }
-          }
- else {
-          }
+      if (shardCanBeDeleted(event.state(),indexShardRoutingTable)) {
+        ShardId shardId=indexShardRoutingTable.shardId();
+        IndexService indexService=indicesService.indexService(shardId.getIndex());
+        if (indexService == null || !indexService.hasShard(shardId.getId())) {
+          deleteShardIfExistElseWhere(event.state(),indexShardRoutingTable);
         }
       }
     }
