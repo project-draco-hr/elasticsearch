@@ -67,12 +67,29 @@
   if (sortMode == MultiValueMode.SUM) {
     throw new ElasticsearchIllegalArgumentException("sort_mode [sum] isn't supported for sorting by geo distance");
   }
-  FieldMapper mapper=context.smartNameFieldMapper(fieldName);
+  FieldMapper<?> mapper=context.smartNameFieldMapper(fieldName);
   if (mapper == null) {
     throw new ElasticsearchIllegalArgumentException("failed to find mapper for [" + fieldName + "] for geo distance based sort");
   }
-  IndexGeoPointFieldData indexFieldData=context.fieldData().getForField(mapper);
-  IndexFieldData.XFieldComparatorSource geoDistanceComparatorSource=new GeoDistanceComparatorSource(indexFieldData,point.lat(),point.lon(),unit,geoDistance,sortMode);
+  final MultiValueMode finalSortMode=sortMode;
+  final IndexGeoPointFieldData geoIndexFieldData=context.fieldData().getForField(mapper);
+  final FixedSourceDistance distance=geoDistance.fixedSourceDistance(point.lat(),point.lon(),unit);
+  IndexFieldData.XFieldComparatorSource geoDistanceComparatorSource=new IndexFieldData.XFieldComparatorSource(){
+    @Override public Type reducedType(){
+      return Type.DOUBLE;
+    }
+    @Override public FieldComparator<?> newComparator(    String fieldname,    int numHits,    int sortPos,    boolean reversed) throws IOException {
+      return new DoubleValuesComparator(null,Double.MAX_VALUE,numHits,finalSortMode){
+        @Override protected NumericDoubleValues getNumericDoubleValues(        AtomicReaderContext context){
+          final MultiGeoPointValues geoPointValues=geoIndexFieldData.load(context).getGeoPointValues();
+          final SortedNumericDoubleValues distanceValues=GeoDistance.distanceValues(distance,geoPointValues);
+          return sortMode.select(distanceValues,Double.MAX_VALUE);
+        }
+      }
+;
+    }
+  }
+;
   ObjectMapper objectMapper;
   if (nestedPath != null) {
     ObjectMappers objectMappers=context.mapperService().objectMapper(nestedPath);

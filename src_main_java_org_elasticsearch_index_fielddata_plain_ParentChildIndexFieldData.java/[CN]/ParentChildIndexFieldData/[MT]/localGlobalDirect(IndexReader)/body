@@ -1,0 +1,64 @@
+{
+  final long startTime=System.nanoTime();
+  final Map<String,SortedDocValues[]> types=new HashMap<>();
+synchronized (lock) {
+    for (    BytesRef type : parentTypes) {
+      final SortedDocValues[] values=new SortedDocValues[indexReader.leaves().size()];
+      Arrays.fill(values,DocValues.emptySorted());
+      types.put(type.utf8ToString(),values);
+    }
+  }
+  for (  Map.Entry<String,SortedDocValues[]> entry : types.entrySet()) {
+    final String parentType=entry.getKey();
+    final SortedDocValues[] values=entry.getValue();
+    for (    AtomicReaderContext context : indexReader.leaves()) {
+      SortedDocValues vals=load(context).getOrdinalsValues(parentType);
+      if (vals != null) {
+        values[context.ord]=vals;
+      }
+    }
+  }
+  long ramBytesUsed=0;
+  @SuppressWarnings("unchecked") final Map<String,SortedDocValues>[] global=new Map[indexReader.leaves().size()];
+  for (  Map.Entry<String,SortedDocValues[]> entry : types.entrySet()) {
+    final String parentType=entry.getKey();
+    final SortedDocValues[] values=entry.getValue();
+    final XOrdinalMap ordinalMap=XOrdinalMap.build(null,entry.getValue(),PackedInts.DEFAULT);
+    ramBytesUsed+=ordinalMap.ramBytesUsed();
+    for (int i=0; i < values.length; ++i) {
+      final SortedDocValues segmentValues=values[i];
+      final LongValues globalOrds=ordinalMap.getGlobalOrds(i);
+      final SortedDocValues globalSortedValues=new SortedDocValues(){
+        @Override public BytesRef lookupOrd(        int ord){
+          final int segmentNum=ordinalMap.getFirstSegmentNumber(ord);
+          final int segmentOrd=(int)ordinalMap.getFirstSegmentOrd(ord);
+          return values[segmentNum].lookupOrd(segmentOrd);
+        }
+        @Override public int getValueCount(){
+          return (int)ordinalMap.getValueCount();
+        }
+        @Override public int getOrd(        int docID){
+          final int segmentOrd=segmentValues.getOrd(docID);
+          if (segmentOrd >= 0) {
+            return (int)globalOrds.get(segmentOrd);
+          }
+ else {
+            return segmentOrd;
+          }
+        }
+      }
+;
+      Map<String,SortedDocValues> perSegmentGlobal=global[i];
+      if (perSegmentGlobal == null) {
+        perSegmentGlobal=new HashMap<>(1);
+        global[i]=perSegmentGlobal;
+      }
+      perSegmentGlobal.put(parentType,globalSortedValues);
+    }
+  }
+  breakerService.getBreaker().addWithoutBreaking(ramBytesUsed);
+  if (logger.isDebugEnabled()) {
+    logger.debug("Global-ordinals[_parent] took {}",new TimeValue(System.nanoTime() - startTime,TimeUnit.NANOSECONDS));
+  }
+  return new GlobalFieldData(indexReader,global,ramBytesUsed);
+}

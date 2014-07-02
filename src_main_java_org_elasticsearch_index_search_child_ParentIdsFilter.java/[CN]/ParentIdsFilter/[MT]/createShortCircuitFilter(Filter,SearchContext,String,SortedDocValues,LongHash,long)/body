@@ -1,0 +1,30 @@
+{
+  if (numFoundParents == 1) {
+    BytesRef id=globalValues.lookupOrd((int)parentIdxs.get(0));
+    if (nonNestedDocsFilter != null) {
+      List<Filter> filters=Arrays.asList(new TermFilter(new Term(UidFieldMapper.NAME,Uid.createUidAsBytes(parentType,id))),nonNestedDocsFilter);
+      return new AndFilter(filters);
+    }
+ else {
+      return new TermFilter(new Term(UidFieldMapper.NAME,Uid.createUidAsBytes(parentType,id)));
+    }
+  }
+ else {
+    BytesRefHash parentIds=null;
+    boolean constructed=false;
+    try {
+      parentIds=new BytesRefHash(numFoundParents,searchContext.bigArrays());
+      for (int id=0; id < parentIdxs.size(); id++) {
+        parentIds.add(globalValues.lookupOrd((int)parentIdxs.get(id)));
+      }
+      constructed=true;
+    }
+  finally {
+      if (!constructed) {
+        Releasables.close(parentIds);
+      }
+    }
+    searchContext.addReleasable(parentIds,SearchContext.Lifetime.COLLECTION);
+    return new ParentIdsFilter(parentType,nonNestedDocsFilter,parentIds);
+  }
+}
