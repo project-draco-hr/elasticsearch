@@ -1,2 +1,30 @@
 {
+  List<String> nodes=internalCluster().startNodesAsync(3,nodeSettings).get();
+  ensureStableCluster(3);
+  final String masterNode=internalCluster().getMasterName();
+  logger.info("---> legit elected master node=" + masterNode);
+  Set<String> nonMasters=new HashSet<>(nodes);
+  nonMasters.remove(masterNode);
+  final String unluckyNode=randomFrom(nonMasters.toArray(Strings.EMPTY_ARRAY));
+  NetworkDisconnectPartition networkDisconnect=new NetworkDisconnectPartition(masterNode,unluckyNode,getRandom());
+  setDisruptionScheme(networkDisconnect);
+  networkDisconnect.startDisrupting();
+  ensureStableCluster(2,masterNode);
+  boolean success=awaitBusy(new Predicate<Object>(){
+    @Override public boolean apply(    Object input){
+      ClusterState localClusterState=getNodeClusterState(unluckyNode);
+      DiscoveryNodes localDiscoveryNodes=localClusterState.nodes();
+      logger.info("localDiscoveryNodes=" + localDiscoveryNodes.prettyPrint());
+      return localDiscoveryNodes.masterNode() == null;
+    }
+  }
+,10,TimeUnit.SECONDS);
+  assertThat(success,is(true));
+  networkDisconnect.stopDisrupting();
+  ensureStableCluster(3);
+  for (  String node : nodes) {
+    ClusterState state=getNodeClusterState(node);
+    assertThat(state.nodes().size(),equalTo(3));
+    assertThat(state.nodes().masterNode().name(),equalTo(masterNode));
+  }
 }

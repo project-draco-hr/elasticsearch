@@ -3,25 +3,19 @@
   ensureStableCluster(3);
   assertAcked(prepareCreate("test").setSettings(ImmutableSettings.builder().put(IndexMetaData.SETTING_NUMBER_OF_SHARDS,1 + randomInt(2)).put(IndexMetaData.SETTING_NUMBER_OF_REPLICAS,randomInt(2))));
   ensureGreen();
-  String isolatedNode=findMasterNode(nodes).name();
-  String nonIsolatedNode=null;
-  for (  String node : nodes) {
-    if (!node.equals(isolatedNode)) {
-      nonIsolatedNode=node;
-      break;
-    }
-  }
-  ServiceDisruptionScheme scheme=addRandomIsolation(isolatedNode);
-  scheme.startDisrupting();
+  String isolatedNode=internalCluster().getMasterName();
+  NetworkPartition networkPartition=addRandomIsolation(isolatedNode);
+  networkPartition.startDisrupting();
+  String nonIsolatedNode=networkPartition.getMajoritySide().get(0);
   ensureStableCluster(2,nonIsolatedNode);
-  scheme.stopDisrupting();
-  ensureStableCluster(3,new TimeValue(30000 + scheme.expectedTimeToHeal().millis()));
+  networkPartition.stopDisrupting();
+  ensureStableCluster(3,new TimeValue(30000 + networkPartition.expectedTimeToHeal().millis()));
   logger.info("issue a reroute");
   assertAcked(client().admin().cluster().prepareReroute());
   ensureGreen("test");
   ClusterState state=null;
   for (  String node : nodes) {
-    ClusterState nodeState=client(node).admin().cluster().prepareState().setLocal(true).get().getState();
+    ClusterState nodeState=getNodeClusterState(node);
     if (state == null) {
       state=nodeState;
       continue;
