@@ -1,53 +1,23 @@
 {
-  final GetMappingsResponse[] lastResponse=new GetMappingsResponse[1];
-  boolean applied=awaitBusy(new Predicate<Object>(){
-    @Override public boolean apply(    Object input){
-      GetMappingsResponse response=lastResponse[0]=client().admin().indices().prepareGetMappings(index).setTypes(type).get();
+  assertBusy(new Callable(){
+    @Override public Object call() throws Exception {
+      GetMappingsResponse response=client().admin().indices().prepareGetMappings(index).setTypes(type).get();
       ImmutableOpenMap<String,MappingMetaData> mappings=response.getMappings().get(index);
-      if (mappings == null) {
-        return false;
-      }
+      assertThat(mappings,notNullValue());
       MappingMetaData mappingMetaData=mappings.get(type);
-      if (mappingMetaData == null) {
-        return false;
-      }
-      Map<String,Object> mappingSource;
-      try {
-        mappingSource=mappingMetaData.getSourceAsMap();
-      }
- catch (      IOException e) {
-        throw ExceptionsHelper.convertToElastic(e);
-      }
-      if (mappingSource.isEmpty() && !mappingSource.containsKey("properties")) {
-        return false;
-      }
+      assertThat(mappingMetaData,notNullValue());
+      Map<String,Object> mappingSource=mappingMetaData.getSourceAsMap();
+      assertFalse(mappingSource.isEmpty());
+      assertTrue(mappingSource.containsKey("properties"));
       for (      String fieldName : fieldNames) {
         Map<String,Object> mappingProperties=(Map<String,Object>)mappingSource.get("properties");
         if (fieldName.indexOf('.') != -1) {
           fieldName=fieldName.replace(".",".properties.");
         }
-        if (XContentMapValues.extractValue(fieldName,mappingProperties) == null) {
-          return false;
-        }
+        assertThat("field " + fieldName + " doesn't exists in mapping "+ mappingMetaData.source().string(),XContentMapValues.extractValue(fieldName,mappingProperties),notNullValue());
       }
-      return true;
+      return null;
     }
   }
 );
-  if (!applied) {
-    String source=null;
-    ImmutableOpenMap<String,MappingMetaData> mappings=lastResponse[0].getMappings().get(index);
-    if (mappings != null) {
-      MappingMetaData mappingMetaData=mappings.get(type);
-      if (mappingMetaData != null) {
-        try {
-          source=mappingMetaData.source().string();
-        }
- catch (        IOException e) {
-          throw ExceptionsHelper.convertToElastic(e);
-        }
-      }
-    }
-    fail("failed to find mappings for index " + index + ", type "+ type+ ", fields "+ fieldNames+ ", on master node, mapping source ["+ source+ "]");
-  }
 }
