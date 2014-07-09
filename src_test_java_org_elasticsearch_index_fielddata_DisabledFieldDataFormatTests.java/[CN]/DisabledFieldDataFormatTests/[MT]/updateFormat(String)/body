@@ -2,40 +2,22 @@
   logger.info(">> put mapping start {}",format);
   assertAcked(client().admin().indices().preparePutMapping("test").setType("type").setSource(XContentFactory.jsonBuilder().startObject().startObject("type").startObject("properties").startObject("s").field("type","string").startObject("fielddata").field("format",format).endObject().endObject().endObject().endObject().endObject()).get());
   logger.info(">> put mapping end {}",format);
-  boolean applied=awaitBusy(new Predicate<Object>(){
-    @Override public boolean apply(    Object input){
-      try {
-        Set<String> nodes=internalCluster().nodesInclude("test");
-        if (nodes.isEmpty()) {
-          return false;
-        }
-        for (        String node : nodes) {
-          IndicesService indicesService=internalCluster().getInstance(IndicesService.class,node);
-          IndexService indexService=indicesService.indexService("test");
-          if (indexService == null) {
-            return false;
-          }
-          final SmartNameFieldMappers mappers=indexService.mapperService().smartName("s");
-          if (mappers == null || !mappers.hasMapper()) {
-            return false;
-          }
-          final String currentFormat=mappers.mapper().fieldDataType().getFormat(ImmutableSettings.EMPTY);
-          if (!format.equals(currentFormat)) {
-            return false;
-          }
-        }
+  assertBusy(new Callable<Object>(){
+    @Override public Object call() throws Exception {
+      Set<String> nodes=internalCluster().nodesInclude("test");
+      assertFalse(nodes.isEmpty());
+      for (      String node : nodes) {
+        IndicesService indicesService=internalCluster().getInstance(IndicesService.class,node);
+        IndexService indexService=indicesService.indexService("test");
+        assertThat(indexService,notNullValue());
+        final SmartNameFieldMappers mappers=indexService.mapperService().smartName("s");
+        assertThat(mappers,notNullValue());
+        assertTrue(mappers.hasMapper());
+        final String currentFormat=mappers.mapper().fieldDataType().getFormat(ImmutableSettings.EMPTY);
+        assertThat(currentFormat,equalTo(format));
       }
- catch (      Exception e) {
-        logger.info("got exception waiting for concrete mappings",e);
-        return false;
-      }
-      return true;
+      return null;
     }
   }
 );
-  waitNoPendingTasksOnAll();
-  logger.info(">> put mapping verified {}, applies {}",format,applied);
-  if (!applied) {
-    fail();
-  }
 }
