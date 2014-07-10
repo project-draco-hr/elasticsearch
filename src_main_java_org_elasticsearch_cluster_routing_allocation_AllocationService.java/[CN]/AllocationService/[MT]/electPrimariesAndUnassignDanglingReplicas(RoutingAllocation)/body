@@ -4,19 +4,6 @@
   if (!routingNodes.hasUnassignedPrimaries()) {
     return changed;
   }
-  List<ShardRouting> shardsToFail=Lists.newArrayList();
-  for (  MutableShardRouting shardEntry : routingNodes.unassigned()) {
-    if (shardEntry.primary()) {
-      for (      MutableShardRouting routing : routingNodes.assignedShards(shardEntry)) {
-        if (!routing.primary() && routing.initializing()) {
-          shardsToFail.add(routing);
-        }
-      }
-    }
-  }
-  for (  ShardRouting shardToFail : shardsToFail) {
-    changed|=applyFailedShard(allocation,shardToFail,false);
-  }
   for (  MutableShardRouting shardEntry : routingNodes.unassigned()) {
     if (shardEntry.primary()) {
       MutableShardRouting candidate=allocation.routingNodes().activeReplica(shardEntry);
@@ -34,6 +21,27 @@
             }
           }
         }
+      }
+    }
+  }
+  List<ShardRouting> shardsToFail=null;
+  if (routingNodes.hasUnassignedPrimaries()) {
+    for (    MutableShardRouting shardEntry : routingNodes.unassigned()) {
+      if (shardEntry.primary()) {
+        for (        MutableShardRouting routing : routingNodes.assignedShards(shardEntry)) {
+          if (!routing.primary()) {
+            changed=true;
+            if (shardsToFail == null) {
+              shardsToFail=new ArrayList<>();
+            }
+            shardsToFail.add(routing);
+          }
+        }
+      }
+    }
+    if (shardsToFail != null) {
+      for (      ShardRouting shardToFail : shardsToFail) {
+        applyFailedShard(allocation,shardToFail,false);
       }
     }
   }
