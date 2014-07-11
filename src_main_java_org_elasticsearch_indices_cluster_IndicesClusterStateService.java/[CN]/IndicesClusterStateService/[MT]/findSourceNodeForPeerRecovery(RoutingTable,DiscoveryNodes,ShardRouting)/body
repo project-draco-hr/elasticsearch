@@ -1,0 +1,29 @@
+{
+  DiscoveryNode sourceNode=null;
+  if (!shardRouting.primary()) {
+    IndexShardRoutingTable shardRoutingTable=routingTable.index(shardRouting.index()).shard(shardRouting.id());
+    for (    ShardRouting entry : shardRoutingTable) {
+      if (entry.primary() && entry.started()) {
+        sourceNode=nodes.get(entry.currentNodeId());
+        if (sourceNode == null) {
+          logger.trace("can't find replica source node because primary shard {} is assigned to an unknown node. ignoring.",entry);
+          return null;
+        }
+        break;
+      }
+    }
+    if (sourceNode == null) {
+      logger.trace("can't find replica source node for {} because a primary shard can not be found. ignoring.",shardRouting.shardId());
+    }
+  }
+ else   if (shardRouting.relocatingNodeId() != null) {
+    sourceNode=nodes.get(shardRouting.relocatingNodeId());
+    if (sourceNode == null) {
+      logger.trace("can't find relocation source node for shard {} because it is assigned to an unknown node [{}]. ignoring.",shardRouting.shardId(),shardRouting.relocatingNodeId());
+    }
+  }
+ else {
+    throw new ElasticsearchIllegalStateException("trying to find source node for peer recovery when routing state means no peer recovery: " + shardRouting);
+  }
+  return sourceNode;
+}
