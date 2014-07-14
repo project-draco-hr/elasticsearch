@@ -5,10 +5,12 @@
     throw new ElasticsearchIllegalArgumentException("found no fielddata type for field [" + fieldNames.fullName() + "]");
   }
   final boolean docValues=mapper.hasDocValues();
-  IndexFieldData<?> fieldData=loadedFieldData.get(fieldNames.indexName());
+  final String key=fieldNames.indexName();
+  IndexFieldData<?> fieldData=loadedFieldData.get(key);
   if (fieldData == null) {
-synchronized (loadedFieldData) {
-      fieldData=loadedFieldData.get(fieldNames.indexName());
+    fieldLoadingLock.acquire(key);
+    try {
+      fieldData=loadedFieldData.get(key);
       if (fieldData == null) {
         IndexFieldData.Builder builder=null;
         String format=type.getFormat(indexSettings);
@@ -53,8 +55,11 @@ synchronized (loadedFieldData) {
         }
         GlobalOrdinalsBuilder globalOrdinalBuilder=new InternalGlobalOrdinalsBuilder(index(),indexSettings);
         fieldData=builder.build(index,indexSettings,mapper,cache,circuitBreakerService,indexService.mapperService(),globalOrdinalBuilder);
-        loadedFieldData.put(fieldNames.indexName(),fieldData);
+        loadedFieldData.put(key,fieldData);
       }
+    }
+  finally {
+      fieldLoadingLock.release(key);
     }
   }
   return (IFD)fieldData;
