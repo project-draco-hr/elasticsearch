@@ -7,32 +7,12 @@
   final String nonIsolatedNode=networkPartition.getMajoritySide().get(0);
   networkPartition.startDisrupting();
   logger.info("waiting for isolated node [{}] to have no master",isolatedNode);
-  final ClusterState[] lastState=new ClusterState[1];
-  boolean success=awaitBusy(new Predicate<Object>(){
-    @Override public boolean apply(    Object input){
-      lastState[0]=getNodeClusterState(isolatedNode);
-      DiscoveryNodes localDiscoveryNodes=lastState[0].nodes();
-      logger.info("localDiscoveryNodes=" + localDiscoveryNodes.prettyPrint());
-      if (localDiscoveryNodes.masterNode() == null) {
-        return false;
-      }
-      for (      ClusterBlockLevel level : DiscoverySettings.NO_MASTER_BLOCK_WRITES.levels()) {
-        if (lastState[0].getBlocks().hasGlobalBlock(level)) {
-          return false;
-        }
-      }
-      return true;
-    }
-  }
-,10,TimeUnit.SECONDS);
-  if (!success) {
-    fail("isolated node still has a master or the wrong blocks. Cluster state:\n" + lastState[0].prettyPrint());
-  }
+  assertNoMaster(isolatedNode,DiscoverySettings.NO_MASTER_BLOCK_WRITES,TimeValue.timeValueSeconds(10));
   logger.info("wait until elected master has been removed and a new 2 node cluster was from (via [{}])",isolatedNode);
   ensureStableCluster(2,nonIsolatedNode);
   for (  String node : networkPartition.getMajoritySide()) {
     ClusterState nodeState=getNodeClusterState(node);
-    success=true;
+    boolean success=true;
     if (nodeState.nodes().getMasterNode() == null) {
       success=false;
     }
@@ -49,25 +29,6 @@
   client().admin().cluster().prepareUpdateSettings().setTransientSettings(ImmutableSettings.builder().put(DiscoverySettings.NO_MASTER_BLOCK,"all")).get();
   networkPartition.startDisrupting();
   logger.info("waiting for isolated node [{}] to have no master",isolatedNode);
-  success=awaitBusy(new Predicate<Object>(){
-    @Override public boolean apply(    Object input){
-      lastState[0]=getNodeClusterState(isolatedNode);
-      DiscoveryNodes localDiscoveryNodes=lastState[0].nodes();
-      logger.info("localDiscoveryNodes=" + localDiscoveryNodes.prettyPrint());
-      if (localDiscoveryNodes.masterNode() == null) {
-        return false;
-      }
-      for (      ClusterBlockLevel level : DiscoverySettings.NO_MASTER_BLOCK_ALL.levels()) {
-        if (lastState[0].getBlocks().hasGlobalBlock(level)) {
-          return false;
-        }
-      }
-      return true;
-    }
-  }
-,10,TimeUnit.SECONDS);
-  if (!success) {
-    fail("isolated node still has a master or the wrong blocks (expected 'all' block). Cluster state:\n" + lastState[0].prettyPrint());
-  }
+  assertNoMaster(isolatedNode,DiscoverySettings.NO_MASTER_BLOCK_ALL,TimeValue.timeValueSeconds(10));
   ensureStableCluster(2,nonIsolatedNode);
 }
