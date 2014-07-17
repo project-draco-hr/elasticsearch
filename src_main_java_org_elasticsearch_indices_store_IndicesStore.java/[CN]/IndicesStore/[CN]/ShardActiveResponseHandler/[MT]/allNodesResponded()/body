@@ -1,36 +1,49 @@
 {
   if (activeCopies.get() != expectedActiveCopies) {
-    logger.trace("not deleting shard [{}], expected {} active copies, but only {} found active copies",shardId,expectedActiveCopies,activeCopies.get());
+    logger.trace("not deleting shard {}, expected {} active copies, but only {} found active copies",shardId,expectedActiveCopies,activeCopies.get());
     return;
   }
   ClusterState latestClusterState=clusterService.state();
   if (clusterState.getVersion() != latestClusterState.getVersion()) {
-    logger.trace("not deleting shard [{}], the latest cluster state version[{}] is not equal to cluster state before shard active api call [{}]",shardId,latestClusterState.getVersion(),clusterState.getVersion());
+    logger.trace("not deleting shard {}, the latest cluster state version[{}] is not equal to cluster state before shard active api call [{}]",shardId,latestClusterState.getVersion(),clusterState.getVersion());
     return;
   }
-  IndexService indexService=indicesService.indexService(shardId.getIndex());
-  if (indexService == null) {
-    if (nodeEnv.hasNodeFile()) {
-      File[] shardLocations=nodeEnv.shardLocations(shardId);
-      if (FileSystemUtils.exists(shardLocations)) {
-        logger.debug("[{}][{}] deleting shard that is no longer used",shardId.index().name(),shardId.id());
-        FileSystemUtils.deleteRecursively(shardLocations);
+  clusterService.submitStateUpdateTask("indices_store",new ClusterStateUpdateTask(){
+    @Override public ClusterState execute(    ClusterState currentState) throws Exception {
+      if (clusterState.getVersion() != currentState.getVersion()) {
+        logger.trace("not deleting shard {}, the update task state version[{}] is not equal to cluster state before shard active api call [{}]",shardId,currentState.getVersion(),clusterState.getVersion());
+        return currentState;
       }
-    }
-  }
- else {
-    if (!indexService.hasShard(shardId.id())) {
-      if (indexService.store().canDeleteUnallocated(shardId)) {
-        logger.debug("[{}][{}] deleting shard that is no longer used",shardId.index().name(),shardId.id());
-        try {
-          indexService.store().deleteUnallocated(shardId);
-        }
- catch (        Exception e) {
-          logger.debug("[{}][{}] failed to delete unallocated shard, ignoring",e,shardId.index().name(),shardId.id());
+      IndexService indexService=indicesService.indexService(shardId.getIndex());
+      if (indexService == null) {
+        if (nodeEnv.hasNodeFile()) {
+          File[] shardLocations=nodeEnv.shardLocations(shardId);
+          if (FileSystemUtils.exists(shardLocations)) {
+            logger.debug("[{}][{}] deleting shard that is no longer used",shardId);
+            FileSystemUtils.deleteRecursively(shardLocations);
+          }
         }
       }
-    }
  else {
+        if (!indexService.hasShard(shardId.id())) {
+          if (indexService.store().canDeleteUnallocated(shardId)) {
+            logger.debug("{} deleting shard that is no longer used",shardId);
+            try {
+              indexService.store().deleteUnallocated(shardId);
+            }
+ catch (            Exception e) {
+              logger.debug("{} failed to delete unallocated shard, ignoring",e,shardId);
+            }
+          }
+        }
+ else {
+        }
+      }
+      return currentState;
+    }
+    @Override public void onFailure(    String source,    Throwable t){
+      logger.error("{} unexpected error during deletion of unallocated shard",t,shardId);
     }
   }
+);
 }
