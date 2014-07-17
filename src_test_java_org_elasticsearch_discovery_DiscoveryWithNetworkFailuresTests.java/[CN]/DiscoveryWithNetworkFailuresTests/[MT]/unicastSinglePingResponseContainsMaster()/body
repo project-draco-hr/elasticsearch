@@ -1,0 +1,22 @@
+{
+  List<String> nodes=startUnicastCluster(4,new int[]{0},-1);
+  final String masterNode=internalCluster().getMasterName();
+  logger.info("---> legit elected master node=" + masterNode);
+  List<String> otherNodes=new ArrayList<>(nodes);
+  otherNodes.remove(masterNode);
+  otherNodes.remove(nodes.get(0));
+  final String isolatedNode=otherNodes.get(0);
+  for (  ZenPingService pingService : internalCluster().getInstances(ZenPingService.class)) {
+    for (    ZenPing zenPing : pingService.zenPings()) {
+      ((UnicastZenPing)zenPing).clearTemporalReponses();
+    }
+  }
+  NetworkDisconnectPartition networkDisconnect=new NetworkDisconnectPartition(masterNode,isolatedNode,getRandom());
+  setDisruptionScheme(networkDisconnect);
+  networkDisconnect.startDisrupting();
+  ensureStableCluster(3,masterNode);
+  assertNoMaster(isolatedNode);
+  networkDisconnect.stopDisrupting();
+  ensureStableCluster(4);
+  assertMaster(masterNode,nodes);
+}
