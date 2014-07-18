@@ -1,0 +1,70 @@
+{
+  ChannelPipeline pipeline=super.getPipeline();
+  pipeline.replace("dispatcher","dispatcher",new MessageChannelHandler(nettyTransport,logger){
+    @Override protected String handleRequest(    Channel channel,    StreamInput buffer,    long requestId,    Version version) throws IOException {
+      final String action=buffer.readString();
+      final NettyTransportChannel transportChannel=new NettyTransportChannel(transport,action,channel,requestId,version);
+      try {
+        final TransportRequestHandler handler=transportServiceAdapter.handler(action);
+        if (handler == null) {
+          throw new ActionNotFoundTransportException(action);
+        }
+        final TransportRequest request=handler.newInstance();
+        request.remoteAddress(new InetSocketTransportAddress((InetSocketAddress)channel.getRemoteAddress()));
+        request.readFrom(buffer);
+        if (request.getHeaders() != null && request.getHeaders().containsKey("ERROR")) {
+          throw new ElasticsearchException((String)request.getHeaders().get("ERROR"));
+        }
+        if (handler.executor() == ThreadPool.Names.SAME) {
+          handler.messageReceived(request,transportChannel);
+        }
+ else {
+          threadPool.executor(handler.executor()).execute(new RequestHandler(handler,request,transportChannel,action));
+        }
+      }
+ catch (      Throwable e) {
+        try {
+          transportChannel.sendResponse(e);
+        }
+ catch (        IOException e1) {
+          logger.warn("Failed to send error message back to client for action [" + action + "]",e);
+          logger.warn("Actual Exception",e1);
+        }
+      }
+      return action;
+    }
+class RequestHandler extends AbstractRunnable {
+      private final TransportRequestHandler handler;
+      private final TransportRequest request;
+      private final NettyTransportChannel transportChannel;
+      private final String action;
+      public RequestHandler(      TransportRequestHandler handler,      TransportRequest request,      NettyTransportChannel transportChannel,      String action){
+        this.handler=handler;
+        this.request=request;
+        this.transportChannel=transportChannel;
+        this.action=action;
+      }
+      @SuppressWarnings({"unchecked"}) @Override public void run(){
+        try {
+          handler.messageReceived(request,transportChannel);
+        }
+ catch (        Throwable e) {
+          if (transport.lifecycleState() == Lifecycle.State.STARTED) {
+            try {
+              transportChannel.sendResponse(e);
+            }
+ catch (            Throwable e1) {
+              logger.warn("Failed to send error message back to client for action [" + action + "]",e1);
+              logger.warn("Actual Exception",e);
+            }
+          }
+        }
+      }
+      @Override public boolean isForceExecution(){
+        return handler.isForceExecution();
+      }
+    }
+  }
+);
+  return pipeline;
+}
