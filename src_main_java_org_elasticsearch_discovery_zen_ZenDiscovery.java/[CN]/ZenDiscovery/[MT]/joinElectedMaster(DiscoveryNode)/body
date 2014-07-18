@@ -1,0 +1,44 @@
+{
+  try {
+    transportService.connectToNode(masterNode);
+  }
+ catch (  Exception e) {
+    logger.warn("failed to connect to master [{}], retrying...",e,masterNode);
+    return false;
+  }
+  for (int joinAttempt=0; joinAttempt < this.joinRetryAttempts; joinAttempt++) {
+    try {
+      logger.trace("joining master {}",masterNode);
+      membership.sendJoinRequestBlocking(masterNode,localNode,joinTimeout);
+      return true;
+    }
+ catch (    ElasticsearchIllegalStateException e) {
+      if (joinAttempt >= this.joinRetryAttempts) {
+        logger.info("failed to send join request to master [{}], reason [{}]. Tried [{}] times",masterNode,e.getDetailedMessage(),joinAttempt + 1);
+        return false;
+      }
+ else {
+        logger.trace("master {} failed with [{}]. retrying... (attempts done: [{}])",masterNode,e.getDetailedMessage(),joinAttempt + 1);
+      }
+    }
+catch (    Exception e) {
+      if (logger.isTraceEnabled()) {
+        logger.trace("failed to send join request to master [{}]",e);
+      }
+ else       if (e instanceof ElasticsearchException) {
+        logger.info("failed to send join request to master [{}], reason [{}]",masterNode,((ElasticsearchException)e).getDetailedMessage());
+      }
+ else {
+        logger.info("failed to send join request to master [{}], reason [{}]",masterNode,e.getMessage());
+      }
+      return false;
+    }
+    try {
+      Thread.sleep(this.joinRetryDelay.millis());
+    }
+ catch (    InterruptedException e) {
+      Thread.currentThread().interrupt();
+    }
+  }
+  return false;
+}
