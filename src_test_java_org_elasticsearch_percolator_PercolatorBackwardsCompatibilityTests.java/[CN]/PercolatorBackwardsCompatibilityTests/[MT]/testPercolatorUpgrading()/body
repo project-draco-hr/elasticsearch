@@ -1,0 +1,22 @@
+{
+  assertAcked(prepareCreate("test").setSettings(ImmutableSettings.builder().put(IndexMetaData.SETTING_VERSION_CREATED,Version.V_1_3_0).put(indexSettings())));
+  ensureGreen();
+  int numDocs=randomIntBetween(100,150);
+  IndexRequestBuilder[] docs=new IndexRequestBuilder[numDocs];
+  for (int i=0; i < numDocs; i++) {
+    docs[i]=client().prepareIndex("test",PercolatorService.TYPE_NAME).setSource(jsonBuilder().startObject().field("query",termQuery("field1","value")).endObject());
+  }
+  indexRandom(true,docs);
+  PercolateResponse response=client().preparePercolate().setIndices("test").setDocumentType("type").setPercolateDoc(new PercolateSourceBuilder.DocBuilder().setDoc("field1","value")).get();
+  assertMatchCount(response,(long)numDocs);
+  client().prepareIndex("test",PercolatorService.TYPE_NAME).setSource(jsonBuilder().startObject().field("query",termQuery("field2","value")).endObject()).get();
+  createIndex("test2");
+  try {
+    client().prepareIndex("test2",PercolatorService.TYPE_NAME).setSource(jsonBuilder().startObject().field("query",termQuery("field1","value")).endObject()).get();
+    fail();
+  }
+ catch (  PercolatorException e) {
+    e.printStackTrace();
+    assertThat(e.getRootCause(),instanceOf(QueryParsingException.class));
+  }
+}
