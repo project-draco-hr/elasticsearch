@@ -5,19 +5,26 @@
   if (hits.length > 0) {
     if (context.streamShardTarget() == StreamContext.ShardTargetType.LOOKUP) {
       int counter=1;
+      List<SearchShardTarget> targets=new ArrayList<>();
       for (      InternalSearchHit hit : hits) {
         if (hit.shard() != null) {
           Integer handle=context.shardHandleLookup().get(hit.shard());
           if (handle == null) {
             context.shardHandleLookup().put(hit.shard(),counter++);
+            targets.add(hit.shard());
           }
         }
       }
-      out.writeVInt(context.shardHandleLookup().size());
-      if (!context.shardHandleLookup().isEmpty()) {
-        for (        Map.Entry<SearchShardTarget,Integer> entry : context.shardHandleLookup().entrySet()) {
-          out.writeVInt(entry.getValue());
-          entry.getKey().writeTo(out);
+      out.writeVInt(targets.size());
+      if (out.getVersion().onOrAfter(Version.V_1_4_0)) {
+        for (int i=0; i < targets.size(); i++) {
+          targets.get(i).writeTo(out);
+        }
+      }
+ else {
+        for (int i=0; i < targets.size(); i++) {
+          out.writeVInt(i + 1);
+          targets.get(i).writeTo(out);
         }
       }
     }
