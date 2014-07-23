@@ -1,5 +1,5 @@
 {
-  createIndex("test");
+  assertAcked(prepareCreate("test").addAlias(new Alias("alias")));
   ensureYellow();
   BytesReference sourceBytesRef=jsonBuilder().startObject().field("field","1","2").startObject("included").field("field","should be seen").field("hidden_field","should not be seen").endObject().field("excluded","should not be seen").endObject().bytes();
   for (int i=0; i < 100; i++) {
@@ -8,16 +8,17 @@
   MultiGetRequestBuilder request=client().prepareMultiGet();
   for (int i=0; i < 100; i++) {
     if (i % 2 == 0) {
-      request.add(new MultiGetRequest.Item("test","type",Integer.toString(i)).fetchSourceContext(new FetchSourceContext("included","*.hidden_field")));
+      request.add(new MultiGetRequest.Item(indexOrAlias(),"type",Integer.toString(i)).fetchSourceContext(new FetchSourceContext("included","*.hidden_field")));
     }
  else {
-      request.add(new MultiGetRequest.Item("test","type",Integer.toString(i)).fetchSourceContext(new FetchSourceContext(false)));
+      request.add(new MultiGetRequest.Item(indexOrAlias(),"type",Integer.toString(i)).fetchSourceContext(new FetchSourceContext(false)));
     }
   }
   MultiGetResponse response=request.get();
   assertThat(response.getResponses().length,equalTo(100));
   for (int i=0; i < 100; i++) {
     MultiGetItemResponse responseItem=response.getResponses()[i];
+    assertThat(responseItem.getIndex(),equalTo("test"));
     if (i % 2 == 0) {
       Map<String,Object> source=responseItem.getResponse().getSourceAsMap();
       assertThat(source.size(),equalTo(1));

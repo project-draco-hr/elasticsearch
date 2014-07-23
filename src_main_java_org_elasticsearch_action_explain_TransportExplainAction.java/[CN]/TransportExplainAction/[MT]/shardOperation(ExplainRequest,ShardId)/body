@@ -1,0 +1,35 @@
+{
+  IndexService indexService=indicesService.indexService(shardId.getIndex());
+  IndexShard indexShard=indexService.shardSafe(shardId.id());
+  Term uidTerm=new Term(UidFieldMapper.NAME,Uid.createUidAsBytes(request.type(),request.id()));
+  Engine.GetResult result=indexShard.get(new Engine.Get(false,uidTerm));
+  if (!result.exists()) {
+    return new ExplainResponse(shardId.getIndex(),request.type(),request.id(),false);
+  }
+  SearchContext context=new DefaultSearchContext(0,new ShardSearchRequest().types(new String[]{request.type()}).filteringAliases(request.filteringAlias()).nowInMillis(request.nowInMillis),null,result.searcher(),indexService,indexShard,scriptService,cacheRecycler,pageCacheRecycler,bigArrays);
+  SearchContext.setCurrent(context);
+  try {
+    context.parsedQuery(indexService.queryParserService().parseQuery(request.source()));
+    context.preProcess();
+    int topLevelDocId=result.docIdAndVersion().docId + result.docIdAndVersion().context.docBase;
+    Explanation explanation=context.searcher().explain(context.query(),topLevelDocId);
+    for (    RescoreSearchContext ctx : context.rescore()) {
+      Rescorer rescorer=ctx.rescorer();
+      explanation=rescorer.explain(topLevelDocId,context,ctx,explanation);
+    }
+    if (request.fields() != null || (request.fetchSourceContext() != null && request.fetchSourceContext().fetchSource())) {
+      GetResult getResult=indexShard.getService().get(result,request.id(),request.type(),request.fields(),request.fetchSourceContext(),false);
+      return new ExplainResponse(shardId.getIndex(),request.type(),request.id(),true,explanation,getResult);
+    }
+ else {
+      return new ExplainResponse(shardId.getIndex(),request.type(),request.id(),true,explanation);
+    }
+  }
+ catch (  IOException e) {
+    throw new ElasticsearchException("Could not explain",e);
+  }
+ finally {
+    context.close();
+    SearchContext.removeCurrent();
+  }
+}

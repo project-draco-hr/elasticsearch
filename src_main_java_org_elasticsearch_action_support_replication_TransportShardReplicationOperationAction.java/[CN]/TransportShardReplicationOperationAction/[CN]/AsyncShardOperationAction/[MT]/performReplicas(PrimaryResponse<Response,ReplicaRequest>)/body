@@ -1,6 +1,6 @@
 {
   if (ignoreReplicas()) {
-    postPrimaryOperation(request,response);
+    postPrimaryOperation(internalRequest,response);
     listener.onResponse(response.response());
     return;
   }
@@ -20,7 +20,7 @@
       throw new ElasticsearchIllegalStateException("unexpected state, failed to find primary shard on an index operation that succeeded");
     }
     observer.reset(newState);
-    shardIt=shards(newState,request);
+    shardIt=shards(newState,internalRequest);
     while ((shard=shardIt.nextOrNull()) != null) {
       if (shard.primary()) {
         if (originalPrimaryShard.currentNodeId().equals(shard.currentNodeId())) {
@@ -33,13 +33,13 @@
       }
     }
     shardIt.reset();
-    request.setCanHaveDuplicates();
+    internalRequest.request().setCanHaveDuplicates();
   }
  else {
     shardIt.reset();
     while ((shard=shardIt.nextOrNull()) != null) {
       if (shard.state() != ShardRoutingState.STARTED) {
-        request.setCanHaveDuplicates();
+        internalRequest.request().setCanHaveDuplicates();
       }
     }
     shardIt.reset();
@@ -49,18 +49,18 @@
     replicaCounter++;
   }
   if (replicaCounter == 0) {
-    postPrimaryOperation(request,response);
+    postPrimaryOperation(internalRequest,response);
     listener.onResponse(response.response());
     return;
   }
   if (replicationType == ReplicationType.ASYNC) {
-    postPrimaryOperation(request,response);
+    postPrimaryOperation(internalRequest,response);
     listener.onResponse(response.response());
     replicaCounter=Integer.MIN_VALUE;
   }
   replicaCounter++;
   AtomicInteger counter=new AtomicInteger(replicaCounter);
-  IndexMetaData indexMetaData=observer.observedState().metaData().index(request.index());
+  IndexMetaData indexMetaData=observer.observedState().metaData().index(internalRequest.concreteIndex());
   if (newPrimaryShard != null) {
     performOnReplica(response,counter,newPrimaryShard,newPrimaryShard.currentNodeId(),indexMetaData);
   }
@@ -85,7 +85,7 @@
       performOnReplica(response,counter,shard,shard.relocatingNodeId(),indexMetaData);
     }
   }
-  postPrimaryOperation(request,response);
+  postPrimaryOperation(internalRequest,response);
   if (counter.decrementAndGet() == 0) {
     listener.onResponse(response.response());
   }

@@ -1,19 +1,26 @@
 {
-  this.request=request;
   this.listener=listener;
   ClusterState clusterState=clusterService.state();
   if (logger.isTraceEnabled()) {
     logger.trace("executing [{}] based on cluster state version [{}]",request,clusterState.version());
   }
   nodes=clusterState.nodes();
-  ClusterBlockException blockException=checkGlobalBlock(clusterState,request);
+  ClusterBlockException blockException=checkGlobalBlock(clusterState);
   if (blockException != null) {
     throw blockException;
   }
-  resolveRequest(clusterState,request);
-  blockException=checkRequestBlock(clusterState,request);
+  String concreteSingleIndex;
+  if (resolveIndex()) {
+    concreteSingleIndex=clusterState.metaData().concreteSingleIndex(request.index(),request.indicesOptions());
+  }
+ else {
+    concreteSingleIndex=request.index();
+  }
+  this.internalRequest=new InternalRequest(request,concreteSingleIndex);
+  resolveRequest(clusterState,internalRequest);
+  blockException=checkRequestBlock(clusterState,internalRequest);
   if (blockException != null) {
     throw blockException;
   }
-  this.shardIt=shards(clusterState,request);
+  this.shardIt=shards(clusterState,internalRequest);
 }

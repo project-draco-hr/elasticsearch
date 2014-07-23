@@ -1,6 +1,6 @@
 {
   try {
-    ClusterBlockException blockException=checkGlobalBlock(observer.observedState(),request);
+    ClusterBlockException blockException=checkGlobalBlock(observer.observedState());
     if (blockException != null) {
       if (blockException.retryable()) {
         logger.trace("cluster is blocked ({}), scheduling a retry",blockException.getMessage());
@@ -11,10 +11,16 @@
         throw blockException;
       }
     }
-    if (!resolveRequest(observer.observedState(),request,listener)) {
+    if (resolveIndex()) {
+      internalRequest.concreteIndex(observer.observedState().metaData().concreteSingleIndex(internalRequest.request().index(),internalRequest.request().indicesOptions()));
+    }
+ else {
+      internalRequest.concreteIndex(internalRequest.request().index());
+    }
+    if (!resolveRequest(observer.observedState(),internalRequest,listener)) {
       return true;
     }
-    blockException=checkRequestBlock(observer.observedState(),request);
+    blockException=checkRequestBlock(observer.observedState(),internalRequest);
     if (blockException != null) {
       if (blockException.retryable()) {
         logger.trace("cluster is blocked ({}), scheduling a retry",blockException.getMessage());
@@ -25,7 +31,7 @@
         throw blockException;
       }
     }
-    shardIt=shards(observer.observedState(),request);
+    shardIt=shards(observer.observedState(),internalRequest);
   }
  catch (  Throwable e) {
     listener.onFailure(e);
@@ -50,8 +56,8 @@
     }
     if (checkWriteConsistency) {
       WriteConsistencyLevel consistencyLevel=defaultWriteConsistencyLevel;
-      if (request.consistencyLevel() != WriteConsistencyLevel.DEFAULT) {
-        consistencyLevel=request.consistencyLevel();
+      if (internalRequest.request().consistencyLevel() != WriteConsistencyLevel.DEFAULT) {
+        consistencyLevel=internalRequest.request().consistencyLevel();
       }
       int requiredNumber=1;
       if (consistencyLevel == WriteConsistencyLevel.QUORUM && shardIt.size() > 2) {
@@ -72,8 +78,8 @@
     foundPrimary=true;
     if (shard.currentNodeId().equals(observer.observedState().nodes().localNodeId())) {
       try {
-        if (request.operationThreaded()) {
-          request.beforeLocalFork();
+        if (internalRequest.request().operationThreaded()) {
+          internalRequest.request().beforeLocalFork();
           threadPool.executor(executor).execute(new Runnable(){
             @Override public void run(){
               try {
@@ -96,7 +102,7 @@
     }
  else {
       DiscoveryNode node=observer.observedState().nodes().get(shard.currentNodeId());
-      transportService.sendRequest(node,actionName,request,transportOptions,new BaseTransportResponseHandler<Response>(){
+      transportService.sendRequest(node,actionName,internalRequest.request(),transportOptions,new BaseTransportResponseHandler<Response>(){
         @Override public Response newInstance(){
           return newResponseInstance();
         }
