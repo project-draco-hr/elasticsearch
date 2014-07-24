@@ -1,0 +1,35 @@
+{
+  IndexService indexService=indicesService.indexServiceSafe(request.index());
+  IndexShard indexShard=indexService.shardSafe(request.shardId());
+  SearchShardTarget shardTarget=new SearchShardTarget(clusterService.localNode().id(),request.index(),request.shardId());
+  SearchContext context=new DefaultSearchContext(0,new ShardSearchRequest().types(request.types()).filteringAliases(request.filteringAliases()).nowInMillis(request.nowInMillis()),shardTarget,indexShard.acquireSearcher("exists"),indexService,indexShard,scriptService,cacheRecycler,pageCacheRecycler,bigArrays);
+  SearchContext.setCurrent(context);
+  try {
+    if (request.minScore() != DEFAULT_MIN_SCORE) {
+      context.minimumScore(request.minScore());
+    }
+    BytesReference source=request.querySource();
+    if (source != null && source.length() > 0) {
+      try {
+        QueryParseContext.setTypes(request.types());
+        context.parsedQuery(indexService.queryParserService().parseQuery(source));
+      }
+  finally {
+        QueryParseContext.removeTypes();
+      }
+    }
+    context.preProcess();
+    try {
+      Lucene.EarlyTerminatingCollector existsCollector=Lucene.createExistsCollector();
+      Lucene.exists(context.searcher(),context.query(),existsCollector);
+      return new ShardExistsResponse(request.index(),request.shardId(),existsCollector.exists());
+    }
+ catch (    Exception e) {
+      throw new QueryPhaseExecutionException(context,"failed to execute exists",e);
+    }
+  }
+  finally {
+    context.close();
+    SearchContext.removeCurrent();
+  }
+}
