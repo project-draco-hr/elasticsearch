@@ -1,0 +1,35 @@
+{
+  boolean loadFixedBitSeLazily=randomBoolean();
+  ImmutableSettings.Builder settingsBuilder=ImmutableSettings.builder().put(indexSettings()).put("index.refresh_interval",-1);
+  if (loadFixedBitSeLazily) {
+    settingsBuilder.put("index.load_fixed_bitset_filters_eagerly",false);
+  }
+  assertAcked(prepareCreate("test").setSettings(settingsBuilder).addMapping("type"));
+  client().prepareIndex("test","type","0").setSource("field","value").get();
+  client().prepareIndex("test","type","1").setSource("field","value").get();
+  refresh();
+  ensureSearchable("test");
+  ClusterStatsResponse clusterStatsResponse=client().admin().cluster().prepareClusterStats().get();
+  assertThat(clusterStatsResponse.getIndicesStats().getSegments().getFixedBitSetMemoryInBytes(),equalTo(0l));
+  assertAcked(client().admin().indices().preparePutMapping("test").setType("type").setSource("array1","type=nested"));
+  XContentBuilder builder=jsonBuilder().startObject().startArray("array1").startObject().field("field1","value1").endObject().endArray().endObject();
+  client().prepareIndex("test","type","2").setSource(builder).get();
+  client().prepareIndex("test","type","3").setSource(builder).get();
+  client().prepareIndex("test","type","4").setSource(builder).get();
+  client().prepareIndex("test","type","5").setSource(builder).get();
+  client().prepareIndex("test","type","6").setSource(builder).get();
+  refresh();
+  ensureSearchable("test");
+  if (loadFixedBitSeLazily) {
+    clusterStatsResponse=client().admin().cluster().prepareClusterStats().get();
+    assertThat(clusterStatsResponse.getIndicesStats().getSegments().getFixedBitSetMemoryInBytes(),equalTo(0l));
+    SearchResponse searchResponse=client().prepareSearch("test").setQuery(nestedQuery("array1",termQuery("field1","value1"))).get();
+    assertNoFailures(searchResponse);
+    assertThat(searchResponse.getHits().totalHits(),equalTo(5l));
+  }
+  clusterStatsResponse=client().admin().cluster().prepareClusterStats().get();
+  assertThat(clusterStatsResponse.getIndicesStats().getSegments().getFixedBitSetMemoryInBytes(),greaterThan(0l));
+  assertAcked(client().admin().indices().prepareDelete("test"));
+  clusterStatsResponse=client().admin().cluster().prepareClusterStats().get();
+  assertThat(clusterStatsResponse.getIndicesStats().getSegments().getFixedBitSetMemoryInBytes(),equalTo(0l));
+}
