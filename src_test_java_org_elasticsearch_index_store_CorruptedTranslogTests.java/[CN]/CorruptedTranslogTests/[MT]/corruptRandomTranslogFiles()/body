@@ -1,0 +1,42 @@
+{
+  ClusterState state=client().admin().cluster().prepareState().get().getState();
+  GroupShardsIterator shardIterators=state.getRoutingNodes().getRoutingTable().activePrimaryShardsGrouped(new String[]{"test"},false);
+  ShardIterator shardIterator=RandomPicks.randomFrom(getRandom(),shardIterators.iterators());
+  ShardRouting shardRouting=shardIterator.nextOrNull();
+  assertNotNull(shardRouting);
+  assertTrue(shardRouting.primary());
+  assertTrue(shardRouting.assignedToNode());
+  String nodeId=shardRouting.currentNodeId();
+  NodesStatsResponse nodeStatses=client().admin().cluster().prepareNodesStats(nodeId).setFs(true).get();
+  Set<File> files=new TreeSet<>();
+  for (  FsStats.Info info : nodeStatses.getNodes()[0].getFs()) {
+    String path=info.getPath();
+    final String relativeDataLocationPath="indices/test/" + Integer.toString(shardRouting.getId()) + "/translog";
+    File file=new File(path,relativeDataLocationPath);
+    logger.info("--> path: {}",file);
+    files.addAll(Arrays.asList(file.listFiles(new FileFilter(){
+      @Override public boolean accept(      File pathname){
+        logger.info("--> File: {}",pathname);
+        return pathname.isFile() && pathname.getName().startsWith("translog-");
+      }
+    }
+)));
+  }
+  File fileToCorrupt=null;
+  if (!files.isEmpty()) {
+    int corruptions=randomIntBetween(5,20);
+    for (int i=0; i < corruptions; i++) {
+      fileToCorrupt=RandomPicks.randomFrom(getRandom(),files);
+      try (RandomAccessFile raf=new RandomAccessFile(fileToCorrupt,"rw")){
+        raf.seek(randomIntBetween(0,(int)Math.min(Integer.MAX_VALUE,raf.length() - 1)));
+        long filePointer=raf.getFilePointer();
+        byte b=raf.readByte();
+        raf.seek(filePointer);
+        raf.writeByte(~b);
+        raf.getFD().sync();
+        logger.info("--> corrupting file {} --  flipping at position {} from {} to {} file: {}",fileToCorrupt.getName(),filePointer,Integer.toHexString(b),Integer.toHexString(~b),fileToCorrupt);
+      }
+     }
+  }
+  assertThat("no file corrupted",fileToCorrupt,notNullValue());
+}

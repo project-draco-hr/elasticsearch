@@ -82,7 +82,7 @@
       if (!tmpRecoveringFile.exists()) {
         File tmpTranslogFile=new File(translogLocation,translogName);
         if (tmpTranslogFile.exists()) {
-          for (int i=0; i < 3; i++) {
+          for (int i=0; i < RECOVERY_TRANSLOG_RENAME_RETRIES; i++) {
             if (tmpTranslogFile.renameTo(tmpRecoveringFile)) {
               recoveringTranslogFile=tmpRecoveringFile;
               break;
@@ -106,16 +106,14 @@
     recoveryState.getStart().checkIndexTime(indexShard.checkIndexTook());
     recoveryState.getTranslog().startTime(System.currentTimeMillis());
     recoveryState.setStage(RecoveryState.Stage.TRANSLOG);
-    FileInputStream fs=null;
+    TranslogStream stream=null;
     final Set<String> typesToUpdate=Sets.newHashSet();
     try {
-      fs=new FileInputStream(recoveringTranslogFile);
-      InputStreamStreamInput si=new InputStreamStreamInput(fs);
+      stream=TranslogStreams.translogStreamFor(recoveringTranslogFile);
       while (true) {
         Translog.Operation operation;
         try {
-          int opSize=si.readInt();
-          operation=TranslogStreams.readTranslogOperation(si);
+          operation=stream.read();
         }
  catch (        EOFException e) {
           break;
@@ -148,7 +146,7 @@ catch (        IOException e) {
     }
  finally {
       try {
-        fs.close();
+        IOUtils.close(stream);
       }
  catch (      IOException e) {
       }
