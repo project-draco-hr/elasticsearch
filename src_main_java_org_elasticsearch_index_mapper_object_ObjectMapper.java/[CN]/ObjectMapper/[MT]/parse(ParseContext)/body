@@ -12,16 +12,15 @@
   if (token.isValue() && !allowValue()) {
     throw new MapperParsingException("object mapping for [" + name + "] tried to parse as object, but found a concrete value");
   }
-  Document restoreDoc=null;
   if (nested.isNested()) {
-    Document nestedDoc=new Document();
-    IndexableField uidField=context.doc().getField(UidFieldMapper.NAME);
+    context=context.createNestedContext(fullPath);
+    Document nestedDoc=context.doc();
+    Document parentDoc=nestedDoc.getParent();
+    IndexableField uidField=parentDoc.getField(UidFieldMapper.NAME);
     if (uidField != null) {
       nestedDoc.add(new Field(UidFieldMapper.NAME,uidField.stringValue(),UidFieldMapper.Defaults.NESTED_FIELD_TYPE));
     }
     nestedDoc.add(new Field(TypeFieldMapper.NAME,nestedTypePathAsString,TypeFieldMapper.Defaults.FIELD_TYPE));
-    restoreDoc=context.switchDoc(nestedDoc);
-    context.addDoc(nestedDoc);
   }
   ContentPath.Type origPathType=context.path().pathType();
   context.path().pathType(pathType);
@@ -54,25 +53,27 @@
   }
   context.path().pathType(origPathType);
   if (nested.isNested()) {
-    Document nestedDoc=context.switchDoc(restoreDoc);
+    Document nestedDoc=context.doc();
+    Document parentDoc=nestedDoc.getParent();
     if (nested.isIncludeInParent()) {
       for (      IndexableField field : nestedDoc.getFields()) {
         if (field.name().equals(UidFieldMapper.NAME) || field.name().equals(TypeFieldMapper.NAME)) {
           continue;
         }
  else {
-          context.doc().add(field);
+          parentDoc.add(field);
         }
       }
     }
     if (nested.isIncludeInRoot()) {
-      if (!(nested.isIncludeInParent() && context.doc() == context.rootDoc())) {
+      Document rootDoc=context.rootDoc();
+      if (!nested.isIncludeInParent() || parentDoc != rootDoc) {
         for (        IndexableField field : nestedDoc.getFields()) {
           if (field.name().equals(UidFieldMapper.NAME) || field.name().equals(TypeFieldMapper.NAME)) {
             continue;
           }
  else {
-            context.rootDoc().add(field);
+            rootDoc.add(field);
           }
         }
       }
