@@ -1,0 +1,20 @@
+{
+  createIndex("idx");
+  List<IndexRequestBuilder> builders=new ArrayList<>();
+  numDocs=randomIntBetween(10,100);
+  for (int i=0; i < numDocs; i++) {
+    builders.add(client().prepareIndex("idx","type","" + i).setSource(jsonBuilder().startObject().field("value",randomAsciiOfLengthBetween(5,15)).endObject()));
+  }
+  indexRandom(true,builders);
+  prepareCreate("empty_bucket_idx").addMapping("type","value","type=integer").execute().actionGet();
+  builders=new ArrayList<>();
+  for (int i=0; i < 2; i++) {
+    builders.add(client().prepareIndex("empty_bucket_idx","type","" + i).setSource(jsonBuilder().startObject().field("value",i * 2).endObject()));
+  }
+  client().preparePutIndexedScript("groovy","initScript_indexed","{\"script\":\"vars.multiplier = 3\"}").get();
+  client().preparePutIndexedScript("groovy","mapScript_indexed","{\"script\":\"_agg.add(vars.multiplier)\"}").get();
+  client().preparePutIndexedScript("groovy","combineScript_indexed","{\"script\":\"newaggregation = []; sum = 0;for (a in _agg) { sum += a}; newaggregation.add(sum); return newaggregation\"}").get();
+  client().preparePutIndexedScript("groovy","reduceScript_indexed","{\"script\":\"newaggregation = []; sum = 0;for (agg in _aggs) { for (a in agg) { sum += a} }; newaggregation.add(sum); return newaggregation\"}").get();
+  indexRandom(true,builders);
+  ensureSearchable();
+}
