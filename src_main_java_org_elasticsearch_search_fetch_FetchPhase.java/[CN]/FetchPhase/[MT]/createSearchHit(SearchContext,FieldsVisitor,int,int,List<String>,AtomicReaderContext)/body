@@ -1,0 +1,44 @@
+{
+  loadStoredFields(context,subReaderContext,fieldsVisitor,subDocId);
+  fieldsVisitor.postProcess(context.mapperService());
+  Map<String,SearchHitField> searchFields=null;
+  if (!fieldsVisitor.fields().isEmpty()) {
+    searchFields=new HashMap<>(fieldsVisitor.fields().size());
+    for (    Map.Entry<String,List<Object>> entry : fieldsVisitor.fields().entrySet()) {
+      searchFields.put(entry.getKey(),new InternalSearchHitField(entry.getKey(),entry.getValue()));
+    }
+  }
+  DocumentMapper documentMapper=context.mapperService().documentMapper(fieldsVisitor.uid().type());
+  Text typeText;
+  if (documentMapper == null) {
+    typeText=new StringAndBytesText(fieldsVisitor.uid().type());
+  }
+ else {
+    typeText=documentMapper.typeText();
+  }
+  InternalSearchHit searchHit=new InternalSearchHit(docId,fieldsVisitor.uid().id(),typeText,searchFields);
+  context.lookup().setNextReader(subReaderContext);
+  context.lookup().setNextDocId(subDocId);
+  if (fieldsVisitor.source() != null) {
+    context.lookup().source().setNextSource(fieldsVisitor.source());
+  }
+  if (extractFieldNames != null) {
+    for (    String extractFieldName : extractFieldNames) {
+      List<Object> values=context.lookup().source().extractRawValues(extractFieldName);
+      if (!values.isEmpty()) {
+        if (searchHit.fieldsOrNull() == null) {
+          searchHit.fields(new HashMap<String,SearchHitField>(2));
+        }
+        SearchHitField hitField=searchHit.fields().get(extractFieldName);
+        if (hitField == null) {
+          hitField=new InternalSearchHitField(extractFieldName,new ArrayList<>(2));
+          searchHit.fields().put(extractFieldName,hitField);
+        }
+        for (        Object value : values) {
+          hitField.values().add(value);
+        }
+      }
+    }
+  }
+  return searchHit;
+}

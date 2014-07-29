@@ -1,0 +1,30 @@
+{
+  int currentParent=nestedSubDocId;
+  ObjectMapper nestedParentObjectMapper;
+  InternalSearchHit.InternalNestedIdentity nestedIdentity=null;
+  do {
+    String field;
+    Filter parentFilter;
+    nestedParentObjectMapper=documentMapper.findParentObjectMapper(nestedObjectMapper);
+    if (nestedParentObjectMapper != null && nestedObjectMapper.nested().isNested()) {
+      field=nestedObjectMapper.name();
+      parentFilter=nestedParentObjectMapper.nestedTypeFilter();
+    }
+ else {
+      field=nestedObjectMapper.fullPath();
+      parentFilter=NonNestedDocsFilter.INSTANCE;
+    }
+    FixedBitSet parentBitSet=context.fixedBitSetFilterCache().getFixedBitSetFilter(parentFilter).getDocIdSet(subReaderContext,null);
+    int offset=0;
+    FixedBitSet nestedDocsBitSet=context.fixedBitSetFilterCache().getFixedBitSetFilter(nestedObjectMapper.nestedTypeFilter()).getDocIdSet(subReaderContext,null);
+    int nextParent=parentBitSet.nextSetBit(currentParent);
+    for (int docId=nestedDocsBitSet.nextSetBit(currentParent + 1); docId < nextParent && docId != -1; docId=nestedDocsBitSet.nextSetBit(docId + 1)) {
+      offset++;
+    }
+    currentParent=nextParent;
+    nestedObjectMapper=nestedParentObjectMapper;
+    nestedIdentity=new InternalSearchHit.InternalNestedIdentity(field,offset,nestedIdentity);
+  }
+ while (nestedParentObjectMapper != null);
+  return nestedIdentity;
+}

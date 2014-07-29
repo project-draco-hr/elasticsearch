@@ -1,6 +1,7 @@
 {
   createIndex("idx");
   createIndex("empty");
+  assertAcked(prepareCreate("articles").addMapping("article",jsonBuilder().startObject().startObject("article").startObject("properties").startObject("comments").field("type","nested").startObject("properties").startObject("date").field("type","long").endObject().startObject("message").field("type","string").field("store",true).field("term_vector","with_positions_offsets").field("index_options","offsets").endObject().startObject("reviewers").field("type","nested").startObject("properties").startObject("name").field("type","string").field("index","not_analyzed").endObject().endObject().endObject().endObject().endObject().endObject().endObject().endObject()));
   List<IndexRequestBuilder> builders=new ArrayList<>();
   for (int i=0; i < 50; i++) {
     builders.add(client().prepareIndex("idx","type",Integer.toString(i)).setSource(jsonBuilder().startObject().field(TERMS_AGGS_FIELD,"val" + (i / 10)).field(SORT_FIELD,i + 1).field("text","some text to entertain").field("field1",5).endObject()));
@@ -14,6 +15,20 @@
   builders.add(client().prepareIndex("idx","field-collapsing","7").setSource(jsonBuilder().startObject().field("group","c").field("text","x y z term").endObject()));
   builders.add(client().prepareIndex("idx","field-collapsing","8").setSource(jsonBuilder().startObject().field("group","c").field("text","x y term b").endObject()));
   builders.add(client().prepareIndex("idx","field-collapsing","9").setSource(jsonBuilder().startObject().field("group","c").field("text","rare x term").endObject()));
+  numArticles=scaledRandomIntBetween(10,100);
+  numArticles-=(numArticles % 5);
+  for (int i=0; i < numArticles; i++) {
+    XContentBuilder builder=randomFrom(jsonBuilder(),yamlBuilder(),smileBuilder());
+    builder.startObject().field("date",i).startArray("comments");
+    for (int j=0; j < i; j++) {
+      String user=Integer.toString(j);
+      builder.startObject().field("id",j).field("user",user).field("message","some text").endObject();
+    }
+    builder.endArray().endObject();
+    builders.add(client().prepareIndex("articles","article").setCreate(true).setSource(builder));
+  }
+  builders.add(client().prepareIndex("articles","article","1").setSource(jsonBuilder().startObject().field("title","title 1").field("body","some text").startArray("comments").startObject().field("user","a").field("date",1l).field("message","some comment").startArray("reviewers").startObject().field("name","user a").endObject().startObject().field("name","user b").endObject().startObject().field("name","user c").endObject().endArray().endObject().startObject().field("user","b").field("date",2l).field("message","some other comment").startArray("reviewers").startObject().field("name","user c").endObject().startObject().field("name","user d").endObject().startObject().field("name","user e").endObject().endArray().endObject().endArray().endObject()));
+  builders.add(client().prepareIndex("articles","article","2").setSource(jsonBuilder().startObject().field("title","title 2").field("body","some different text").startArray("comments").startObject().field("user","b").field("date",3l).field("message","some comment").startArray("reviewers").startObject().field("name","user f").endObject().endArray().endObject().startObject().field("user","c").field("date",4l).field("message","some other comment").endObject().endArray().endObject()));
   indexRandom(true,builders);
   ensureSearchable();
 }
