@@ -1,0 +1,30 @@
+{
+  Directory dir=newDirectory();
+  IndexOutput output=dir.createOutput("foo.bar",IOContext.DEFAULT);
+  int iters=scaledRandomIntBetween(10,100);
+  for (int i=0; i < iters; i++) {
+    BytesRef bytesRef=new BytesRef(TestUtil.randomRealisticUnicodeString(random(),10,1024));
+    output.writeBytes(bytesRef.bytes,bytesRef.offset,bytesRef.length);
+  }
+  CodecUtil.writeFooter(output);
+  output.close();
+  IndexInput indexInput=dir.openInput("foo.bar",IOContext.DEFAULT);
+  long checksum=CodecUtil.retrieveChecksum(indexInput);
+  indexInput.seek(0);
+  IndexInput verifyingIndexInput=new Store.VerifyingIndexInput(dir.openInput("foo.bar",IOContext.DEFAULT));
+  readIndexInputFullyWithRandomSeeks(verifyingIndexInput);
+  Store.verify(verifyingIndexInput);
+  assertThat(checksum,equalTo(((ChecksumIndexInput)verifyingIndexInput).getChecksum()));
+  IOUtils.close(indexInput,verifyingIndexInput);
+  corruptFile(dir,"foo.bar","foo1.bar");
+  verifyingIndexInput=new Store.VerifyingIndexInput(dir.openInput("foo1.bar",IOContext.DEFAULT));
+  readIndexInputFullyWithRandomSeeks(verifyingIndexInput);
+  try {
+    Store.verify(verifyingIndexInput);
+    fail("should be a corrupted index");
+  }
+ catch (  CorruptIndexException ex) {
+  }
+  IOUtils.close(verifyingIndexInput);
+  IOUtils.close(dir);
+}

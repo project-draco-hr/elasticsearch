@@ -1,45 +1,5 @@
 {
-  final AtomicLong counter=new AtomicLong(fileInfo.numberOfParts());
-  for (long i=0; i < fileInfo.numberOfParts(); i++) {
-    IndexInput indexInput=null;
-    try {
-      final String file=fileInfo.physicalName();
-      indexInput=store.directory().openInput(file,IOContext.READONCE);
-      indexInput.seek(i * fileInfo.partBytes());
-      InputStreamIndexInput inputStreamIndexInput=new ThreadSafeInputStreamIndexInput(indexInput,fileInfo.partBytes());
-      final IndexInput fIndexInput=indexInput;
-      long size=inputStreamIndexInput.actualSizeToRead();
-      InputStream inputStream;
-      if (snapshotRateLimiter != null) {
-        inputStream=new RateLimitingInputStream(inputStreamIndexInput,snapshotRateLimiter,snapshotThrottleListener);
-      }
- else {
-        inputStream=inputStreamIndexInput;
-      }
-      inputStream=new AbortableInputStream(inputStream,file);
-      blobContainer.writeBlob(fileInfo.partName(i),inputStream,size,new ImmutableBlobContainer.WriterListener(){
-        @Override public void onCompleted(){
-          IOUtils.closeWhileHandlingException(fIndexInput);
-          snapshotStatus.addProcessedFile(fileInfo.length());
-          if (counter.decrementAndGet() == 0) {
-            latch.countDown();
-          }
-        }
-        @Override public void onFailure(        Throwable t){
-          IOUtils.closeWhileHandlingException(fIndexInput);
-          snapshotStatus.addProcessedFile(0);
-          failures.add(t);
-          if (counter.decrementAndGet() == 0) {
-            latch.countDown();
-          }
-        }
-      }
-);
-    }
- catch (    Throwable e) {
-      IOUtils.closeWhileHandlingException(indexInput);
-      failures.add(e);
-      latch.countDown();
-    }
-  }
+  final String file=fileInfo.physicalName();
+  IndexInput indexInput=store.openVerifyingInput(file,IOContext.READONCE,fileInfo.metadata());
+  writeBlob(indexInput,fileInfo,0,latch,failures);
 }
