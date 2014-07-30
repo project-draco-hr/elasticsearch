@@ -1,17 +1,17 @@
 {
-  if (globalOrdinals == null) {
+  if (globalOrds == null) {
     return buildEmptyAggregation();
   }
   final int size;
   if (bucketCountThresholds.getMinDocCount() == 0) {
-    size=(int)Math.min(globalOrdinals.getMaxOrd(),bucketCountThresholds.getShardSize());
+    size=(int)Math.min(globalOrds.getValueCount(),bucketCountThresholds.getShardSize());
   }
  else {
     size=(int)Math.min(maxBucketOrd(),bucketCountThresholds.getShardSize());
   }
   BucketPriorityQueue ordered=new BucketPriorityQueue(size,order.comparator(this));
-  OrdBucket spare=new OrdBucket(-1,0,null);
-  for (long globalTermOrd=Ordinals.MIN_ORDINAL; globalTermOrd < globalOrdinals.getMaxOrd(); ++globalTermOrd) {
+  OrdBucket spare=new OrdBucket(-1,0,null,showTermDocCountError,0);
+  for (long globalTermOrd=0; globalTermOrd < globalOrds.getValueCount(); ++globalTermOrd) {
     if (includeExclude != null && !acceptedGlobalOrdinals.get(globalTermOrd)) {
       continue;
     }
@@ -26,7 +26,7 @@
     if (bucketCountThresholds.getShardMinDocCount() <= spare.docCount) {
       spare=(OrdBucket)ordered.insertWithOverflow(spare);
       if (spare == null) {
-        spare=new OrdBucket(-1,0,null);
+        spare=new OrdBucket(-1,0,null,showTermDocCountError,0);
       }
     }
   }
@@ -36,14 +36,15 @@
     final OrdBucket bucket=(OrdBucket)ordered.pop();
     survivingBucketOrds[i]=bucket.bucketOrd;
     BytesRef scratch=new BytesRef();
-    copy(globalValues.getValueByOrd(bucket.globalOrd),scratch);
-    list[i]=new StringTerms.Bucket(scratch,bucket.docCount,null);
+    copy(globalOrds.lookupOrd(bucket.globalOrd),scratch);
+    list[i]=new StringTerms.Bucket(scratch,bucket.docCount,null,showTermDocCountError,0);
     list[i].bucketOrd=bucket.bucketOrd;
   }
   runDeferredCollections(survivingBucketOrds);
   for (int i=0; i < list.length; i++) {
     Bucket bucket=list[i];
     bucket.aggregations=bucket.docCount == 0 ? bucketEmptyAggregations() : bucketAggregations(bucket.bucketOrd);
+    bucket.docCountError=0;
   }
-  return new StringTerms(name,order,bucketCountThresholds.getRequiredSize(),bucketCountThresholds.getMinDocCount(),Arrays.asList(list));
+  return new StringTerms(name,order,bucketCountThresholds.getRequiredSize(),bucketCountThresholds.getShardSize(),bucketCountThresholds.getMinDocCount(),Arrays.asList(list),showTermDocCountError,0);
 }

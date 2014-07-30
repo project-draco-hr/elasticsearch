@@ -1,16 +1,26 @@
 {
-  rwl.writeLock().lock();
-  try {
-    flushBuffer();
-    if (!raf.increaseRefCount()) {
-      return null;
-    }
-    return new FsChannelSnapshot(this.id,raf,lastWrittenPosition,operationCounter);
-  }
- catch (  IOException e) {
-    throw new TranslogException(shardId,"failed to flush",e);
-  }
+  if (raf.increaseRefCount()) {
+    boolean success=false;
+    try {
+      rwl.writeLock().lock();
+      try {
+        flushBuffer();
+        FsChannelSnapshot snapshot=new FsChannelSnapshot(this.id,raf,lastWrittenPosition,operationCounter);
+        success=true;
+        return snapshot;
+      }
+ catch (      Exception e) {
+        throw new TranslogException(shardId,"exception while creating snapshot",e);
+      }
  finally {
-    rwl.writeLock().unlock();
+        rwl.writeLock().unlock();
+      }
+    }
+  finally {
+      if (!success) {
+        raf.decreaseRefCount(false);
+      }
+    }
   }
+  return null;
 }

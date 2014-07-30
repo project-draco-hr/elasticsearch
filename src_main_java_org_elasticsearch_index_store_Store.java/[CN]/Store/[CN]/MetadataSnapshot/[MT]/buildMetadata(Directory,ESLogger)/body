@@ -1,0 +1,73 @@
+{
+  ImmutableMap.Builder<String,StoreFileMetaData> builder=ImmutableMap.builder();
+  Map<String,String> checksumMap=readLegacyChecksums(directory);
+  try {
+    final SegmentInfos segmentCommitInfos;
+    try {
+      segmentCommitInfos=Store.readLastCommittedSegmentsInfo(directory);
+    }
+ catch (    FileNotFoundException|NoSuchFileException ex) {
+      logger.trace("Can't read segment infos",ex);
+      return ImmutableMap.of();
+    }
+    Version maxVersion=Version.LUCENE_3_0;
+    Set<String> added=new HashSet<>();
+    for (    SegmentCommitInfo info : segmentCommitInfos) {
+      final Version version=Lucene.parseVersionLenient(info.info.getVersion(),Version.LUCENE_3_0);
+      if (version.onOrAfter(maxVersion)) {
+        maxVersion=version;
+      }
+      for (      String file : Iterables.concat(info.info.files(),info.files())) {
+        if (!added.contains(file)) {
+          String legacyChecksum=checksumMap.get(file);
+          if (version.onOrAfter(Version.LUCENE_4_8) && legacyChecksum == null) {
+            checksumFromLuceneFile(directory,file,builder,logger,version);
+          }
+ else {
+            builder.put(file,new StoreFileMetaData(file,directory.fileLength(file),legacyChecksum,null));
+          }
+          added.add(file);
+        }
+      }
+    }
+    for (    String file : Arrays.asList(segmentCommitInfos.getSegmentsFileName(),IndexFileNames.SEGMENTS_GEN)) {
+      if (!added.contains(file)) {
+        try {
+          String legacyChecksum=checksumMap.get(file);
+          if (maxVersion.onOrAfter(Version.LUCENE_4_8) && legacyChecksum == null) {
+            checksumFromLuceneFile(directory,file,builder,logger,maxVersion);
+          }
+ else {
+            builder.put(file,new StoreFileMetaData(file,directory.fileLength(file),legacyChecksum,null));
+          }
+          added.add(file);
+        }
+ catch (        FileNotFoundException|NoSuchFileException ex) {
+          if (IndexFileNames.SEGMENTS_GEN.equals(file) == false) {
+            throw ex;
+          }
+        }
+      }
+    }
+  }
+ catch (  CorruptIndexException ex) {
+    throw ex;
+  }
+catch (  FileNotFoundException|NoSuchFileException ex) {
+    logger.warn("Can't open file to read checksums",ex);
+    return ImmutableMap.of();
+  }
+catch (  Throwable ex) {
+    try {
+      Lucene.checkSegmentInfoIntegrity(directory);
+    }
+ catch (    CorruptIndexException cex) {
+      cex.addSuppressed(ex);
+      throw cex;
+    }
+catch (    Throwable e) {
+    }
+    throw ex;
+  }
+  return builder.build();
+}

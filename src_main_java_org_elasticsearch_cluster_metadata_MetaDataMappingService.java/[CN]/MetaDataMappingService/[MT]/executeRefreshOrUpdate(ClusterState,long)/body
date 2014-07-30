@@ -2,17 +2,17 @@
   final List<MappingTask> allTasks=new ArrayList<>();
 synchronized (refreshOrUpdateMutex) {
     if (refreshOrUpdateQueue.isEmpty()) {
-      return currentState;
+      return Tuple.tuple(currentState,allTasks);
     }
     if (insertionOrder < refreshOrUpdateProcessedInsertOrder) {
-      return currentState;
+      return Tuple.tuple(currentState,allTasks);
     }
     allTasks.addAll(refreshOrUpdateQueue);
     refreshOrUpdateQueue.clear();
     refreshOrUpdateProcessedInsertOrder=refreshOrUpdateInsertOrder;
   }
   if (allTasks.isEmpty()) {
-    return currentState;
+    return Tuple.tuple(currentState,allTasks);
   }
   Map<String,List<MappingTask>> tasksPerIndex=Maps.newHashMap();
   for (  MappingTask task : allTasks) {
@@ -101,20 +101,8 @@ synchronized (refreshOrUpdateMutex) {
       }
     }
   }
-  threadPool.generic().execute(new Runnable(){
-    @Override public void run(){
-      for (      Object task : allTasks) {
-        if (task instanceof UpdateTask) {
-          UpdateTask uTask=(UpdateTask)task;
-          ClusterStateUpdateResponse response=new ClusterStateUpdateResponse(true);
-          uTask.listener.onResponse(response);
-        }
-      }
-    }
-  }
-);
   if (!dirty) {
-    return currentState;
+    return Tuple.tuple(currentState,allTasks);
   }
-  return ClusterState.builder(currentState).metaData(mdBuilder).build();
+  return Tuple.tuple(ClusterState.builder(currentState).metaData(mdBuilder).build(),allTasks);
 }

@@ -1,7 +1,7 @@
 {
   final IndexOutput indexOutput;
   try {
-    indexOutput=store.createOutputRaw(fileInfo.physicalName());
+    indexOutput=store.createVerifyingOutput(fileInfo.physicalName(),IOContext.DEFAULT,fileInfo.metadata());
   }
  catch (  IOException e) {
     try {
@@ -37,9 +37,12 @@
         }
  else {
           try {
+            Store.verify(indexOutput);
             indexOutput.close();
-            if (fileInfo.checksum() != null) {
-              store.writeChecksum(fileInfo.physicalName(),fileInfo.checksum());
+            if (fileInfo.metadata().hasLegacyChecksum()) {
+              Store.LegacyChecksums legacyChecksums=new Store.LegacyChecksums();
+              legacyChecksums.add(fileInfo.metadata());
+              legacyChecksums.write(store);
             }
             store.directory().sync(Collections.singleton(fileInfo.physicalName()));
             recoveryState.getIndex().addRecoveredFileCount(1);
@@ -53,8 +56,16 @@
       }
       @Override public void onFailure(      Throwable t){
         try {
-          IOUtils.closeWhileHandlingException(indexOutput);
           failures.add(t);
+          IOUtils.closeWhileHandlingException(indexOutput);
+          if (t instanceof CorruptIndexException) {
+            try {
+              store.markStoreCorrupted((CorruptIndexException)t);
+            }
+ catch (            IOException e) {
+            }
+          }
+          store.deleteQuiet(fileInfo.physicalName());
         }
   finally {
           latch.countDown();
@@ -66,8 +77,13 @@
   }
   finally {
     if (!success) {
-      IOUtils.closeWhileHandlingException(indexOutput);
-      latch.countDown();
+      try {
+        IOUtils.closeWhileHandlingException(indexOutput);
+        store.deleteQuiet(fileInfo.physicalName());
+      }
+  finally {
+        latch.countDown();
+      }
     }
   }
 }

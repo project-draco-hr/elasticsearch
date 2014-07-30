@@ -5,10 +5,12 @@
     throw new ElasticsearchIllegalArgumentException("found no fielddata type for field [" + fieldNames.fullName() + "]");
   }
   final boolean docValues=mapper.hasDocValues();
-  IndexFieldData<?> fieldData=loadedFieldData.get(fieldNames.indexName());
+  final String key=fieldNames.indexName();
+  IndexFieldData<?> fieldData=loadedFieldData.get(key);
   if (fieldData == null) {
-synchronized (loadedFieldData) {
-      fieldData=loadedFieldData.get(fieldNames.indexName());
+    fieldLoadingLock.acquire(key);
+    try {
+      fieldData=loadedFieldData.get(key);
       if (fieldData == null) {
         IndexFieldData.Builder builder=null;
         String format=type.getFormat(indexSettings);
@@ -43,15 +45,20 @@ synchronized (loadedFieldData) {
  else           if ("node".equals(cacheType)) {
             cache=indicesFieldDataCache.buildIndexFieldDataCache(indexService,index,fieldNames,type);
           }
+ else           if ("none".equals(cacheType)) {
+            cache=new IndexFieldDataCache.None();
+          }
  else {
             throw new ElasticsearchIllegalArgumentException("cache type not supported [" + cacheType + "] for field ["+ fieldNames.fullName()+ "]");
           }
           fieldDataCaches.put(fieldNames.indexName(),cache);
         }
-        GlobalOrdinalsBuilder globalOrdinalBuilder=new InternalGlobalOrdinalsBuilder(index(),indexSettings);
-        fieldData=builder.build(index,indexSettings,mapper,cache,circuitBreakerService,indexService.mapperService(),globalOrdinalBuilder);
+        fieldData=builder.build(index,indexSettings,mapper,cache,circuitBreakerService,indexService.mapperService());
         loadedFieldData.put(fieldNames.indexName(),fieldData);
       }
+    }
+  finally {
+      fieldLoadingLock.release(key);
     }
   }
   return (IFD)fieldData;

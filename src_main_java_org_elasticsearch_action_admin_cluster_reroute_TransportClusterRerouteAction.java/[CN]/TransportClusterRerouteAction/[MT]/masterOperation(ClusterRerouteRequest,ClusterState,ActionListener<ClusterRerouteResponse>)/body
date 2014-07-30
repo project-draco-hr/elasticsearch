@@ -1,25 +1,16 @@
 {
-  clusterService.submitStateUpdateTask("cluster_reroute (api)",Priority.IMMEDIATE,new AckedClusterStateUpdateTask(){
+  clusterService.submitStateUpdateTask("cluster_reroute (api)",Priority.IMMEDIATE,new AckedClusterStateUpdateTask<ClusterRerouteResponse>(request,listener){
     private volatile ClusterState clusterStateToSend;
     private volatile RoutingExplanations explanations;
-    @Override public boolean mustAck(    DiscoveryNode discoveryNode){
-      return true;
-    }
-    @Override public void onAllNodesAcked(    @Nullable Throwable t){
-      listener.onResponse(new ClusterRerouteResponse(true,clusterStateToSend,explanations));
+    @Override protected ClusterRerouteResponse newResponse(    boolean acknowledged){
+      return new ClusterRerouteResponse(acknowledged,clusterStateToSend,explanations);
     }
     @Override public void onAckTimeout(){
       listener.onResponse(new ClusterRerouteResponse(false,clusterStateToSend,new RoutingExplanations()));
     }
-    @Override public TimeValue ackTimeout(){
-      return request.timeout();
-    }
-    @Override public TimeValue timeout(){
-      return request.masterNodeTimeout();
-    }
     @Override public void onFailure(    String source,    Throwable t){
       logger.debug("failed to perform [{}]",t,source);
-      listener.onFailure(t);
+      super.onFailure(source,t);
     }
     @Override public ClusterState execute(    ClusterState currentState){
       RoutingAllocation.Result routingResult=allocationService.reroute(currentState,request.commands,request.explain());
@@ -30,8 +21,6 @@
         return currentState;
       }
       return newState;
-    }
-    @Override public void clusterStateProcessed(    String source,    ClusterState oldState,    ClusterState newState){
     }
   }
 );

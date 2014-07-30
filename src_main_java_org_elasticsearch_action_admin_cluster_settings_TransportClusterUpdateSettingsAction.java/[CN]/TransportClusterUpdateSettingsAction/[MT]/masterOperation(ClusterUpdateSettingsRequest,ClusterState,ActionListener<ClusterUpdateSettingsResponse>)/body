@@ -1,17 +1,17 @@
 {
   final ImmutableSettings.Builder transientUpdates=ImmutableSettings.settingsBuilder();
   final ImmutableSettings.Builder persistentUpdates=ImmutableSettings.settingsBuilder();
-  clusterService.submitStateUpdateTask("cluster_update_settings",Priority.IMMEDIATE,new AckedClusterStateUpdateTask(){
+  clusterService.submitStateUpdateTask("cluster_update_settings",Priority.IMMEDIATE,new AckedClusterStateUpdateTask<ClusterUpdateSettingsResponse>(request,listener){
     private volatile boolean changed=false;
-    @Override public boolean mustAck(    DiscoveryNode discoveryNode){
-      return true;
+    @Override protected ClusterUpdateSettingsResponse newResponse(    boolean acknowledged){
+      return new ClusterUpdateSettingsResponse(acknowledged,transientUpdates.build(),persistentUpdates.build());
     }
     @Override public void onAllNodesAcked(    @Nullable Throwable t){
       if (changed) {
         reroute(true);
       }
  else {
-        listener.onResponse(new ClusterUpdateSettingsResponse(true,transientUpdates.build(),persistentUpdates.build()));
+        super.onAllNodesAcked(t);
       }
     }
     @Override public void onAckTimeout(){
@@ -19,7 +19,7 @@
         reroute(false);
       }
  else {
-        listener.onResponse(new ClusterUpdateSettingsResponse(false,transientUpdates.build(),persistentUpdates.build()));
+        super.onAckTimeout();
       }
     }
     private void reroute(    final boolean updateSettingsAcked){
@@ -28,21 +28,12 @@
         listener.onResponse(new ClusterUpdateSettingsResponse(updateSettingsAcked,transientUpdates.build(),persistentUpdates.build()));
         return;
       }
-      clusterService.submitStateUpdateTask("reroute_after_cluster_update_settings",Priority.URGENT,new AckedClusterStateUpdateTask(){
+      clusterService.submitStateUpdateTask("reroute_after_cluster_update_settings",Priority.URGENT,new AckedClusterStateUpdateTask<ClusterUpdateSettingsResponse>(request,listener){
         @Override public boolean mustAck(        DiscoveryNode discoveryNode){
           return updateSettingsAcked;
         }
-        @Override public void onAllNodesAcked(        @Nullable Throwable t){
-          listener.onResponse(new ClusterUpdateSettingsResponse(updateSettingsAcked,transientUpdates.build(),persistentUpdates.build()));
-        }
-        @Override public void onAckTimeout(){
-          listener.onResponse(new ClusterUpdateSettingsResponse(false,transientUpdates.build(),persistentUpdates.build()));
-        }
-        @Override public TimeValue ackTimeout(){
-          return request.timeout();
-        }
-        @Override public TimeValue timeout(){
-          return request.masterNodeTimeout();
+        @Override protected ClusterUpdateSettingsResponse newResponse(        boolean acknowledged){
+          return new ClusterUpdateSettingsResponse(updateSettingsAcked && acknowledged,transientUpdates.build(),persistentUpdates.build());
         }
         @Override public void onFailure(        String source,        Throwable t){
           logger.debug("failed to perform [{}]",t,source);
@@ -55,20 +46,12 @@
           }
           return ClusterState.builder(currentState).routingResult(routingResult).build();
         }
-        @Override public void clusterStateProcessed(        String source,        ClusterState oldState,        ClusterState newState){
-        }
       }
 );
     }
-    @Override public TimeValue ackTimeout(){
-      return request.timeout();
-    }
-    @Override public TimeValue timeout(){
-      return request.masterNodeTimeout();
-    }
     @Override public void onFailure(    String source,    Throwable t){
       logger.debug("failed to perform [{}]",t,source);
-      listener.onFailure(t);
+      super.onFailure(source,t);
     }
     @Override public ClusterState execute(    final ClusterState currentState){
       ImmutableSettings.Builder transientSettings=ImmutableSettings.settingsBuilder();
@@ -120,8 +103,6 @@
         blocks.removeGlobalBlock(MetaData.CLUSTER_READ_ONLY_BLOCK);
       }
       return builder(currentState).metaData(metaData).blocks(blocks).build();
-    }
-    @Override public void clusterStateProcessed(    String source,    ClusterState oldState,    ClusterState newState){
     }
   }
 );

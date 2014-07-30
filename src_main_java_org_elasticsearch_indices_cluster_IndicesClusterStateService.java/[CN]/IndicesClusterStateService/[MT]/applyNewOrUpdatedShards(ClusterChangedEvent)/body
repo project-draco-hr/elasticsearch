@@ -20,7 +20,12 @@
     }
     final int shardId=shardRouting.id();
     if (!indexService.hasShard(shardId) && shardRouting.started()) {
-      if (!failedShards.containsKey(shardRouting.shardId())) {
+      if (failedShards.containsKey(shardRouting.shardId())) {
+        if (nodes.masterNode() != null) {
+          shardStateAction.resendShardFailed(shardRouting,indexMetaData.getUUID(),"master " + nodes.masterNode() + " marked shard as started, but shard has previous failed. resending shard failure.",nodes.masterNode());
+        }
+      }
+ else {
         logger.warn("[{}][{}] master [{}] marked shard as started, but shard has not been created, mark shard as failed",shardRouting.index(),shardId,nodes.masterNode());
         failedShards.put(shardRouting.shardId(),new FailedShard(shardRouting.version()));
         if (nodes.masterNode() != null) {
@@ -36,6 +41,17 @@
         logger.debug("[{}][{}] removing shard (different instance of it allocated on this node, current [{}], global [{}])",shardRouting.index(),shardRouting.id(),currentRoutingEntry,shardRouting);
         recoveryTarget.cancelRecovery(indexShard);
         indexService.removeShard(shardRouting.id(),"removing shard (different instance of it allocated on this node)");
+      }
+ else       if (isPeerRecovery(shardRouting)) {
+        RecoveryStatus recoveryStatus=recoveryTarget.recoveryStatus(indexShard);
+        if (recoveryStatus != null && recoveryStatus.stage() != RecoveryState.Stage.DONE) {
+          DiscoveryNode sourceNode=findSourceNodeForPeerRecovery(routingTable,nodes,shardRouting);
+          if (!recoveryStatus.sourceNode().equals(sourceNode)) {
+            logger.debug("[{}][{}] removing shard (recovery source changed), current [{}], global [{}])",shardRouting.index(),shardRouting.id(),currentRoutingEntry,shardRouting);
+            recoveryTarget.cancelRecovery(indexShard);
+            indexService.removeShard(shardRouting.id(),"removing shard (recovery source node changed)");
+          }
+        }
       }
     }
     if (indexService.hasShard(shardId)) {

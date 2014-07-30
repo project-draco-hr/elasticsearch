@@ -18,10 +18,20 @@
         QueryParseContext.removeTypes();
       }
     }
+    final boolean hasTerminateAfterCount=request.terminateAfter() != DEFAULT_TERMINATE_AFTER;
+    boolean terminatedEarly=false;
     context.preProcess();
     try {
-      long count=Lucene.count(context.searcher(),context.query());
-      return new ShardCountResponse(request.index(),request.shardId(),count);
+      long count;
+      if (hasTerminateAfterCount) {
+        final Lucene.EarlyTerminatingCollector countCollector=Lucene.createCountBasedEarlyTerminatingCollector(request.terminateAfter());
+        terminatedEarly=Lucene.countWithEarlyTermination(context.searcher(),context.query(),countCollector);
+        count=countCollector.count();
+      }
+ else {
+        count=Lucene.count(context.searcher(),context.query());
+      }
+      return new ShardCountResponse(request.index(),request.shardId(),count,terminatedEarly);
     }
  catch (    Exception e) {
       throw new QueryPhaseExecutionException(context,"failed to execute count",e);

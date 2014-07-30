@@ -1,0 +1,86 @@
+{
+  int numDocs=scaledRandomIntBetween(100,1000);
+  assertThat(cluster().numDataNodes(),greaterThanOrEqualTo(2));
+  while (cluster().numDataNodes() < 4) {
+    internalCluster().startNode(ImmutableSettings.builder().put("node.data",true).put("node.client",false).put("node.master",false));
+  }
+  assertThat(cluster().numDataNodes(),greaterThanOrEqualTo(3));
+  final boolean failOnCorruption=randomBoolean();
+  assertAcked(prepareCreate("test").setSettings(ImmutableSettings.builder().put(IndexMetaData.SETTING_NUMBER_OF_REPLICAS,"1").put(MergePolicyModule.MERGE_POLICY_TYPE_KEY,NoMergePolicyProvider.class).put(MockFSDirectoryService.CHECK_INDEX_ON_CLOSE,false).put(InternalEngine.INDEX_FAIL_ON_CORRUPTION,failOnCorruption).put("indices.recovery.concurrent_streams",10)));
+  if (failOnCorruption == false) {
+    client().admin().indices().prepareUpdateSettings("test").setSettings(ImmutableSettings.builder().put(InternalEngine.INDEX_FAIL_ON_CORRUPTION,true)).get();
+  }
+  ensureGreen();
+  disableAllocation("test");
+  IndexRequestBuilder[] builders=new IndexRequestBuilder[numDocs];
+  for (int i=0; i < builders.length; i++) {
+    builders[i]=client().prepareIndex("test","type").setSource("field","value");
+  }
+  indexRandom(true,builders);
+  ensureGreen();
+  assertAllSuccessful(client().admin().indices().prepareFlush().setForce(true).setWaitIfOngoing(true).execute().actionGet());
+  CountResponse countResponse=client().prepareCount().get();
+  assertHitCount(countResponse,numDocs);
+  final int numShards=numShards("test");
+  ShardRouting corruptedShardRouting=corruptRandomFile();
+  enableAllocation("test");
+  Settings build=ImmutableSettings.builder().put(IndexMetaData.SETTING_NUMBER_OF_REPLICAS,"2").build();
+  client().admin().indices().prepareUpdateSettings("test").setSettings(build).get();
+  ClusterHealthResponse health=client().admin().cluster().health(Requests.clusterHealthRequest("test").waitForGreenStatus().timeout("5m").waitForRelocatingShards(0)).actionGet();
+  if (health.isTimedOut()) {
+    logger.info("cluster state:\n{}\n{}",client().admin().cluster().prepareState().get().getState().prettyPrint(),client().admin().cluster().preparePendingClusterTasks().get().prettyPrint());
+    assertThat("timed out waiting for green state",health.isTimedOut(),equalTo(false));
+  }
+  assertThat(health.getStatus(),equalTo(ClusterHealthStatus.GREEN));
+  final int numIterations=scaledRandomIntBetween(5,20);
+  for (int i=0; i < numIterations; i++) {
+    SearchResponse response=client().prepareSearch().setSize(numDocs).get();
+    assertHitCount(response,numDocs);
+  }
+  final CountDownLatch latch=new CountDownLatch(numShards * 3);
+  final CopyOnWriteArrayList<Throwable> exception=new CopyOnWriteArrayList<>();
+  final IndicesLifecycle.Listener listener=new IndicesLifecycle.Listener(){
+    @Override public void beforeIndexShardClosed(    ShardId sid,    @Nullable IndexShard indexShard){
+      if (indexShard != null) {
+        Store store=((InternalIndexShard)indexShard).store();
+        store.incRef();
+        try {
+          if (!Lucene.indexExists(store.directory()) && indexShard.state() == IndexShardState.STARTED) {
+            return;
+          }
+          CheckIndex checkIndex=new CheckIndex(store.directory());
+          BytesStreamOutput os=new BytesStreamOutput();
+          PrintStream out=new PrintStream(os,false,Charsets.UTF_8.name());
+          checkIndex.setInfoStream(out);
+          out.flush();
+          CheckIndex.Status status=checkIndex.checkIndex();
+          if (!status.clean) {
+            logger.warn("check index [failure]\n{}",new String(os.bytes().toBytes(),Charsets.UTF_8));
+            throw new IndexShardException(sid,"index check failure");
+          }
+        }
+ catch (        Throwable t) {
+          exception.add(t);
+        }
+ finally {
+          store.decRef();
+          latch.countDown();
+        }
+      }
+    }
+  }
+;
+  for (  IndicesService service : internalCluster().getDataNodeInstances(IndicesService.class)) {
+    service.indicesLifecycle().addListener(listener);
+  }
+  try {
+    client().admin().indices().prepareDelete("test").get();
+    latch.await();
+    assertThat(exception,empty());
+  }
+  finally {
+    for (    IndicesService service : internalCluster().getDataNodeInstances(IndicesService.class)) {
+      service.indicesLifecycle().removeListener(listener);
+    }
+  }
+}

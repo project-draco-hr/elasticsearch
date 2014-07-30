@@ -1,0 +1,37 @@
+{
+  List<String> validFields=new ArrayList<>();
+  for (  String field : request.selectedFields()) {
+    FieldMapper fieldMapper=indexShard.mapperService().smartNameFieldMapper(field);
+    if (!(fieldMapper instanceof StringFieldMapper)) {
+      continue;
+    }
+    if (fieldMapper.fieldType().storeTermVectors()) {
+      continue;
+    }
+    if (!fieldMapper.fieldType().indexed()) {
+      continue;
+    }
+    validFields.add(field);
+  }
+  if (validFields.isEmpty()) {
+    return termVectorsByField;
+  }
+  Engine.GetResult get=indexShard.get(new Engine.Get(realTime,uidTerm));
+  Fields generatedTermVectors;
+  try {
+    if (!get.exists()) {
+      return termVectorsByField;
+    }
+    GetResult getResult=indexShard.getService().get(get,request.id(),request.type(),validFields.toArray(Strings.EMPTY_ARRAY),null);
+    generatedTermVectors=generateTermVectors(getResult.getFields().values(),request.offsets());
+  }
+  finally {
+    get.release();
+  }
+  if (termVectorsByField == null) {
+    return generatedTermVectors;
+  }
+ else {
+    return mergeFields(request.selectedFields().toArray(Strings.EMPTY_ARRAY),termVectorsByField,generatedTermVectors);
+  }
+}

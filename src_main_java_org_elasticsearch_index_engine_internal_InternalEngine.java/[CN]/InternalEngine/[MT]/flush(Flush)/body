@@ -40,7 +40,7 @@
  catch (          Throwable t) {
             logger.warn("Failed to close current SearcherManager",t);
           }
-          pruneDeletedVersions(threadPool.estimatedTimeInMillis());
+          maybePruneDeletedTombstones();
         }
  catch (        Throwable t) {
           throw new FlushFailedEngineException(shardId,t);
@@ -60,7 +60,7 @@
             translog.newTransientTranslog(translogId);
             indexWriter.setCommitData(MapBuilder.<String,String>newMapBuilder().put(Translog.TRANSLOG_ID_KEY,Long.toString(translogId)).map());
             indexWriter.commit();
-            pruneDeletedVersions(threadPool.estimatedTimeInMillis());
+            refresh(new Refresh("version_table_flush").force(true));
             translog.makeTransientCurrent();
           }
  catch (          Throwable e) {
@@ -69,7 +69,10 @@
           }
         }
       }
-     }
+       if (enableGcDeletes) {
+        pruneDeletedTombstones();
+      }
+    }
  else     if (flush.type() == Flush.Type.COMMIT) {
       try (InternalLock _=readLock.acquire()){
         final IndexWriter indexWriter=currentIndexWriter();
@@ -82,7 +85,10 @@
           throw new FlushFailedEngineException(shardId,e);
         }
       }
-     }
+       if (enableGcDeletes) {
+        pruneDeletedTombstones();
+      }
+    }
  else {
       throw new ElasticsearchIllegalStateException("flush type [" + flush.type() + "] not supported");
     }
@@ -93,11 +99,14 @@
  catch (    Throwable e) {
       if (!closed) {
         logger.warn("failed to read latest segment infos on flush",e);
+        if (Lucene.isCorruptionException(e)) {
+          throw new FlushFailedEngineException(shardId,e);
+        }
       }
     }
   }
  catch (  FlushFailedEngineException ex) {
-    maybeFailEngine(ex.getCause());
+    maybeFailEngine(ex,"flush");
     throw ex;
   }
  finally {

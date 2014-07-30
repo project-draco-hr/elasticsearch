@@ -1,4 +1,7 @@
 {
+  if (name == null) {
+    throw new ElasticsearchIllegalArgumentException("plugin name must be supplied with --install [name].");
+  }
   HttpDownloadHelper downloadHelper=new HttpDownloadHelper();
   boolean downloaded=false;
   HttpDownloadHelper.DownloadProgress progress;
@@ -13,10 +16,11 @@
     throw new IOException("plugin directory " + environment.pluginsFile() + " is read only");
   }
   PluginHandle pluginHandle=PluginHandle.parse(name);
+  checkForForbiddenName(pluginHandle.name);
   File pluginFile=pluginHandle.distroFile(environment);
   File extractLocation=pluginHandle.extractedDir(environment);
   if (extractLocation.exists()) {
-    throw new IOException("plugin directory " + extractLocation.getAbsolutePath() + " already exists. To update the plugin, uninstall it first using -remove "+ name+ " command");
+    throw new IOException("plugin directory " + extractLocation.getAbsolutePath() + " already exists. To update the plugin, uninstall it first using --remove "+ name+ " command");
   }
   if (url != null) {
     URL pluginUrl=new URL(url);
@@ -49,7 +53,7 @@ catch (      Exception e) {
     }
   }
   if (!downloaded) {
-    throw new IOException("failed to download out of all possible locations..., use -verbose to get detailed information");
+    throw new IOException("failed to download out of all possible locations..., use --verbose to get detailed information");
   }
   ZipFile zipFile=null;
   try {
@@ -95,7 +99,19 @@ catch (      Exception e) {
     File toLocation=pluginHandle.binDir(environment);
     debug("Found bin, moving to " + toLocation.getAbsolutePath());
     FileSystemUtils.deleteRecursively(toLocation);
-    binFile.renameTo(toLocation);
+    if (!binFile.renameTo(toLocation)) {
+      throw new IOException("Could not move [" + binFile.getAbsolutePath() + "] to ["+ toLocation.getAbsolutePath()+ "]");
+    }
+    debug("Installed " + name + " into "+ toLocation.getAbsolutePath());
+  }
+  File configFile=new File(extractLocation,"config");
+  if (configFile.exists() && configFile.isDirectory()) {
+    File toLocation=pluginHandle.configDir(environment);
+    debug("Found config, moving to " + toLocation.getAbsolutePath());
+    FileSystemUtils.deleteRecursively(toLocation);
+    if (!configFile.renameTo(toLocation)) {
+      throw new IOException("Could not move [" + configFile.getAbsolutePath() + "] to ["+ configFile.getAbsolutePath()+ "]");
+    }
     debug("Installed " + name + " into "+ toLocation.getAbsolutePath());
   }
   if (!new File(extractLocation,"_site").exists()) {

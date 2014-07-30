@@ -1,6 +1,5 @@
 {
   clusterService.submitStateUpdateTask("update snapshot state",new ProcessedClusterStateUpdateTask(){
-    private boolean completed=true;
     private RestoreInfo restoreInfo=null;
     @Override public ClusterState execute(    ClusterState currentState){
       MetaData metaData=currentState.metaData();
@@ -14,24 +13,12 @@
             HashMap<ShardId,ShardRestoreStatus> shards=newHashMap(entry.shards());
             logger.trace("[{}] Updating shard [{}] with status [{}]",request.snapshotId(),request.shardId(),request.status().state());
             shards.put(request.shardId(),request.status());
-            for (            RestoreMetaData.ShardRestoreStatus status : shards.values()) {
-              if (!status.state().completed()) {
-                completed=false;
-                break;
-              }
-            }
-            if (!completed) {
+            if (!completed(shards)) {
               entries.add(new RestoreMetaData.Entry(entry.snapshotId(),RestoreMetaData.State.STARTED,entry.indices(),ImmutableMap.copyOf(shards)));
             }
  else {
               logger.info("restore [{}] is done",request.snapshotId());
-              int failedShards=0;
-              for (              RestoreMetaData.ShardRestoreStatus status : shards.values()) {
-                if (status.state() == RestoreMetaData.State.FAILURE) {
-                  failedShards++;
-                }
-              }
-              restoreInfo=new RestoreInfo(entry.snapshotId().getSnapshot(),entry.indices(),shards.size(),shards.size() - failedShards);
+              restoreInfo=new RestoreInfo(entry.snapshotId().getSnapshot(),entry.indices(),shards.size(),shards.size() - failedShards(shards));
             }
             changed=true;
           }

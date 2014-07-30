@@ -1,20 +1,23 @@
 {
-  HttpServerTransport httpServerTransport=internalCluster().getInstance(HttpServerTransport.class);
-  final HttpClient httpClient=new HttpClient(httpServerTransport.boundAddress().publishAddress());
-  logger.info("--> tested http address [{}]",httpServerTransport.info().getAddress());
+  final HttpRequestBuilder httpRequestBuilder=getHttpRequestBuilder();
   assertThat(awaitBusy(new Predicate<Object>(){
     public boolean apply(    Object obj){
-      HttpClientResponse response=httpClient.request("");
-      if (response.errorCode() != RestStatus.OK.getStatus()) {
-        logger.info("--> error caught [{}], headers [{}]",response.errorCode(),response.getHeaders());
-        logger.info("--> cluster state [{}]",internalCluster().clusterService().state());
-        return false;
+      try {
+        HttpResponse response=httpRequestBuilder.method("GET").path("/").execute();
+        if (response.getStatusCode() != RestStatus.OK.getStatus()) {
+          logger.info("--> error caught [{}], headers [{}]",response.getStatusCode(),response.getHeaders());
+          logger.info("--> cluster state [{}]",internalCluster().clusterService().state());
+          return false;
+        }
+        return true;
       }
-      return true;
+ catch (      IOException e) {
+        throw new ElasticsearchException("HTTP problem",e);
+      }
     }
   }
 ,5,TimeUnit.SECONDS),equalTo(true));
-  HttpClientResponse response=httpClient.request("_plugin/" + pluginName + "/");
+  HttpResponse response=getHttpRequestBuilder().method("GET").path("/_plugin/" + pluginName + "/").execute();
   assertThat(response,notNullValue());
-  assertThat(response.errorCode(),equalTo(RestStatus.OK.getStatus()));
+  assertThat(response.getStatusCode(),equalTo(RestStatus.OK.getStatus()));
 }

@@ -1,0 +1,35 @@
+{
+  String node_1=internalCluster().startNode(SETTINGS);
+  String node_2=internalCluster().startNode(SETTINGS);
+  final String node_1_id=internalCluster().getInstance(DiscoveryService.class,node_1).localNode().getId();
+  final String node_2_id=internalCluster().getInstance(DiscoveryService.class,node_2).localNode().getId();
+  final int numShards=scaledRandomIntBetween(2,20);
+  ElasticsearchAssertions.assertAcked(prepareCreate("test").setSettings(ImmutableSettings.builder().put(IndexMetaData.SETTING_NUMBER_OF_REPLICAS,0).put(IndexMetaData.SETTING_NUMBER_OF_SHARDS,numShards)));
+  ensureGreen("test");
+  ClusterStateResponse stateResponse=client().admin().cluster().prepareState().get();
+  RoutingNode routingNode=stateResponse.getState().routingNodes().node(node_2_id);
+  int[] node2Shards=new int[routingNode.numberOfOwningShards()];
+  int i=0;
+  for (  MutableShardRouting mutableShardRouting : routingNode) {
+    node2Shards[i++]=mutableShardRouting.shardId().id();
+  }
+  logger.info("Node 2 has shards: {}",Arrays.toString(node2Shards));
+  waitNoPendingTasksOnAll();
+  internalCluster().getInstance(ClusterService.class,node_2).submitStateUpdateTask("test",Priority.IMMEDIATE,new ClusterStateUpdateTask(){
+    @Override public ClusterState execute(    ClusterState currentState) throws Exception {
+      IndexRoutingTable.Builder indexRoutingTableBuilder=IndexRoutingTable.builder("test");
+      for (int i=0; i < numShards; i++) {
+        indexRoutingTableBuilder.addIndexShard(new IndexShardRoutingTable.Builder(new ShardId("test",i),false).addShard(new ImmutableShardRouting("test",i,node_1_id,true,ShardRoutingState.STARTED,1)).build());
+      }
+      return ClusterState.builder(currentState).routingTable(RoutingTable.builder().add(indexRoutingTableBuilder).build()).build();
+    }
+    @Override public void onFailure(    String source,    Throwable t){
+    }
+  }
+);
+  waitNoPendingTasksOnAll();
+  logger.info("Checking if shards aren't removed");
+  for (  int shard : node2Shards) {
+    assertTrue(waitForShardDeletion(node_2,"test",shard));
+  }
+}

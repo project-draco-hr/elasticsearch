@@ -1,4 +1,5 @@
 {
+  assertAcked(prepareCreate("test").addMapping("type1","value","type=string").execute().actionGet());
   for (int i=0; i < 10; i++) {
     client().prepareIndex("test","type1",Integer.toString(i)).setSource(jsonBuilder().startObject().field("value","test" + i).endObject()).execute().actionGet();
   }
@@ -8,17 +9,20 @@
     CountResponse countResponse=client().prepareCount().setQuery(matchAllQuery()).execute().actionGet();
     assertThat(countResponse.getCount(),equalTo(10l));
   }
-  ClusterState clusterState=client().admin().cluster().prepareState().execute().actionGet().getState();
-  assertThat(clusterState.metaData().index("test").mappings().containsKey("type1"),equalTo(true));
+  waitForMappingOnMaster("test","type1");
   GetMappingsResponse mappingsResponse=client().admin().indices().prepareGetMappings("test").setTypes("type1").execute().actionGet();
   assertThat(mappingsResponse.getMappings().get("test").get("type1"),notNullValue());
-  ElasticsearchAssertions.assertAcked(client().admin().indices().prepareDeleteMapping().setIndices("test").setType("type1"));
+  assertAcked(client().admin().indices().prepareDeleteMapping().setIndices("test").setType("type1"));
   for (int i=0; i < 10; i++) {
     CountResponse countResponse=client().prepareCount().setQuery(matchAllQuery()).execute().actionGet();
     assertThat(countResponse.getCount(),equalTo(0l));
   }
-  clusterState=client().admin().cluster().prepareState().execute().actionGet().getState();
-  assertThat(clusterState.metaData().index("test").mappings().containsKey("type1"),equalTo(false));
-  mappingsResponse=client().admin().indices().prepareGetMappings("test").setTypes("type1").execute().actionGet();
-  assertThat(mappingsResponse.getMappings().get("test"),nullValue());
+  assertBusy(new Runnable(){
+    @Override public void run(){
+      GetMappingsResponse response=client().admin().indices().prepareGetMappings().get();
+      assertTrue(response.getMappings().containsKey("test"));
+      assertFalse(response.getMappings().get("test").containsKey("type1"));
+    }
+  }
+);
 }

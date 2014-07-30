@@ -1,25 +1,25 @@
 {
   if (!rehash) {
-    LongValues hashValues=((ValuesSource.Numeric)valuesSource).longValues();
+    MurmurHash3Values hashValues=MurmurHash3Values.cast(((ValuesSource.Numeric)valuesSource).longValues());
     return new DirectCollector(counts,hashValues);
   }
   if (valuesSource instanceof ValuesSource.Numeric) {
     ValuesSource.Numeric source=(ValuesSource.Numeric)valuesSource;
-    LongValues hashValues=source.isFloatingPoint() ? MurmurHash3Values.wrap(source.doubleValues()) : MurmurHash3Values.wrap(source.longValues());
+    MurmurHash3Values hashValues=source.isFloatingPoint() ? MurmurHash3Values.hash(source.doubleValues()) : MurmurHash3Values.hash(source.longValues());
     return new DirectCollector(counts,hashValues);
   }
-  final BytesValues bytesValues=valuesSource.bytesValues();
-  if (bytesValues instanceof BytesValues.WithOrdinals) {
-    BytesValues.WithOrdinals values=(BytesValues.WithOrdinals)bytesValues;
-    final long maxOrd=values.ordinals().getMaxOrd();
+  if (valuesSource instanceof ValuesSource.Bytes.WithOrdinals) {
+    ValuesSource.Bytes.WithOrdinals source=(ValuesSource.Bytes.WithOrdinals)valuesSource;
+    final RandomAccessOrds ordinalValues=source.ordinalsValues();
+    final long maxOrd=ordinalValues.getValueCount();
     if (maxOrd == 0) {
       return new EmptyCollector();
     }
     final long ordinalsMemoryUsage=OrdinalsCollector.memoryOverhead(maxOrd);
     final long countsMemoryUsage=HyperLogLogPlusPlus.memoryUsage(precision);
     if (ordinalsMemoryUsage < countsMemoryUsage / 4) {
-      return new OrdinalsCollector(counts,values,bigArrays);
+      return new OrdinalsCollector(counts,ordinalValues,bigArrays);
     }
   }
-  return new DirectCollector(counts,MurmurHash3Values.wrap(bytesValues));
+  return new DirectCollector(counts,MurmurHash3Values.hash(valuesSource.bytesValues()));
 }

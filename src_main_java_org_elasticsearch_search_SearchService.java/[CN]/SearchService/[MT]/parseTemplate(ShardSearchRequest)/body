@@ -1,29 +1,36 @@
 {
+  final ExecutableScript executable;
   if (hasLength(request.templateName())) {
-    ExecutableScript executable=this.scriptService.executable("mustache",request.templateName(),request.templateParams());
-    BytesReference processedQuery=(BytesReference)executable.run();
-    request.source(processedQuery);
+    executable=this.scriptService.executable("mustache",request.templateName(),request.templateType(),request.templateParams());
   }
  else {
-    if (request.templateSource() == null || request.templateSource().length() == 0) {
+    if (!hasLength(request.templateSource())) {
       return;
     }
     XContentParser parser=null;
+    TemplateQueryParser.TemplateContext templateContext=null;
     try {
       parser=XContentFactory.xContent(request.templateSource()).createParser(request.templateSource());
-      TemplateQueryParser.TemplateContext templateContext=TemplateQueryParser.parse(parser,"template","params");
-      if (!hasLength(templateContext.template())) {
-        throw new ElasticsearchParseException("Template must have [template] field configured");
+      templateContext=TemplateQueryParser.parse(parser,"params","template");
+      if (templateContext.scriptType().equals(ScriptService.ScriptType.INLINE)) {
+        parser=XContentFactory.xContent(templateContext.template().getBytes(Charset.defaultCharset())).createParser(templateContext.template().getBytes(Charset.defaultCharset()));
+        TemplateQueryParser.TemplateContext innerContext=TemplateQueryParser.parse(parser,"params");
+        if (hasLength(innerContext.template()) && !innerContext.scriptType().equals(ScriptService.ScriptType.INLINE)) {
+          templateContext=new TemplateQueryParser.TemplateContext(innerContext.scriptType(),innerContext.template(),templateContext.params());
+        }
       }
-      ExecutableScript executable=this.scriptService.executable("mustache",templateContext.template(),templateContext.params());
-      BytesReference processedQuery=(BytesReference)executable.run();
-      request.source(processedQuery);
     }
  catch (    IOException e) {
-      logger.error("Error trying to parse template: ",e);
+      throw new ElasticsearchParseException("Failed to parse template",e);
     }
  finally {
-      IOUtils.closeWhileHandlingException(parser);
+      Releasables.closeWhileHandlingException(parser);
     }
+    if (templateContext == null || !hasLength(templateContext.template())) {
+      throw new ElasticsearchParseException("Template must have [template] field configured");
+    }
+    executable=this.scriptService.executable("mustache",templateContext.template(),templateContext.scriptType(),templateContext.params());
   }
+  BytesReference processedQuery=(BytesReference)executable.run();
+  request.source(processedQuery);
 }

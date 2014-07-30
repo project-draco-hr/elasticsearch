@@ -1,0 +1,36 @@
+{
+  super(settings);
+  int cacheMaxSize=componentSettings.getAsInt("cache.max_size",500);
+  TimeValue cacheExpire=componentSettings.getAsTime("cache.expire",null);
+  logger.debug("using script cache with max_size [{}], expire [{}]",cacheMaxSize,cacheExpire);
+  this.defaultLang=settings.get(DEFAULT_SCRIPTING_LANGUAGE_SETTING,"groovy");
+  this.dynamicScriptingDisabled=DynamicScriptDisabling.parse(settings.get(DISABLE_DYNAMIC_SCRIPTING_SETTING,DISABLE_DYNAMIC_SCRIPTING_DEFAULT));
+  CacheBuilder cacheBuilder=CacheBuilder.newBuilder();
+  if (cacheMaxSize >= 0) {
+    cacheBuilder.maximumSize(cacheMaxSize);
+  }
+  if (cacheExpire != null) {
+    cacheBuilder.expireAfterAccess(cacheExpire.nanos(),TimeUnit.NANOSECONDS);
+  }
+  this.cache=cacheBuilder.build();
+  ImmutableMap.Builder<String,ScriptEngineService> builder=ImmutableMap.builder();
+  for (  ScriptEngineService scriptEngine : scriptEngines) {
+    for (    String type : scriptEngine.types()) {
+      builder.put(type,scriptEngine);
+    }
+  }
+  this.scriptEngines=builder.build();
+  staticCache.put("doc.score",new CompiledScript("native",new DocScoreNativeScriptFactory()));
+  scriptsDirectory=new File(env.configFile(),"scripts");
+  if (logger.isTraceEnabled()) {
+    logger.trace("Using scripts directory [{}] ",scriptsDirectory);
+  }
+  FileWatcher fileWatcher=new FileWatcher(scriptsDirectory);
+  fileWatcher.addListener(new ScriptChangesListener());
+  if (componentSettings.getAsBoolean("auto_reload_enabled",true)) {
+    resourceWatcherService.add(fileWatcher);
+  }
+ else {
+    fileWatcher.init();
+  }
+}

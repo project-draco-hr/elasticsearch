@@ -1,0 +1,46 @@
+{
+  this.logger=logger;
+  this.queries=context.percolateQueries();
+  this.searcher=context.docSearcher();
+  final FieldMapper<?> idMapper=context.mapperService().smartNameFieldMapper(IdFieldMapper.NAME);
+  this.idFieldData=context.fieldData().getForField(idMapper);
+  this.isNestedDoc=isNestedDoc;
+  ImmutableList.Builder<Collector> facetAggCollectorBuilder=ImmutableList.builder();
+  if (context.facets() != null) {
+    for (    SearchContextFacets.Entry entry : context.facets().entries()) {
+      if (entry.isGlobal()) {
+        continue;
+      }
+      Collector collector=entry.getFacetExecutor().collector();
+      if (entry.getFilter() != null) {
+        if (collector instanceof NestedFacetExecutor.Collector) {
+          collector=new NestedFacetExecutor.Collector((NestedFacetExecutor.Collector)collector,entry.getFilter());
+        }
+ else {
+          collector=new FilteredCollector(collector,entry.getFilter());
+        }
+      }
+      facetAggCollectorBuilder.add(collector);
+    }
+  }
+  if (context.aggregations() != null) {
+    AggregationContext aggregationContext=new AggregationContext(context);
+    context.aggregations().aggregationContext(aggregationContext);
+    List<Aggregator> aggregatorCollectors=new ArrayList<>();
+    Aggregator[] aggregators=context.aggregations().factories().createTopLevelAggregators(aggregationContext);
+    for (int i=0; i < aggregators.length; i++) {
+      if (!(aggregators[i] instanceof GlobalAggregator)) {
+        Aggregator aggregator=aggregators[i];
+        if (aggregator.shouldCollect()) {
+          aggregatorCollectors.add(aggregator);
+        }
+      }
+    }
+    context.aggregations().aggregators(aggregators);
+    if (!aggregatorCollectors.isEmpty()) {
+      facetAggCollectorBuilder.add(new AggregationPhase.AggregationsCollector(aggregatorCollectors,aggregationContext));
+    }
+    aggregationContext.setNextReader(context.searcher().getIndexReader().getContext());
+  }
+  facetAndAggregatorCollector=facetAggCollectorBuilder.build();
+}

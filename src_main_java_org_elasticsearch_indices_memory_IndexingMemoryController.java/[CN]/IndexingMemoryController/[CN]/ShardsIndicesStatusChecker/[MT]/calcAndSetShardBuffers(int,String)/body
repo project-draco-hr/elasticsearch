@@ -1,0 +1,45 @@
+{
+  if (activeShards == 0) {
+    return;
+  }
+  ByteSizeValue shardIndexingBufferSize=new ByteSizeValue(indexingBuffer.bytes() / activeShards);
+  if (shardIndexingBufferSize.bytes() < minShardIndexBufferSize.bytes()) {
+    shardIndexingBufferSize=minShardIndexBufferSize;
+  }
+  if (shardIndexingBufferSize.bytes() > maxShardIndexBufferSize.bytes()) {
+    shardIndexingBufferSize=maxShardIndexBufferSize;
+  }
+  ByteSizeValue shardTranslogBufferSize=new ByteSizeValue(translogBuffer.bytes() / activeShards);
+  if (shardTranslogBufferSize.bytes() < minShardTranslogBufferSize.bytes()) {
+    shardTranslogBufferSize=minShardTranslogBufferSize;
+  }
+  if (shardTranslogBufferSize.bytes() > maxShardTranslogBufferSize.bytes()) {
+    shardTranslogBufferSize=maxShardTranslogBufferSize;
+  }
+  logger.debug("recalculating shard indexing buffer (reason={}), total is [{}] with [{}] active shards, each shard set to indexing=[{}], translog=[{}]",reason,indexingBuffer,activeShards,shardIndexingBufferSize,shardTranslogBufferSize);
+  for (  IndexService indexService : indicesService) {
+    for (    IndexShard indexShard : indexService) {
+      IndexShardState state=indexShard.state();
+      if (!CAN_UPDATE_INDEX_BUFFER_STATES.contains(state)) {
+        logger.trace("shard [{}] is not yet ready for index buffer update. index shard state: [{}]",indexShard.shardId(),state);
+        continue;
+      }
+      ShardIndexingStatus status=shardsIndicesStatus.get(indexShard.shardId());
+      if (status == null || status.activeIndexing) {
+        try {
+          ((InternalIndexShard)indexShard).engine().updateIndexingBufferSize(shardIndexingBufferSize);
+          ((InternalIndexShard)indexShard).translog().updateBuffer(shardTranslogBufferSize);
+        }
+ catch (        EngineClosedException e) {
+          continue;
+        }
+catch (        FlushNotAllowedEngineException e) {
+          continue;
+        }
+catch (        Exception e) {
+          logger.warn("failed to set shard {} index buffer to [{}]",indexShard.shardId(),shardIndexingBufferSize);
+        }
+      }
+    }
+  }
+}

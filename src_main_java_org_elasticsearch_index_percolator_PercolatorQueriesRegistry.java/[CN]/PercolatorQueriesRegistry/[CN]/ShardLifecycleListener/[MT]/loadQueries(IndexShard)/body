@@ -1,20 +1,15 @@
 {
-  try {
-    shard.refresh(new Engine.Refresh("percolator_load_queries").force(true));
-    Engine.Searcher searcher=shard.acquireSearcher("percolator_load_queries",IndexShard.Mode.WRITE);
-    try {
-      Query query=new XConstantScoreQuery(indexCache.filter().cache(new TermFilter(new Term(TypeFieldMapper.NAME,PercolatorService.TYPE_NAME))));
-      QueriesLoaderCollector queryCollector=new QueriesLoaderCollector(PercolatorQueriesRegistry.this,logger,mapperService,indexFieldDataService);
-      searcher.searcher().search(query,queryCollector);
-      Map<BytesRef,Query> queries=queryCollector.queries();
-      for (      Map.Entry<BytesRef,Query> entry : queries.entrySet()) {
-        Query previousQuery=percolateQueries.put(entry.getKey(),entry.getValue());
-        shardPercolateService.addedQuery(entry.getKey(),previousQuery,entry.getValue());
-      }
+  shard.refresh(new Engine.Refresh("percolator_load_queries").force(true));
+  try (Engine.Searcher searcher=shard.acquireSearcher("percolator_load_queries",IndexShard.Mode.WRITE)){
+    Query query=new XConstantScoreQuery(indexCache.filter().cache(new TermFilter(new Term(TypeFieldMapper.NAME,PercolatorService.TYPE_NAME))));
+    QueriesLoaderCollector queryCollector=new QueriesLoaderCollector(PercolatorQueriesRegistry.this,logger,mapperService,indexFieldDataService);
+    searcher.searcher().search(query,queryCollector);
+    Map<BytesRef,Query> queries=queryCollector.queries();
+    for (    Map.Entry<BytesRef,Query> entry : queries.entrySet()) {
+      Query previousQuery=percolateQueries.put(entry.getKey(),entry.getValue());
+      shardPercolateService.addedQuery(entry.getKey(),previousQuery,entry.getValue());
     }
-  finally {
-      searcher.close();
-    }
+    return queries.size();
   }
  catch (  Exception e) {
     throw new PercolatorException(shardId.index(),"failed to load queries from percolator index",e);

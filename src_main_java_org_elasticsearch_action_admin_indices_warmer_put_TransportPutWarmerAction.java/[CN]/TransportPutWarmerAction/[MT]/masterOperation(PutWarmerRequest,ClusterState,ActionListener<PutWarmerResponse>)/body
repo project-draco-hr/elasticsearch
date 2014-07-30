@@ -5,25 +5,13 @@
         listener.onFailure(new ElasticsearchException("search failed with failed shards: " + Arrays.toString(searchResponse.getShardFailures())));
         return;
       }
-      clusterService.submitStateUpdateTask("put_warmer [" + request.name() + "]",new AckedClusterStateUpdateTask(){
-        @Override public boolean mustAck(        DiscoveryNode discoveryNode){
-          return true;
-        }
-        @Override public void onAllNodesAcked(        @Nullable Throwable t){
-          listener.onResponse(new PutWarmerResponse(true));
-        }
-        @Override public void onAckTimeout(){
-          listener.onResponse(new PutWarmerResponse(false));
-        }
-        @Override public TimeValue ackTimeout(){
-          return request.timeout();
-        }
-        @Override public TimeValue timeout(){
-          return request.masterNodeTimeout();
+      clusterService.submitStateUpdateTask("put_warmer [" + request.name() + "]",new AckedClusterStateUpdateTask<PutWarmerResponse>(request,listener){
+        @Override protected PutWarmerResponse newResponse(        boolean acknowledged){
+          return new PutWarmerResponse(acknowledged);
         }
         @Override public void onFailure(        String source,        Throwable t){
           logger.debug("failed to put warmer [{}] on indices [{}]",t,request.name(),request.searchRequest().indices());
-          listener.onFailure(t);
+          super.onFailure(source,t);
         }
         @Override public ClusterState execute(        ClusterState currentState){
           MetaData metaData=currentState.metaData();
@@ -71,8 +59,6 @@
             mdBuilder.put(indexBuilder);
           }
           return ClusterState.builder(currentState).metaData(mdBuilder).build();
-        }
-        @Override public void clusterStateProcessed(        String source,        ClusterState oldState,        ClusterState newState){
         }
       }
 );

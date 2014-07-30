@@ -2,7 +2,10 @@
   ThreadMXBean threadBean=ManagementFactory.getThreadMXBean();
   Set<String> preNodeStartThreadNames=Sets.newHashSet();
   for (  long l : threadBean.getAllThreadIds()) {
-    preNodeStartThreadNames.add(threadBean.getThreadInfo(l).getThreadName());
+    ThreadInfo threadInfo=threadBean.getThreadInfo(l);
+    if (threadInfo != null) {
+      preNodeStartThreadNames.add(threadInfo.getThreadName());
+    }
   }
   logger.info("pre node threads are {}",preNodeStartThreadNames);
   String node=internalCluster().startNode();
@@ -15,18 +18,21 @@
   indexRandom(true,builders);
   int numSearches=randomIntBetween(2,100);
   for (int i=0; i < numSearches; i++) {
-    assertAllSuccessful(client().prepareSearch("idx").setQuery(QueryBuilders.termQuery("str_value","s" + i)).get());
-    assertAllSuccessful(client().prepareSearch("idx").setQuery(QueryBuilders.termQuery("l_value",i)).get());
+    assertNoFailures(client().prepareSearch("idx").setQuery(QueryBuilders.termQuery("str_value","s" + i)).get());
+    assertNoFailures(client().prepareSearch("idx").setQuery(QueryBuilders.termQuery("l_value",i)).get());
   }
   Set<String> threadNames=Sets.newHashSet();
   for (  long l : threadBean.getAllThreadIds()) {
-    threadNames.add(threadBean.getThreadInfo(l).getThreadName());
+    ThreadInfo threadInfo=threadBean.getThreadInfo(l);
+    if (threadInfo != null) {
+      threadNames.add(threadInfo.getThreadName());
+    }
   }
   logger.info("post node threads are {}",threadNames);
   threadNames.removeAll(preNodeStartThreadNames);
   logger.info("post node *new* threads are {}",threadNames);
   for (  String threadName : threadNames) {
-    if (threadName.contains("[" + MulticastChannel.SHARED_CHANNEL_NAME + "]")) {
+    if (threadName.contains("[" + MulticastChannel.SHARED_CHANNEL_NAME + "]") || threadName.contains("[" + ElasticsearchSingleNodeTest.nodeName() + "]")) {
       continue;
     }
     assertThat(threadName,anyOf(containsString("[" + node + "]"),containsString("[" + InternalTestCluster.TRANSPORT_CLIENT_PREFIX + node+ "]")));
