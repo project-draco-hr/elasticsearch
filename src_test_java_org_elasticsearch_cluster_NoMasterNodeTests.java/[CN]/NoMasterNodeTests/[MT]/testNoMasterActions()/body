@@ -1,5 +1,7 @@
 {
-  Settings settings=settingsBuilder().put("discovery.type","zen").put("action.auto_create_index",false).put("discovery.zen.minimum_master_nodes",2).put("discovery.zen.ping_timeout","200ms").put("discovery.initial_state_timeout","500ms").build();
+  boolean autoCreateIndex=randomBoolean();
+  logger.info("auto_create_index set to {}",autoCreateIndex);
+  Settings settings=settingsBuilder().put("discovery.type","zen").put("action.auto_create_index",autoCreateIndex).put("discovery.zen.minimum_master_nodes",2).put("discovery.zen.ping_timeout","200ms").put("discovery.initial_state_timeout","500ms").build();
   TimeValue timeout=TimeValue.timeValueMillis(200);
   internalCluster().startNode(settings);
   internalCluster().startNode(settings);
@@ -17,14 +19,14 @@
     client().prepareGet("test","type1","1").execute().actionGet();
     fail("Expected ClusterBlockException");
   }
- catch (  ClusterBlockException e) {
+ catch (  ClusterBlockException|MasterNotDiscoveredException e) {
     assertThat(e.status(),equalTo(RestStatus.SERVICE_UNAVAILABLE));
   }
   try {
     client().prepareMultiGet().add("test","type1","1").execute().actionGet();
     fail("Expected ClusterBlockException");
   }
- catch (  ClusterBlockException e) {
+ catch (  ClusterBlockException|MasterNotDiscoveredException e) {
     assertThat(e.status(),equalTo(RestStatus.SERVICE_UNAVAILABLE));
   }
   try {
@@ -33,7 +35,7 @@
     client().preparePercolate().setIndices("test").setDocumentType("type1").setSource(percolateSource).execute().actionGet();
     fail("Expected ClusterBlockException");
   }
- catch (  ClusterBlockException e) {
+ catch (  ClusterBlockException|MasterNotDiscoveredException e) {
     assertThat(e.status(),equalTo(RestStatus.SERVICE_UNAVAILABLE));
   }
   long now=System.currentTimeMillis();
@@ -41,7 +43,7 @@
     client().prepareUpdate("test","type1","1").setScript("test script",ScriptService.ScriptType.INLINE).setTimeout(timeout).execute().actionGet();
     fail("Expected ClusterBlockException");
   }
- catch (  ClusterBlockException e) {
+ catch (  ClusterBlockException|MasterNotDiscoveredException e) {
     assertThat(System.currentTimeMillis() - now,greaterThan(timeout.millis() - 50));
     assertThat(e.status(),equalTo(RestStatus.SERVICE_UNAVAILABLE));
   }
@@ -49,14 +51,14 @@
     client().admin().indices().prepareAnalyze("test","this is a test").execute().actionGet();
     fail("Expected ClusterBlockException");
   }
- catch (  ClusterBlockException e) {
+ catch (  ClusterBlockException|MasterNotDiscoveredException e) {
     assertThat(e.status(),equalTo(RestStatus.SERVICE_UNAVAILABLE));
   }
   try {
     client().prepareCount("test").execute().actionGet();
     fail("Expected ClusterBlockException");
   }
- catch (  ClusterBlockException e) {
+ catch (  ClusterBlockException|MasterNotDiscoveredException e) {
     assertThat(e.status(),equalTo(RestStatus.SERVICE_UNAVAILABLE));
   }
   now=System.currentTimeMillis();
@@ -64,8 +66,26 @@
     client().prepareIndex("test","type1","1").setSource(XContentFactory.jsonBuilder().startObject().endObject()).setTimeout(timeout).execute().actionGet();
     fail("Expected ClusterBlockException");
   }
- catch (  ClusterBlockException e) {
+ catch (  ClusterBlockException|MasterNotDiscoveredException e) {
     assertThat(System.currentTimeMillis() - now,greaterThan(timeout.millis() - 50));
+    assertThat(e.status(),equalTo(RestStatus.SERVICE_UNAVAILABLE));
+  }
+  now=System.currentTimeMillis();
+  try {
+    BulkRequestBuilder bulkRequestBuilder=client().prepareBulk();
+    bulkRequestBuilder.add(client().prepareIndex("test","type1","1").setSource(XContentFactory.jsonBuilder().startObject().endObject()));
+    bulkRequestBuilder.add(client().prepareIndex("test","type1","2").setSource(XContentFactory.jsonBuilder().startObject().endObject()));
+    bulkRequestBuilder.setTimeout(timeout);
+    bulkRequestBuilder.get();
+    fail("Expected ClusterBlockException");
+  }
+ catch (  ClusterBlockException|MasterNotDiscoveredException e) {
+    if (autoCreateIndex) {
+      assertThat(System.currentTimeMillis() - now,greaterThan(timeout.millis() - 50));
+    }
+ else {
+      assertThat(System.currentTimeMillis() - now,lessThan(50l));
+    }
     assertThat(e.status(),equalTo(RestStatus.SERVICE_UNAVAILABLE));
   }
   internalCluster().startNode(settings);
