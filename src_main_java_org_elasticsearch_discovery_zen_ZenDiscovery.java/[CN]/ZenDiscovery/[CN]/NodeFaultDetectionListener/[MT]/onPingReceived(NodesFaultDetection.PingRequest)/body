@@ -1,0 +1,24 @@
+{
+  if (!master) {
+    pingsWhileMaster.set(0);
+    return;
+  }
+  if (pingRequest.masterNode() == null) {
+    return;
+  }
+  if (pingsWhileMaster.incrementAndGet() < maxPingsFromAnotherMaster) {
+    logger.trace("got a ping from another master {}. current ping count: [{}]",pingRequest.masterNode(),pingsWhileMaster.get());
+    return;
+  }
+  logger.debug("got a ping from another master {}. resolving who should rejoin. current ping count: [{}]",pingRequest.masterNode(),pingsWhileMaster.get());
+  clusterService.submitStateUpdateTask("ping from another master",Priority.URGENT,new ClusterStateUpdateTask(){
+    @Override public ClusterState execute(    ClusterState currentState) throws Exception {
+      pingsWhileMaster.set(0);
+      return handleAnotherMaster(currentState,pingRequest.masterNode(),pingRequest.clusterStateVersion(),"node fd ping");
+    }
+    @Override public void onFailure(    String source,    Throwable t){
+      logger.debug("unexpected error during cluster state update task after pings from another master",t);
+    }
+  }
+);
+}
