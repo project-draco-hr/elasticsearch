@@ -42,14 +42,24 @@
       functionArrayFound=true;
     }
  else {
-      ScoreFunctionParser currentFunctionParser=funtionParserMapper.get(parseContext.index(),currentFieldName);
-      singleFunctionName=currentFieldName;
+      ScoreFunction scoreFunction;
+      if (currentFieldName.equals("weight")) {
+        scoreFunction=new WeightFactorFunction(parser.floatValue());
+      }
+ else {
+        scoreFunction=funtionParserMapper.get(parseContext.index(),currentFieldName).parse(parseContext,parser);
+      }
       if (functionArrayFound) {
         String errorString="Found \"functions\": [...] already, now encountering \"" + currentFieldName + "\".";
         handleMisplacedFunctionsDeclaration(errorString,currentFieldName);
       }
-      filterFunctions.add(new FiltersFunctionScoreQuery.FilterFunction(null,currentFunctionParser.parse(parseContext,parser)));
+      if (filterFunctions.size() > 0) {
+        String errorString="Found function " + singleFunctionName + " already, now encountering \""+ currentFieldName+ "\". Use functions[{...},...] if you want to define several functions.";
+        throw new ElasticsearchParseException(errorString);
+      }
+      filterFunctions.add(new FiltersFunctionScoreQuery.FilterFunction(null,scoreFunction));
       singleFunctionFound=true;
+      singleFunctionName=currentFieldName;
     }
   }
   if (query == null) {
@@ -58,7 +68,7 @@
   if (filterFunctions.isEmpty()) {
     return query;
   }
-  if (filterFunctions.size() == 1 && filterFunctions.get(0).filter == null) {
+  if (filterFunctions.size() == 1 && (filterFunctions.get(0).filter == null || filterFunctions.get(0).filter instanceof MatchAllDocsFilter)) {
     FunctionScoreQuery theQuery=new FunctionScoreQuery(query,filterFunctions.get(0).function);
     if (combineFunction != null) {
       theQuery.setCombineFunction(combineFunction);

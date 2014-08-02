@@ -1,0 +1,10 @@
+{
+  assertAcked(prepareCreate(INDEX).addMapping(TYPE,MAPPING_WITH_FLOAT_AND_GEO_POINT_AND_TEST_FIELD));
+  ensureYellow();
+  index(INDEX,TYPE,"1",SIMPLE_DOC);
+  refresh();
+  SearchResponse response=client().search(searchRequest().source(searchSource().query(functionScoreQuery(termFilter(TEXT_FIELD,"value")).add(gaussDecayFunction(GEO_POINT_FIELD,new GeoPoint(10,20),"1000km")).add(fieldValueFactorFunction(FLOAT_FIELD).modifier(FieldValueFactorFunction.Modifier.LN)).add(scriptFunction("_index['" + TEXT_FIELD + "']['value'].tf()"))))).actionGet();
+  SearchResponse responseWithWeights=client().search(searchRequest().source(searchSource().query(functionScoreQuery(termFilter(TEXT_FIELD,"value")).add(gaussDecayFunction(GEO_POINT_FIELD,new GeoPoint(10,20),"1000km").setWeight(2)).add(fieldValueFactorFunction(FLOAT_FIELD).modifier(FieldValueFactorFunction.Modifier.LN).setWeight(2)).add(scriptFunction("_index['" + TEXT_FIELD + "']['value'].tf()").setWeight(2))))).actionGet();
+  assertThat((double)response.getHits().getAt(0).getScore(),closeTo(1.0,1.e-5));
+  assertThat((double)responseWithWeights.getHits().getAt(0).getScore(),closeTo(8.0,1.e-5));
+}
