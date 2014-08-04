@@ -1,0 +1,47 @@
+{
+  List<FiltersAggregator.KeyedFilter> filters=new ArrayList<>();
+  XContentParser.Token token=null;
+  String currentFieldName=null;
+  Boolean keyed=null;
+  while ((token=parser.nextToken()) != XContentParser.Token.END_OBJECT) {
+    if (token == XContentParser.Token.FIELD_NAME) {
+      currentFieldName=parser.currentName();
+    }
+ else     if (token == XContentParser.Token.START_OBJECT) {
+      if ("filters".equals(currentFieldName)) {
+        keyed=true;
+        String key=null;
+        while ((token=parser.nextToken()) != XContentParser.Token.END_OBJECT) {
+          if (token == XContentParser.Token.FIELD_NAME) {
+            key=parser.currentName();
+          }
+ else {
+            ParsedFilter filter=context.queryParserService().parseInnerFilter(parser);
+            filters.add(new FiltersAggregator.KeyedFilter(key,filter.filter()));
+          }
+        }
+      }
+ else {
+        throw new SearchParseException(context,"Unknown key for a " + token + " in ["+ aggregationName+ "]: ["+ currentFieldName+ "].");
+      }
+    }
+ else     if (token == XContentParser.Token.START_ARRAY) {
+      if ("filters".equals(currentFieldName)) {
+        keyed=false;
+        int idx=0;
+        while ((token=parser.nextToken()) != XContentParser.Token.END_ARRAY) {
+          ParsedFilter filter=context.queryParserService().parseInnerFilter(parser);
+          filters.add(new FiltersAggregator.KeyedFilter(String.valueOf(idx),filter.filter()));
+          idx++;
+        }
+      }
+ else {
+        throw new SearchParseException(context,"Unknown key for a " + token + " in ["+ aggregationName+ "]: ["+ currentFieldName+ "].");
+      }
+    }
+ else {
+      throw new SearchParseException(context,"Unknown key for a " + token + " in ["+ aggregationName+ "]: ["+ currentFieldName+ "].");
+    }
+  }
+  return new FiltersAggregator.Factory(aggregationName,filters,keyed);
+}

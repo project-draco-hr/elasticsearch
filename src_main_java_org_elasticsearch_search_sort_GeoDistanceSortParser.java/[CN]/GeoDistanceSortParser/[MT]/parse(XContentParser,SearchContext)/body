@@ -1,6 +1,6 @@
 {
   String fieldName=null;
-  GeoPoint point=new GeoPoint();
+  List<GeoPoint> geoPoints=new ArrayList<>();
   DistanceUnit unit=DistanceUnit.DEFAULT;
   GeoDistance geoDistance=GeoDistance.DEFAULT;
   boolean reverse=false;
@@ -16,7 +16,7 @@
       currentName=parser.currentName();
     }
  else     if (token == XContentParser.Token.START_ARRAY) {
-      GeoUtils.parseGeoPoint(parser,point);
+      parseGeoPoints(parser,geoPoints);
       fieldName=currentName;
     }
  else     if (token == XContentParser.Token.START_OBJECT) {
@@ -26,7 +26,9 @@
       }
  else {
         fieldName=currentName;
+        GeoPoint point=new GeoPoint();
         GeoUtils.parseGeoPoint(parser,point);
+        geoPoints.add(point);
       }
     }
  else     if (token.isValue()) {
@@ -53,13 +55,17 @@
         nestedPath=parser.text();
       }
  else {
+        GeoPoint point=new GeoPoint();
         point.resetFromString(parser.text());
+        geoPoints.add(point);
         fieldName=currentName;
       }
     }
   }
   if (normalizeLat || normalizeLon) {
-    GeoUtils.normalizePoint(point,normalizeLat,normalizeLon);
+    for (    GeoPoint point : geoPoints) {
+      GeoUtils.normalizePoint(point,normalizeLat,normalizeLon);
+    }
   }
   if (sortMode == null) {
     sortMode=reverse ? MultiValueMode.MAX : MultiValueMode.MIN;
@@ -73,7 +79,10 @@
   }
   final MultiValueMode finalSortMode=sortMode;
   final IndexGeoPointFieldData geoIndexFieldData=context.fieldData().getForField(mapper);
-  final FixedSourceDistance distance=geoDistance.fixedSourceDistance(point.lat(),point.lon(),unit);
+  final FixedSourceDistance[] distances=new FixedSourceDistance[geoPoints.size()];
+  for (int i=0; i < geoPoints.size(); i++) {
+    distances[i]=geoDistance.fixedSourceDistance(geoPoints.get(i).lat(),geoPoints.get(i).lon(),unit);
+  }
   ObjectMapper objectMapper;
   if (nestedPath != null) {
     ObjectMappers objectMappers=context.mapperService().objectMapper(nestedPath);
@@ -111,7 +120,7 @@
       return new FieldComparator.DoubleComparator(numHits,null,null,null){
         @Override protected Doubles getDoubleValues(        AtomicReaderContext context,        String field) throws IOException {
           final MultiGeoPointValues geoPointValues=geoIndexFieldData.load(context).getGeoPointValues();
-          final SortedNumericDoubleValues distanceValues=GeoDistance.distanceValues(distance,geoPointValues);
+          final SortedNumericDoubleValues distanceValues=GeoDistance.distanceValues(geoPointValues,distances);
           final NumericDoubleValues selectedValues;
           if (nested == null) {
             selectedValues=finalSortMode.select(distanceValues,Double.MAX_VALUE);

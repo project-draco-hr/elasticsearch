@@ -1,0 +1,42 @@
+{
+  IndexService indexService=createIndex("test");
+  DocumentMapperParser parser=indexService.mapperService().documentMapperParser();
+  for (  boolean mapped : new boolean[]{true,false}) {
+    XContentBuilder mapping=jsonBuilder().startObject().startObject("type").startObject("properties").startObject("n1").field("type","nested").startObject("properties").startObject("n2").field("type","nested").startObject("properties").startObject("source").field("type","long").startArray("copy_to").value("target").value("n1.target").value("n1.n2.target").endArray().endObject();
+    for (int i=0; i < 3; ++i) {
+      if (mapped) {
+        mapping=mapping.startObject("target").field("type","long").endObject();
+      }
+      mapping=mapping.endObject().endObject();
+    }
+    mapping=mapping.endObject();
+    DocumentMapper mapper=parser.parse(mapping.string());
+    XContentBuilder jsonDoc=XContentFactory.jsonBuilder().startObject().startArray("n1").startObject().startArray("n2").startObject().field("source",3).endObject().startObject().field("source",5).endObject().endArray().endObject().startObject().startArray("n2").startObject().field("source",7).endObject().endArray().endObject().endArray().endObject();
+    ParsedDocument doc=mapper.parse("type","1",jsonDoc.bytes());
+    assertEquals(6,doc.docs().size());
+    Document nested=doc.docs().get(0);
+    assertFieldValue(nested,"n1.n2.target",7L);
+    assertFieldValue(nested,"n1.target");
+    assertFieldValue(nested,"target");
+    nested=doc.docs().get(2);
+    assertFieldValue(nested,"n1.n2.target",5L);
+    assertFieldValue(nested,"n1.target");
+    assertFieldValue(nested,"target");
+    nested=doc.docs().get(3);
+    assertFieldValue(nested,"n1.n2.target",3L);
+    assertFieldValue(nested,"n1.target");
+    assertFieldValue(nested,"target");
+    Document parent=doc.docs().get(1);
+    assertFieldValue(parent,"target");
+    assertFieldValue(parent,"n1.target",7L);
+    assertFieldValue(parent,"n1.n2.target");
+    parent=doc.docs().get(4);
+    assertFieldValue(parent,"target");
+    assertFieldValue(parent,"n1.target",3L,5L);
+    assertFieldValue(parent,"n1.n2.target");
+    Document root=doc.docs().get(5);
+    assertFieldValue(root,"target",3L,5L,7L);
+    assertFieldValue(root,"n1.target");
+    assertFieldValue(root,"n1.n2.target");
+  }
+}

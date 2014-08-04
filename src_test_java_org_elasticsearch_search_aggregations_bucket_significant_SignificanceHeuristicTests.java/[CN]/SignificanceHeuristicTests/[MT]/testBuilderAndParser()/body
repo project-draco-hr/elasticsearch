@@ -2,62 +2,30 @@
   Set<SignificanceHeuristicParser> parsers=new HashSet<>();
   parsers.add(new JLHScore.JLHScoreParser());
   parsers.add(new MutualInformation.MutualInformationParser());
+  parsers.add(new GND.GNDParser());
+  parsers.add(new ChiSquare.ChiSquareParser());
   SignificanceHeuristicParserMapper heuristicParserMapper=new SignificanceHeuristicParserMapper(parsers);
   SearchContext searchContext=new SignificantTermsTestSearchContext();
-  XContentParser stParser=JsonXContent.jsonXContent.createParser("{\"field\":\"text\", \"jlh\":{}, \"min_doc_count\":200}");
-  stParser.nextToken();
-  SignificantTermsAggregatorFactory aggregatorFactory=(SignificantTermsAggregatorFactory)new SignificantTermsParser(heuristicParserMapper).parse("testagg",stParser,searchContext);
-  stParser.nextToken();
-  assertThat(aggregatorFactory.getBucketCountThresholds().getMinDocCount(),equalTo(200l));
-  assertThat(stParser.currentToken(),equalTo(null));
-  stParser.close();
-  SignificantTermsBuilder stBuilder=new SignificantTermsBuilder("testagg");
-  stBuilder.significanceHeuristic(new JLHScore.JLHScoreBuilder()).field("text").minDocCount(200);
-  XContentBuilder stXContentBuilder=XContentFactory.jsonBuilder();
-  stBuilder.internalXContent(stXContentBuilder,null);
-  stParser=JsonXContent.jsonXContent.createParser(stXContentBuilder.string());
-  stParser.nextToken();
-  aggregatorFactory=(SignificantTermsAggregatorFactory)new SignificantTermsParser(heuristicParserMapper).parse("testagg",stParser,searchContext);
-  stParser.nextToken();
-  assertThat(aggregatorFactory.getBucketCountThresholds().getMinDocCount(),equalTo(200l));
-  assertThat(stParser.currentToken(),equalTo(null));
-  stParser.close();
-  stParser=JsonXContent.jsonXContent.createParser("{\"field\":\"text\", \"mutual_information\":{\"include_negatives\": false}, \"min_doc_count\":200}");
-  stParser.nextToken();
-  aggregatorFactory=(SignificantTermsAggregatorFactory)new SignificantTermsParser(heuristicParserMapper).parse("testagg",stParser,searchContext);
-  stParser.nextToken();
-  assertThat(aggregatorFactory.getBucketCountThresholds().getMinDocCount(),equalTo(200l));
-  assertTrue(!((MutualInformation)aggregatorFactory.getSignificanceHeuristic()).getIncludeNegatives());
-  assertThat(stParser.currentToken(),equalTo(null));
-  stParser.close();
-  stBuilder=new SignificantTermsBuilder("testagg");
-  stBuilder.significanceHeuristic(new MutualInformation.MutualInformationBuilder(false,true)).field("text").minDocCount(200);
-  stXContentBuilder=XContentFactory.jsonBuilder();
-  stBuilder.internalXContent(stXContentBuilder,null);
-  stParser=JsonXContent.jsonXContent.createParser(stXContentBuilder.string());
-  stParser.nextToken();
-  aggregatorFactory=(SignificantTermsAggregatorFactory)new SignificantTermsParser(heuristicParserMapper).parse("testagg",stParser,searchContext);
-  stParser.nextToken();
-  assertThat(aggregatorFactory.getBucketCountThresholds().getMinDocCount(),equalTo(200l));
-  assertTrue(!((MutualInformation)aggregatorFactory.getSignificanceHeuristic()).getIncludeNegatives());
-  assertThat(stParser.currentToken(),equalTo(null));
-  stParser.close();
-  try {
-    stParser=JsonXContent.jsonXContent.createParser("{\"field\":\"text\", \"mutual_information\":{\"include_negatives\": false, \"some_unknown_field\": false}\"min_doc_count\":200}");
-    stParser.nextToken();
-    new SignificantTermsParser(heuristicParserMapper).parse("testagg",stParser,searchContext);
-    fail();
-  }
- catch (  ElasticsearchParseException e) {
-    assertTrue(e.getMessage().contains("unknown for mutual_information"));
-  }
-  try {
-    stParser=JsonXContent.jsonXContent.createParser("{\"field\":\"text\", \"jlh\":{\"unknown_field\": true}, \"min_doc_count\":200}");
-    stParser.nextToken();
-    new SignificantTermsParser(heuristicParserMapper).parse("testagg",stParser,searchContext);
-    fail();
-  }
- catch (  ElasticsearchParseException e) {
-    assertTrue(e.getMessage().contains("expected }, got "));
-  }
+  assertTrue(parseFromString(heuristicParserMapper,searchContext,"\"jlh\":{}") instanceof JLHScore);
+  assertTrue(parseFromString(heuristicParserMapper,searchContext,"\"gnd\":{}") instanceof GND);
+  boolean includeNegatives=randomBoolean();
+  boolean backgroundIsSuperset=randomBoolean();
+  assertThat(parseFromString(heuristicParserMapper,searchContext,"\"mutual_information\":{\"include_negatives\": " + includeNegatives + ", \"background_is_superset\":"+ backgroundIsSuperset+ "}"),equalTo((SignificanceHeuristic)(new MutualInformation(includeNegatives,backgroundIsSuperset))));
+  assertThat(parseFromString(heuristicParserMapper,searchContext,"\"chi_square\":{\"include_negatives\": " + includeNegatives + ", \"background_is_superset\":"+ backgroundIsSuperset+ "}"),equalTo((SignificanceHeuristic)(new ChiSquare(includeNegatives,backgroundIsSuperset))));
+  assertTrue(parseFromBuilder(heuristicParserMapper,searchContext,new JLHScore.JLHScoreBuilder()) instanceof JLHScore);
+  assertTrue(parseFromBuilder(heuristicParserMapper,searchContext,new GND.GNDBuilder(backgroundIsSuperset)) instanceof GND);
+  assertThat(parseFromBuilder(heuristicParserMapper,searchContext,new MutualInformation.MutualInformationBuilder(includeNegatives,backgroundIsSuperset)),equalTo((SignificanceHeuristic)new MutualInformation(includeNegatives,backgroundIsSuperset)));
+  assertThat(parseFromBuilder(heuristicParserMapper,searchContext,new ChiSquare.ChiSquareBuilder(includeNegatives,backgroundIsSuperset)),equalTo((SignificanceHeuristic)new ChiSquare(includeNegatives,backgroundIsSuperset)));
+  String faultyHeuristicdefinition="\"mutual_information\":{\"include_negatives\": false, \"some_unknown_field\": false}";
+  String expectedError="unknown for mutual_information";
+  checkParseException(heuristicParserMapper,searchContext,faultyHeuristicdefinition,expectedError);
+  faultyHeuristicdefinition="\"chi_square\":{\"unknown_field\": true}";
+  expectedError="unknown for chi_square";
+  checkParseException(heuristicParserMapper,searchContext,faultyHeuristicdefinition,expectedError);
+  faultyHeuristicdefinition="\"jlh\":{\"unknown_field\": true}";
+  expectedError="expected }, got ";
+  checkParseException(heuristicParserMapper,searchContext,faultyHeuristicdefinition,expectedError);
+  faultyHeuristicdefinition="\"gnd\":{\"unknown_field\": true}";
+  expectedError="unknown for gnd";
+  checkParseException(heuristicParserMapper,searchContext,faultyHeuristicdefinition,expectedError);
 }
