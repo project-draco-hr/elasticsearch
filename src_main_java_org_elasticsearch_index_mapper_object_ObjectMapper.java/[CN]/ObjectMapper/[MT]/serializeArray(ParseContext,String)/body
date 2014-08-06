@@ -5,27 +5,38 @@
     mapper.parse(context);
   }
  else {
-    XContentParser parser=context.parser();
-    XContentParser.Token token;
-    while ((token=parser.nextToken()) != XContentParser.Token.END_ARRAY) {
-      if (token == XContentParser.Token.START_OBJECT) {
-        serializeObject(context,lastFieldName);
-      }
- else       if (token == XContentParser.Token.START_ARRAY) {
-        serializeArray(context,lastFieldName);
-      }
- else       if (token == XContentParser.Token.FIELD_NAME) {
-        lastFieldName=parser.currentName();
-      }
- else       if (token == XContentParser.Token.VALUE_NULL) {
-        serializeNullValue(context,lastFieldName);
-      }
- else       if (token == null) {
-        throw new MapperParsingException("object mapping for [" + name + "] with array for ["+ arrayFieldName+ "] tried to parse as array, but got EOF, is there a mismatch in types for the same field?");
-      }
+    Dynamic dynamic=this.dynamic;
+    if (dynamic == null) {
+      dynamic=context.root().dynamic();
+    }
+    if (dynamic == Dynamic.STRICT) {
+      throw new StrictDynamicMappingException(fullPath,arrayFieldName);
+    }
+ else     if (dynamic == Dynamic.TRUE) {
+synchronized (mutex) {
+        mapper=mappers.get(arrayFieldName);
+        if (mapper == null) {
+          Mapper.Builder builder=context.root().findTemplateBuilder(context,arrayFieldName,"object");
+          if (builder == null) {
+            serializeNonDynamicArray(context,lastFieldName,arrayFieldName);
+            return;
+          }
+          BuilderContext builderContext=new BuilderContext(context.indexSettings(),context.path());
+          mapper=builder.build(builderContext);
+          if (mapper != null && mapper instanceof ArrayValueMapperParser) {
+            putDynamicMapper(context,arrayFieldName,mapper);
+          }
  else {
-        serializeValue(context,lastFieldName,token);
+            serializeNonDynamicArray(context,lastFieldName,arrayFieldName);
+          }
+        }
+ else {
+          serializeNonDynamicArray(context,lastFieldName,arrayFieldName);
+        }
       }
+    }
+ else {
+      serializeNonDynamicArray(context,lastFieldName,arrayFieldName);
     }
   }
 }
