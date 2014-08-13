@@ -2,35 +2,48 @@
   super.readFrom(in);
   int size=in.readVInt();
   locations=new IntArrayList(size);
-  types=new ArrayList<>(size);
-  ids=new ArrayList<>(size);
-  fields=new ArrayList<>(size);
-  versions=new LongArrayList(size);
-  versionTypes=new ArrayList<>(size);
-  fetchSourceContexts=new ArrayList<>(size);
-  for (int i=0; i < size; i++) {
-    locations.add(in.readVInt());
-    if (in.readBoolean()) {
-      types.add(in.readSharedString());
+  items=new ArrayList<>(size);
+  if (in.getVersion().onOrAfter(Version.V_1_4_0)) {
+    for (int i=0; i < size; i++) {
+      locations.add(in.readVInt());
+      items.add(MultiGetRequest.Item.readItem(in));
     }
+  }
  else {
-      types.add(null);
-    }
-    ids.add(in.readString());
-    int size1=in.readVInt();
-    if (size1 > 0) {
-      String[] fields=new String[size1];
-      for (int j=0; j < size1; j++) {
-        fields[j]=in.readString();
+    List<String> types=new ArrayList<>(size);
+    List<String> ids=new ArrayList<>(size);
+    List<String[]> fields=new ArrayList<>(size);
+    LongArrayList versions=new LongArrayList(size);
+    List<VersionType> versionTypes=new ArrayList<>(size);
+    List<FetchSourceContext> fetchSourceContexts=new ArrayList<>(size);
+    for (int i=0; i < size; i++) {
+      locations.add(in.readVInt());
+      if (in.readBoolean()) {
+        types.add(in.readSharedString());
       }
-      this.fields.add(fields);
-    }
  else {
-      fields.add(null);
+        types.add(null);
+      }
+      ids.add(in.readString());
+      int size1=in.readVInt();
+      if (size1 > 0) {
+        String[] fieldsArray=new String[size1];
+        for (int j=0; j < size1; j++) {
+          fieldsArray[j]=in.readString();
+        }
+        fields.add(fieldsArray);
+      }
+ else {
+        fields.add(null);
+      }
+      versions.add(Versions.readVersionWithVLongForBW(in));
+      versionTypes.add(VersionType.fromValue(in.readByte()));
+      fetchSourceContexts.add(FetchSourceContext.optionalReadFromStream(in));
     }
-    versions.add(Versions.readVersionWithVLongForBW(in));
-    versionTypes.add(VersionType.fromValue(in.readByte()));
-    fetchSourceContexts.add(FetchSourceContext.optionalReadFromStream(in));
+    for (int i=0; i < size; i++) {
+      MultiGetRequest.Item item=new MultiGetRequest.Item(index,types.get(i),ids.get(i)).fields(fields.get(i)).version(versions.get(i)).versionType(versionTypes.get(i)).fetchSourceContext(fetchSourceContexts.get(i));
+      items.add(item);
+    }
   }
   preference=in.readOptionalString();
   refresh=in.readBoolean();
