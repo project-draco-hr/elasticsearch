@@ -1,15 +1,23 @@
 {
+  final String checksum;
+  BytesRef fileHash=new BytesRef();
   try (IndexInput in=directory.openInput(file,IOContext.READONCE)){
     try {
       if (in.length() < CodecUtil.footerLength()) {
         throw new CorruptIndexException("Can't retrieve checksum from file: " + file + " file length must be >= "+ CodecUtil.footerLength()+ " but was: "+ in.length());
       }
-      String checksum=digestToString(CodecUtil.retrieveChecksum(in));
-      builder.put(file,new StoreFileMetaData(file,directory.fileLength(file),checksum,version));
+      if (readFileAsHash) {
+        final int len=(int)Math.min(1024 * 1024,in.length());
+        fileHash.bytes=new byte[len];
+        in.readBytes(fileHash.bytes,0,len);
+        fileHash.length=len;
+      }
+      checksum=digestToString(CodecUtil.retrieveChecksum(in));
     }
  catch (    Throwable ex) {
       logger.debug("Can retrieve checksum from file [{}]",ex,file);
       throw ex;
     }
+    builder.put(file,new StoreFileMetaData(file,directory.fileLength(file),checksum,version,fileHash));
   }
  }
