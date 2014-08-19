@@ -4,15 +4,21 @@
   pingRequest.timeout=timeout;
   DiscoveryNodes discoNodes=nodesProvider.nodes();
   pingRequest.pingResponse=new PingResponse(discoNodes.localNode(),discoNodes.masterNode(),clusterName);
-  HashSet<DiscoveryNode> nodesToPing=new HashSet<>(Arrays.asList(nodes));
+  HashSet<DiscoveryNode> nodesToPingSet=new HashSet<>();
   for (  PingResponse temporalResponse : temporalResponses) {
     if (clusterName.equals(temporalResponse.clusterName())) {
-      nodesToPing.add(temporalResponse.target());
+      nodesToPingSet.add(temporalResponse.target());
     }
   }
   for (  UnicastHostsProvider provider : hostsProviders) {
-    nodesToPing.addAll(provider.buildDynamicNodes());
+    nodesToPingSet.addAll(provider.buildDynamicNodes());
   }
+  for (  ObjectCursor<DiscoveryNode> masterNode : discoNodes.getMasterNodes().values()) {
+    nodesToPingSet.add(masterNode.value);
+  }
+  List<DiscoveryNode> sortedNodesToPing=electMasterService.sortByMasterLikelihood(nodesToPingSet);
+  ArrayList<DiscoveryNode> nodesToPing=Lists.newArrayList(nodes);
+  nodesToPing.addAll(sortedNodesToPing);
   final CountDownLatch latch=new CountDownLatch(nodesToPing.size());
   for (  final DiscoveryNode node : nodesToPing) {
     boolean nodeFoundByAddressX;
