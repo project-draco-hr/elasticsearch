@@ -51,14 +51,14 @@
  else     if ("transform".equals(fieldName)) {
       iterator.remove();
       if (fieldNode instanceof Map) {
-        parseTransform(docBuilder,(Map<String,Object>)fieldNode);
+        parseTransform(docBuilder,(Map<String,Object>)fieldNode,parserContext.indexVersionCreated());
       }
  else       if (fieldNode instanceof List) {
         for (        Object transformItem : (List)fieldNode) {
           if (!(transformItem instanceof Map)) {
             throw new MapperParsingException("Elements of transform list must be objects but one was:  " + fieldNode);
           }
-          parseTransform(docBuilder,(Map<String,Object>)transformItem);
+          parseTransform(docBuilder,(Map<String,Object>)transformItem,parserContext.indexVersionCreated());
         }
       }
  else {
@@ -69,7 +69,10 @@
       Mapper.TypeParser typeParser=rootTypeParsers.get(fieldName);
       if (typeParser != null) {
         iterator.remove();
-        docBuilder.put(typeParser.parse(fieldName,(Map<String,Object>)fieldNode,parserContext));
+        Map<String,Object> fieldNodeMap=(Map<String,Object>)fieldNode;
+        docBuilder.put(typeParser.parse(fieldName,fieldNodeMap,parserContext));
+        fieldNodeMap.remove("type");
+        checkNoRemainingFields(fieldName,fieldNodeMap,parserContext.indexVersionCreated());
       }
     }
   }
@@ -78,9 +81,7 @@
     attributes=ImmutableMap.copyOf((Map<String,Object>)mapping.remove("_meta"));
   }
   docBuilder.meta(attributes);
-  if (!mapping.isEmpty()) {
-    throw new MapperParsingException("Root type mapping not empty after parsing! Remaining fields:  " + getRemainingFields(mapping));
-  }
+  checkNoRemainingFields(mapping,parserContext.indexVersionCreated(),"Root mapping definition has unsupported parameters: ");
   if (!docBuilder.hasIndexAnalyzer()) {
     docBuilder.indexAnalyzer(analysisService.defaultIndexAnalyzer());
   }
