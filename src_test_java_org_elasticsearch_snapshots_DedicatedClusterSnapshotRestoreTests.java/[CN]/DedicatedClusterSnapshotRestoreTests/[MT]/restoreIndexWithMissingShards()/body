@@ -56,6 +56,19 @@
     assertThat(snapshotStatus.getShardsStats().getTotalShards(),equalTo(18));
     assertThat(snapshotStatus.getShardsStats().getDoneShards(),lessThan(12));
     assertThat(snapshotStatus.getShardsStats().getDoneShards(),greaterThan(6));
+    awaitBusy(new Predicate<Object>(){
+      @Override public boolean apply(      Object o){
+        GetSnapshotsResponse response=client().admin().cluster().prepareGetSnapshots("test-repo").setSnapshots("test-snap-2").get();
+        assertThat(response.getSnapshots().size(),equalTo(1));
+        SnapshotInfo snapshotInfo=response.getSnapshots().get(0);
+        if (snapshotInfo.state().completed()) {
+          assertThat(snapshotInfo.state(),equalTo(SnapshotState.PARTIAL));
+          return true;
+        }
+        return false;
+      }
+    }
+);
   }
  else {
     logger.info("checking snapshot completion using wait_for_completion flag");
@@ -64,8 +77,8 @@
     assertThat(createSnapshotResponse.getSnapshotInfo().totalShards(),equalTo(18));
     assertThat(createSnapshotResponse.getSnapshotInfo().successfulShards(),lessThan(12));
     assertThat(createSnapshotResponse.getSnapshotInfo().successfulShards(),greaterThan(6));
+    assertThat(client().admin().cluster().prepareGetSnapshots("test-repo").setSnapshots("test-snap-2").execute().actionGet().getSnapshots().get(0).state(),equalTo(SnapshotState.PARTIAL));
   }
-  assertThat(client().admin().cluster().prepareGetSnapshots("test-repo").setSnapshots("test-snap-2").execute().actionGet().getSnapshots().get(0).state(),equalTo(SnapshotState.PARTIAL));
   assertAcked(client().admin().indices().prepareClose("test-idx-some","test-idx-all").execute().actionGet());
   logger.info("--> restore incomplete snapshot - should fail");
   assertThrows(client().admin().cluster().prepareRestoreSnapshot("test-repo","test-snap-2").setRestoreGlobalState(false).setWaitForCompletion(true).execute(),SnapshotRestoreException.class);
