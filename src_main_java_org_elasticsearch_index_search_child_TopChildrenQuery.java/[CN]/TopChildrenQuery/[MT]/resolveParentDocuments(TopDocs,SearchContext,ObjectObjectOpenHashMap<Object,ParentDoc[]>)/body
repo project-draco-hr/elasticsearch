@@ -1,0 +1,71 @@
+{
+  int parentHitsResolved=0;
+  ObjectObjectOpenHashMap<Object,IntObjectOpenHashMap<ParentDoc>> parentDocsPerReader=new ObjectObjectOpenHashMap<>(context.searcher().getIndexReader().leaves().size());
+  child_hits:   for (  ScoreDoc scoreDoc : topDocs.scoreDocs) {
+    int readerIndex=ReaderUtil.subIndex(scoreDoc.doc,context.searcher().getIndexReader().leaves());
+    AtomicReaderContext subContext=context.searcher().getIndexReader().leaves().get(readerIndex);
+    SortedDocValues parentValues=parentChildIndexFieldData.load(subContext).getOrdinalsValues(parentType);
+    int subDoc=scoreDoc.doc - subContext.docBase;
+    BytesRef parentId=parentValues.get(subDoc);
+    if (parentId == null) {
+      continue;
+    }
+    for (    AtomicReaderContext atomicReaderContext : context.searcher().getIndexReader().leaves()) {
+      AtomicReader indexReader=atomicReaderContext.reader();
+      FixedBitSet nonNestedDocs=null;
+      if (nonNestedDocsFilter != null) {
+        nonNestedDocs=(FixedBitSet)nonNestedDocsFilter.getDocIdSet(atomicReaderContext,indexReader.getLiveDocs());
+      }
+      Terms terms=indexReader.terms(UidFieldMapper.NAME);
+      if (terms == null) {
+        continue;
+      }
+      TermsEnum termsEnum=terms.iterator(null);
+      if (!termsEnum.seekExact(Uid.createUidAsBytes(parentType,parentId))) {
+        continue;
+      }
+      DocsEnum docsEnum=termsEnum.docs(indexReader.getLiveDocs(),null,DocsEnum.FLAG_NONE);
+      int parentDocId=docsEnum.nextDoc();
+      if (nonNestedDocs != null && !nonNestedDocs.get(parentDocId)) {
+        parentDocId=nonNestedDocs.nextSetBit(parentDocId);
+      }
+      if (parentDocId != DocsEnum.NO_MORE_DOCS) {
+        IntObjectOpenHashMap<ParentDoc> readerParentDocs=parentDocsPerReader.get(indexReader.getCoreCacheKey());
+        if (readerParentDocs == null) {
+          readerParentDocs=new IntObjectOpenHashMap<>(indexReader.maxDoc());
+          parentDocsPerReader.put(indexReader.getCoreCacheKey(),readerParentDocs);
+        }
+        ParentDoc parentDoc=readerParentDocs.get(parentDocId);
+        if (parentDoc == null) {
+          parentHitsResolved++;
+          parentDoc=new ParentDoc();
+          parentDoc.docId=parentDocId;
+          parentDoc.count=1;
+          parentDoc.maxScore=scoreDoc.score;
+          parentDoc.sumScores=scoreDoc.score;
+          readerParentDocs.put(parentDocId,parentDoc);
+        }
+ else {
+          parentDoc.count++;
+          parentDoc.sumScores+=scoreDoc.score;
+          if (scoreDoc.score > parentDoc.maxScore) {
+            parentDoc.maxScore=scoreDoc.score;
+          }
+        }
+        continue child_hits;
+      }
+    }
+  }
+  boolean[] states=parentDocsPerReader.allocated;
+  Object[] keys=parentDocsPerReader.keys;
+  Object[] values=parentDocsPerReader.values;
+  for (int i=0; i < states.length; i++) {
+    if (states[i]) {
+      IntObjectOpenHashMap<ParentDoc> value=(IntObjectOpenHashMap<ParentDoc>)values[i];
+      ParentDoc[] _parentDocs=value.values().toArray(ParentDoc.class);
+      Arrays.sort(_parentDocs,PARENT_DOC_COMP);
+      parentDocs.put(keys[i],_parentDocs);
+    }
+  }
+  return parentHitsResolved;
+}
