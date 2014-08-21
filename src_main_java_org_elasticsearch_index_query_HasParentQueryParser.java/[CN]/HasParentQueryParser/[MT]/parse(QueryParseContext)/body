@@ -71,43 +71,9 @@
   }
   innerQuery.setBoost(boost);
   innerQuery=new XFilteredQuery(innerQuery,parseContext.cacheFilter(parentDocMapper.typeFilter(),null));
-  ParentChildIndexFieldData parentChildIndexFieldData=null;
-  Set<String> parentTypes=new HashSet<>(5);
-  parentTypes.add(parentType);
-  for (  DocumentMapper documentMapper : parseContext.mapperService().docMappers(false)) {
-    ParentFieldMapper parentFieldMapper=documentMapper.parentFieldMapper();
-    if (parentFieldMapper.active()) {
-      parentChildIndexFieldData=parseContext.getForField(parentFieldMapper);
-      DocumentMapper parentTypeDocumentMapper=parseContext.mapperService().documentMapper(parentFieldMapper.type());
-      if (parentTypeDocumentMapper == null) {
-        parentTypes.add(parentFieldMapper.type());
-      }
-    }
-  }
-  if (parentChildIndexFieldData == null) {
-    throw new QueryParsingException(parseContext.index(),"[has_parent] no _parent field configured");
-  }
-  Filter parentFilter;
-  if (parentTypes.size() == 1) {
-    DocumentMapper documentMapper=parseContext.mapperService().documentMapper(parentTypes.iterator().next());
-    parentFilter=parseContext.cacheFilter(documentMapper.typeFilter(),null);
-  }
- else {
-    XBooleanFilter parentsFilter=new XBooleanFilter();
-    for (    String parentTypeStr : parentTypes) {
-      DocumentMapper documentMapper=parseContext.mapperService().documentMapper(parentTypeStr);
-      Filter filter=parseContext.cacheFilter(documentMapper.typeFilter(),null);
-      parentsFilter.add(filter,BooleanClause.Occur.SHOULD);
-    }
-    parentFilter=parentsFilter;
-  }
-  Filter childrenFilter=parseContext.cacheFilter(new NotFilter(parentFilter),null);
-  Query query;
-  if (score) {
-    query=new ParentQuery(parentChildIndexFieldData,innerQuery,parentType,childrenFilter);
-  }
- else {
-    query=new ParentConstantScoreQuery(parentChildIndexFieldData,innerQuery,parentType,childrenFilter);
+  Query query=createParentQuery(innerQuery,parentType,score,parseContext);
+  if (query == null) {
+    return null;
   }
   query.setBoost(boost);
   if (queryName != null) {
