@@ -1,0 +1,72 @@
+{
+  int numFilters=randomInt(10);
+  Set<Integer> orders=new HashSet<>(numFilters);
+  while (orders.size() < numFilters) {
+    orders.add(randomInt(10));
+  }
+  Set<ActionFilter> filters=new HashSet<>();
+  for (  Integer order : orders) {
+    filters.add(new ResponseTestFilter(order,randomFrom(ResponseOperation.values())));
+  }
+  String actionName=randomAsciiOfLength(randomInt(30));
+  ActionFilters actionFilters=new ActionFilters(filters);
+  TransportAction<TestRequest,TestResponse> transportAction=new TransportAction<TestRequest,TestResponse>(ImmutableSettings.EMPTY,actionName,null,actionFilters){
+    @Override protected void doExecute(    TestRequest request,    ActionListener<TestResponse> listener){
+      listener.onResponse(new TestResponse());
+    }
+  }
+;
+  ArrayList<ActionFilter> actionFiltersByOrder=Lists.newArrayList(filters);
+  Collections.sort(actionFiltersByOrder,new Comparator<ActionFilter>(){
+    @Override public int compare(    ActionFilter o1,    ActionFilter o2){
+      return Integer.compare(o2.order(),o1.order());
+    }
+  }
+);
+  List<ActionFilter> expectedActionFilters=Lists.newArrayList();
+  boolean errorExpected=false;
+  for (  ActionFilter filter : actionFiltersByOrder) {
+    ResponseTestFilter testFilter=(ResponseTestFilter)filter;
+    expectedActionFilters.add(testFilter);
+    if (testFilter.callback == ResponseOperation.LISTENER_FAILURE) {
+      errorExpected=true;
+    }
+    if (testFilter.callback != ResponseOperation.CONTINUE_PROCESSING) {
+      break;
+    }
+  }
+  PlainListenableActionFuture<TestResponse> future=new PlainListenableActionFuture<>(false,null);
+  transportAction.execute(new TestRequest(),future);
+  try {
+    assertThat(future.get(),notNullValue());
+    assertThat("shouldn't get here if an error is expected",errorExpected,equalTo(false));
+  }
+ catch (  Throwable t) {
+    assertThat("shouldn't get here if an error is not expected " + t.getMessage(),errorExpected,equalTo(true));
+  }
+  List<ResponseTestFilter> testFiltersByLastExecution=Lists.newArrayList();
+  for (  ActionFilter actionFilter : actionFilters.filters()) {
+    testFiltersByLastExecution.add((ResponseTestFilter)actionFilter);
+  }
+  Collections.sort(testFiltersByLastExecution,new Comparator<ResponseTestFilter>(){
+    @Override public int compare(    ResponseTestFilter o1,    ResponseTestFilter o2){
+      return Integer.compare(o1.executionToken,o2.executionToken);
+    }
+  }
+);
+  ArrayList<ResponseTestFilter> finalTestFilters=Lists.newArrayList();
+  for (  ActionFilter filter : testFiltersByLastExecution) {
+    ResponseTestFilter testFilter=(ResponseTestFilter)filter;
+    finalTestFilters.add(testFilter);
+    if (testFilter.callback != ResponseOperation.CONTINUE_PROCESSING) {
+      break;
+    }
+  }
+  assertThat(finalTestFilters.size(),equalTo(expectedActionFilters.size()));
+  for (int i=0; i < finalTestFilters.size(); i++) {
+    ResponseTestFilter testFilter=finalTestFilters.get(i);
+    assertThat(testFilter,equalTo(expectedActionFilters.get(i)));
+    assertThat(testFilter.runs.get(),equalTo(1));
+    assertThat(testFilter.lastActionName,equalTo(actionName));
+  }
+}
