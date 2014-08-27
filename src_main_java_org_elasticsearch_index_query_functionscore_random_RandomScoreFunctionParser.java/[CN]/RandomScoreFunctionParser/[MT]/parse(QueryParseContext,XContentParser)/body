@@ -1,5 +1,5 @@
 {
-  long seed=-1;
+  int seed=-1;
   String currentFieldName=null;
   XContentParser.Token token;
   while ((token=parser.nextToken()) != XContentParser.Token.END_OBJECT) {
@@ -8,7 +8,7 @@
     }
  else     if (token.isValue()) {
       if ("seed".equals(currentFieldName)) {
-        seed=parser.longValue();
+        seed=parser.intValue();
       }
  else {
         throw new QueryParsingException(parseContext.index(),NAMES[0] + " query does not support [" + currentFieldName+ "]");
@@ -16,9 +16,11 @@
     }
   }
   if (seed == -1) {
-    seed=parseContext.nowInMillis();
+    seed=(int)parseContext.nowInMillis();
   }
   ShardId shardId=SearchContext.current().indexShard().shardId();
-  seed=salt(seed,shardId.index().name(),shardId.id());
-  return new RandomScoreFunction(seed);
+  int salt=(shardId.index().name().hashCode() << 10) | shardId.id();
+  final FieldMapper<?> mapper=SearchContext.current().mapperService().smartNameFieldMapper("_uid");
+  IndexFieldData<?> uidFieldData=SearchContext.current().fieldData().getForField(mapper);
+  return new RandomScoreFunction(seed,salt,uidFieldData);
 }
