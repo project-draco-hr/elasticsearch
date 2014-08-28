@@ -15,25 +15,33 @@
       preference=randomRealisticUnicodeOfLengthBetween(1,10);
     }
     int innerIters=scaledRandomIntBetween(2,5);
-    SearchHits hits=null;
+    SearchHit[] hits=null;
     for (int i=0; i < innerIters; i++) {
-      SearchResponse searchResponse=client().prepareSearch().setPreference(preference).setQuery(functionScoreQuery(matchAllQuery(),randomFunction(seed))).execute().actionGet();
+      SearchResponse searchResponse=client().prepareSearch().setSize(docCount).setPreference(preference).setQuery(functionScoreQuery(matchAllQuery(),randomFunction(seed))).execute().actionGet();
       assertThat("Failures " + Arrays.toString(searchResponse.getShardFailures()),searchResponse.getShardFailures().length,CoreMatchers.equalTo(0));
-      int hitCount=searchResponse.getHits().getHits().length;
+      final int hitCount=searchResponse.getHits().getHits().length;
+      final SearchHit[] currentHits=searchResponse.getHits().getHits();
+      ArrayUtil.timSort(currentHits,new Comparator<SearchHit>(){
+        @Override public int compare(        SearchHit o1,        SearchHit o2){
+          int cmp=Float.compare(o1.getScore(),o2.getScore());
+          return cmp == 0 ? o1.getId().compareTo(o2.getId()) : cmp;
+        }
+      }
+);
       if (i == 0) {
         assertThat(hits,nullValue());
-        hits=searchResponse.getHits();
+        hits=currentHits;
       }
  else {
-        assertThat(hits.getHits().length,equalTo(searchResponse.getHits().getHits().length));
+        assertThat(hits.length,equalTo(searchResponse.getHits().getHits().length));
         for (int j=0; j < hitCount; j++) {
-          assertThat(searchResponse.getHits().getAt(j).id(),equalTo(hits.getAt(j).id()));
-          assertThat(searchResponse.getHits().getAt(j).score(),equalTo(hits.getAt(j).score()));
+          assertThat("" + j,currentHits[j].score(),equalTo(hits[j].score()));
+          assertThat("" + j,currentHits[j].id(),equalTo(hits[j].id()));
         }
       }
       int numDocsToChange=randomIntBetween(20,50);
       while (numDocsToChange > 0) {
-        int doc=randomInt(docCount);
+        int doc=randomInt(docCount - 1);
         index("test","type","" + doc,jsonBuilder().startObject().endObject());
         --numDocsToChange;
       }
