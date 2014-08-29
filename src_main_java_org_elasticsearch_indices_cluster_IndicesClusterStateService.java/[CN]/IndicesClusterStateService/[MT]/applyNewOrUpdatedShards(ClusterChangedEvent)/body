@@ -37,10 +37,12 @@
     InternalIndexShard indexShard=(InternalIndexShard)indexService.shard(shardId);
     if (indexShard != null) {
       ShardRouting currentRoutingEntry=indexShard.routingEntry();
+      boolean shardHasBeenRemoved=false;
       if (currentRoutingEntry.initializing() && shardRouting.initializing() && !currentRoutingEntry.equals(shardRouting)) {
         logger.debug("[{}][{}] removing shard (different instance of it allocated on this node, current [{}], global [{}])",shardRouting.index(),shardRouting.id(),currentRoutingEntry,shardRouting);
         recoveryTarget.cancelRecovery(indexShard);
         indexService.removeShard(shardRouting.id(),"removing shard (different instance of it allocated on this node)");
+        shardHasBeenRemoved=true;
       }
  else       if (isPeerRecovery(shardRouting)) {
         RecoveryStatus recoveryStatus=recoveryTarget.recoveryStatus(indexShard);
@@ -50,10 +52,11 @@
             logger.debug("[{}][{}] removing shard (recovery source changed), current [{}], global [{}])",shardRouting.index(),shardRouting.id(),currentRoutingEntry,shardRouting);
             recoveryTarget.cancelRecovery(indexShard);
             indexService.removeShard(shardRouting.id(),"removing shard (recovery source node changed)");
+            shardHasBeenRemoved=true;
           }
         }
       }
-      if (!shardRouting.equals(indexShard.routingEntry())) {
+      if (shardHasBeenRemoved == false && !shardRouting.equals(indexShard.routingEntry())) {
         indexShard.routingEntry(shardRouting);
         indexService.shardInjectorSafe(shardId).getInstance(IndexShardGatewayService.class).routingStateChanged();
       }
