@@ -2,21 +2,31 @@
   final Engine.Searcher searcher=indexShard.acquireSearcher("term_vector");
   IndexReader topLevelReader=searcher.reader();
   final TermVectorResponse termVectorResponse=new TermVectorResponse(concreteIndex,request.type(),request.id());
-  final Term uidTerm=new Term(UidFieldMapper.NAME,Uid.createUidAsBytes(request.type(),request.id()));
+  if (request.selectedFields() != null) {
+    handleFieldWildcards(request);
+  }
   try {
     Fields topLevelFields=MultiFields.getFields(topLevelReader);
-    Versions.DocIdAndVersion docIdAndVersion=Versions.loadDocIdAndVersion(topLevelReader,uidTerm);
-    if (docIdAndVersion != null) {
-      if (request.selectedFields() != null) {
-        handleFieldWildcards(request);
-      }
-      Fields termVectorsByField=docIdAndVersion.context.reader().getTermVectors(docIdAndVersion.docId);
-      if (request.selectedFields() != null) {
-        termVectorsByField=generateTermVectorsIfNeeded(termVectorsByField,request,uidTerm,false);
+    if (request.doc() != null) {
+      Fields termVectorsByField=generateTermVectorsFromDoc(request);
+      if (topLevelFields == null) {
+        topLevelFields=termVectorsByField;
       }
       termVectorResponse.setFields(termVectorsByField,request.selectedFields(),request.getFlags(),topLevelFields);
       termVectorResponse.setExists(true);
+      termVectorResponse.setArtificial(true);
+      return termVectorResponse;
+    }
+    final Term uidTerm=new Term(UidFieldMapper.NAME,Uid.createUidAsBytes(request.type(),request.id()));
+    Versions.DocIdAndVersion docIdAndVersion=Versions.loadDocIdAndVersion(topLevelReader,uidTerm);
+    if (docIdAndVersion != null) {
+      Fields termVectorsByField=docIdAndVersion.context.reader().getTermVectors(docIdAndVersion.docId);
+      if (request.selectedFields() != null) {
+        termVectorsByField=addGeneratedTermVectors(termVectorsByField,request,uidTerm,false);
+      }
+      termVectorResponse.setFields(termVectorsByField,request.selectedFields(),request.getFlags(),topLevelFields);
       termVectorResponse.setDocVersion(docIdAndVersion.version);
+      termVectorResponse.setExists(true);
     }
  else {
       termVectorResponse.setExists(false);
