@@ -41,16 +41,23 @@
         }
         return stateBuilder.build();
       }
-      @Override public void onFailure(      String source,      Throwable t){
-        if (t instanceof ClusterService.NoLongerMasterException) {
-          logger.debug("not processing [{}] as we are no longer master",source);
-        }
- else {
-          logger.error("unexpected failure during [{}]",t,source);
-        }
+      @Override public void onNoLongerMaster(      String source){
+        Exception e=new EsRejectedExecutionException("no longer master. source: [" + source + "]");
+        innerOnFailure(e);
+      }
+      void innerOnFailure(      Throwable t){
         for (        Tuple<DiscoveryNode,MembershipAction.JoinCallback> drainedTask : drainedTasks) {
-          drainedTask.v2().onFailure(t);
+          try {
+            drainedTask.v2().onFailure(t);
+          }
+ catch (          Exception e) {
+            logger.error("error during task failure",e);
+          }
         }
+      }
+      @Override public void onFailure(      String source,      Throwable t){
+        logger.error("unexpected failure during [{}]",t,source);
+        innerOnFailure(t);
       }
       @Override public void clusterStateProcessed(      String source,      ClusterState oldState,      ClusterState newState){
         for (        Tuple<DiscoveryNode,MembershipAction.JoinCallback> drainedTask : drainedTasks) {
