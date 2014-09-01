@@ -1,0 +1,36 @@
+{
+  final List<String> nodes=startCluster(3);
+  assertAcked(prepareCreate("test").setSettings(ImmutableSettings.builder().put(IndexMetaData.SETTING_NUMBER_OF_SHARDS,1 + randomInt(2)).put(IndexMetaData.SETTING_NUMBER_OF_REPLICAS,randomInt(2))));
+  ensureGreen();
+  String isolatedNode=internalCluster().getMasterName();
+  NetworkPartition networkPartition=addRandomIsolation(isolatedNode);
+  networkPartition.startDisrupting();
+  String nonIsolatedNode=networkPartition.getMajoritySide().get(0);
+  ensureStableCluster(2,nonIsolatedNode);
+  assertNoMaster(isolatedNode,TimeValue.timeValueSeconds(40));
+  networkPartition.stopDisrupting();
+  ensureStableCluster(3,new TimeValue(DISRUPTION_HEALING_OVERHEAD.millis() + networkPartition.expectedTimeToHeal().millis()));
+  logger.info("issue a reroute");
+  assertAcked(client().admin().cluster().prepareReroute());
+  ensureGreen("test");
+  ClusterState state=null;
+  for (  String node : nodes) {
+    ClusterState nodeState=getNodeClusterState(node);
+    if (state == null) {
+      state=nodeState;
+      continue;
+    }
+    try {
+      assertEquals("unequal versions",state.version(),nodeState.version());
+      assertEquals("unequal node count",state.nodes().size(),nodeState.nodes().size());
+      assertEquals("different masters ",state.nodes().masterNodeId(),nodeState.nodes().masterNodeId());
+      assertEquals("different meta data version",state.metaData().version(),nodeState.metaData().version());
+      if (!state.routingTable().prettyPrint().equals(nodeState.routingTable().prettyPrint())) {
+        fail("different routing");
+      }
+    }
+ catch (    AssertionError t) {
+      fail("failed comparing cluster state: " + t.getMessage() + "\n"+ "--- cluster state of node ["+ nodes.get(0)+ "]: ---\n"+ state.prettyPrint()+ "\n--- cluster state ["+ node+ "]: ---\n"+ nodeState.prettyPrint());
+    }
+  }
+}

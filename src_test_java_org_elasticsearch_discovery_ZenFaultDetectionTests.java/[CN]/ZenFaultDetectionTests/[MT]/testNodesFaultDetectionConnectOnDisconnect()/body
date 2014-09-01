@@ -1,0 +1,27 @@
+{
+  ImmutableSettings.Builder settings=ImmutableSettings.builder();
+  boolean shouldRetry=randomBoolean();
+  settings.put(FaultDetection.SETTING_CONNECT_ON_NETWORK_DISCONNECT,shouldRetry).put(FaultDetection.SETTING_PING_INTERVAL,"5m");
+  NodesFaultDetection nodesFD=new NodesFaultDetection(settings.build(),threadPool,serviceA,new ClusterName("test"));
+  nodesFD.start();
+  nodesFD.updateNodes(buildNodesForA(true),-1);
+  final String[] failureReason=new String[1];
+  final DiscoveryNode[] failureNode=new DiscoveryNode[1];
+  final CountDownLatch notified=new CountDownLatch(1);
+  nodesFD.addListener(new NodesFaultDetection.Listener(){
+    @Override public void onNodeFailure(    DiscoveryNode node,    String reason){
+      failureNode[0]=node;
+      failureReason[0]=reason;
+      notified.countDown();
+    }
+  }
+);
+  serviceB.stop();
+  notified.await(30,TimeUnit.SECONDS);
+  assertEquals(nodeB,failureNode[0]);
+  Matcher<String> matcher=Matchers.containsString("verified");
+  if (!shouldRetry) {
+    matcher=Matchers.not(matcher);
+  }
+  assertThat(failureReason[0],matcher);
+}

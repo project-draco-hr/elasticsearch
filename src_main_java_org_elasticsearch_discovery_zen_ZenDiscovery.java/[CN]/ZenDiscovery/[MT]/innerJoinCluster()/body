@@ -14,12 +14,14 @@
     if (localNode.equals(masterNode)) {
       this.master=true;
       nodesFD.start();
-      clusterService.submitStateUpdateTask("zen-disco-join (elected_as_master)",Priority.URGENT,new ProcessedClusterStateUpdateTask(){
+      clusterService.submitStateUpdateTask("zen-disco-join (elected_as_master)",Priority.URGENT,new ProcessedClusterStateNonMasterUpdateTask(){
         @Override public ClusterState execute(        ClusterState currentState){
-          DiscoveryNodes.Builder builder=new DiscoveryNodes.Builder().localNodeId(localNode.id()).masterNodeId(localNode.id()).put(localNode);
+          DiscoveryNodes.Builder builder=new DiscoveryNodes.Builder(latestDiscoNodes).localNodeId(localNode.id()).masterNodeId(localNode.id()).put(localNode);
           latestDiscoNodes=builder.build();
-          ClusterBlocks clusterBlocks=ClusterBlocks.builder().blocks(currentState.blocks()).removeGlobalBlock(NO_MASTER_BLOCK).build();
-          return ClusterState.builder(currentState).nodes(latestDiscoNodes).blocks(clusterBlocks).build();
+          ClusterBlocks clusterBlocks=ClusterBlocks.builder().blocks(currentState.blocks()).removeGlobalBlock(discoverySettings.getNoMasterBlock()).build();
+          currentState=ClusterState.builder(currentState).nodes(latestDiscoNodes).blocks(clusterBlocks).build();
+          RoutingAllocation.Result result=allocationService.reroute(currentState);
+          return ClusterState.builder(currentState).routingResult(result).build();
         }
         @Override public void onFailure(        String source,        Throwable t){
           logger.error("unexpected failure during [{}]",t,source);
@@ -32,27 +34,12 @@
     }
  else {
       this.master=false;
-      try {
-        transportService.connectToNode(masterNode);
-      }
- catch (      Exception e) {
-        logger.warn("failed to connect to master [{}], retrying...",e,masterNode);
-        retry=true;
+      retry=!joinElectedMaster(masterNode);
+      if (retry) {
         continue;
       }
-      try {
-        membership.sendJoinRequestBlocking(masterNode,localNode,joinTimeout);
-      }
- catch (      Exception e) {
-        if (e instanceof ElasticsearchException) {
-          logger.info("failed to send join request to master [{}], reason [{}]",masterNode,((ElasticsearchException)e).getDetailedMessage());
-        }
- else {
-          logger.info("failed to send join request to master [{}], reason [{}]",masterNode,e.getMessage());
-        }
-        if (logger.isTraceEnabled()) {
-          logger.trace("detailed failed reason",e);
-        }
+      if (latestDiscoNodes.masterNode() == null) {
+        logger.debug("no master node is set, despite of join request completing. retrying pings");
         retry=true;
         continue;
       }

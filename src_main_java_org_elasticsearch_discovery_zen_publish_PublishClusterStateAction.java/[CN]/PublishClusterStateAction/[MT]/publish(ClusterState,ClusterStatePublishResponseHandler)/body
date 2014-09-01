@@ -1,6 +1,8 @@
 {
   DiscoveryNode localNode=nodesProvider.nodes().localNode();
   Map<Version,BytesReference> serializedStates=Maps.newHashMap();
+  final AtomicBoolean timedOutWaitingForNodes=new AtomicBoolean(false);
+  final TimeValue publishTimeout=discoverySettings.getPublishTimeout();
   for (  final DiscoveryNode node : clusterState.nodes()) {
     if (node.equals(localNode)) {
       continue;
@@ -26,26 +28,28 @@
       TransportRequestOptions options=TransportRequestOptions.options().withType(TransportRequestOptions.Type.STATE).withCompress(false);
       transportService.sendRequest(node,ACTION_NAME,new BytesTransportRequest(bytes,node.version()),options,new EmptyTransportResponseHandler(ThreadPool.Names.SAME){
         @Override public void handleResponse(        TransportResponse.Empty response){
+          if (timedOutWaitingForNodes.get()) {
+            logger.debug("node {} responded for cluster state [{}] (took longer than [{}])",node,clusterState.version(),publishTimeout);
+          }
           publishResponseHandler.onResponse(node);
         }
         @Override public void handleException(        TransportException exp){
-          logger.debug("failed to send cluster state to [{}]",exp,node);
+          logger.debug("failed to send cluster state to {}",exp,node);
           publishResponseHandler.onFailure(node,exp);
         }
       }
 );
     }
  catch (    Throwable t) {
-      logger.debug("error sending cluster state to [{}]",t,node);
+      logger.debug("error sending cluster state to {}",t,node);
       publishResponseHandler.onFailure(node,t);
     }
   }
-  TimeValue publishTimeout=discoverySettings.getPublishTimeout();
   if (publishTimeout.millis() > 0) {
     try {
-      boolean awaited=publishResponseHandler.awaitAllNodes(publishTimeout);
-      if (!awaited) {
-        logger.debug("awaiting all nodes to process published state {} timed out, timeout {}",clusterState.version(),publishTimeout);
+      timedOutWaitingForNodes.set(!publishResponseHandler.awaitAllNodes(publishTimeout));
+      if (timedOutWaitingForNodes.get()) {
+        logger.debug("timed out waiting for all nodes to process published state [{}] (timeout [{}])",clusterState.version(),publishTimeout);
       }
     }
  catch (    InterruptedException e) {

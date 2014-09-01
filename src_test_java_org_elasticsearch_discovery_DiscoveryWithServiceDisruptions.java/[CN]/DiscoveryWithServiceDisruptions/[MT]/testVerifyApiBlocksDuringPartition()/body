@@ -1,0 +1,34 @@
+{
+  startCluster(3);
+  assertAcked(prepareCreate("test").setSettings(ImmutableSettings.builder().put(IndexMetaData.SETTING_NUMBER_OF_SHARDS,1).put(IndexMetaData.SETTING_NUMBER_OF_REPLICAS,2)));
+  ensureGreen("test");
+  NetworkPartition networkPartition=addRandomPartition();
+  final String isolatedNode=networkPartition.getMinoritySide().get(0);
+  final String nonIsolatedNode=networkPartition.getMajoritySide().get(0);
+  networkPartition.startDisrupting();
+  logger.info("waiting for isolated node [{}] to have no master",isolatedNode);
+  assertNoMaster(isolatedNode,DiscoverySettings.NO_MASTER_BLOCK_WRITES,TimeValue.timeValueSeconds(10));
+  logger.info("wait until elected master has been removed and a new 2 node cluster was from (via [{}])",isolatedNode);
+  ensureStableCluster(2,nonIsolatedNode);
+  for (  String node : networkPartition.getMajoritySide()) {
+    ClusterState nodeState=getNodeClusterState(node);
+    boolean success=true;
+    if (nodeState.nodes().getMasterNode() == null) {
+      success=false;
+    }
+    if (!nodeState.blocks().global().isEmpty()) {
+      success=false;
+    }
+    if (!success) {
+      fail("node [" + node + "] has no master or has blocks, despite of being on the right side of the partition. State dump:\n"+ nodeState.prettyPrint());
+    }
+  }
+  networkPartition.stopDisrupting();
+  ensureStableCluster(3,new TimeValue(DISRUPTION_HEALING_OVERHEAD.millis() + networkPartition.expectedTimeToHeal().millis()));
+  logger.info("Verify no master block with {} set to {}",DiscoverySettings.NO_MASTER_BLOCK,"all");
+  client().admin().cluster().prepareUpdateSettings().setTransientSettings(ImmutableSettings.builder().put(DiscoverySettings.NO_MASTER_BLOCK,"all")).get();
+  networkPartition.startDisrupting();
+  logger.info("waiting for isolated node [{}] to have no master",isolatedNode);
+  assertNoMaster(isolatedNode,DiscoverySettings.NO_MASTER_BLOCK_ALL,TimeValue.timeValueSeconds(10));
+  ensureStableCluster(2,nonIsolatedNode);
+}

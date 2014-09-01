@@ -6,12 +6,19 @@
     return;
   }
   logger.info("master_left [{}], reason [{}]",masterNode,reason);
-  clusterService.submitStateUpdateTask("zen-disco-master_failed (" + masterNode + ")",Priority.IMMEDIATE,new ProcessedClusterStateUpdateTask(){
+  clusterService.submitStateUpdateTask("zen-disco-master_failed (" + masterNode + ")",Priority.IMMEDIATE,new ProcessedClusterStateNonMasterUpdateTask(){
     @Override public ClusterState execute(    ClusterState currentState){
       if (!masterNode.id().equals(currentState.nodes().masterNodeId())) {
         return currentState;
       }
       DiscoveryNodes discoveryNodes=DiscoveryNodes.builder(currentState.nodes()).remove(masterNode.id()).masterNodeId(null).build();
+      latestDiscoNodes=discoveryNodes;
+      ArrayList<ProcessClusterState> pendingNewClusterStates=new ArrayList<>();
+      processNewClusterStates.drainTo(pendingNewClusterStates);
+      logger.trace("removed [{}] pending cluster states",pendingNewClusterStates.size());
+      if (rejoinOnMasterGone) {
+        return rejoin(ClusterState.builder(currentState).nodes(discoveryNodes).build(),"master left (reason = " + reason + ")");
+      }
       if (!electMaster.hasEnoughMasterNodes(discoveryNodes)) {
         return rejoin(ClusterState.builder(currentState).nodes(discoveryNodes).build(),"not enough master nodes after master left (reason = " + reason + ")");
       }

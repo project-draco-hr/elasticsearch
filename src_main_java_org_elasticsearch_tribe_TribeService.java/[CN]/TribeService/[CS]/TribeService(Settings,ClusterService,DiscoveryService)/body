@@ -1,0 +1,39 @@
+{
+  super(settings);
+  this.clusterService=clusterService;
+  Map<String,Settings> nodesSettings=Maps.newHashMap(settings.getGroups("tribe",true));
+  nodesSettings.remove("blocks");
+  nodesSettings.remove("on_conflict");
+  for (  Map.Entry<String,Settings> entry : nodesSettings.entrySet()) {
+    ImmutableSettings.Builder sb=ImmutableSettings.builder().put(entry.getValue());
+    sb.put("node.name",settings.get("name") + "/" + entry.getKey());
+    sb.put(TRIBE_NAME,entry.getKey());
+    if (sb.get("http.enabled") == null) {
+      sb.put("http.enabled",false);
+    }
+    nodes.add((InternalNode)NodeBuilder.nodeBuilder().settings(sb).client(true).build());
+  }
+  String[] blockIndicesWrite=Strings.EMPTY_ARRAY;
+  String[] blockIndicesRead=Strings.EMPTY_ARRAY;
+  String[] blockIndicesMetadata=Strings.EMPTY_ARRAY;
+  if (!nodes.isEmpty()) {
+    clusterService.removeInitialStateBlock(discoveryService.getNoMasterBlock());
+    clusterService.removeInitialStateBlock(GatewayService.STATE_NOT_RECOVERED_BLOCK);
+    if (settings.getAsBoolean("tribe.blocks.write",false)) {
+      clusterService.addInitialStateBlock(TRIBE_WRITE_BLOCK);
+    }
+    blockIndicesWrite=settings.getAsArray("tribe.blocks.write.indices",Strings.EMPTY_ARRAY);
+    if (settings.getAsBoolean("tribe.blocks.metadata",false)) {
+      clusterService.addInitialStateBlock(TRIBE_METADATA_BLOCK);
+    }
+    blockIndicesMetadata=settings.getAsArray("tribe.blocks.metadata.indices",Strings.EMPTY_ARRAY);
+    blockIndicesRead=settings.getAsArray("tribe.blocks.read.indices",Strings.EMPTY_ARRAY);
+    for (    InternalNode node : nodes) {
+      node.injector().getInstance(ClusterService.class).add(new TribeClusterStateListener(node));
+    }
+  }
+  this.blockIndicesMetadata=blockIndicesMetadata;
+  this.blockIndicesRead=blockIndicesRead;
+  this.blockIndicesWrite=blockIndicesWrite;
+  this.onConflict=settings.get("tribe.on_conflict",ON_CONFLICT_ANY);
+}

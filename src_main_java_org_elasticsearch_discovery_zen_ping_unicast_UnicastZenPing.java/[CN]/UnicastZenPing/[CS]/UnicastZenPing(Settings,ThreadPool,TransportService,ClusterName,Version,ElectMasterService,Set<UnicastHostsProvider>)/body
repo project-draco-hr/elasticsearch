@@ -1,0 +1,34 @@
+{
+  super(settings);
+  this.threadPool=threadPool;
+  this.transportService=transportService;
+  this.clusterName=clusterName;
+  this.electMasterService=electMasterService;
+  if (unicastHostsProviders != null) {
+    for (    UnicastHostsProvider unicastHostsProvider : unicastHostsProviders) {
+      addHostsProvider(unicastHostsProvider);
+    }
+  }
+  this.concurrentConnects=componentSettings.getAsInt("concurrent_connects",10);
+  String[] hostArr=componentSettings.getAsArray("hosts");
+  for (int i=0; i < hostArr.length; i++) {
+    hostArr[i]=hostArr[i].trim();
+  }
+  List<String> hosts=Lists.newArrayList(hostArr);
+  logger.debug("using initial hosts {}, with concurrent_connects [{}]",hosts,concurrentConnects);
+  List<DiscoveryNode> configuredTargetNodes=Lists.newArrayList();
+  int idCounter=0;
+  for (  String host : hosts) {
+    try {
+      TransportAddress[] addresses=transportService.addressesFromString(host);
+      for (int i=0; (i < addresses.length && i < LIMIT_PORTS_COUNT); i++) {
+        configuredTargetNodes.add(new DiscoveryNode("#zen_unicast_" + (++idCounter) + "#",addresses[i],version.minimumCompatibilityVersion()));
+      }
+    }
+ catch (    Exception e) {
+      throw new ElasticsearchIllegalArgumentException("Failed to resolve address for [" + host + "]",e);
+    }
+  }
+  this.configuredTargetNodes=configuredTargetNodes.toArray(new DiscoveryNode[configuredTargetNodes.size()]);
+  transportService.registerHandler(ACTION_NAME,new UnicastPingRequestHandler());
+}

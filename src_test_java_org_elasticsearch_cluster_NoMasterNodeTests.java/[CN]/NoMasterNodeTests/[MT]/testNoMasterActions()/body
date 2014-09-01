@@ -1,7 +1,7 @@
 {
   boolean autoCreateIndex=randomBoolean();
   logger.info("auto_create_index set to {}",autoCreateIndex);
-  Settings settings=settingsBuilder().put("discovery.type","zen").put("action.auto_create_index",autoCreateIndex).put("discovery.zen.minimum_master_nodes",2).put("discovery.zen.ping_timeout","200ms").put("discovery.initial_state_timeout","500ms").build();
+  Settings settings=settingsBuilder().put("discovery.type","zen").put("action.auto_create_index",autoCreateIndex).put("discovery.zen.minimum_master_nodes",2).put("discovery.zen.ping_timeout","200ms").put("discovery.initial_state_timeout","500ms").put(DiscoverySettings.NO_MASTER_BLOCK,"all").build();
   TimeValue timeout=TimeValue.timeValueMillis(200);
   internalCluster().startNode(settings);
   internalCluster().startNode(settings);
@@ -11,7 +11,7 @@
   assertBusy(new Runnable(){
     @Override public void run(){
       ClusterState state=client().admin().cluster().prepareState().setLocal(true).execute().actionGet().getState();
-      assertTrue(state.blocks().hasGlobalBlock(Discovery.NO_MASTER_BLOCK));
+      assertTrue(state.blocks().hasGlobalBlock(DiscoverySettings.NO_MASTER_BLOCK_ID));
     }
   }
 );
@@ -29,14 +29,14 @@
   assertThrows(client().admin().indices().prepareAnalyze("no_index","this is a test"),ClusterBlockException.class,RestStatus.SERVICE_UNAVAILABLE);
   assertThrows(client().prepareCount("test"),ClusterBlockException.class,RestStatus.SERVICE_UNAVAILABLE);
   assertThrows(client().prepareCount("no_index"),ClusterBlockException.class,RestStatus.SERVICE_UNAVAILABLE);
-  checkWriteAction(autoCreateIndex,timeout,client().prepareUpdate("test","type1","1").setScript("test script",ScriptService.ScriptType.INLINE).setTimeout(timeout));
+  checkWriteAction(false,timeout,client().prepareUpdate("test","type1","1").setScript("test script",ScriptService.ScriptType.INLINE).setTimeout(timeout));
   checkWriteAction(autoCreateIndex,timeout,client().prepareUpdate("no_index","type1","1").setScript("test script",ScriptService.ScriptType.INLINE).setTimeout(timeout));
-  checkWriteAction(autoCreateIndex,timeout,client().prepareIndex("test","type1","1").setSource(XContentFactory.jsonBuilder().startObject().endObject()).setTimeout(timeout));
+  checkWriteAction(false,timeout,client().prepareIndex("test","type1","1").setSource(XContentFactory.jsonBuilder().startObject().endObject()).setTimeout(timeout));
   checkWriteAction(autoCreateIndex,timeout,client().prepareIndex("no_index","type1","1").setSource(XContentFactory.jsonBuilder().startObject().endObject()).setTimeout(timeout));
   BulkRequestBuilder bulkRequestBuilder=client().prepareBulk();
   bulkRequestBuilder.add(client().prepareIndex("test","type1","1").setSource(XContentFactory.jsonBuilder().startObject().endObject()));
   bulkRequestBuilder.add(client().prepareIndex("test","type1","2").setSource(XContentFactory.jsonBuilder().startObject().endObject()));
-  checkBulkAction(autoCreateIndex,bulkRequestBuilder);
+  checkBulkAction(false,bulkRequestBuilder);
   bulkRequestBuilder=client().prepareBulk();
   bulkRequestBuilder.add(client().prepareIndex("no_index","type1","1").setSource(XContentFactory.jsonBuilder().startObject().endObject()));
   bulkRequestBuilder.add(client().prepareIndex("no_index","type1","2").setSource(XContentFactory.jsonBuilder().startObject().endObject()));

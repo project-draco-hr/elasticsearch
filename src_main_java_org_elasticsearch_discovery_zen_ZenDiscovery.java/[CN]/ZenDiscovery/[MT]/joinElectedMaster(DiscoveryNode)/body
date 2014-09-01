@@ -1,0 +1,44 @@
+{
+  try {
+    transportService.connectToNode(masterNode);
+  }
+ catch (  Exception e) {
+    logger.warn("failed to connect to master [{}], retrying...",e,masterNode);
+    return false;
+  }
+  int joinAttempt=0;
+  while (true) {
+    try {
+      logger.trace("joining master {}",masterNode);
+      membership.sendJoinRequestBlocking(masterNode,localNode,joinTimeout);
+      return true;
+    }
+ catch (    Throwable t) {
+      Throwable unwrap=ExceptionsHelper.unwrapCause(t);
+      if (unwrap instanceof ElasticsearchIllegalStateException) {
+        if (++joinAttempt == this.joinRetryAttempts) {
+          logger.info("failed to send join request to master [{}], reason [{}], tried [{}] times",masterNode,ExceptionsHelper.detailedMessage(t),joinAttempt);
+          return false;
+        }
+ else {
+          logger.trace("master {} failed with [{}]. retrying... (attempts done: [{}])",masterNode,ExceptionsHelper.detailedMessage(t),joinAttempt);
+        }
+      }
+ else {
+        if (logger.isTraceEnabled()) {
+          logger.trace("failed to send join request to master [{}]",t,masterNode);
+        }
+ else {
+          logger.info("failed to send join request to master [{}], reason [{}]",masterNode,ExceptionsHelper.detailedMessage(t));
+        }
+        return false;
+      }
+    }
+    try {
+      Thread.sleep(this.joinRetryDelay.millis());
+    }
+ catch (    InterruptedException e) {
+      Thread.currentThread().interrupt();
+    }
+  }
+}

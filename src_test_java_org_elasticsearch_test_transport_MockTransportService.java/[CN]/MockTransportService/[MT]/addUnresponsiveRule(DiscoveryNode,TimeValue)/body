@@ -1,0 +1,74 @@
+{
+  final long startTime=System.currentTimeMillis();
+  addDelegate(node,new DelegateTransport(original){
+    TimeValue getDelay(){
+      return new TimeValue(duration.millis() - (System.currentTimeMillis() - startTime));
+    }
+    @Override public void connectToNode(    DiscoveryNode node) throws ConnectTransportException {
+      TimeValue delay=getDelay();
+      if (delay.millis() <= 0) {
+        original.connectToNode(node);
+        return;
+      }
+      TimeValue connectingTimeout=NetworkService.TcpSettings.TCP_DEFAULT_CONNECT_TIMEOUT;
+      try {
+        if (delay.millis() < connectingTimeout.millis()) {
+          Thread.sleep(delay.millis());
+          original.connectToNode(node);
+        }
+ else {
+          Thread.sleep(connectingTimeout.millis());
+          throw new ConnectTransportException(node,"UNRESPONSIVE: simulated");
+        }
+      }
+ catch (      InterruptedException e) {
+        throw new ConnectTransportException(node,"UNRESPONSIVE: interrupted while sleeping",e);
+      }
+    }
+    @Override public void connectToNodeLight(    DiscoveryNode node) throws ConnectTransportException {
+      TimeValue delay=getDelay();
+      if (delay.millis() <= 0) {
+        original.connectToNodeLight(node);
+        return;
+      }
+      TimeValue connectingTimeout=NetworkService.TcpSettings.TCP_DEFAULT_CONNECT_TIMEOUT;
+      try {
+        if (delay.millis() < connectingTimeout.millis()) {
+          Thread.sleep(delay.millis());
+          original.connectToNodeLight(node);
+        }
+ else {
+          Thread.sleep(connectingTimeout.millis());
+          throw new ConnectTransportException(node,"UNRESPONSIVE: simulated");
+        }
+      }
+ catch (      InterruptedException e) {
+        throw new ConnectTransportException(node,"UNRESPONSIVE: interrupted while sleeping",e);
+      }
+    }
+    @Override public void sendRequest(    final DiscoveryNode node,    final long requestId,    final String action,    TransportRequest request,    final TransportRequestOptions options) throws IOException, TransportException {
+      TimeValue delay=getDelay();
+      if (delay.millis() <= 0) {
+        original.sendRequest(node,requestId,action,request,options);
+        return;
+      }
+      TransportRequestHandler handler=MockTransportService.this.getHandler(action);
+      BytesStreamOutput bStream=new BytesStreamOutput();
+      request.writeTo(bStream);
+      final TransportRequest clonedRequest=handler.newInstance();
+      clonedRequest.readFrom(new BytesStreamInput(bStream.bytes()));
+      threadPool.schedule(delay,ThreadPool.Names.GENERIC,new AbstractRunnable(){
+        @Override public void run(){
+          try {
+            original.sendRequest(node,requestId,action,clonedRequest,options);
+          }
+ catch (          Throwable e) {
+            logger.debug("failed to send delayed request",e);
+          }
+        }
+      }
+);
+    }
+  }
+);
+}
