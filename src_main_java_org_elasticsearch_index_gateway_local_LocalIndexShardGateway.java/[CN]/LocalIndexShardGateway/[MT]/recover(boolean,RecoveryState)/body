@@ -106,14 +106,25 @@
     recoveryState.getStart().checkIndexTime(indexShard.checkIndexTook());
     recoveryState.getTranslog().startTime(System.currentTimeMillis());
     recoveryState.setStage(RecoveryState.Stage.TRANSLOG);
-    TranslogStream stream=null;
+    StreamInput in=null;
     final Set<String> typesToUpdate=Sets.newHashSet();
     try {
-      stream=TranslogStreams.translogStreamFor(recoveringTranslogFile);
+      TranslogStream stream=TranslogStreams.translogStreamFor(recoveringTranslogFile);
+      try {
+        in=stream.openInput(recoveringTranslogFile);
+      }
+ catch (      TruncatedTranslogException e) {
+      }
       while (true) {
+        if (in == null) {
+          break;
+        }
         Translog.Operation operation;
         try {
-          operation=stream.read();
+          if (stream instanceof LegacyTranslogStream) {
+            in.readInt();
+          }
+          operation=stream.read(in);
         }
  catch (        EOFException e) {
           break;
@@ -145,11 +156,7 @@ catch (        IOException e) {
       throw new IndexShardGatewayRecoveryException(shardId,"failed to recover shard",e);
     }
  finally {
-      try {
-        IOUtils.close(stream);
-      }
- catch (      IOException e) {
-      }
+      IOUtils.closeWhileHandlingException(in);
     }
     indexShard.performRecoveryFinalization(true);
     recoveringTranslogFile.delete();
