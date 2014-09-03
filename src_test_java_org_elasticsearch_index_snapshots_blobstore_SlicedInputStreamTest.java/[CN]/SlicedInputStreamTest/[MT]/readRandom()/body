@@ -1,0 +1,57 @@
+{
+  int parts=randomIntBetween(1,20);
+  ByteArrayOutputStream stream=new ByteArrayOutputStream();
+  int numWriteOps=scaledRandomIntBetween(1000,10000);
+  final long seed=randomLong();
+  Random random=new Random(seed);
+  for (int i=0; i < numWriteOps; i++) {
+switch (random.nextInt(5)) {
+case 1:
+      stream.write(random.nextInt(Byte.MAX_VALUE));
+    break;
+default :
+  stream.write(randomBytes(random));
+break;
+}
+}
+final CheckClosedInputStream[] streams=new CheckClosedInputStream[parts];
+byte[] bytes=stream.toByteArray();
+int slice=bytes.length / parts;
+int offset=0;
+int length;
+for (int i=0; i < parts; i++) {
+length=i == parts - 1 ? bytes.length - offset : slice;
+streams[i]=new CheckClosedInputStream(new ByteArrayInputStream(bytes,offset,length));
+offset+=length;
+}
+SlicedInputStream input=new SlicedInputStream(parts){
+@Override protected InputStream openSlice(long slice) throws IOException {
+return streams[(int)slice];
+}
+}
+;
+random=new Random(seed);
+assertThat(input.available(),equalTo(streams[0].available()));
+for (int i=0; i < numWriteOps; i++) {
+switch (random.nextInt(5)) {
+case 1:
+assertThat(random.nextInt(Byte.MAX_VALUE),equalTo(input.read()));
+break;
+default :
+byte[] b=randomBytes(random);
+byte[] buffer=new byte[b.length];
+int read=readFully(input,buffer);
+assertThat(b.length,equalTo(read));
+assertArrayEquals(b,buffer);
+break;
+}
+}
+assertThat(input.available(),equalTo(0));
+for (int i=0; i < streams.length - 1; i++) {
+assertTrue(streams[i].closed);
+}
+input.close();
+for (int i=0; i < streams.length; i++) {
+assertTrue(streams[i].closed);
+}
+}

@@ -1,0 +1,43 @@
+{
+  boolean success=false;
+  RecoveryState.File file=recoveryState.getIndex().file(fileInfo.name());
+  try (InputStream stream=new PartSliceStream(blobContainer,fileInfo)){
+    try (final IndexOutput indexOutput=store.createVerifyingOutput(fileInfo.physicalName(),IOContext.DEFAULT,fileInfo.metadata())){
+      final byte[] buffer=new byte[BUFFER_SIZE];
+      int length;
+      while ((length=stream.read(buffer)) > 0) {
+        indexOutput.writeBytes(buffer,0,length);
+        if (file != null) {
+          file.updateRecovered(length);
+        }
+        if (restoreRateLimiter != null) {
+          rateLimiterListener.onRestorePause(restoreRateLimiter.pause(length));
+        }
+      }
+      Store.verify(indexOutput);
+      indexOutput.close();
+      if (fileInfo.metadata().hasLegacyChecksum()) {
+        Store.LegacyChecksums legacyChecksums=new Store.LegacyChecksums();
+        legacyChecksums.add(fileInfo.metadata());
+        legacyChecksums.write(store);
+      }
+      store.directory().sync(Collections.singleton(fileInfo.physicalName()));
+      recoveryState.getIndex().addRecoveredFileCount(1);
+      success=true;
+    }
+ catch (    CorruptIndexException ex) {
+      try {
+        store.markStoreCorrupted(ex);
+      }
+ catch (      IOException e) {
+        logger.warn("store cannot be marked as corrupted",e);
+      }
+      throw ex;
+    }
+ finally {
+      if (success == false) {
+        store.deleteQuiet(fileInfo.physicalName());
+      }
+    }
+  }
+ }

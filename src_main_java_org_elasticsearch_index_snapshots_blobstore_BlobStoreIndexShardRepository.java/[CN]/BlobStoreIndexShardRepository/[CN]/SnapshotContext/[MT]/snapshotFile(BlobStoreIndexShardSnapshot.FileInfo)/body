@@ -1,0 +1,24 @@
+{
+  final String file=fileInfo.physicalName();
+  try (IndexInput indexInput=store.openVerifyingInput(file,IOContext.READONCE,fileInfo.metadata())){
+    for (int i=0; i < fileInfo.numberOfParts(); i++) {
+      final InputStreamIndexInput inputStreamIndexInput=new InputStreamIndexInput(indexInput,fileInfo.partBytes());
+      InputStream inputStream=snapshotRateLimiter == null ? inputStreamIndexInput : new RateLimitingInputStream(inputStreamIndexInput,snapshotRateLimiter,snapshotThrottleListener);
+      inputStream=new AbortableInputStream(inputStream,fileInfo.physicalName());
+      try (OutputStream output=blobContainer.createOutput(fileInfo.partName(i))){
+        int len;
+        final byte[] buffer=new byte[BUFFER_SIZE];
+        while ((len=inputStream.read(buffer)) > 0) {
+          output.write(buffer,0,len);
+        }
+      }
+     }
+    Store.verify(indexInput);
+    snapshotStatus.addProcessedFile(fileInfo.length());
+  }
+ catch (  Throwable t) {
+    failStoreIfCorrupted(t);
+    snapshotStatus.addProcessedFile(0);
+    throw t;
+  }
+}

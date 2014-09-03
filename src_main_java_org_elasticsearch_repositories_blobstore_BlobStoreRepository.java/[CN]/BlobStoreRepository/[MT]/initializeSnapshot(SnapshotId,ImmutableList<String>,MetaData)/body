@@ -7,14 +7,18 @@
       throw new InvalidSnapshotNameException(snapshotId,"snapshot with such name already exists");
     }
     BytesReference bRef=bStream.bytes();
-    snapshotsBlobContainer.writeBlob(snapshotBlobName,bRef.streamInput(),bRef.length());
-    bStream=writeGlobalMetaData(metaData);
+    try (OutputStream output=snapshotsBlobContainer.createOutput(snapshotBlobName)){
+      bRef.writeTo(output);
+    }
+     bStream=writeGlobalMetaData(metaData);
     bRef=bStream.bytes();
-    snapshotsBlobContainer.writeBlob(metaDataBlobName(snapshotId),bRef.streamInput(),bRef.length());
-    for (    String index : indices) {
+    try (OutputStream output=snapshotsBlobContainer.createOutput(metaDataBlobName(snapshotId))){
+      bRef.writeTo(output);
+    }
+     for (    String index : indices) {
       IndexMetaData indexMetaData=metaData.index(index);
       BlobPath indexPath=basePath().add("indices").add(index);
-      ImmutableBlobContainer indexMetaDataBlobContainer=blobStore().immutableBlobContainer(indexPath);
+      BlobContainer indexMetaDataBlobContainer=blobStore().blobContainer(indexPath);
       bStream=new BytesStreamOutput();
       StreamOutput stream=bStream;
       if (isCompress()) {
@@ -26,8 +30,10 @@
       builder.endObject();
       builder.close();
       bRef=bStream.bytes();
-      indexMetaDataBlobContainer.writeBlob(snapshotBlobName(snapshotId),bRef.streamInput(),bRef.length());
-    }
+      try (OutputStream output=indexMetaDataBlobContainer.createOutput(snapshotBlobName(snapshotId))){
+        bRef.writeTo(output);
+      }
+     }
   }
  catch (  IOException ex) {
     throw new SnapshotCreationException(snapshotId,ex);
