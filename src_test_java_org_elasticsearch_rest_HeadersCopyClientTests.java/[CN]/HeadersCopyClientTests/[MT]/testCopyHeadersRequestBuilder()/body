@@ -1,18 +1,25 @@
 {
-  Map<String,String> existingTransportHeaders=randomHeaders(randomIntBetween(0,10));
+  Map<String,String> transportHeaders=randomHeaders(randomIntBetween(0,10));
   Map<String,String> restHeaders=randomHeaders(randomIntBetween(0,10));
-  Map<String,String> leftRestHeaders=randomHeadersFrom(restHeaders);
-  Set<String> usefulRestHeaders=new HashSet<>(leftRestHeaders.keySet());
-  usefulRestHeaders.addAll(randomHeaders(randomIntBetween(0,10),"useful-").keySet());
+  Map<String,String> copiedHeaders=randomHeadersFrom(restHeaders);
+  Set<String> usefulRestHeaders=new HashSet<>(copiedHeaders.keySet());
+  usefulRestHeaders.addAll(randomMap(randomIntBetween(0,10),"useful-").keySet());
+  Map<String,String> restContext=randomContext(randomIntBetween(0,10));
+  Map<String,String> transportContext=Maps.difference(randomContext(randomIntBetween(0,10)),restContext).entriesOnlyOnLeft();
   HashMap<String,String> expectedHeaders=new HashMap<>();
-  expectedHeaders.putAll(existingTransportHeaders);
-  expectedHeaders.putAll(leftRestHeaders);
-  Client client=client(new NoOpClient(),new FakeRestRequest(restHeaders),usefulRestHeaders);
+  expectedHeaders.putAll(transportHeaders);
+  expectedHeaders.putAll(copiedHeaders);
+  Map<String,String> expectedContext=new HashMap<>();
+  expectedContext.putAll(transportContext);
+  expectedContext.putAll(restContext);
+  Client client=client(new NoOpClient(),new FakeRestRequest(restHeaders,restContext),usefulRestHeaders);
   ActionRequestBuilder requestBuilders[]=new ActionRequestBuilder[]{client.prepareIndex("index","type"),client.prepareGet("index","type","id"),client.prepareBulk(),client.prepareDelete(),client.prepareIndex(),client.prepareClearScroll(),client.prepareMultiGet(),client.prepareBenchStatus()};
   for (  ActionRequestBuilder requestBuilder : requestBuilders) {
-    putHeaders(requestBuilder.request(),existingTransportHeaders);
-    assertHeaders(requestBuilder.request(),existingTransportHeaders);
+    putHeaders(requestBuilder.request(),transportHeaders);
+    putContext(requestBuilder.request(),transportContext);
+    assertHeaders(requestBuilder.request(),transportHeaders);
     requestBuilder.get();
     assertHeaders(requestBuilder.request(),expectedHeaders);
+    assertContext(requestBuilder.request(),expectedContext);
   }
 }
