@@ -1,0 +1,25 @@
+{
+  Map<String,Object> vars=suggestions.getCollateScriptParams();
+  MultiSearchResponse multiSearchResponse=null;
+  MultiSearchRequestBuilder multiSearchRequestBuilder=client.prepareMultiSearch();
+  boolean requestAdded=false;
+  SearchRequestBuilder req;
+  for (  Correction correction : corrections) {
+    spare.copyUTF8Bytes(correction.join(SEPARATOR,byteSpare,null,null));
+    vars.put(SUGGESTION_TEMPLATE_VAR_NAME,spare.toString());
+    ExecutableScript executable=scriptService.executable(collateScript,vars);
+    BytesReference querySource=(BytesReference)executable.run();
+    requestAdded=true;
+    if (isFilter) {
+      req=client.prepareSearch().setPreference(suggestions.getPreference()).setQuery(QueryBuilders.constantScoreQuery(FilterBuilders.bytesFilter(querySource))).setSearchType(SearchType.COUNT).setTerminateAfter(1);
+    }
+ else {
+      req=client.prepareSearch().setPreference(suggestions.getPreference()).setQuery(querySource).setSearchType(SearchType.COUNT).setTerminateAfter(1);
+    }
+    multiSearchRequestBuilder.add(req);
+  }
+  if (requestAdded) {
+    multiSearchResponse=multiSearchRequestBuilder.get();
+  }
+  return multiSearchResponse;
+}

@@ -1,67 +1,51 @@
 {
-  double expungeDeletesPctAllowed=settings.getAsDouble(INDEX_MERGE_POLICY_EXPUNGE_DELETES_ALLOWED,TieredMergePolicyProvider.this.forceMergeDeletesPctAllowed);
-  if (expungeDeletesPctAllowed != TieredMergePolicyProvider.this.forceMergeDeletesPctAllowed) {
-    logger.info("updating [expunge_deletes_allowed] from [{}] to [{}]",TieredMergePolicyProvider.this.forceMergeDeletesPctAllowed,expungeDeletesPctAllowed);
-    TieredMergePolicyProvider.this.forceMergeDeletesPctAllowed=expungeDeletesPctAllowed;
-    for (    CustomTieredMergePolicyProvider policy : policies) {
-      policy.setForceMergeDeletesPctAllowed(expungeDeletesPctAllowed);
-    }
+  double oldExpungeDeletesPctAllowed=mergePolicy.getForceMergeDeletesPctAllowed();
+  double expungeDeletesPctAllowed=settings.getAsDouble(INDEX_MERGE_POLICY_EXPUNGE_DELETES_ALLOWED,DEFAULT_EXPUNGE_DELETES_ALLOWED);
+  if (expungeDeletesPctAllowed != oldExpungeDeletesPctAllowed) {
+    logger.info("updating [expunge_deletes_allowed] from [{}] to [{}]",oldExpungeDeletesPctAllowed,expungeDeletesPctAllowed);
+    mergePolicy.setForceMergeDeletesPctAllowed(expungeDeletesPctAllowed);
   }
-  ByteSizeValue floorSegment=settings.getAsBytesSize(INDEX_MERGE_POLICY_FLOOR_SEGMENT,TieredMergePolicyProvider.this.floorSegment);
-  if (!floorSegment.equals(TieredMergePolicyProvider.this.floorSegment)) {
-    logger.info("updating [floor_segment] from [{}] to [{}]",TieredMergePolicyProvider.this.floorSegment,floorSegment);
-    TieredMergePolicyProvider.this.floorSegment=floorSegment;
-    for (    CustomTieredMergePolicyProvider policy : policies) {
-      policy.setFloorSegmentMB(floorSegment.mbFrac());
-    }
+  double oldFloorSegmentMB=mergePolicy.getFloorSegmentMB();
+  ByteSizeValue floorSegment=settings.getAsBytesSize(INDEX_MERGE_POLICY_FLOOR_SEGMENT,DEFAULT_FLOOR_SEGMENT);
+  if (floorSegment.mbFrac() != oldFloorSegmentMB) {
+    logger.info("updating [floor_segment] from [{}mb] to [{}]",oldFloorSegmentMB,floorSegment);
+    mergePolicy.setFloorSegmentMB(floorSegment.mbFrac());
   }
-  int maxMergeAtOnce=settings.getAsInt(INDEX_MERGE_POLICY_MAX_MERGE_AT_ONCE,TieredMergePolicyProvider.this.maxMergeAtOnce);
-  if (maxMergeAtOnce != TieredMergePolicyProvider.this.maxMergeAtOnce) {
-    logger.info("updating [max_merge_at_once] from [{}] to [{}]",TieredMergePolicyProvider.this.maxMergeAtOnce,maxMergeAtOnce);
-    TieredMergePolicyProvider.this.maxMergeAtOnce=maxMergeAtOnce;
-    for (    CustomTieredMergePolicyProvider policy : policies) {
-      policy.setMaxMergeAtOnce(maxMergeAtOnce);
-    }
+  double oldSegmentsPerTier=mergePolicy.getSegmentsPerTier();
+  double segmentsPerTier=settings.getAsDouble(INDEX_MERGE_POLICY_SEGMENTS_PER_TIER,DEFAULT_SEGMENTS_PER_TIER);
+  if (segmentsPerTier != oldSegmentsPerTier) {
+    logger.info("updating [segments_per_tier] from [{}] to [{}]",oldSegmentsPerTier,segmentsPerTier);
+    mergePolicy.setSegmentsPerTier(segmentsPerTier);
   }
-  int maxMergeAtOnceExplicit=settings.getAsInt(INDEX_MERGE_POLICY_MAX_MERGE_AT_ONCE_EXPLICIT,TieredMergePolicyProvider.this.maxMergeAtOnceExplicit);
-  if (maxMergeAtOnceExplicit != TieredMergePolicyProvider.this.maxMergeAtOnceExplicit) {
-    logger.info("updating [max_merge_at_once_explicit] from [{}] to [{}]",TieredMergePolicyProvider.this.maxMergeAtOnceExplicit,maxMergeAtOnceExplicit);
-    TieredMergePolicyProvider.this.maxMergeAtOnceExplicit=maxMergeAtOnceExplicit;
-    for (    CustomTieredMergePolicyProvider policy : policies) {
-      policy.setMaxMergeAtOnceExplicit(maxMergeAtOnceExplicit);
-    }
+  int oldMaxMergeAtOnce=mergePolicy.getMaxMergeAtOnce();
+  int maxMergeAtOnce=settings.getAsInt(INDEX_MERGE_POLICY_MAX_MERGE_AT_ONCE,DEFAULT_MAX_MERGE_AT_ONCE);
+  if (maxMergeAtOnce != oldMaxMergeAtOnce) {
+    logger.info("updating [max_merge_at_once] from [{}] to [{}]",oldMaxMergeAtOnce,maxMergeAtOnce);
+    maxMergeAtOnce=adjustMaxMergeAtOnceIfNeeded(maxMergeAtOnce,segmentsPerTier);
+    mergePolicy.setMaxMergeAtOnce(maxMergeAtOnce);
   }
-  ByteSizeValue maxMergedSegment=settings.getAsBytesSize(INDEX_MERGE_POLICY_MAX_MERGED_SEGMENT,TieredMergePolicyProvider.this.maxMergedSegment);
-  if (!maxMergedSegment.equals(TieredMergePolicyProvider.this.maxMergedSegment)) {
-    logger.info("updating [max_merged_segment] from [{}] to [{}]",TieredMergePolicyProvider.this.maxMergedSegment,maxMergedSegment);
-    TieredMergePolicyProvider.this.maxMergedSegment=maxMergedSegment;
-    for (    CustomTieredMergePolicyProvider policy : policies) {
-      policy.setFloorSegmentMB(maxMergedSegment.mbFrac());
-    }
+  int oldMaxMergeAtOnceExplicit=mergePolicy.getMaxMergeAtOnceExplicit();
+  int maxMergeAtOnceExplicit=settings.getAsInt(INDEX_MERGE_POLICY_MAX_MERGE_AT_ONCE_EXPLICIT,DEFAULT_MAX_MERGE_AT_ONCE_EXPLICIT);
+  if (maxMergeAtOnceExplicit != oldMaxMergeAtOnceExplicit) {
+    logger.info("updating [max_merge_at_once_explicit] from [{}] to [{}]",oldMaxMergeAtOnceExplicit,maxMergeAtOnceExplicit);
+    mergePolicy.setMaxMergeAtOnceExplicit(maxMergeAtOnceExplicit);
   }
-  double segmentsPerTier=settings.getAsDouble(INDEX_MERGE_POLICY_SEGMENTS_PER_TIER,TieredMergePolicyProvider.this.segmentsPerTier);
-  if (segmentsPerTier != TieredMergePolicyProvider.this.segmentsPerTier) {
-    logger.info("updating [segments_per_tier] from [{}] to [{}]",TieredMergePolicyProvider.this.segmentsPerTier,segmentsPerTier);
-    TieredMergePolicyProvider.this.segmentsPerTier=segmentsPerTier;
-    for (    CustomTieredMergePolicyProvider policy : policies) {
-      policy.setSegmentsPerTier(segmentsPerTier);
-    }
+  double oldMaxMergedSegmentMB=mergePolicy.getMaxMergedSegmentMB();
+  ByteSizeValue maxMergedSegment=settings.getAsBytesSize(INDEX_MERGE_POLICY_MAX_MERGED_SEGMENT,DEFAULT_MAX_MERGED_SEGMENT);
+  if (maxMergedSegment.mbFrac() != oldMaxMergedSegmentMB) {
+    logger.info("updating [max_merged_segment] from [{}mb] to [{}]",oldMaxMergedSegmentMB,maxMergedSegment);
+    mergePolicy.setMaxMergedSegmentMB(maxMergedSegment.mbFrac());
   }
-  double reclaimDeletesWeight=settings.getAsDouble(INDEX_MERGE_POLICY_RECLAIM_DELETES_WEIGHT,TieredMergePolicyProvider.this.reclaimDeletesWeight);
-  if (reclaimDeletesWeight != TieredMergePolicyProvider.this.reclaimDeletesWeight) {
-    logger.info("updating [reclaim_deletes_weight] from [{}] to [{}]",TieredMergePolicyProvider.this.reclaimDeletesWeight,reclaimDeletesWeight);
-    TieredMergePolicyProvider.this.reclaimDeletesWeight=reclaimDeletesWeight;
-    for (    CustomTieredMergePolicyProvider policy : policies) {
-      policy.setReclaimDeletesWeight(reclaimDeletesWeight);
-    }
+  double oldReclaimDeletesWeight=mergePolicy.getReclaimDeletesWeight();
+  double reclaimDeletesWeight=settings.getAsDouble(INDEX_MERGE_POLICY_RECLAIM_DELETES_WEIGHT,DEFAULT_RECLAIM_DELETES_WEIGHT);
+  if (reclaimDeletesWeight != oldReclaimDeletesWeight) {
+    logger.info("updating [reclaim_deletes_weight] from [{}] to [{}]",oldReclaimDeletesWeight,reclaimDeletesWeight);
+    mergePolicy.setReclaimDeletesWeight(reclaimDeletesWeight);
   }
-  final double noCFSRatio=parseNoCFSRatio(settings.get(INDEX_COMPOUND_FORMAT,Double.toString(TieredMergePolicyProvider.this.noCFSRatio)));
+  double noCFSRatio=parseNoCFSRatio(settings.get(INDEX_COMPOUND_FORMAT,Double.toString(TieredMergePolicyProvider.this.noCFSRatio)));
   if (noCFSRatio != TieredMergePolicyProvider.this.noCFSRatio) {
     logger.info("updating index.compound_format from [{}] to [{}]",formatNoCFSRatio(TieredMergePolicyProvider.this.noCFSRatio),formatNoCFSRatio(noCFSRatio));
+    mergePolicy.setNoCFSRatio(noCFSRatio);
     TieredMergePolicyProvider.this.noCFSRatio=noCFSRatio;
-    for (    CustomTieredMergePolicyProvider policy : policies) {
-      policy.setNoCFSRatio(noCFSRatio);
-    }
   }
-  fixSettingsIfNeeded();
 }
