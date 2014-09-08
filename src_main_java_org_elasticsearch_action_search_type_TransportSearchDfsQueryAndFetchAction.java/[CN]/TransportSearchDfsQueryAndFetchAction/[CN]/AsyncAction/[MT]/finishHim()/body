@@ -1,14 +1,29 @@
 {
   try {
-    innerFinishHim();
-  }
- catch (  Throwable e) {
-    ReduceSearchPhaseException failure=new ReduceSearchPhaseException("query_fetch","",e,buildShardFailures());
-    if (logger.isDebugEnabled()) {
-      logger.debug("failed to reduce search",failure);
+    threadPool.executor(ThreadPool.Names.SEARCH).execute(new Runnable(){
+      @Override public void run(){
+        try {
+          boolean useScroll=!useSlowScroll && request.scroll() != null;
+          sortedShardList=searchPhaseController.sortDocs(useScroll,queryFetchResults);
+          final InternalSearchResponse internalResponse=searchPhaseController.merge(sortedShardList,queryFetchResults,queryFetchResults);
+          String scrollId=null;
+          if (request.scroll() != null) {
+            scrollId=TransportSearchHelper.buildScrollId(request.searchType(),firstResults,null);
+          }
+          listener.onResponse(new SearchResponse(internalResponse,scrollId,expectedSuccessfulOps,successfulOps.get(),buildTookInMillis(),buildShardFailures()));
+        }
+ catch (        Throwable e) {
+          ReduceSearchPhaseException failure=new ReduceSearchPhaseException("query_fetch","",e,buildShardFailures());
+          if (logger.isDebugEnabled()) {
+            logger.debug("failed to reduce search",failure);
+          }
+          listener.onFailure(failure);
+        }
+      }
     }
-    listener.onFailure(failure);
+);
   }
- finally {
+ catch (  EsRejectedExecutionException ex) {
+    listener.onFailure(ex);
   }
 }
