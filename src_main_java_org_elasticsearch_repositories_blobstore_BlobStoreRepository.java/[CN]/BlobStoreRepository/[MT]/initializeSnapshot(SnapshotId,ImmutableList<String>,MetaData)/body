@@ -1,37 +1,30 @@
 {
   try {
     BlobStoreSnapshot blobStoreSnapshot=BlobStoreSnapshot.builder().name(snapshotId.getSnapshot()).indices(indices).startTime(System.currentTimeMillis()).build();
-    BytesStreamOutput bStream=writeSnapshot(blobStoreSnapshot);
     String snapshotBlobName=snapshotBlobName(snapshotId);
     if (snapshotsBlobContainer.blobExists(snapshotBlobName)) {
       throw new InvalidSnapshotNameException(snapshotId,"snapshot with such name already exists");
     }
-    BytesReference bRef=bStream.bytes();
     try (OutputStream output=snapshotsBlobContainer.createOutput(snapshotBlobName)){
-      bRef.writeTo(output);
+      writeSnapshot(blobStoreSnapshot,output);
     }
-     bStream=writeGlobalMetaData(metaData);
-    bRef=bStream.bytes();
-    try (OutputStream output=snapshotsBlobContainer.createOutput(metaDataBlobName(snapshotId))){
-      bRef.writeTo(output);
+     try (OutputStream output=snapshotsBlobContainer.createOutput(metaDataBlobName(snapshotId))){
+      writeGlobalMetaData(metaData,output);
     }
      for (    String index : indices) {
-      IndexMetaData indexMetaData=metaData.index(index);
-      BlobPath indexPath=basePath().add("indices").add(index);
-      BlobContainer indexMetaDataBlobContainer=blobStore().blobContainer(indexPath);
-      bStream=new BytesStreamOutput();
-      StreamOutput stream=bStream;
-      if (isCompress()) {
-        stream=CompressorFactory.defaultCompressor().streamOutput(stream);
-      }
-      XContentBuilder builder=XContentFactory.contentBuilder(XContentType.JSON,stream);
-      builder.startObject();
-      IndexMetaData.Builder.toXContent(indexMetaData,builder,ToXContent.EMPTY_PARAMS);
-      builder.endObject();
-      builder.close();
-      bRef=bStream.bytes();
+      final IndexMetaData indexMetaData=metaData.index(index);
+      final BlobPath indexPath=basePath().add("indices").add(index);
+      final BlobContainer indexMetaDataBlobContainer=blobStore().blobContainer(indexPath);
       try (OutputStream output=indexMetaDataBlobContainer.createOutput(snapshotBlobName(snapshotId))){
-        bRef.writeTo(output);
+        StreamOutput stream=new OutputStreamStreamOutput(output);
+        if (isCompress()) {
+          stream=CompressorFactory.defaultCompressor().streamOutput(stream);
+        }
+        XContentBuilder builder=XContentFactory.contentBuilder(XContentType.JSON,stream);
+        builder.startObject();
+        IndexMetaData.Builder.toXContent(indexMetaData,builder,ToXContent.EMPTY_PARAMS);
+        builder.endObject();
+        builder.close();
       }
      }
   }
