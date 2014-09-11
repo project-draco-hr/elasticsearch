@@ -1,0 +1,44 @@
+{
+  final DiscoveryNodes discoNodes=clusterService.state().nodes();
+  final DiscoveryNode localNode=discoNodes.localNode();
+  final ObjectContainer<DiscoveryNode> masterAndDataNodes=discoNodes.masterAndDataNodes().values();
+  final List<DiscoveryNode> nodes=newArrayList();
+  for (  ObjectCursor<DiscoveryNode> cursor : masterAndDataNodes) {
+    DiscoveryNode node=cursor.value;
+    Version version=node.getVersion();
+    if (version != null && version.onOrAfter(Version.V_1_4_0)) {
+      nodes.add(node);
+    }
+  }
+  final CopyOnWriteArrayList<VerificationFailure> errors=new CopyOnWriteArrayList<>();
+  final AtomicInteger counter=new AtomicInteger(nodes.size());
+  for (  final DiscoveryNode node : nodes) {
+    if (node.equals(localNode)) {
+      try {
+        doVerify(repository,verificationToken);
+      }
+ catch (      Throwable t) {
+        errors.add(new VerificationFailure(node.id(),ExceptionsHelper.detailedMessage(t)));
+      }
+      if (counter.decrementAndGet() == 0) {
+        finishVerification(listener,nodes,errors);
+      }
+    }
+ else {
+      transportService.sendRequest(node,ACTION_NAME,new VerifyNodeRepositoryRequest(repository,verificationToken),new EmptyTransportResponseHandler(ThreadPool.Names.SAME){
+        @Override public void handleResponse(        TransportResponse.Empty response){
+          if (counter.decrementAndGet() == 0) {
+            finishVerification(listener,nodes,errors);
+          }
+        }
+        @Override public void handleException(        TransportException exp){
+          errors.add(new VerificationFailure(node.id(),ExceptionsHelper.detailedMessage(exp)));
+          if (counter.decrementAndGet() == 0) {
+            finishVerification(listener,nodes,errors);
+          }
+        }
+      }
+);
+    }
+  }
+}
