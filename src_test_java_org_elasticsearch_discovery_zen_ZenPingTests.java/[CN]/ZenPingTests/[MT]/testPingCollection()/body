@@ -1,0 +1,40 @@
+{
+  DiscoveryNode[] nodes=new DiscoveryNode[randomIntBetween(1,30)];
+  long maxIdPerNode[]=new long[nodes.length];
+  DiscoveryNode masterPerNode[]=new DiscoveryNode[nodes.length];
+  boolean hasJoinedOncePerNode[]=new boolean[nodes.length];
+  ArrayList<ZenPing.PingResponse> pings=new ArrayList<>();
+  for (int i=0; i < nodes.length; i++) {
+    nodes[i]=new DiscoveryNode("" + i,DummyTransportAddress.INSTANCE,Version.CURRENT);
+  }
+  for (int pingCount=scaledRandomIntBetween(10,nodes.length * 10); pingCount > 0; pingCount--) {
+    int node=randomInt(nodes.length - 1);
+    DiscoveryNode masterNode=null;
+    if (randomBoolean()) {
+      masterNode=nodes[randomInt(nodes.length - 1)];
+    }
+    boolean hasJoinedOnce=randomBoolean();
+    ZenPing.PingResponse ping=new ZenPing.PingResponse(nodes[node],masterNode,ClusterName.DEFAULT,hasJoinedOnce);
+    if (rarely()) {
+      continue;
+    }
+    maxIdPerNode[node]=ping.id();
+    masterPerNode[node]=masterNode;
+    hasJoinedOncePerNode[node]=hasJoinedOnce;
+    pings.add(ping);
+  }
+  Collections.shuffle(pings);
+  ZenPing.PingCollection collection=new ZenPing.PingCollection();
+  collection.addPings(pings.toArray(new ZenPing.PingResponse[pings.size()]));
+  ZenPing.PingResponse[] aggregate=collection.toArray();
+  for (  ZenPing.PingResponse ping : aggregate) {
+    int nodeId=Integer.parseInt(ping.node().id());
+    assertThat(maxIdPerNode[nodeId],equalTo(ping.id()));
+    assertThat(masterPerNode[nodeId],equalTo(ping.master()));
+    assertThat(hasJoinedOncePerNode[nodeId],equalTo(ping.hasJoinedOnce()));
+    maxIdPerNode[nodeId]=-1;
+  }
+  for (int i=0; i < maxIdPerNode.length; i++) {
+    assertTrue("node " + i + " had pings but it was not found in collection",maxIdPerNode[i] <= 0);
+  }
+}
