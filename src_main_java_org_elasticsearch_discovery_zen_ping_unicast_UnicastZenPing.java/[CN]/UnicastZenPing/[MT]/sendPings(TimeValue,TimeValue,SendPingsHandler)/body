@@ -21,24 +21,26 @@
   nodesToPing.addAll(sortedNodesToPing);
   final CountDownLatch latch=new CountDownLatch(nodesToPing.size());
   for (  final DiscoveryNode node : nodesToPing) {
-    boolean nodeFoundByAddressX;
-    DiscoveryNode nodeToSendX=discoNodes.findByAddress(node.address());
-    if (nodeToSendX != null) {
-      nodeFoundByAddressX=true;
+    final boolean nodeFoundByAddress;
+    DiscoveryNode nodeToSend=discoNodes.findByAddress(node.address());
+    if (nodeToSend != null) {
+      nodeFoundByAddress=true;
     }
  else {
-      nodeToSendX=node;
-      nodeFoundByAddressX=false;
+      nodeToSend=node;
+      nodeFoundByAddress=false;
     }
-    final DiscoveryNode nodeToSend=nodeToSendX;
-    final boolean nodeFoundByAddress=nodeFoundByAddressX;
     if (!transportService.nodeConnected(nodeToSend)) {
       if (sendPingsHandler.isClosed()) {
         return;
       }
       if (!nodeFoundByAddress) {
+        DiscoveryNode tempNode=new DiscoveryNode("",UNICAST_NODE_PREFIX + unicastNodeIdGenerator.incrementAndGet() + "_"+ nodeToSend.id(),nodeToSend.getHostName(),nodeToSend.getHostAddress(),nodeToSend.address(),nodeToSend.attributes(),nodeToSend.version());
+        logger.trace("replacing {} with temp node {}",nodeToSend,tempNode);
+        nodeToSend=tempNode;
         sendPingsHandler.nodeToDisconnect.add(nodeToSend);
       }
+      final DiscoveryNode finalNodeToSend=nodeToSend;
       sendPingsHandler.executor().execute(new Runnable(){
         @Override public void run(){
           if (sendPingsHandler.isClosed()) {
@@ -47,16 +49,16 @@
           boolean success=false;
           try {
             if (!nodeFoundByAddress) {
-              logger.trace("[{}] connecting (light) to {}",sendPingsHandler.id(),nodeToSend);
-              transportService.connectToNodeLight(nodeToSend);
+              logger.trace("[{}] connecting (light) to {}",sendPingsHandler.id(),finalNodeToSend);
+              transportService.connectToNodeLight(finalNodeToSend);
             }
  else {
-              logger.trace("[{}] connecting to {}",sendPingsHandler.id(),nodeToSend);
-              transportService.connectToNode(nodeToSend);
+              logger.trace("[{}] connecting to {}",sendPingsHandler.id(),finalNodeToSend);
+              transportService.connectToNode(finalNodeToSend);
             }
             logger.trace("[{}] connected to {}",sendPingsHandler.id(),node);
             if (receivedResponses.containsKey(sendPingsHandler.id())) {
-              sendPingRequestToNode(sendPingsHandler.id(),timeout,pingRequest,latch,node,nodeToSend);
+              sendPingRequestToNode(sendPingsHandler.id(),timeout,pingRequest,latch,node,finalNodeToSend);
             }
  else {
               latch.countDown();
@@ -65,10 +67,10 @@
             success=true;
           }
  catch (          ConnectTransportException e) {
-            logger.trace("[{}] failed to connect to {}",e,sendPingsHandler.id(),nodeToSend);
+            logger.trace("[{}] failed to connect to {}",e,sendPingsHandler.id(),finalNodeToSend);
           }
 catch (          Throwable e) {
-            logger.warn("[{}] failed send ping to {}",e,sendPingsHandler.id(),nodeToSend);
+            logger.warn("[{}] failed send ping to {}",e,sendPingsHandler.id(),finalNodeToSend);
           }
  finally {
             if (!success) {
