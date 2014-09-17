@@ -4,21 +4,26 @@
     createIndex(request,listener,mdLock);
     return;
   }
-  threadPool.executor(ThreadPool.Names.MANAGEMENT).execute(new Runnable(){
-    @Override public void run(){
-      try {
-        if (!mdLock.tryAcquire(request.masterNodeTimeout().nanos(),TimeUnit.NANOSECONDS)) {
-          listener.onFailure(new ProcessClusterEventTimeoutException(request.masterNodeTimeout(),"acquire index lock"));
+  try {
+    threadPool.executor(ThreadPool.Names.MANAGEMENT).execute(new Runnable(){
+      @Override public void run(){
+        try {
+          if (!mdLock.tryAcquire(request.masterNodeTimeout().nanos(),TimeUnit.NANOSECONDS)) {
+            listener.onFailure(new ProcessClusterEventTimeoutException(request.masterNodeTimeout(),"acquire index lock"));
+            return;
+          }
+        }
+ catch (        InterruptedException e) {
+          Thread.interrupted();
+          listener.onFailure(e);
           return;
         }
+        createIndex(request,listener,mdLock);
       }
- catch (      InterruptedException e) {
-        Thread.interrupted();
-        listener.onFailure(e);
-        return;
-      }
-      createIndex(request,listener,mdLock);
     }
-  }
 );
+  }
+ catch (  EsRejectedExecutionException ex) {
+    listener.onFailure(ex);
+  }
 }
