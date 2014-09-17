@@ -1,0 +1,56 @@
+{
+  SearchContext context=SearchContext.current();
+  Directory directory=newDirectory();
+  IndexWriter writer=new IndexWriter(directory,newIndexWriterConfig(new MockAnalyzer(random())));
+  MockScorer scorer=new MockScorer(scoreType);
+  scorer.scores=new FloatArrayList(10);
+  int parentDocs=scaledRandomIntBetween(2,10);
+  int childDocId=0;
+  Map<String,Float> parentScores=new TreeMap<>();
+  for (int parentDocId=0; parentDocId < parentDocs; ++parentDocId) {
+    String parent=Integer.toString(parentDocId);
+    Document parentDocument=new Document();
+    parentDocument.add(new StringField(UidFieldMapper.NAME,Uid.createUid("parent",parent),Field.Store.YES));
+    parentDocument.add(new StringField(IdFieldMapper.NAME,parent,Field.Store.YES));
+    parentDocument.add(new StringField(TypeFieldMapper.NAME,"parent",Field.Store.NO));
+    writer.addDocument(parentDocument);
+    int numChildDocs=scaledRandomIntBetween(1,10);
+    scorer.scores.clear();
+    for (int i=0; i < numChildDocs; ++i) {
+      int childScore=random().nextInt(128);
+      Document childDocument=new Document();
+      childDocument.add(new StringField(UidFieldMapper.NAME,Uid.createUid("child",Integer.toString(childDocId++)),Field.Store.NO));
+      childDocument.add(new StringField(TypeFieldMapper.NAME,"child",Field.Store.NO));
+      childDocument.add(new StringField(ParentFieldMapper.NAME,Uid.createUid("parent",parent),Field.Store.NO));
+      childDocument.add(new DoubleField(CHILD_SCORE_NAME,childScore,Field.Store.NO));
+      scorer.scores.add(childScore);
+      writer.addDocument(childDocument);
+    }
+    parentScores.put(parent,scorer.score());
+  }
+  writer.commit();
+  IndexReader reader=DirectoryReader.open(writer,true);
+  IndexSearcher searcher=new IndexSearcher(reader);
+  Engine.SimpleSearcher engineSearcher=new Engine.SimpleSearcher(ChildrenQueryTests.class.getSimpleName(),searcher);
+  ((TestSearchContext)context).setSearcher(new ContextIndexSearcher(context,engineSearcher));
+  ParentFieldMapper parentFieldMapper=context.mapperService().documentMapper("child").parentFieldMapper();
+  ParentChildIndexFieldData parentChildIndexFieldData=context.fieldData().getForField(parentFieldMapper);
+  FixedBitSetFilter parentFilter=wrap(new TermFilter(new Term(TypeFieldMapper.NAME,"parent")));
+  FieldMapper fieldMapper=context.mapperService().smartNameFieldMapper(CHILD_SCORE_NAME);
+  IndexNumericFieldData fieldData=context.fieldData().getForField(fieldMapper);
+  FieldValueFactorFunction fieldScore=new FieldValueFactorFunction(CHILD_SCORE_NAME,1,FieldValueFactorFunction.Modifier.NONE,fieldData);
+  Query childQuery=new FunctionScoreQuery(new FilteredQuery(Queries.newMatchAllQuery(),new TermFilter(new Term(TypeFieldMapper.NAME,"child"))),fieldScore);
+  TopDocs docs=searcher.search(new ChildrenQuery(parentChildIndexFieldData,"parent","child",parentFilter,childQuery,scoreType,0,0,parentDocs,null),parentDocs);
+  assertThat("Expected all parents",docs.totalHits,is(parentDocs));
+  float topScore=docs.scoreDocs[0].score;
+  for (int i=0; i < parentDocs; ++i) {
+    ScoreDoc scoreDoc=docs.scoreDocs[i];
+    float score=parentScores.remove(reader.document(scoreDoc.doc).get(IdFieldMapper.NAME));
+    assertThat("Unexpected score",scoreDoc.score,is(score));
+    assertThat("Not descending",score,lessThanOrEqualTo(topScore));
+    topScore=score;
+  }
+  reader.close();
+  writer.close();
+  directory.close();
+}
