@@ -1,35 +1,26 @@
 {
-  try {
-    threadPool.executor(ThreadPool.Names.SEARCH).execute(new Runnable(){
-      @Override public void run(){
-        try {
-          final InternalSearchResponse internalResponse=searchPhaseController.merge(sortedShardList,queryResults,fetchResults);
-          String scrollId=null;
-          if (request.scroll() != null) {
-            scrollId=TransportSearchHelper.buildScrollId(request.searchType(),firstResults,null);
-          }
-          listener.onResponse(new SearchResponse(internalResponse,scrollId,expectedSuccessfulOps,successfulOps.get(),buildTookInMillis(),buildShardFailures()));
-        }
- catch (        Throwable e) {
-          ReduceSearchPhaseException failure=new ReduceSearchPhaseException("merge","",e,buildShardFailures());
-          if (logger.isDebugEnabled()) {
-            logger.debug("failed to reduce search",failure);
-          }
-          listener.onFailure(failure);
-        }
- finally {
-          releaseIrrelevantSearchContexts(queryResults,docIdsToLoad);
-        }
+  threadPool.executor(ThreadPool.Names.SEARCH).execute(new ActionRunnable<SearchResponse>(listener){
+    @Override public void doRun() throws IOException {
+      final InternalSearchResponse internalResponse=searchPhaseController.merge(sortedShardList,queryResults,fetchResults);
+      String scrollId=null;
+      if (request.scroll() != null) {
+        scrollId=TransportSearchHelper.buildScrollId(request.searchType(),firstResults,null);
       }
-    }
-);
-  }
- catch (  EsRejectedExecutionException ex) {
-    try {
+      listener.onResponse(new SearchResponse(internalResponse,scrollId,expectedSuccessfulOps,successfulOps.get(),buildTookInMillis(),buildShardFailures()));
       releaseIrrelevantSearchContexts(queryResults,docIdsToLoad);
     }
+    @Override public void onFailure(    Throwable t){
+      try {
+        ReduceSearchPhaseException failure=new ReduceSearchPhaseException("merge","",t,buildShardFailures());
+        if (logger.isDebugEnabled()) {
+          logger.debug("failed to reduce search",failure);
+        }
+        super.onFailure(failure);
+      }
   finally {
-      listener.onFailure(ex);
+        releaseIrrelevantSearchContexts(queryResults,docIdsToLoad);
+      }
     }
   }
+);
 }
