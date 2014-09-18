@@ -2,7 +2,6 @@
   IndexSearcher searcher=new IndexSearcher(reader);
   searcher.setSimilarity(similarityService.similarity());
   if (warmer != null) {
-    Searcher currentSearcher=null;
     IndexSearcher newSearcher=null;
     boolean closeNewSearcher=false;
     try {
@@ -10,28 +9,29 @@
         newSearcher=searcher;
       }
  else {
-        currentSearcher=acquireSearcher("search_factory");
-        List<IndexReader> readers=Lists.newArrayList();
-        for (        AtomicReaderContext newReaderContext : searcher.getIndexReader().leaves()) {
-          if (isMergedSegment(newReaderContext.reader())) {
-            continue;
-          }
-          boolean found=false;
-          for (          AtomicReaderContext currentReaderContext : currentSearcher.reader().leaves()) {
-            if (currentReaderContext.reader().getCoreCacheKey().equals(newReaderContext.reader().getCoreCacheKey())) {
-              found=true;
-              break;
+        try (final Searcher currentSearcher=acquireSearcher("search_factory")){
+          List<IndexReader> readers=Lists.newArrayList();
+          for (          AtomicReaderContext newReaderContext : searcher.getIndexReader().leaves()) {
+            if (isMergedSegment(newReaderContext.reader())) {
+              continue;
+            }
+            boolean found=false;
+            for (            AtomicReaderContext currentReaderContext : currentSearcher.reader().leaves()) {
+              if (currentReaderContext.reader().getCoreCacheKey().equals(newReaderContext.reader().getCoreCacheKey())) {
+                found=true;
+                break;
+              }
+            }
+            if (!found) {
+              readers.add(newReaderContext.reader());
             }
           }
-          if (!found) {
-            readers.add(newReaderContext.reader());
+          if (!readers.isEmpty()) {
+            newSearcher=new IndexSearcher(new MultiReader(readers.toArray(new IndexReader[readers.size()]),false));
+            closeNewSearcher=true;
           }
         }
-        if (!readers.isEmpty()) {
-          newSearcher=new IndexSearcher(new MultiReader(readers.toArray(new IndexReader[readers.size()]),false));
-          closeNewSearcher=true;
-        }
-      }
+       }
       if (newSearcher != null) {
         IndicesWarmer.WarmerContext context=new IndicesWarmer.WarmerContext(shardId,new SimpleSearcher("warmer",newSearcher));
         warmer.warmNewReaders(context);
@@ -44,7 +44,6 @@
       }
     }
  finally {
-      Releasables.close(currentSearcher);
       if (newSearcher != null && closeNewSearcher) {
         IOUtils.closeWhileHandlingException(newSearcher.getIndexReader());
       }
