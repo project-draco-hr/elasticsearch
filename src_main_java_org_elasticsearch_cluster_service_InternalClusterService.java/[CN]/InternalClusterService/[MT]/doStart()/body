@@ -1,20 +1,11 @@
 {
   add(localNodeMasterListeners);
   this.clusterState=ClusterState.builder(clusterState).blocks(initialBlocks).build();
-  this.updateTasksExecutor=EsExecutors.newSinglePrioritizing(daemonThreadFactory(settings,"clusterService#updateTask"));
+  this.updateTasksExecutor=EsExecutors.newSinglePrioritizing(daemonThreadFactory(settings,UPDATE_THREAD_NAME));
   this.reconnectToNodes=threadPool.schedule(reconnectInterval,ThreadPool.Names.GENERIC,new ReconnectToNodes());
-  discoveryService.addLifecycleListener(new LifecycleListener(){
-    @Override public void afterStart(){
-      submitStateUpdateTask("update local node",Priority.IMMEDIATE,new ClusterStateNonMasterUpdateTask(){
-        @Override public ClusterState execute(        ClusterState currentState) throws Exception {
-          return ClusterState.builder(currentState).nodes(DiscoveryNodes.builder(currentState.nodes()).put(localNode()).localNodeId(localNode().id())).build();
-        }
-        @Override public void onFailure(        String source,        Throwable t){
-          logger.warn("failed to update local node",t);
-        }
-      }
-);
-    }
-  }
-);
+  Map<String,String> nodeAttributes=discoveryNodeService.buildAttributes();
+  final String nodeId=DiscoveryService.generateNodeId(settings);
+  DiscoveryNode localNode=new DiscoveryNode(settings.get("name"),nodeId,transportService.boundAddress().publishAddress(),nodeAttributes,version);
+  DiscoveryNodes.Builder nodeBuilder=DiscoveryNodes.builder().put(localNode).localNodeId(localNode.id());
+  this.clusterState=ClusterState.builder(clusterState).nodes(nodeBuilder).blocks(initialBlocks).build();
 }

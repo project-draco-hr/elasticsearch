@@ -1,7 +1,4 @@
 {
-  if (!master) {
-    throw new ElasticsearchIllegalStateException("Node [" + localNode + "] not master for join request from ["+ node+ "]");
-  }
   if (!transportService.addressSupported(node.address().getClass())) {
     logger.warn("received a wrong address type from [{}], ignoring...",node);
   }
@@ -10,15 +7,15 @@
     membership.sendValidateJoinRequestBlocking(node,joinTimeout);
     processJoinRequests.add(new Tuple<>(node,callback));
     clusterService.submitStateUpdateTask("zen-disco-receive(join from node[" + node + "])",Priority.URGENT,new ProcessedClusterStateUpdateTask(){
-      private final List<Tuple<DiscoveryNode,MembershipAction.JoinCallback>> drainedTasks=new ArrayList<>();
+      private final List<Tuple<DiscoveryNode,MembershipAction.JoinCallback>> drainedJoinRequests=new ArrayList<>();
       @Override public ClusterState execute(      ClusterState currentState){
-        processJoinRequests.drainTo(drainedTasks);
-        if (drainedTasks.isEmpty()) {
+        processJoinRequests.drainTo(drainedJoinRequests);
+        if (drainedJoinRequests.isEmpty()) {
           return currentState;
         }
         boolean modified=false;
         DiscoveryNodes.Builder nodesBuilder=DiscoveryNodes.builder(currentState.nodes());
-        for (        Tuple<DiscoveryNode,MembershipAction.JoinCallback> task : drainedTasks) {
+        for (        Tuple<DiscoveryNode,MembershipAction.JoinCallback> task : drainedJoinRequests) {
           DiscoveryNode node=task.v1();
           if (currentState.nodes().nodeExists(node.id())) {
             logger.debug("received a join request for an existing node [{}]",node);
@@ -36,17 +33,17 @@
         }
         ClusterState.Builder stateBuilder=ClusterState.builder(currentState);
         if (modified) {
-          latestDiscoNodes=nodesBuilder.build();
-          stateBuilder.nodes(latestDiscoNodes);
+          stateBuilder.nodes(nodesBuilder);
         }
         return stateBuilder.build();
       }
       @Override public void onNoLongerMaster(      String source){
-        Exception e=new EsRejectedExecutionException("no longer master. source: [" + source + "]");
+        processJoinRequests.drainTo(drainedJoinRequests);
+        Exception e=new ElasticsearchIllegalStateException("Node [" + clusterService.localNode() + "] not master for join request from ["+ node+ "]");
         innerOnFailure(e);
       }
       void innerOnFailure(      Throwable t){
-        for (        Tuple<DiscoveryNode,MembershipAction.JoinCallback> drainedTask : drainedTasks) {
+        for (        Tuple<DiscoveryNode,MembershipAction.JoinCallback> drainedTask : drainedJoinRequests) {
           try {
             drainedTask.v2().onFailure(t);
           }
@@ -60,7 +57,7 @@
         innerOnFailure(t);
       }
       @Override public void clusterStateProcessed(      String source,      ClusterState oldState,      ClusterState newState){
-        for (        Tuple<DiscoveryNode,MembershipAction.JoinCallback> drainedTask : drainedTasks) {
+        for (        Tuple<DiscoveryNode,MembershipAction.JoinCallback> drainedTask : drainedJoinRequests) {
           try {
             drainedTask.v2().onSuccess();
           }

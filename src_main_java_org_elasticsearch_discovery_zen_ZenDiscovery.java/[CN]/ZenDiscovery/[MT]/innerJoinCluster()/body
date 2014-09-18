@@ -1,53 +1,70 @@
 {
-  boolean retry=true;
-  while (retry) {
-    if (lifecycle.stoppedOrClosed()) {
-      return;
-    }
-    retry=false;
-    DiscoveryNode masterNode=findMaster();
-    if (masterNode == null) {
-      logger.trace("no masterNode returned");
-      retry=true;
-      continue;
-    }
-    if (localNode.equals(masterNode)) {
-      this.master=true;
-      nodesFD.start();
-      clusterService.submitStateUpdateTask("zen-disco-join (elected_as_master)",Priority.IMMEDIATE,new ProcessedClusterStateNonMasterUpdateTask(){
-        @Override public ClusterState execute(        ClusterState currentState){
-          DiscoveryNodes.Builder builder=new DiscoveryNodes.Builder(latestDiscoNodes).localNodeId(localNode.id()).masterNodeId(localNode.id()).put(localNode);
-          latestDiscoNodes=builder.build();
-          ClusterBlocks clusterBlocks=ClusterBlocks.builder().blocks(currentState.blocks()).removeGlobalBlock(discoverySettings.getNoMasterBlock()).build();
-          currentState=ClusterState.builder(currentState).nodes(latestDiscoNodes).blocks(clusterBlocks).build();
-          RoutingAllocation.Result result=allocationService.reroute(currentState);
-          return ClusterState.builder(currentState).routingResult(result).build();
+  DiscoveryNode masterNode=null;
+  final Thread currentThread=Thread.currentThread();
+  while (masterNode == null && joinThreadControl.joinThreadActive(currentThread)) {
+    masterNode=findMaster();
+  }
+  if (!joinThreadControl.joinThreadActive(currentThread)) {
+    logger.trace("thread is no longer in currentJoinThread. Stopping.");
+    return;
+  }
+  if (clusterService.localNode().equals(masterNode)) {
+    clusterService.submitStateUpdateTask("zen-disco-join (elected_as_master)",Priority.IMMEDIATE,new ProcessedClusterStateNonMasterUpdateTask(){
+      @Override public ClusterState execute(      ClusterState currentState){
+        if (currentState.nodes().masterNode() != null) {
+          logger.trace("join thread elected local node as master, but there is already a master in place: {}",currentState.nodes().masterNode());
+          return currentState;
         }
-        @Override public void onFailure(        String source,        Throwable t){
-          logger.error("unexpected failure during [{}]",t,source);
-        }
-        @Override public void clusterStateProcessed(        String source,        ClusterState oldState,        ClusterState newState){
-          sendInitialStateEventIfNeeded();
-          long count=clusterJoinsCounter.incrementAndGet();
-          logger.trace("cluster joins counter set to [{}] (elected as master)",count);
-        }
+        DiscoveryNodes.Builder builder=new DiscoveryNodes.Builder(currentState.nodes()).masterNodeId(currentState.nodes().localNode().id());
+        ClusterBlocks clusterBlocks=ClusterBlocks.builder().blocks(currentState.blocks()).removeGlobalBlock(discoverySettings.getNoMasterBlock()).build();
+        currentState=ClusterState.builder(currentState).nodes(builder).blocks(clusterBlocks).build();
+        RoutingAllocation.Result result=allocationService.reroute(currentState);
+        return ClusterState.builder(currentState).routingResult(result).build();
       }
-);
-    }
+      @Override public void onFailure(      String source,      Throwable t){
+        logger.error("unexpected failure during [{}]",t,source);
+        joinThreadControl.markThreadAsDoneAndStartNew(currentThread);
+      }
+      @Override public void clusterStateProcessed(      String source,      ClusterState oldState,      ClusterState newState){
+        if (newState.nodes().localNodeMaster()) {
+          joinThreadControl.markThreadAsDone(currentThread);
+          nodesFD.start(newState);
+        }
  else {
-      this.master=false;
-      retry=!joinElectedMaster(masterNode);
-      if (retry) {
-        continue;
+          joinThreadControl.markThreadAsDoneAndStartNew(currentThread);
+        }
+        sendInitialStateEventIfNeeded();
+        long count=clusterJoinsCounter.incrementAndGet();
+        logger.trace("cluster joins counter set to [{}] (elected as master)",count);
       }
-      if (latestDiscoNodes.masterNode() == null) {
-        logger.debug("no master node is set, despite of join request completing. retrying pings");
-        retry=true;
-        continue;
-      }
-      masterFD.start(masterNode,"initial_join");
-      long count=clusterJoinsCounter.incrementAndGet();
-      logger.trace("cluster joins counter set to [{}] (joined master)",count);
     }
+);
+  }
+ else {
+    final boolean success=joinElectedMaster(masterNode);
+    final DiscoveryNode finalMasterNode=masterNode;
+    clusterService.submitStateUpdateTask("finalize_join (" + masterNode + ")",new ClusterStateNonMasterUpdateTask(){
+      @Override public ClusterState execute(      ClusterState currentState) throws Exception {
+        if (!success) {
+          joinThreadControl.markThreadAsDoneAndStartNew(currentThread);
+          return currentState;
+        }
+        if (currentState.getNodes().masterNode() == null) {
+          logger.debug("no master node is set, despite of join request completing. retrying pings.");
+          joinThreadControl.markThreadAsDoneAndStartNew(currentThread);
+          return currentState;
+        }
+        if (!currentState.getNodes().masterNode().equals(finalMasterNode)) {
+          return joinThreadControl.stopRunningThreadAndRejoin(currentState,"master_switched_while_finalizing_join");
+        }
+        joinThreadControl.markThreadAsDone(currentThread);
+        return currentState;
+      }
+      @Override public void onFailure(      String source,      @Nullable Throwable t){
+        logger.error("unexpected error while trying to finalize cluster join",t);
+        joinThreadControl.markThreadAsDoneAndStartNew(currentThread);
+      }
+    }
+);
   }
 }
