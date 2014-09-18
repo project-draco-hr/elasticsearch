@@ -30,6 +30,15 @@
       logger.debug("Unable to determine disk usage for [{}], defaulting to average across nodes [{} total] [{} free] [{}% free]",node.nodeId(),usage.getTotalBytes(),usage.getFreeBytes(),usage.getFreeDiskAsPercentage());
     }
   }
+  if (includeRelocations) {
+    long relocatingShardsSize=sizeOfRelocatingShards(node,allocation,shardSizes);
+    DiskUsage usageIncludingRelocations=new DiskUsage(node.nodeId(),usage.getTotalBytes(),usage.getFreeBytes() - relocatingShardsSize);
+    if (logger.isDebugEnabled()) {
+      logger.debug("usage without relocations: {}",usage);
+      logger.debug("usage with relocations: [{} bytes] {}",relocatingShardsSize,usageIncludingRelocations);
+    }
+    usage=usageIncludingRelocations;
+  }
   double freeDiskPercentage=usage.getFreeDiskAsPercentage();
   long freeBytes=usage.getFreeBytes();
   if (logger.isDebugEnabled()) {
@@ -61,7 +70,7 @@
       if (logger.isDebugEnabled()) {
         logger.debug("Less than the required {}% free disk threshold ({}% free) on node [{}], preventing allocation",freeDiskThresholdLow,freeDiskPercentage,node.nodeId());
       }
-      return allocation.decision(Decision.NO,NAME,"less than required [%s%%] free disk on node, free: [%s%%]",freeDiskThresholdLow,freeDiskThresholdLow);
+      return allocation.decision(Decision.NO,NAME,"less than required [%s%%] free disk on node, free: [%s%%]",freeDiskThresholdLow,freeDiskPercentage);
     }
  else     if (freeDiskPercentage > freeDiskThresholdHigh) {
       if (logger.isDebugEnabled()) {
@@ -73,7 +82,7 @@
       if (logger.isDebugEnabled()) {
         logger.debug("Less than the required {} free bytes threshold ({} bytes free) on node {}, " + "preventing allocation even though primary has never been allocated",freeDiskThresholdHigh,freeDiskPercentage,node.nodeId());
       }
-      return allocation.decision(Decision.NO,NAME,"less than required [%s%%] free disk on node, free: [%s%%]",freeDiskThresholdLow,freeDiskThresholdLow);
+      return allocation.decision(Decision.NO,NAME,"less than required [%s%%] free disk on node, free: [%s%%]",freeDiskThresholdLow,freeDiskPercentage);
     }
   }
   Long shardSize=shardSizes.get(shardIdentifierFromRouting(shardRouting));
