@@ -5,32 +5,32 @@
   MetaData metaData=clusterState.metaData();
   for (int i=0; i < bulkRequest.requests.size(); i++) {
     ActionRequest request=bulkRequest.requests.get(i);
-    if (request instanceof IndexRequest) {
-      IndexRequest indexRequest=(IndexRequest)request;
-      String concreteIndex=concreteIndices.resolveIfAbsent(indexRequest.index(),indexRequest.indicesOptions());
-      MappingMetaData mappingMd=null;
-      if (metaData.hasIndex(concreteIndex)) {
-        mappingMd=metaData.index(concreteIndex).mappingOrDefault(indexRequest.type());
+    if (request instanceof DocumentRequest) {
+      DocumentRequest req=(DocumentRequest)request;
+      if (addFailureIfIndexIsClosed(req,bulkRequest,responses,i,concreteIndices,metaData)) {
+        continue;
       }
-      try {
-        indexRequest.process(metaData,mappingMd,allowIdGeneration,concreteIndex);
+      String concreteIndex=concreteIndices.resolveIfAbsent(req.index(),req.indicesOptions());
+      if (request instanceof IndexRequest) {
+        IndexRequest indexRequest=(IndexRequest)request;
+        MappingMetaData mappingMd=null;
+        if (metaData.hasIndex(concreteIndex)) {
+          mappingMd=metaData.index(concreteIndex).mappingOrDefault(indexRequest.type());
+        }
+        try {
+          indexRequest.process(metaData,mappingMd,allowIdGeneration,concreteIndex);
+        }
+ catch (        ElasticsearchParseException e) {
+          BulkItemResponse.Failure failure=new BulkItemResponse.Failure(concreteIndex,indexRequest.type(),indexRequest.id(),e);
+          BulkItemResponse bulkItemResponse=new BulkItemResponse(i,"index",failure);
+          responses.set(i,bulkItemResponse);
+          bulkRequest.requests.set(i,null);
+        }
       }
- catch (      ElasticsearchParseException e) {
-        BulkItemResponse.Failure failure=new BulkItemResponse.Failure(concreteIndex,indexRequest.type(),indexRequest.id(),e);
-        BulkItemResponse bulkItemResponse=new BulkItemResponse(i,"index",failure);
-        responses.set(i,bulkItemResponse);
-        bulkRequest.requests.set(i,null);
+ else {
+        concreteIndices.resolveIfAbsent(req.index(),req.indicesOptions());
+        req.routing(clusterState.metaData().resolveIndexRouting(req.routing(),req.index()));
       }
-    }
- else     if (request instanceof DeleteRequest) {
-      DeleteRequest deleteRequest=(DeleteRequest)request;
-      concreteIndices.resolveIfAbsent(deleteRequest.index(),deleteRequest.indicesOptions());
-      deleteRequest.routing(clusterState.metaData().resolveIndexRouting(deleteRequest.routing(),deleteRequest.index()));
-    }
- else     if (request instanceof UpdateRequest) {
-      UpdateRequest updateRequest=(UpdateRequest)request;
-      concreteIndices.resolveIfAbsent(updateRequest.index(),updateRequest.indicesOptions());
-      updateRequest.routing(clusterState.metaData().resolveIndexRouting(updateRequest.routing(),updateRequest.index()));
     }
   }
   Map<ShardId,List<BulkItemRequest>> requestsByShard=Maps.newHashMap();
