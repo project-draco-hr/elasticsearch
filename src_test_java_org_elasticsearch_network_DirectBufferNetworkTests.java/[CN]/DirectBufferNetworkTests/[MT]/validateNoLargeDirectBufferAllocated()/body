@@ -1,0 +1,43 @@
+{
+  Field threadLocalsField=Thread.class.getDeclaredField("threadLocals");
+  threadLocalsField.setAccessible(true);
+  Class<?> tlmClass=Class.forName("java.lang.ThreadLocal$ThreadLocalMap");
+  Field tableField=tlmClass.getDeclaredField("table");
+  tableField.setAccessible(true);
+  for (  Thread thread : Thread.getAllStackTraces().keySet()) {
+    if (thread == null) {
+      continue;
+    }
+    Object threadLocalMap=threadLocalsField.get(thread);
+    if (threadLocalMap == null) {
+      continue;
+    }
+    Object[] table=(Object[])tableField.get(threadLocalMap);
+    if (table == null) {
+      continue;
+    }
+    for (    Object entry : table) {
+      if (entry == null) {
+        continue;
+      }
+      Field valueField=entry.getClass().getDeclaredField("value");
+      valueField.setAccessible(true);
+      Object value=valueField.get(entry);
+      if (value == null) {
+        continue;
+      }
+      if (!value.getClass().getName().equals("sun.nio.ch.Util$BufferCache")) {
+        continue;
+      }
+      Field buffersField=value.getClass().getDeclaredField("buffers");
+      buffersField.setAccessible(true);
+      Object[] buffers=(Object[])buffersField.get(value);
+      for (      Object buffer : buffers) {
+        if (buffer == null) {
+          continue;
+        }
+        assertThat(((ByteBuffer)buffer).capacity(),Matchers.lessThan(1 * 1024 * 1024));
+      }
+    }
+  }
+}
