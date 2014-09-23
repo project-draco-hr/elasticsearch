@@ -1,0 +1,43 @@
+{
+  NAMES_FIELD.match(parser.currentName(),ParseField.EMPTY_FLAGS);
+  String script=null;
+  String scriptLang;
+  XContentParser.Token token;
+  Map<String,Object> params=new HashMap<>();
+  String currentFieldName=null;
+  ScriptService.ScriptType scriptType=ScriptService.ScriptType.INLINE;
+  ScriptParameterParser scriptParameterParser=new ScriptParameterParser();
+  while ((token=parser.nextToken()) != XContentParser.Token.END_OBJECT) {
+    if (token.equals(XContentParser.Token.FIELD_NAME)) {
+      currentFieldName=parser.currentName();
+    }
+ else     if (token == XContentParser.Token.START_OBJECT) {
+      if ("params".equals(currentFieldName)) {
+        params=parser.map();
+      }
+ else {
+        throw new ElasticsearchParseException("unknown object " + currentFieldName + " in script_heuristic");
+      }
+    }
+ else     if (!scriptParameterParser.token(currentFieldName,token,parser)) {
+      throw new ElasticsearchParseException("unknown field " + currentFieldName + " in script_heuristic");
+    }
+  }
+  ScriptParameterParser.ScriptParameterValue scriptValue=scriptParameterParser.getDefaultScriptParameterValue();
+  if (scriptValue != null) {
+    script=scriptValue.script();
+    scriptType=scriptValue.scriptType();
+  }
+  scriptLang=scriptParameterParser.lang();
+  if (script == null) {
+    throw new ElasticsearchParseException("No script found in script_heuristic");
+  }
+  ExecutableScript searchScript;
+  try {
+    searchScript=scriptService.executable(scriptLang,script,scriptType,params);
+  }
+ catch (  Exception e) {
+    throw new ElasticsearchParseException("The script [" + script + "] could not be loaded",e);
+  }
+  return new ScriptHeuristic(searchScript,scriptLang,script,scriptType,params);
+}
