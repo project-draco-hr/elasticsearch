@@ -1,0 +1,64 @@
+{
+  if (!observer.observedState().nodes().nodeExists(nodeId)) {
+    state.onReplicaFailure(nodeId,null);
+    return;
+  }
+  final ReplicaOperationRequest shardRequest=new ReplicaOperationRequest(shardIt.shardId(),state.replicaRequest());
+  if (!nodeId.equals(observer.observedState().nodes().localNodeId())) {
+    final DiscoveryNode node=observer.observedState().nodes().get(nodeId);
+    transportService.sendRequest(node,transportReplicaAction,shardRequest,transportOptions,new EmptyTransportResponseHandler(ThreadPool.Names.SAME){
+      @Override public void handleResponse(      TransportResponse.Empty vResponse){
+        state.onReplicaSuccess();
+      }
+      @Override public void handleException(      TransportException exp){
+        state.onReplicaFailure(nodeId,exp);
+        logger.trace("[{}] Transport failure during replica request [{}] ",exp,node,internalRequest.request());
+        if (!ignoreReplicaException(exp)) {
+          logger.warn("Failed to perform " + actionName + " on remote replica "+ node+ shardIt.shardId(),exp);
+          shardStateAction.shardFailed(shard,indexMetaData.getUUID(),"Failed to perform [" + actionName + "] on replica, message ["+ ExceptionsHelper.detailedMessage(exp)+ "]");
+        }
+      }
+    }
+);
+  }
+ else {
+    if (internalRequest.request().operationThreaded()) {
+      internalRequest.request().beforeLocalFork();
+      try {
+        threadPool.executor(executor).execute(new AbstractRunnable(){
+          @Override protected void doRun(){
+            try {
+              shardOperationOnReplica(shardRequest);
+              state.onReplicaSuccess();
+            }
+ catch (            Throwable e) {
+              state.onReplicaFailure(nodeId,e);
+              failReplicaIfNeeded(shard.index(),shard.id(),e);
+            }
+          }
+          @Override public boolean isForceExecution(){
+            return true;
+          }
+          @Override public void onFailure(          Throwable t){
+            state.onReplicaFailure(nodeId,t);
+          }
+        }
+);
+      }
+ catch (      Throwable e) {
+        failReplicaIfNeeded(shard.index(),shard.id(),e);
+        state.onReplicaFailure(nodeId,e);
+      }
+    }
+ else {
+      try {
+        shardOperationOnReplica(shardRequest);
+        state.onReplicaSuccess();
+      }
+ catch (      Throwable e) {
+        failReplicaIfNeeded(shard.index(),shard.id(),e);
+        state.onReplicaFailure(nodeId,e);
+      }
+    }
+  }
+}
