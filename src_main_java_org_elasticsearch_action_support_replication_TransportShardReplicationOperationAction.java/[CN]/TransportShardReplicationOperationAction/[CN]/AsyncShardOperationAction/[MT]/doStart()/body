@@ -5,7 +5,7 @@
       if (blockException.retryable()) {
         logger.trace("cluster is blocked ({}), scheduling a retry",blockException.getMessage());
         retry(blockException);
-        return false;
+        return;
       }
  else {
         throw blockException;
@@ -18,14 +18,14 @@
       internalRequest.concreteIndex(internalRequest.request().index());
     }
     if (!resolveRequest(observer.observedState(),internalRequest,listener)) {
-      return true;
+      return;
     }
     blockException=checkRequestBlock(observer.observedState(),internalRequest);
     if (blockException != null) {
       if (blockException.retryable()) {
         logger.trace("cluster is blocked ({}), scheduling a retry",blockException.getMessage());
         retry(blockException);
-        return false;
+        return;
       }
  else {
         throw blockException;
@@ -35,12 +35,12 @@
   }
  catch (  Throwable e) {
     listener.onFailure(e);
-    return true;
+    return;
   }
   if (shardIt.size() == 0) {
     logger.trace("no shard instances known for shard [{}], scheduling a retry",shardIt.shardId());
-    retry(null);
-    return false;
+    retryBecauseUnavailable(shardIt.shardId(),"No active shards.");
+    return;
   }
   boolean foundPrimary=false;
   ShardRouting shardX;
@@ -51,29 +51,11 @@
     }
     if (!shard.active() || !observer.observedState().nodes().nodeExists(shard.currentNodeId())) {
       logger.trace("primary shard [{}] is not yet active or we do not know the node it is assigned to [{}], scheduling a retry.",shard.shardId(),shard.currentNodeId());
-      retry(null);
-      return false;
-    }
-    if (checkWriteConsistency) {
-      WriteConsistencyLevel consistencyLevel=defaultWriteConsistencyLevel;
-      if (internalRequest.request().consistencyLevel() != WriteConsistencyLevel.DEFAULT) {
-        consistencyLevel=internalRequest.request().consistencyLevel();
-      }
-      int requiredNumber=1;
-      if (consistencyLevel == WriteConsistencyLevel.QUORUM && shardIt.size() > 2) {
-        requiredNumber=(shardIt.size() / 2) + 1;
-      }
- else       if (consistencyLevel == WriteConsistencyLevel.ALL) {
-        requiredNumber=shardIt.size();
-      }
-      if (shardIt.sizeActive() < requiredNumber) {
-        logger.trace("not enough active copies of shard [{}] to meet write consistency of [{}] (have {}, needed {}), scheduling a retry.",shard.shardId(),consistencyLevel,shardIt.sizeActive(),requiredNumber);
-        retry(null);
-        return false;
-      }
+      retryBecauseUnavailable(shardIt.shardId(),"Primary shard is not active or isn't assigned is a known node.");
+      return;
     }
     if (!primaryOperationStarted.compareAndSet(false,true)) {
-      return true;
+      return;
     }
     foundPrimary=true;
     if (shard.currentNodeId().equals(observer.observedState().nodes().localNodeId())) {
@@ -83,7 +65,7 @@
           threadPool.executor(executor).execute(new Runnable(){
             @Override public void run(){
               try {
-                performOnPrimary(shard.id(),shard,observer.observedState());
+                performOnPrimary(shard.id(),shard);
               }
  catch (              Throwable t) {
                 listener.onFailure(t);
@@ -93,7 +75,7 @@
 );
         }
  else {
-          performOnPrimary(shard.id(),shard,observer.observedState());
+          performOnPrimary(shard.id(),shard);
         }
       }
  catch (      Throwable t) {
@@ -116,7 +98,7 @@
           if (exp.unwrapCause() instanceof ConnectTransportException || exp.unwrapCause() instanceof NodeClosedException || retryPrimaryException(exp)) {
             primaryOperationStarted.set(false);
             logger.trace("received an error from node the primary was assigned to ({}), scheduling a retry",exp.getMessage());
-            retry(null);
+            retry(exp);
           }
  else {
             listener.onFailure(exp);
@@ -129,8 +111,6 @@
   }
   if (!foundPrimary) {
     logger.trace("couldn't find a eligible primary shard, scheduling for retry.");
-    retry(null);
-    return false;
+    retryBecauseUnavailable(shardIt.shardId(),"No active shards.");
   }
-  return true;
 }
