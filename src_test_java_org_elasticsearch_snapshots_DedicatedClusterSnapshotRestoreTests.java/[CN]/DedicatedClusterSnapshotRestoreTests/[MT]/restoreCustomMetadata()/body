@@ -1,0 +1,88 @@
+{
+  File tempDir=newTempDir();
+  logger.info("--> start node");
+  internalCluster().startNode(settingsBuilder().put("gateway.type","local"));
+  Client client=client();
+  createIndex("test-idx");
+  ensureYellow();
+  logger.info("--> add custom persistent metadata");
+  updateClusterState(new ClusterStateUpdater(){
+    @Override public ClusterState execute(    ClusterState currentState) throws Exception {
+      ClusterState.Builder builder=ClusterState.builder(currentState);
+      MetaData.Builder metadataBuilder=MetaData.builder(currentState.metaData());
+      metadataBuilder.putCustom(SnapshottableMetadata.TYPE,new SnapshottableMetadata("before_snapshot_s"));
+      metadataBuilder.putCustom(NonSnapshottableMetadata.TYPE,new NonSnapshottableMetadata("before_snapshot_ns"));
+      metadataBuilder.putCustom(SnapshottableGatewayMetadata.TYPE,new SnapshottableGatewayMetadata("before_snapshot_s_gw"));
+      metadataBuilder.putCustom(NonSnapshottableGatewayMetadata.TYPE,new NonSnapshottableGatewayMetadata("before_snapshot_ns_gw"));
+      metadataBuilder.putCustom(SnapshotableGatewayNoApiMetadata.TYPE,new SnapshotableGatewayNoApiMetadata("before_snapshot_s_gw_noapi"));
+      builder.metaData(metadataBuilder);
+      return builder.build();
+    }
+  }
+);
+  logger.info("--> create repository");
+  PutRepositoryResponse putRepositoryResponse=client.admin().cluster().preparePutRepository("test-repo").setType("fs").setSettings(ImmutableSettings.settingsBuilder().put("location",tempDir)).execute().actionGet();
+  assertThat(putRepositoryResponse.isAcknowledged(),equalTo(true));
+  logger.info("--> start snapshot");
+  CreateSnapshotResponse createSnapshotResponse=client.admin().cluster().prepareCreateSnapshot("test-repo","test-snap").setWaitForCompletion(true).execute().actionGet();
+  assertThat(createSnapshotResponse.getSnapshotInfo().totalShards(),greaterThan(0));
+  assertThat(createSnapshotResponse.getSnapshotInfo().successfulShards(),equalTo(createSnapshotResponse.getSnapshotInfo().successfulShards()));
+  assertThat(client.admin().cluster().prepareGetSnapshots("test-repo").setSnapshots("test-snap").execute().actionGet().getSnapshots().get(0).state(),equalTo(SnapshotState.SUCCESS));
+  logger.info("--> change custom persistent metadata");
+  updateClusterState(new ClusterStateUpdater(){
+    @Override public ClusterState execute(    ClusterState currentState) throws Exception {
+      ClusterState.Builder builder=ClusterState.builder(currentState);
+      MetaData.Builder metadataBuilder=MetaData.builder(currentState.metaData());
+      if (randomBoolean()) {
+        metadataBuilder.putCustom(SnapshottableMetadata.TYPE,new SnapshottableMetadata("after_snapshot_s"));
+      }
+ else {
+        metadataBuilder.removeCustom(SnapshottableMetadata.TYPE);
+      }
+      metadataBuilder.putCustom(NonSnapshottableMetadata.TYPE,new NonSnapshottableMetadata("after_snapshot_ns"));
+      if (randomBoolean()) {
+        metadataBuilder.putCustom(SnapshottableGatewayMetadata.TYPE,new SnapshottableGatewayMetadata("after_snapshot_s_gw"));
+      }
+ else {
+        metadataBuilder.removeCustom(SnapshottableGatewayMetadata.TYPE);
+      }
+      metadataBuilder.putCustom(NonSnapshottableGatewayMetadata.TYPE,new NonSnapshottableGatewayMetadata("after_snapshot_ns_gw"));
+      metadataBuilder.removeCustom(SnapshotableGatewayNoApiMetadata.TYPE);
+      builder.metaData(metadataBuilder);
+      return builder.build();
+    }
+  }
+);
+  logger.info("--> delete repository");
+  assertAcked(client.admin().cluster().prepareDeleteRepository("test-repo"));
+  logger.info("--> create repository");
+  putRepositoryResponse=client.admin().cluster().preparePutRepository("test-repo-2").setType("fs").setSettings(ImmutableSettings.settingsBuilder().put("location",tempDir)).execute().actionGet();
+  assertThat(putRepositoryResponse.isAcknowledged(),equalTo(true));
+  logger.info("--> restore snapshot");
+  client.admin().cluster().prepareRestoreSnapshot("test-repo-2","test-snap").setRestoreGlobalState(true).setIndices("-*").setWaitForCompletion(true).execute().actionGet();
+  logger.info("--> make sure old repository wasn't restored");
+  assertThrows(client.admin().cluster().prepareGetRepositories("test-repo"),RepositoryMissingException.class);
+  assertThat(client.admin().cluster().prepareGetRepositories("test-repo-2").get().repositories().size(),equalTo(1));
+  logger.info("--> check that custom persistent metadata was restored");
+  ClusterState clusterState=client.admin().cluster().prepareState().get().getState();
+  logger.info("Cluster state: {}",clusterState);
+  MetaData metaData=clusterState.getMetaData();
+  assertThat(((SnapshottableMetadata)metaData.custom(SnapshottableMetadata.TYPE)).getData(),equalTo("before_snapshot_s"));
+  assertThat(((NonSnapshottableMetadata)metaData.custom(NonSnapshottableMetadata.TYPE)).getData(),equalTo("after_snapshot_ns"));
+  assertThat(((SnapshottableGatewayMetadata)metaData.custom(SnapshottableGatewayMetadata.TYPE)).getData(),equalTo("before_snapshot_s_gw"));
+  assertThat(((NonSnapshottableGatewayMetadata)metaData.custom(NonSnapshottableGatewayMetadata.TYPE)).getData(),equalTo("after_snapshot_ns_gw"));
+  logger.info("--> restart all nodes");
+  internalCluster().fullRestart();
+  ensureYellow();
+  logger.info("--> check that gateway-persistent custom metadata survived full cluster restart");
+  clusterState=client().admin().cluster().prepareState().get().getState();
+  logger.info("Cluster state: {}",clusterState);
+  metaData=clusterState.getMetaData();
+  assertThat(metaData.custom(SnapshottableMetadata.TYPE),nullValue());
+  assertThat(metaData.custom(NonSnapshottableMetadata.TYPE),nullValue());
+  assertThat(((SnapshottableGatewayMetadata)metaData.custom(SnapshottableGatewayMetadata.TYPE)).getData(),equalTo("before_snapshot_s_gw"));
+  assertThat(((NonSnapshottableGatewayMetadata)metaData.custom(NonSnapshottableGatewayMetadata.TYPE)).getData(),equalTo("after_snapshot_ns_gw"));
+  assertThat(metaData.custom(SnapshotableGatewayNoApiMetadata.TYPE),nullValue());
+  metaData=internalCluster().getInstance(ClusterService.class).state().metaData();
+  assertThat(((SnapshotableGatewayNoApiMetadata)metaData.custom(SnapshotableGatewayNoApiMetadata.TYPE)).getData(),equalTo("before_snapshot_s_gw_noapi"));
+}
