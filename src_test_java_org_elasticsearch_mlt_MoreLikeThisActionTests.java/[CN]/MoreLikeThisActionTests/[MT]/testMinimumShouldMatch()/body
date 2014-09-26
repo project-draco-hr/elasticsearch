@@ -1,0 +1,29 @@
+{
+  logger.info("Creating the index ...");
+  assertAcked(prepareCreate("test").addMapping("type1","text","type=string,analyzer=whitespace").setSettings(SETTING_NUMBER_OF_SHARDS,1));
+  ensureGreen();
+  logger.info("Indexing with each doc having one less term ...");
+  List<IndexRequestBuilder> builders=new ArrayList<>();
+  for (int i=0; i < 10; i++) {
+    String text="";
+    for (int j=1; j <= 10 - i; j++) {
+      text+=j + " ";
+    }
+    builders.add(client().prepareIndex("test","type1",i + "").setSource("text",text));
+  }
+  indexRandom(true,builders);
+  logger.info("Testing each minimum_should_match from 0% - 100% with 10% increment ...");
+  for (int i=0; i <= 10; i++) {
+    String minimumShouldMatch=(10 * i) + "%";
+    MoreLikeThisQueryBuilder mltQuery=moreLikeThisQuery("text").likeText("1 2 3 4 5 6 7 8 9 10").minTermFreq(1).minDocFreq(1).minimumShouldMatch(minimumShouldMatch);
+    logger.info("Testing with minimum_should_match = " + minimumShouldMatch);
+    SearchResponse response=client().prepareSearch("test").setTypes("type1").setQuery(mltQuery).get();
+    assertSearchResponse(response);
+    if (minimumShouldMatch.equals("0%")) {
+      assertHitCount(response,10);
+    }
+ else {
+      assertHitCount(response,11 - i);
+    }
+  }
+}
