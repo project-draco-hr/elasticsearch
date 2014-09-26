@@ -1,33 +1,35 @@
 {
   final SendPingsHandler sendPingsHandler=new SendPingsHandler(pingHandlerIdGenerator.incrementAndGet());
-  receivedResponses.put(sendPingsHandler.id(),new PingCollection());
-  sendPings(timeout,null,sendPingsHandler);
-  threadPool.schedule(TimeValue.timeValueMillis(timeout.millis() / 2),ThreadPool.Names.GENERIC,new Runnable(){
-    @Override public void run(){
-      try {
-        sendPings(timeout,null,sendPingsHandler);
-        threadPool.schedule(TimeValue.timeValueMillis(timeout.millis() / 2),ThreadPool.Names.GENERIC,new Runnable(){
-          @Override public void run(){
-            try {
-              sendPings(timeout,TimeValue.timeValueMillis(timeout.millis() / 2),sendPingsHandler);
-              PingCollection responses=receivedResponses.remove(sendPingsHandler.id());
-              sendPingsHandler.close();
-              for (              DiscoveryNode node : sendPingsHandler.nodeToDisconnect) {
-                logger.trace("[{}] disconnecting from {}",sendPingsHandler.id(),node);
-                transportService.disconnectFromNode(node);
-              }
-              listener.onPing(responses.toArray());
-            }
- catch (            EsRejectedExecutionException ex) {
-              logger.debug("Ping execution rejected",ex);
-            }
+  receivedResponses.put(sendPingsHandler.id(),sendPingsHandler);
+  try {
+    sendPings(timeout,null,sendPingsHandler);
+  }
+ catch (  RejectedExecutionException e) {
+    logger.debug("Ping execution rejected",e);
+  }
+  threadPool.schedule(TimeValue.timeValueMillis(timeout.millis() / 2),ThreadPool.Names.GENERIC,new AbstractRunnable(){
+    @Override protected void doRun(){
+      sendPings(timeout,null,sendPingsHandler);
+      threadPool.schedule(TimeValue.timeValueMillis(timeout.millis() / 2),ThreadPool.Names.GENERIC,new AbstractRunnable(){
+        @Override protected void doRun() throws Exception {
+          sendPings(timeout,TimeValue.timeValueMillis(timeout.millis() / 2),sendPingsHandler);
+          sendPingsHandler.close();
+          for (          DiscoveryNode node : sendPingsHandler.nodeToDisconnect) {
+            logger.trace("[{}] disconnecting from {}",sendPingsHandler.id(),node);
+            transportService.disconnectFromNode(node);
           }
+          listener.onPing(sendPingsHandler.pingCollection().toArray());
         }
+        @Override public void onFailure(        Throwable t){
+          logger.debug("Ping execution failed",t);
+          sendPingsHandler.close();
+        }
+      }
 );
-      }
- catch (      EsRejectedExecutionException ex) {
-        logger.debug("Ping execution rejected",ex);
-      }
+    }
+    @Override public void onFailure(    Throwable t){
+      logger.debug("Ping execution failed",t);
+      sendPingsHandler.close();
     }
   }
 );
