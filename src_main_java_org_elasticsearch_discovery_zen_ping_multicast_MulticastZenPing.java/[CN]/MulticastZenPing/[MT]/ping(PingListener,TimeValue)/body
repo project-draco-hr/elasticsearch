@@ -11,21 +11,36 @@
   final int id=pingIdGenerator.incrementAndGet();
   receivedResponses.put(id,new PingCollection());
   sendPingRequest(id);
-  threadPool.schedule(TimeValue.timeValueMillis(timeout.millis() / 2),ThreadPool.Names.GENERIC,new Runnable(){
-    @Override public void run(){
-      try {
-        sendPingRequest(id);
-      }
- catch (      Exception e) {
-        logger.warn("[{}] failed to send second ping request",e,id);
-      }
+  threadPool.schedule(TimeValue.timeValueMillis(timeout.millis() / 2),ThreadPool.Names.GENERIC,new AbstractRunnable(){
+    @Override public void onFailure(    Throwable t){
+      logger.warn("[{}] failed to send second ping request",t,id);
+      finalizePingCycle(id,listener);
     }
-  }
+    @Override public void doRun(){
+      sendPingRequest(id);
+      threadPool.schedule(TimeValue.timeValueMillis(timeout.millis() / 2),ThreadPool.Names.GENERIC,new AbstractRunnable(){
+        @Override public void onFailure(        Throwable t){
+          logger.warn("[{}] failed to send third ping request",t,id);
+          finalizePingCycle(id,listener);
+        }
+        @Override public void doRun(){
+          PingCollection collection=receivedResponses.get(id);
+          FinalizingPingCollection finalizingPingCollection=new FinalizingPingCollection(id,collection,collection.size(),listener);
+          receivedResponses.put(id,finalizingPingCollection);
+          logger.trace("[{}] sending last pings",id);
+          sendPingRequest(id);
+          threadPool.schedule(TimeValue.timeValueMillis(timeout.millis() / 4),ThreadPool.Names.GENERIC,new AbstractRunnable(){
+            @Override public void onFailure(            Throwable t){
+              logger.warn("[{}] failed to finalize ping",t,id);
+            }
+            @Override protected void doRun() throws Exception {
+              finalizePingCycle(id,listener);
+            }
+          }
 );
-  threadPool.schedule(timeout,ThreadPool.Names.GENERIC,new Runnable(){
-    @Override public void run(){
-      PingCollection responses=receivedResponses.remove(id);
-      listener.onPing(responses.toArray());
+        }
+      }
+);
     }
   }
 );
