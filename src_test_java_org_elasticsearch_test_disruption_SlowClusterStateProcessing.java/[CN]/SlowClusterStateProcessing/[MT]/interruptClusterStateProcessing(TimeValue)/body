@@ -9,9 +9,16 @@
   if (clusterService == null) {
     return false;
   }
+  final AtomicBoolean stopped=new AtomicBoolean(false);
   clusterService.submitStateUpdateTask("service_disruption_delay",Priority.IMMEDIATE,new ClusterStateNonMasterUpdateTask(){
     @Override public ClusterState execute(    ClusterState currentState) throws Exception {
-      Thread.sleep(duration.millis());
+      long count=duration.millis() / 200;
+      for (; count > 0 && !stopped.get(); count--) {
+        Thread.sleep(200);
+      }
+      if (!stopped.get()) {
+        Thread.sleep(duration.millis() % 200);
+      }
       countDownLatch.countDown();
       return currentState;
     }
@@ -24,6 +31,7 @@
     countDownLatch.await();
   }
  catch (  InterruptedException e) {
+    stopped.set(true);
     countDownLatch.await();
   }
   return true;

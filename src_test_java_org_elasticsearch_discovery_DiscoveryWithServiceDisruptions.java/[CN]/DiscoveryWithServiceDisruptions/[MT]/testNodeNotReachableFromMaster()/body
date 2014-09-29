@@ -1,0 +1,26 @@
+{
+  startCluster(3);
+  String masterNode=internalCluster().getMasterName();
+  String nonMasterNode=null;
+  while (nonMasterNode == null) {
+    nonMasterNode=randomFrom(internalCluster().getNodeNames());
+    if (nonMasterNode.equals(masterNode)) {
+      masterNode=null;
+    }
+  }
+  logger.info("blocking request from master [{}] to [{}]",masterNode,nonMasterNode);
+  MockTransportService masterTransportService=(MockTransportService)internalCluster().getInstance(TransportService.class,masterNode);
+  if (randomBoolean()) {
+    masterTransportService.addUnresponsiveRule(internalCluster().getInstance(ClusterService.class,nonMasterNode).localNode());
+  }
+ else {
+    masterTransportService.addFailToSendNoConnectRule(internalCluster().getInstance(ClusterService.class,nonMasterNode).localNode());
+  }
+  logger.info("waiting for [{}] to be removed from cluster",nonMasterNode);
+  ensureStableCluster(2,masterNode);
+  logger.info("waiting for [{}] to have no master",nonMasterNode);
+  assertNoMaster(nonMasterNode);
+  logger.info("healing partition and checking cluster reforms");
+  masterTransportService.clearAllRules();
+  ensureStableCluster(3);
+}

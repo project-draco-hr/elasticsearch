@@ -1,5 +1,5 @@
 {
-  DiscoveryNodes nodes=nodesProvider.nodes();
+  final DiscoveryNodes nodes=clusterService.state().nodes();
   if (!request.masterNodeId.equals(nodes.localNodeId())) {
     throw new NotMasterException();
   }
@@ -7,11 +7,42 @@
     logger.trace("master fault detection ping request is targeted for a different [{}] cluster then us [{}]",request.clusterName,clusterName);
     throw new NotMasterException("master fault detection ping request is targeted for a different [" + request.clusterName + "] cluster then us ["+ clusterName+ "]");
   }
-  if (!nodes.localNodeMaster()) {
-    throw new NoLongerMasterException();
+  if (!nodes.localNodeMaster() || !nodes.nodeExists(request.nodeId)) {
+    logger.trace("checking ping from [{}] under a cluster state thread",request.nodeId);
+    clusterService.submitStateUpdateTask("master ping (from: [" + request.nodeId + "])",new ProcessedClusterStateNonMasterUpdateTask(){
+      @Override public ClusterState execute(      ClusterState currentState) throws Exception {
+        DiscoveryNodes nodes=currentState.nodes();
+        if (!nodes.localNodeMaster()) {
+          throw new NoLongerMasterException();
+        }
+        if (!nodes.nodeExists(request.nodeId)) {
+          throw new NodeDoesNotExistOnMasterException();
+        }
+        return currentState;
+      }
+      @Override public void onFailure(      String source,      @Nullable Throwable t){
+        if (t == null) {
+          t=new ElasticsearchException("unknown error while processing ping");
+        }
+        try {
+          channel.sendResponse(t);
+        }
+ catch (        IOException e) {
+          logger.warn("error while sending ping response",e);
+        }
+      }
+      @Override public void clusterStateProcessed(      String source,      ClusterState oldState,      ClusterState newState){
+        try {
+          channel.sendResponse(new MasterPingResponseResponse(true));
+        }
+ catch (        IOException e) {
+          logger.warn("error while sending ping response",e);
+        }
+      }
+    }
+);
   }
-  if (!nodes.nodeExists(request.nodeId)) {
-    throw new NodeDoesNotExistOnMasterException();
+ else {
+    channel.sendResponse(new MasterPingResponseResponse(true));
   }
-  channel.sendResponse(new MasterPingResponseResponse(nodes.nodeExists(request.nodeId)));
 }
