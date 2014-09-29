@@ -18,6 +18,7 @@
         ClusterBlocks.Builder blocks=ClusterBlocks.builder().blocks(currentState.blocks());
         RoutingTable.Builder rtBuilder=RoutingTable.builder(currentState.routingTable());
         final ImmutableMap<ShardId,RestoreMetaData.ShardRestoreStatus> shards;
+        Set<String> aliases=newHashSet();
         if (!renamedIndices.isEmpty()) {
           ImmutableMap.Builder<ShardId,RestoreMetaData.ShardRestoreStatus> shardsBuilder=ImmutableMap.builder();
           for (          Map.Entry<String,String> indexEntry : renamedIndices.entrySet()) {
@@ -33,6 +34,11 @@
               IndexMetaData.Builder indexMdBuilder=IndexMetaData.builder(snapshotIndexMetaData).state(IndexMetaData.State.OPEN).index(renamedIndex);
               if (!request.includeAliases() && !snapshotIndexMetaData.aliases().isEmpty()) {
                 indexMdBuilder.removeAllAliases();
+              }
+ else {
+                for (                ObjectCursor<String> alias : snapshotIndexMetaData.aliases().keys()) {
+                  aliases.add(alias.value);
+                }
               }
               IndexMetaData updatedIndexMetaData=indexMdBuilder.build();
               if (partial) {
@@ -51,6 +57,11 @@
                 }
                 for (                ObjectCursor<AliasMetaData> alias : currentIndexMetaData.aliases().values()) {
                   indexMdBuilder.putAlias(alias.value);
+                }
+              }
+ else {
+                for (                ObjectCursor<String> alias : snapshotIndexMetaData.aliases().keys()) {
+                  aliases.add(alias.value);
                 }
               }
               IndexMetaData updatedIndexMetaData=indexMdBuilder.index(renamedIndex).build();
@@ -74,13 +85,21 @@
  else {
           shards=ImmutableMap.of();
         }
+        checkAliasNameConflicts(renamedIndices,aliases);
         restoreGlobalStateIfRequested(mdBuilder);
         if (completed(shards)) {
-          restoreInfo=new RestoreInfo(request.name(),ImmutableList.<String>copyOf(renamedIndices.keySet()),shards.size(),shards.size() - failedShards(shards));
+          restoreInfo=new RestoreInfo(request.name(),ImmutableList.copyOf(renamedIndices.keySet()),shards.size(),shards.size() - failedShards(shards));
         }
         ClusterState updatedState=ClusterState.builder(currentState).metaData(mdBuilder).blocks(blocks).routingTable(rtBuilder).build();
         RoutingAllocation.Result routingResult=allocationService.reroute(ClusterState.builder(updatedState).routingTable(rtBuilder).build());
         return ClusterState.builder(updatedState).routingResult(routingResult).build();
+      }
+      private void checkAliasNameConflicts(      Map<String,String> renamedIndices,      Set<String> aliases){
+        for (        Map.Entry<String,String> renamedIndex : renamedIndices.entrySet()) {
+          if (aliases.contains(renamedIndex.getKey())) {
+            throw new SnapshotRestoreException(snapshotId,"cannot rename index [" + renamedIndex.getValue() + "] into ["+ renamedIndex.getKey()+ "] because of conflict with an alias with the same name");
+          }
+        }
       }
       private void populateIgnoredShards(      String index,      IntSet ignoreShards){
         for (        SnapshotShardFailure failure : snapshot.shardFailures()) {
