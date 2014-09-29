@@ -20,7 +20,7 @@
     }
   }
 );
-  Engine engine=createEngine(engineSettingsService,store,createTranslog(),mergeSchedulerProvider);
+  final Engine engine=createEngine(engineSettingsService,store,createTranslog(),mergeSchedulerProvider);
   engine.start();
   ParsedDocument doc=testParsedDocument("1","1","test",null,-1,-1,testDocument(),Lucene.STANDARD_ANALYZER,B_1,false);
   Engine.Index index=new Engine.Index(null,newUid("1"),doc);
@@ -52,20 +52,37 @@
   index=new Engine.Index(null,newUid("4"),doc);
   engine.index(index);
   engine.flush(new Engine.Flush());
+  final long gen1=store.readLastCommittedSegmentsInfo().getGeneration();
   engine.optimize(new Engine.Optimize().flush(true).maxNumSegments(1).waitForMerge(true));
   for (  Segment segment : engine.segments()) {
     assertThat(segment.getMergeId(),nullValue());
   }
+  assertTrue(store.readLastCommittedSegmentsInfo().getGeneration() > gen1);
   final boolean force=randomBoolean();
   if (force) {
     waitTillMerge.set(new CountDownLatch(1));
     waitForMerge.set(new CountDownLatch(1));
   }
-  engine.optimize(new Engine.Optimize().flush(true).maxNumSegments(1).force(force).waitForMerge(false));
+  final boolean flush=randomBoolean();
+  final long gen2=store.readLastCommittedSegmentsInfo().getGeneration();
+  engine.optimize(new Engine.Optimize().flush(flush).maxNumSegments(1).force(force).waitForMerge(false));
   waitTillMerge.get().await();
   for (  Segment segment : engine.segments()) {
     assertThat(segment.getMergeId(),force ? notNullValue() : nullValue());
   }
   waitForMerge.get().countDown();
+  if (flush) {
+    awaitBusy(new Predicate<Object>(){
+      @Override public boolean apply(      Object o){
+        try {
+          return store.readLastCommittedSegmentsInfo().getLastGeneration() == gen2;
+        }
+ catch (        IOException e) {
+          throw ExceptionsHelper.convertToRuntime(e);
+        }
+      }
+    }
+);
+  }
   engine.close();
 }

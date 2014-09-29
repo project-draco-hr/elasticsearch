@@ -1,7 +1,4 @@
 {
-  if (optimize.flush()) {
-    flush(new Flush().force(true).waitIfOngoing(true));
-  }
   if (optimizeMutex.compareAndSet(false,true)) {
     ElasticsearchMergePolicy elasticsearchMergePolicy=null;
     try (InternalLock _=readLock.acquire()){
@@ -38,14 +35,17 @@
     }
   }
   if (optimize.waitForMerge()) {
-    try {
-      currentIndexWriter().waitForMerges();
-    }
- catch (    IOException e) {
-      throw new OptimizeFailedEngineException(shardId,e);
-    }
+    waitForMerges(optimize.flush());
   }
-  if (optimize.flush()) {
-    flush(new Flush().force(true).waitIfOngoing(true));
+ else   if (optimize.flush()) {
+    threadPool.executor(ThreadPool.Names.OPTIMIZE).execute(new AbstractRunnable(){
+      @Override public void onFailure(      Throwable t){
+        logger.error("Exception while waiting for merges asynchronously after optimize",t);
+      }
+      @Override protected void doRun() throws Exception {
+        waitForMerges(true);
+      }
+    }
+);
   }
 }
