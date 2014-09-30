@@ -1,33 +1,24 @@
 {
-  ClusterStateRequest clusterStateRequest=new ClusterStateRequest();
-  clusterStateRequest.listenerThreaded(false);
-  clusterStateRequest.masterNodeTimeout(TimeValue.timeValueMillis(0));
-  clusterStateRequest.local(true);
-  clusterStateRequest.clear().blocks(true);
-  client.admin().cluster().state(clusterStateRequest,new RestResponseListener<ClusterStateResponse>(channel){
-    @Override public RestResponse buildResponse(    ClusterStateResponse response) throws Exception {
-      RestStatus status=RestStatus.OK;
-      if (response.getState().blocks().hasGlobalBlock(RestStatus.SERVICE_UNAVAILABLE)) {
-        status=RestStatus.SERVICE_UNAVAILABLE;
-      }
-      if (request.method() == RestRequest.Method.HEAD) {
-        return new BytesRestResponse(status);
-      }
-      XContentBuilder builder=channel.newBuilder();
-      if (!request.hasParam("pretty")) {
-        builder.prettyPrint().lfAtEnd();
-      }
-      builder.startObject();
-      builder.field("status",status.getStatus());
-      if (settings.get("name") != null) {
-        builder.field("name",settings.get("name"));
-      }
-      builder.field("cluster_name",clusterName.value());
-      builder.startObject("version").field("number",version.number()).field("build_hash",Build.CURRENT.hash()).field("build_timestamp",Build.CURRENT.timestamp()).field("build_snapshot",version.snapshot).field("lucene_version",Constants.LUCENE_MAIN_VERSION).endObject();
-      builder.field("tagline","You Know, for Search");
-      builder.endObject();
-      return new BytesRestResponse(status,builder);
-    }
+  RestStatus status=RestStatus.OK;
+  if (clusterService.state().blocks().hasGlobalBlock(RestStatus.SERVICE_UNAVAILABLE)) {
+    status=RestStatus.SERVICE_UNAVAILABLE;
   }
-);
+  if (request.method() == RestRequest.Method.HEAD) {
+    channel.sendResponse(new BytesRestResponse(status));
+    return;
+  }
+  XContentBuilder builder=channel.newBuilder();
+  if (!request.hasParam("pretty")) {
+    builder.prettyPrint().lfAtEnd();
+  }
+  builder.startObject();
+  builder.field("status",status.getStatus());
+  if (settings.get("name") != null) {
+    builder.field("name",settings.get("name"));
+  }
+  builder.field("cluster_name",clusterName.value());
+  builder.startObject("version").field("number",version.number()).field("build_hash",Build.CURRENT.hash()).field("build_timestamp",Build.CURRENT.timestamp()).field("build_snapshot",version.snapshot).field("lucene_version",Constants.LUCENE_MAIN_VERSION).endObject();
+  builder.field("tagline","You Know, for Search");
+  builder.endObject();
+  channel.sendResponse(new BytesRestResponse(status,builder));
 }
