@@ -1,0 +1,33 @@
+{
+  File homeFolder=newTempDir();
+  File genericConfigFolder=newTempDir();
+  Settings settings=settingsBuilder().put("path.conf",genericConfigFolder).put("path.home",homeFolder).build();
+  Environment environment=new Environment(settings);
+  ResourceWatcherService resourceWatcherService=new ResourceWatcherService(settings,null);
+  logger.info("--> setup script service");
+  ScriptService scriptService=new ScriptService(settings,environment,ImmutableSet.of(new TestEngineService()),resourceWatcherService);
+  File scriptsFile=new File(genericConfigFolder,"scripts");
+  assertThat(scriptsFile.mkdir(),equalTo(true));
+  resourceWatcherService.notifyNow();
+  logger.info("--> setup two test files one with extension and another without");
+  File testFileNoExt=new File(scriptsFile,"test_no_ext");
+  File testFileWithExt=new File(scriptsFile,"test_script.tst");
+  Streams.copy("test_file_no_ext".getBytes("UTF-8"),testFileNoExt);
+  Streams.copy("test_file".getBytes("UTF-8"),testFileWithExt);
+  resourceWatcherService.notifyNow();
+  logger.info("--> verify that file with extension was correctly processed");
+  CompiledScript compiledScript=scriptService.compile("test","test_script",ScriptService.ScriptType.FILE);
+  assertThat(compiledScript.compiled(),equalTo((Object)"compiled_test_file"));
+  logger.info("--> delete both files");
+  assertThat(testFileNoExt.delete(),equalTo(true));
+  assertThat(testFileWithExt.delete(),equalTo(true));
+  resourceWatcherService.notifyNow();
+  logger.info("--> verify that file with extension was correctly removed");
+  try {
+    scriptService.compile("test","test_script",ScriptService.ScriptType.FILE);
+    fail("the script test_script should no longe exist");
+  }
+ catch (  ElasticsearchIllegalArgumentException ex) {
+    assertThat(ex.getMessage(),containsString("Unable to find on disk script test_script"));
+  }
+}
