@@ -1,0 +1,18 @@
+{
+  File zippedIndexDir=new File(getClass().getResource("/org/elasticsearch/cluster/routing/" + name + ".zip").toURI());
+  Settings baseSettings=prepareBackwardsDataDir(zippedIndexDir);
+  internalCluster().startNode(ImmutableSettings.builder().put(baseSettings).put(InternalNode.HTTP_ENABLED,true).build());
+  ensureYellow("test");
+  GetIndexResponse getIndexResponse=client().admin().indices().prepareGetIndex().get();
+  assertArrayEquals(new String[]{"test"},getIndexResponse.indices());
+  GetSettingsResponse getSettingsResponse=client().admin().indices().prepareGetSettings("test").get();
+  assertEquals(expectedHashFunction.getName(),getSettingsResponse.getSetting("test",IndexMetaData.SETTING_LEGACY_ROUTING_HASH_FUNCTION));
+  assertEquals(Boolean.valueOf(expectedUseType).toString(),getSettingsResponse.getSetting("test",IndexMetaData.SETTING_LEGACY_ROUTING_USE_TYPE));
+  SearchResponse allDocs=client().prepareSearch("test").get();
+  assertSearchResponse(allDocs);
+  assertHitCount(allDocs,4);
+  for (  SearchHit hit : allDocs.getHits().hits()) {
+    GetResponse get=client().prepareGet(hit.index(),hit.type(),hit.id()).get();
+    assertTrue(get.isExists());
+  }
+}
