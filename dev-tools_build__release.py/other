@@ -12,14 +12,13 @@ import urllib
 import fnmatch
 import socket
 import urllib.request
+import subprocess
 from http.client import HTTPConnection
 from http.client import HTTPSConnection
 " \n This tool builds a release from the a given elasticsearch branch.\n In order to execute it go in the top level directory and run:\n   $ python3 dev_tools/build_release.py --branch 0.90 --publish --remote origin\n\n By default this script runs in 'dry' mode which essentially simulates a release. If the\n '--publish' option is set the actual release is done. The script takes over almost all\n steps necessary for a release from a high level point of view it does the following things:\n\n  - run prerequisit checks ie. check for Java 1.7 being presend or S3 credentials available as env variables\n  - detect the version to release from the specified branch (--branch) or the current branch\n  - creates a release branch & updates pom.xml and Version.java to point to a release version rather than a snapshot\n  - builds the artifacts and runs smoke-tests on the build zip & tar.gz files\n  - commits the new version and merges the release branch into the source branch\n  - creates a tag and pushes the commit to the specified origin (--remote)\n  - publishes the releases to Sonatype and S3\n\nOnce it's done it will print all the remaining steps.\n\n Prerequisites:\n    - Python 3k for script execution\n    - Boto for S3 Upload ($ apt-get install python-boto)\n    - RPM for RPM building ($ apt-get install rpm)\n    - S3 keys exported via ENV Variables (AWS_ACCESS_KEY_ID,  AWS_SECRET_ACCESS_KEY)\n"
 env = os.environ
 PLUGINS = [('bigdesk', 'lukas-vlcek/bigdesk'), ('paramedic', 'karmi/elasticsearch-paramedic'), ('segmentspy', 'polyfractal/elasticsearch-segmentspy'), ('inquisitor', 'polyfractal/elasticsearch-inquisitor'), ('head', 'mobz/elasticsearch-head')]
 LOG = env.get('ES_RELEASE_LOG', '/tmp/elasticsearch_release.log')
-if os.path.exists(LOG):
-    raise RuntimeError(('please remove old release log %s first' % LOG))
 try:
     JAVA_HOME = env['JAVA_HOME']
 except KeyError:
@@ -41,7 +40,7 @@ POM_FILE = 'pom.xml'
 print_sonatype_notice()
 if (__name__ == '__main__'):
     parser = argparse.ArgumentParser(description='Builds and publishes a Elasticsearch Release')
-    parser.add_argument('--branch', '-b', metavar='master', default=get_current_branch(), help='The branch to release from. Defaults to the current branch.')
+    parser.add_argument('--branch', '-b', metavar='RELEASE_BRANCH', default=get_current_branch(), help='The branch to release from. Defaults to the current branch.')
     parser.add_argument('--cpus', '-c', metavar='1', default=1, help='The number of cpus to use for running the test. Default is [1]')
     parser.add_argument('--skiptests', '-t', dest='tests', action='store_false', help='Skips tests before release. Tests are run by default.')
     parser.set_defaults(tests=True)
@@ -60,6 +59,8 @@ if (__name__ == '__main__'):
     cpus = args.cpus
     build = (not args.smoke)
     smoke_test_version = args.smoke
+    if os.path.exists(LOG):
+        raise RuntimeError(('please remove old release log %s first' % LOG))
     if (not dry_run):
         check_s3_credentials()
         print 'WARNING: dryrun is set to "false" - this will push and publish the release'
@@ -69,6 +70,7 @@ if (__name__ == '__main__'):
     print ('  JAVA_HOME is [%s]' % JAVA_HOME)
     print ('  Running with maven command: [%s] ' % MVN)
     if build:
+        ensure_checkout_is_clean(src_branch)
         verify_lucene_version()
         release_version = find_release_version(src_branch)
         ensure_no_open_tickets(release_version)
@@ -115,7 +117,7 @@ if (__name__ == '__main__'):
             cherry_pick_command = '.'
             if version_head_hash:
                 cherry_pick_command = (" and cherry-pick the documentation changes: 'git cherry-pick %s' to the development branch" % version_head_hash)
-            pending_msg = "\n      Release successful pending steps:\n        * create a version tag on github for version 'v%(version)s'\n        * check if there are pending issues for this version (https://github.com/elasticsearch/elasticsearch/issues?labels=v%(version)s&page=1&state=open)\n        * publish the maven artifacts on Sonatype: https://oss.sonatype.org/index.html\n           - here is a guide: https://docs.sonatype.org/display/Repository/Sonatype+OSS+Maven+Repository+Usage+Guide#SonatypeOSSMavenRepositoryUsageGuide-8a.ReleaseIt\n        * check if the release is there https://oss.sonatype.org/content/repositories/releases/org/elasticsearch/elasticsearch/%(version)s\n        * announce the release on the website / blog post\n        * tweet about the release\n        * announce the release in the google group/mailinglist\n        * Move to a Snapshot version to the current branch for the next point release%(cherry_pick)s\n      "
+            pending_msg = '\n      Release successful pending steps:\n        * create a new vX.Y.Z label on github for the next release, with label color #dddddd (https://github.com/elasticsearch/elasticsearch/labels)\n        * publish the maven artifacts on Sonatype: https://oss.sonatype.org/index.html\n           - here is a guide: https://docs.sonatype.org/display/Repository/Sonatype+OSS+Maven+Repository+Usage+Guide#SonatypeOSSMavenRepositoryUsageGuide-8a.ReleaseIt\n        * check if the release is there https://oss.sonatype.org/content/repositories/releases/org/elasticsearch/elasticsearch/%(version)s\n        * announce the release on the website / blog post\n        * tweet about the release\n        * announce the release in the google group/mailinglist\n        * Move to a Snapshot version to the current branch for the next point release%(cherry_pick)s\n      '
             print (pending_msg % {'version': release_version, 'cherry_pick': cherry_pick_command, })
             success = True
         finally:
