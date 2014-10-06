@@ -1,11 +1,10 @@
 {
-  RecoveryStatus onGoingRecovery=onGoingRecoveries.get(request.recoveryId());
-  validateRecoveryStatus(onGoingRecovery,request.shardId());
-  InternalIndexShard shard=(InternalIndexShard)indicesService.indexServiceSafe(request.shardId().index().name()).shardSafe(request.shardId().id());
-  for (  Translog.Operation operation : request.operations()) {
-    validateRecoveryStatus(onGoingRecovery,request.shardId());
-    shard.performRecoveryOperation(operation);
-    onGoingRecovery.recoveryState.getTranslog().incrementTranslogOperations();
+  try (RecoveriesCollection.StatusRef statusRef=onGoingRecoveries.getStatusSafe(request.recoveryId(),request.shardId())){
+    final RecoveryStatus recoveryStatus=statusRef.status();
+    for (    Translog.Operation operation : request.operations()) {
+      recoveryStatus.indexShard().performRecoveryOperation(operation);
+      recoveryStatus.state().getTranslog().incrementTranslogOperations();
+    }
   }
-  channel.sendResponse(TransportResponse.Empty.INSTANCE);
+   channel.sendResponse(TransportResponse.Empty.INSTANCE);
 }
