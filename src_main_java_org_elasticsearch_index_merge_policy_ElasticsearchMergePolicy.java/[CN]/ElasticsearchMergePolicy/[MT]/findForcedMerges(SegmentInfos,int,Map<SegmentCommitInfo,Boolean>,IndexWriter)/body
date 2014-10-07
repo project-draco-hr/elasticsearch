@@ -1,17 +1,18 @@
 {
-  MergeSpecification spec=delegate.findForcedMerges(segmentInfos,maxSegmentCount,segmentsToMerge,writer);
-  if (spec == null && force) {
-    List<SegmentCommitInfo> segments=Lists.newArrayList();
+  if (upgradeInProgress) {
+    MergeSpecification spec=new IndexUpgraderMergeSpecification();
     for (    SegmentCommitInfo info : segmentInfos) {
-      if (segmentsToMerge.containsKey(info)) {
-        segments.add(info);
+      if (Version.CURRENT.luceneVersion.minor > info.info.getVersion().minor) {
+        spec.add(new OneMerge(Lists.newArrayList(info)));
+      }
+      if (spec.merges.size() == MAX_CONCURRENT_UPGRADE_MERGES) {
+        return spec;
       }
     }
-    if (!segments.isEmpty()) {
-      spec=new IndexUpgraderMergeSpecification();
-      spec.add(new OneMerge(segments));
+    upgradeInProgress=false;
+    if (spec.merges.isEmpty() == false) {
       return spec;
     }
   }
-  return upgradedMergeSpecification(spec);
+  return upgradedMergeSpecification(delegate.findForcedMerges(segmentInfos,maxSegmentCount,segmentsToMerge,writer));
 }

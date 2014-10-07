@@ -1,0 +1,43 @@
+{
+  if (backwardsCluster().numNewDataNodes() == 0) {
+    backwardsCluster().startNewNode();
+  }
+  int numIndexes=randomIntBetween(2,4);
+  String[] indexNames=new String[numIndexes];
+  for (int i=0; i < numIndexes; ++i) {
+    String indexName="test" + i;
+    indexNames[i]=indexName;
+    Settings settings=ImmutableSettings.builder().put("index.routing.allocation.exclude._name",backwardsCluster().newNodePattern()).put("index.merge.policy.segments_per_tier",1000000f).put(indexSettings()).build();
+    assertAcked(prepareCreate(indexName).setSettings(settings));
+    ensureGreen(indexName);
+    assertAllShardsOnNodes(indexName,backwardsCluster().backwardsNodePattern());
+    int numDocs=scaledRandomIntBetween(100,1000);
+    List<IndexRequestBuilder> builder=new ArrayList<>();
+    for (int j=0; j < numDocs; ++j) {
+      String id=Integer.toString(j);
+      builder.add(client().prepareIndex(indexName,"type1",id).setSource("text","sometext"));
+    }
+    indexRandom(true,builder);
+    ensureGreen(indexName);
+    flushAndRefresh();
+  }
+  backwardsCluster().allowOnAllNodes(indexNames);
+  backwardsCluster().upgradeAllNodes();
+  ensureGreen();
+  checkNotUpgraded("/_upgrade");
+  final String indexToUpgrade="test" + randomInt(numIndexes - 1);
+  runUpgrade("/" + indexToUpgrade + "/_upgrade");
+  awaitBusy(new Predicate<Object>(){
+    @Override public boolean apply(    Object o){
+      try {
+        return isUpgraded("/" + indexToUpgrade + "/_upgrade");
+      }
+ catch (      Exception e) {
+        throw ExceptionsHelper.convertToRuntime(e);
+      }
+    }
+  }
+);
+  runUpgrade("/_upgrade","wait_for_completion","true");
+  checkUpgraded("/_upgrade");
+}
