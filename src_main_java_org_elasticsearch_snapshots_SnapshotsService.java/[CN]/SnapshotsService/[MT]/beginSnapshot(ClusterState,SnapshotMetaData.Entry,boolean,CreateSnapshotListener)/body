@@ -53,6 +53,13 @@
       }
       @Override public void onFailure(      String source,      Throwable t){
         logger.warn("[{}] failed to create snapshot",t,snapshot.snapshotId());
+        removeSnapshotFromClusterState(snapshot.snapshotId(),null,t);
+        try {
+          repositoriesService.repository(snapshot.snapshotId().getRepository()).finalizeSnapshot(snapshot.snapshotId(),ExceptionsHelper.detailedMessage(t),0,ImmutableList.<SnapshotShardFailure>of());
+        }
+ catch (        Throwable t2) {
+          logger.warn("[{}] failed to close snapshot in repository",snapshot.snapshotId());
+        }
         userCreateSnapshotListener.onFailure(t);
       }
       @Override public void clusterStateProcessed(      String source,      ClusterState oldState,      ClusterState newState){
@@ -66,25 +73,7 @@
   }
  catch (  Throwable t) {
     logger.warn("failed to create snapshot [{}]",t,snapshot.snapshotId());
-    clusterService.submitStateUpdateTask("fail_snapshot [" + snapshot.snapshotId() + "]",new ClusterStateUpdateTask(){
-      @Override public ClusterState execute(      ClusterState currentState){
-        MetaData metaData=currentState.metaData();
-        MetaData.Builder mdBuilder=MetaData.builder(currentState.metaData());
-        SnapshotMetaData snapshots=metaData.custom(SnapshotMetaData.TYPE);
-        ImmutableList.Builder<SnapshotMetaData.Entry> entries=ImmutableList.builder();
-        for (        SnapshotMetaData.Entry entry : snapshots.entries()) {
-          if (!entry.snapshotId().equals(snapshot.snapshotId())) {
-            entries.add(entry);
-          }
-        }
-        mdBuilder.putCustom(SnapshotMetaData.TYPE,new SnapshotMetaData(entries.build()));
-        return ClusterState.builder(currentState).metaData(mdBuilder).build();
-      }
-      @Override public void onFailure(      String source,      Throwable t){
-        logger.warn("[{}] failed to delete snapshot",t,snapshot.snapshotId());
-      }
-    }
-);
+    removeSnapshotFromClusterState(snapshot.snapshotId(),null,t);
     if (snapshotCreated) {
       try {
         repositoriesService.repository(snapshot.snapshotId().getRepository()).finalizeSnapshot(snapshot.snapshotId(),ExceptionsHelper.detailedMessage(t),0,ImmutableList.<SnapshotShardFailure>of());
