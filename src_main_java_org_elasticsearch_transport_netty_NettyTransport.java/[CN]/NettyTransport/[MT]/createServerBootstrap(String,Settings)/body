@@ -1,0 +1,39 @@
+{
+  boolean blockingServer=settings.getAsBoolean("transport.tcp.blocking_server",this.settings.getAsBoolean(TCP_BLOCKING_SERVER,this.settings.getAsBoolean(TCP_BLOCKING,false)));
+  String port=settings.get("port");
+  String bindHost=settings.get("bind_host");
+  String publishHost=settings.get("publish_host");
+  String tcpNoDelay=settings.get("tcp_no_delay");
+  String tcpKeepAlive=settings.get("tcp_keep_alive");
+  Boolean reuseAddress=settings.getAsBoolean("reuse_address",NetworkUtils.defaultReuseAddress());
+  ByteSizeValue tcpSendBufferSize=settings.getAsBytesSize("tcp_send_buffer_size",TCP_DEFAULT_SEND_BUFFER_SIZE);
+  ByteSizeValue tcpReceiveBufferSize=settings.getAsBytesSize("tcp_receive_buffer_size",TCP_DEFAULT_RECEIVE_BUFFER_SIZE);
+  logger.debug("using profile[{}], worker_count[{}], port[{}], bind_host[{}], publish_host[{}], compress[{}], connect_timeout[{}], connections_per_node[{}/{}/{}/{}/{}], receive_predictor[{}->{}]",name,workerCount,port,bindHost,publishHost,compress,connectTimeout,connectionsPerNodeRecovery,connectionsPerNodeBulk,connectionsPerNodeReg,connectionsPerNodeState,connectionsPerNodePing,receivePredictorMin,receivePredictorMax);
+  ServerBootstrap serverBootstrap;
+  if (blockingServer) {
+    serverBootstrap=new ServerBootstrap(new OioServerSocketChannelFactory(Executors.newCachedThreadPool(daemonThreadFactory(this.settings,"transport_server_boss",name)),Executors.newCachedThreadPool(daemonThreadFactory(this.settings,"transport_server_worker",name))));
+  }
+ else {
+    serverBootstrap=new ServerBootstrap(new NioServerSocketChannelFactory(Executors.newCachedThreadPool(daemonThreadFactory(this.settings,"transport_server_boss",name)),Executors.newCachedThreadPool(daemonThreadFactory(this.settings,"transport_server_worker",name)),workerCount));
+  }
+  serverBootstrap.setPipelineFactory(configureServerChannelPipelineFactory(name,settings));
+  if (!"default".equals(tcpNoDelay)) {
+    serverBootstrap.setOption("child.tcpNoDelay",Booleans.parseBoolean(tcpNoDelay,null));
+  }
+  if (!"default".equals(tcpKeepAlive)) {
+    serverBootstrap.setOption("child.keepAlive",Booleans.parseBoolean(tcpKeepAlive,null));
+  }
+  if (tcpSendBufferSize != null && tcpSendBufferSize.bytes() > 0) {
+    serverBootstrap.setOption("child.sendBufferSize",tcpSendBufferSize.bytes());
+  }
+  if (tcpReceiveBufferSize != null && tcpReceiveBufferSize.bytes() > 0) {
+    serverBootstrap.setOption("child.receiveBufferSize",tcpReceiveBufferSize.bytes());
+  }
+  serverBootstrap.setOption("receiveBufferSizePredictorFactory",receiveBufferSizePredictorFactory);
+  serverBootstrap.setOption("child.receiveBufferSizePredictorFactory",receiveBufferSizePredictorFactory);
+  if (reuseAddress != null) {
+    serverBootstrap.setOption("reuseAddress",reuseAddress);
+    serverBootstrap.setOption("child.reuseAddress",reuseAddress);
+  }
+  serverBootstraps.put(name,serverBootstrap);
+}

@@ -1,0 +1,33 @@
+{
+  if (blockingClient) {
+    clientBootstrap=new ClientBootstrap(new OioClientSocketChannelFactory(Executors.newCachedThreadPool(daemonThreadFactory(settings,"transport_client_worker"))));
+  }
+ else {
+    int bossCount=componentSettings.getAsInt("boss_count",1);
+    clientBootstrap=new ClientBootstrap(new NioClientSocketChannelFactory(Executors.newCachedThreadPool(daemonThreadFactory(settings,"transport_client_boss")),bossCount,new NioWorkerPool(Executors.newCachedThreadPool(daemonThreadFactory(settings,"transport_client_worker")),workerCount),new HashedWheelTimer(daemonThreadFactory(settings,"transport_client_timer"))));
+  }
+  clientBootstrap.setPipelineFactory(configureClientChannelPipelineFactory());
+  clientBootstrap.setOption("connectTimeoutMillis",connectTimeout.millis());
+  String tcpNoDelay=componentSettings.get("tcp_no_delay",settings.get(TCP_NO_DELAY,"true"));
+  if (!"default".equals(tcpNoDelay)) {
+    clientBootstrap.setOption("tcpNoDelay",Booleans.parseBoolean(tcpNoDelay,null));
+  }
+  String tcpKeepAlive=componentSettings.get("tcp_keep_alive",settings.get(TCP_KEEP_ALIVE,"true"));
+  if (!"default".equals(tcpKeepAlive)) {
+    clientBootstrap.setOption("keepAlive",Booleans.parseBoolean(tcpKeepAlive,null));
+  }
+  ByteSizeValue tcpSendBufferSize=componentSettings.getAsBytesSize("tcp_send_buffer_size",settings.getAsBytesSize(TCP_SEND_BUFFER_SIZE,TCP_DEFAULT_SEND_BUFFER_SIZE));
+  if (tcpSendBufferSize != null && tcpSendBufferSize.bytes() > 0) {
+    clientBootstrap.setOption("sendBufferSize",tcpSendBufferSize.bytes());
+  }
+  ByteSizeValue tcpReceiveBufferSize=componentSettings.getAsBytesSize("tcp_receive_buffer_size",settings.getAsBytesSize(TCP_RECEIVE_BUFFER_SIZE,TCP_DEFAULT_RECEIVE_BUFFER_SIZE));
+  if (tcpReceiveBufferSize != null && tcpReceiveBufferSize.bytes() > 0) {
+    clientBootstrap.setOption("receiveBufferSize",tcpReceiveBufferSize.bytes());
+  }
+  clientBootstrap.setOption("receiveBufferSizePredictorFactory",receiveBufferSizePredictorFactory);
+  Boolean reuseAddress=componentSettings.getAsBoolean("reuse_address",settings.getAsBoolean(TCP_REUSE_ADDRESS,NetworkUtils.defaultReuseAddress()));
+  if (reuseAddress != null) {
+    clientBootstrap.setOption("reuseAddress",reuseAddress);
+  }
+  return clientBootstrap;
+}

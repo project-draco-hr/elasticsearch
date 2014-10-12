@@ -1,92 +1,41 @@
 {
-  if (blockingClient) {
-    clientBootstrap=new ClientBootstrap(new OioClientSocketChannelFactory(Executors.newCachedThreadPool(daemonThreadFactory(settings,"transport_client_worker"))));
-  }
- else {
-    clientBootstrap=new ClientBootstrap(new NioClientSocketChannelFactory(Executors.newCachedThreadPool(daemonThreadFactory(settings,"transport_client_boss")),bossCount,new NioWorkerPool(Executors.newCachedThreadPool(daemonThreadFactory(settings,"transport_client_worker")),workerCount),new HashedWheelTimer(daemonThreadFactory(settings,"transport_client_timer"))));
-  }
-  clientBootstrap.setPipelineFactory(configureClientChannelPipelineFactory());
-  clientBootstrap.setOption("connectTimeoutMillis",connectTimeout.millis());
-  if (!"default".equals(tcpNoDelay)) {
-    clientBootstrap.setOption("tcpNoDelay",Booleans.parseBoolean(tcpNoDelay,null));
-  }
-  if (!"default".equals(tcpKeepAlive)) {
-    clientBootstrap.setOption("keepAlive",Booleans.parseBoolean(tcpKeepAlive,null));
-  }
-  if (tcpSendBufferSize != null && tcpSendBufferSize.bytes() > 0) {
-    clientBootstrap.setOption("sendBufferSize",tcpSendBufferSize.bytes());
-  }
-  if (tcpReceiveBufferSize != null && tcpReceiveBufferSize.bytes() > 0) {
-    clientBootstrap.setOption("receiveBufferSize",tcpReceiveBufferSize.bytes());
-  }
-  clientBootstrap.setOption("receiveBufferSizePredictorFactory",receiveBufferSizePredictorFactory);
-  if (reuseAddress != null) {
-    clientBootstrap.setOption("reuseAddress",reuseAddress);
-  }
+  clientBootstrap=createClientBootstrap();
   if (!settings.getAsBoolean("network.server",true)) {
     return;
   }
   final OpenChannelsHandler openChannels=new OpenChannelsHandler(logger);
   this.serverOpenChannels=openChannels;
-  if (blockingServer) {
-    serverBootstrap=new ServerBootstrap(new OioServerSocketChannelFactory(Executors.newCachedThreadPool(daemonThreadFactory(settings,"transport_server_boss")),Executors.newCachedThreadPool(daemonThreadFactory(settings,"transport_server_worker"))));
+  Map<String,Settings> profiles=settings.getGroups("transport.profiles",true);
+  if (!profiles.containsKey("default")) {
+    profiles=Maps.newHashMap(profiles);
+    profiles.put("default",ImmutableSettings.EMPTY);
   }
- else {
-    serverBootstrap=new ServerBootstrap(new NioServerSocketChannelFactory(Executors.newCachedThreadPool(daemonThreadFactory(settings,"transport_server_boss")),Executors.newCachedThreadPool(daemonThreadFactory(settings,"transport_server_worker")),workerCount));
-  }
-  serverBootstrap.setPipelineFactory(configureServerChannelPipelineFactory());
-  if (!"default".equals(tcpNoDelay)) {
-    serverBootstrap.setOption("child.tcpNoDelay",Booleans.parseBoolean(tcpNoDelay,null));
-  }
-  if (!"default".equals(tcpKeepAlive)) {
-    serverBootstrap.setOption("child.keepAlive",Booleans.parseBoolean(tcpKeepAlive,null));
-  }
-  if (tcpSendBufferSize != null && tcpSendBufferSize.bytes() > 0) {
-    serverBootstrap.setOption("child.sendBufferSize",tcpSendBufferSize.bytes());
-  }
-  if (tcpReceiveBufferSize != null && tcpReceiveBufferSize.bytes() > 0) {
-    serverBootstrap.setOption("child.receiveBufferSize",tcpReceiveBufferSize.bytes());
-  }
-  serverBootstrap.setOption("receiveBufferSizePredictorFactory",receiveBufferSizePredictorFactory);
-  serverBootstrap.setOption("child.receiveBufferSizePredictorFactory",receiveBufferSizePredictorFactory);
-  if (reuseAddress != null) {
-    serverBootstrap.setOption("reuseAddress",reuseAddress);
-    serverBootstrap.setOption("child.reuseAddress",reuseAddress);
-  }
-  InetAddress hostAddressX;
-  try {
-    hostAddressX=networkService.resolveBindHostAddress(bindHost);
-  }
- catch (  IOException e) {
-    throw new BindTransportException("Failed to resolve host [" + bindHost + "]",e);
-  }
-  final InetAddress hostAddress=hostAddressX;
-  PortsRange portsRange=new PortsRange(port);
-  final AtomicReference<Exception> lastException=new AtomicReference<>();
-  boolean success=portsRange.iterate(new PortsRange.PortCallback(){
-    @Override public boolean onPortNumber(    int portNumber){
-      try {
-        serverChannel=serverBootstrap.bind(new InetSocketAddress(hostAddress,portNumber));
-      }
- catch (      Exception e) {
-        lastException.set(e);
-        return false;
-      }
-      return true;
+  Settings fallbackSettings=createFallbackSettings();
+  Settings defaultSettings=profiles.get("default");
+  for (  Map.Entry<String,Settings> entry : profiles.entrySet()) {
+    Settings profileSettings=entry.getValue();
+    String name=entry.getKey();
+    if ("default".equals(name)) {
+      profileSettings=settingsBuilder().put(profileSettings).put("port",profileSettings.get("port",componentSettings.get("port",this.settings.get("transport.tcp.port",DEFAULT_PORT_RANGE)))).build();
     }
+ else {
+      if (profileSettings.get("port") == null) {
+        logger.info("No port configured for profile [{}], not binding",name);
+        continue;
+      }
+    }
+    Settings mergedSettings=settingsBuilder().put(fallbackSettings).put(defaultSettings).put(profileSettings).build();
+    createServerBootstrap(name,mergedSettings);
+    bindServerBootstrap(name,mergedSettings);
   }
-);
-  if (!success) {
-    throw new BindTransportException("Failed to bind to [" + port + "]",lastException.get());
-  }
-  logger.debug("Bound to address [{}]",serverChannel.getLocalAddress());
-  InetSocketAddress boundAddress=(InetSocketAddress)serverChannel.getLocalAddress();
+  InetSocketAddress boundAddress=(InetSocketAddress)serverChannels.get("default").getLocalAddress();
   InetSocketAddress publishAddress;
-  int publishPort=this.publishPort;
+  int publishPort=componentSettings.getAsInt("publish_port",settings.getAsInt("transport.publish_port",0));
   if (0 == publishPort) {
     publishPort=boundAddress.getPort();
   }
   try {
+    String publishHost=componentSettings.get("publish_host",settings.get("transport.publish_host",settings.get("transport.host")));
     publishAddress=new InetSocketAddress(networkService.resolvePublishHostAddress(publishHost),publishPort);
   }
  catch (  Exception e) {
