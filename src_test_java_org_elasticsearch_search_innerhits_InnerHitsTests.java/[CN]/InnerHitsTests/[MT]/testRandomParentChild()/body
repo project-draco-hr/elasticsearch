@@ -1,0 +1,54 @@
+{
+  assertAcked(prepareCreate("idx").addMapping("parent").addMapping("child1","_parent","type=parent").addMapping("child2","_parent","type=parent"));
+  int numDocs=scaledRandomIntBetween(5,50);
+  List<IndexRequestBuilder> requestBuilders=new ArrayList<>();
+  int child1=0;
+  int child2=0;
+  int[] child1InnerObjects=new int[numDocs];
+  int[] child2InnerObjects=new int[numDocs];
+  for (int parent=0; parent < numDocs; parent++) {
+    String parentId=String.format(Locale.ENGLISH,"%03d",parent);
+    requestBuilders.add(client().prepareIndex("idx","parent",parentId).setSource("{}"));
+    int numChildDocs=child1InnerObjects[parent]=scaledRandomIntBetween(0,numDocs);
+    int limit=child1 + numChildDocs;
+    for (; child1 < limit; child1++) {
+      requestBuilders.add(client().prepareIndex("idx","child1",String.format(Locale.ENGLISH,"%04d",child1)).setParent(parentId).setSource("{}"));
+    }
+    numChildDocs=child2InnerObjects[parent]=scaledRandomIntBetween(0,numDocs);
+    limit=child2 + numChildDocs;
+    for (; child2 < limit; child2++) {
+      requestBuilders.add(client().prepareIndex("idx","child2",String.format(Locale.ENGLISH,"%04d",child2)).setParent(parentId).setSource("{}"));
+    }
+  }
+  indexRandom(true,requestBuilders);
+  SearchResponse searchResponse=client().prepareSearch("idx").setSize(numDocs).setTypes("parent").addSort("_uid",SortOrder.ASC).addInnerHit("a",new InnerHitsBuilder.InnerHit().setType("child1").addSort("_uid",SortOrder.ASC).setSize(numDocs)).addInnerHit("b",new InnerHitsBuilder.InnerHit().setType("child2").addSort("_uid",SortOrder.ASC).setSize(numDocs)).get();
+  assertHitCount(searchResponse,numDocs);
+  assertThat(searchResponse.getHits().getHits().length,equalTo(numDocs));
+  int offset1=0;
+  int offset2=0;
+  for (int parent=0; parent < numDocs; parent++) {
+    SearchHit searchHit=searchResponse.getHits().getAt(parent);
+    assertThat(searchHit.getType(),equalTo("parent"));
+    assertThat(searchHit.getId(),equalTo(String.format(Locale.ENGLISH,"%03d",parent)));
+    SearchHits inner=searchHit.getInnerHits().get("a");
+    assertThat(inner.totalHits(),equalTo((long)child1InnerObjects[parent]));
+    for (int child=0; child < child1InnerObjects[parent]; child++) {
+      SearchHit innerHit=inner.getAt(child);
+      assertThat(innerHit.getType(),equalTo("child1"));
+      String childId=String.format(Locale.ENGLISH,"%04d",offset1 + child);
+      assertThat(innerHit.getId(),equalTo(childId));
+      assertThat(innerHit.getNestedIdentity(),nullValue());
+    }
+    offset1+=child1InnerObjects[parent];
+    inner=searchHit.getInnerHits().get("b");
+    assertThat(inner.totalHits(),equalTo((long)child2InnerObjects[parent]));
+    for (int child=0; child < child2InnerObjects[parent]; child++) {
+      SearchHit innerHit=inner.getAt(child);
+      assertThat(innerHit.getType(),equalTo("child2"));
+      String childId=String.format(Locale.ENGLISH,"%04d",offset2 + child);
+      assertThat(innerHit.getId(),equalTo(childId));
+      assertThat(innerHit.getNestedIdentity(),nullValue());
+    }
+    offset2+=child2InnerObjects[parent];
+  }
+}

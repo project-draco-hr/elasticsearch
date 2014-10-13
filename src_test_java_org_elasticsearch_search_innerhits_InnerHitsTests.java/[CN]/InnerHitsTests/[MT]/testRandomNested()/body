@@ -1,0 +1,44 @@
+{
+  assertAcked(prepareCreate("idx").addMapping("type","field1","type=nested","field2","type=nested"));
+  int numDocs=scaledRandomIntBetween(25,100);
+  List<IndexRequestBuilder> requestBuilders=new ArrayList<>();
+  int[] field1InnerObjects=new int[numDocs];
+  int[] field2InnerObjects=new int[numDocs];
+  for (int i=0; i < numDocs; i++) {
+    int numInnerObjects=field1InnerObjects[i]=scaledRandomIntBetween(0,numDocs);
+    XContentBuilder source=jsonBuilder().startObject().startArray("field1");
+    for (int j=0; j < numInnerObjects; j++) {
+      source.startObject().field("x","y").endObject();
+    }
+    numInnerObjects=field2InnerObjects[i]=scaledRandomIntBetween(0,numDocs);
+    source.endArray().startArray("field2");
+    for (int j=0; j < numInnerObjects; j++) {
+      source.startObject().field("x","y").endObject();
+    }
+    source.endArray().endObject();
+    requestBuilders.add(client().prepareIndex("idx","type",String.format(Locale.ENGLISH,"%03d",i)).setSource(source));
+  }
+  indexRandom(true,requestBuilders);
+  SearchResponse searchResponse=client().prepareSearch("idx").setSize(numDocs).addSort("_uid",SortOrder.ASC).addInnerHit("a",new InnerHitsBuilder.InnerHit().setPath("field1").addSort("_doc",SortOrder.DESC).setSize(numDocs)).addInnerHit("b",new InnerHitsBuilder.InnerHit().setPath("field2").addSort("_doc",SortOrder.DESC).setSize(numDocs)).get();
+  assertHitCount(searchResponse,numDocs);
+  assertThat(searchResponse.getHits().getHits().length,equalTo(numDocs));
+  for (int i=0; i < numDocs; i++) {
+    SearchHit searchHit=searchResponse.getHits().getAt(i);
+    SearchHits inner=searchHit.getInnerHits().get("a");
+    assertThat(inner.totalHits(),equalTo((long)field1InnerObjects[i]));
+    for (int j=0; j < field1InnerObjects[i]; j++) {
+      SearchHit innerHit=inner.getAt(j);
+      assertThat(innerHit.getNestedIdentity().getField().string(),equalTo("field1"));
+      assertThat(innerHit.getNestedIdentity().getOffset(),equalTo(j));
+      assertThat(innerHit.getNestedIdentity().getChild(),nullValue());
+    }
+    inner=searchHit.getInnerHits().get("b");
+    assertThat(inner.totalHits(),equalTo((long)field2InnerObjects[i]));
+    for (int j=0; j < field2InnerObjects[i]; j++) {
+      SearchHit innerHit=inner.getAt(j);
+      assertThat(innerHit.getNestedIdentity().getField().string(),equalTo("field2"));
+      assertThat(innerHit.getNestedIdentity().getOffset(),equalTo(j));
+      assertThat(innerHit.getNestedIdentity().getChild(),nullValue());
+    }
+  }
+}

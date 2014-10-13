@@ -1,0 +1,32 @@
+{
+  TopDocsCollector topDocsCollector;
+  int topN=from() + size();
+  if (sort() != null) {
+    try {
+      topDocsCollector=TopFieldCollector.create(sort(),topN,true,trackScores(),trackScores(),true);
+    }
+ catch (    IOException e) {
+      throw ExceptionsHelper.convertToElastic(e);
+    }
+  }
+ else {
+    topDocsCollector=TopScoreDocCollector.create(topN,true);
+  }
+  Filter rawParentFilter;
+  if (parentObjectMapper == null) {
+    rawParentFilter=NonNestedDocsFilter.INSTANCE;
+  }
+ else {
+    rawParentFilter=parentObjectMapper.nestedTypeFilter();
+  }
+  BitDocIdSetFilter parentFilter=context.bitsetFilterCache().getBitDocIdSetFilter(rawParentFilter);
+  Filter childFilter=context.filterCache().cache(childObjectMapper.nestedTypeFilter());
+  try {
+    Query q=new FilteredQuery(query,new NestedChildrenFilter(parentFilter,childFilter,hitContext));
+    context.searcher().search(q,topDocsCollector);
+  }
+ catch (  IOException e) {
+    throw ExceptionsHelper.convertToElastic(e);
+  }
+  return topDocsCollector.topDocs(from(),size());
+}

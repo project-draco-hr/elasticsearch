@@ -1,0 +1,30 @@
+{
+  InnerHitsContext innerHitsContext=context.innerHits();
+  Map<String,InternalSearchHits> results=new HashMap<>();
+  Map<String,InnerHitsContext.BaseInnerHits> innerHitsByKey=innerHitsContext.getInnerHits();
+  for (  Map.Entry<String,InnerHitsContext.BaseInnerHits> entry : innerHitsByKey.entrySet()) {
+    InnerHitsContext.BaseInnerHits innerHits=entry.getValue();
+    TopDocs topDocs=innerHits.topDocs(context,hitContext);
+    innerHits.queryResult().topDocs(topDocs);
+    int[] docIdsToLoad=new int[topDocs.scoreDocs.length];
+    for (int i=0; i < topDocs.scoreDocs.length; i++) {
+      docIdsToLoad[i]=topDocs.scoreDocs[i].doc;
+    }
+    innerHits.docIdsToLoad(docIdsToLoad,0,docIdsToLoad.length);
+    fetchPhase.execute(innerHits);
+    FetchSearchResult fetchResult=innerHits.fetchResult();
+    InternalSearchHit[] internalHits=fetchResult.fetchResult().hits().internalHits();
+    for (int i=0; i < internalHits.length; i++) {
+      ScoreDoc scoreDoc=topDocs.scoreDocs[i];
+      InternalSearchHit searchHitFields=internalHits[i];
+      searchHitFields.shard(innerHits.shardTarget());
+      searchHitFields.score(scoreDoc.score);
+      if (scoreDoc instanceof FieldDoc) {
+        FieldDoc fieldDoc=(FieldDoc)scoreDoc;
+        searchHitFields.sortValues(fieldDoc.fields);
+      }
+    }
+    results.put(entry.getKey(),fetchResult.hits());
+  }
+  hitContext.hit().setInnerHits(results);
+}
