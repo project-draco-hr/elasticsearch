@@ -1,0 +1,23 @@
+{
+  try (Directory dir=newDirectory(file.getParentFile())){
+    try (final IndexInput indexInput=dir.openInput(file.getName(),IOContext.DEFAULT)){
+      CodecUtil.checksumEntireFile(indexInput);
+      CodecUtil.checkHeader(indexInput,STATE_FILE_CODEC,STATE_FILE_VERSION,STATE_FILE_VERSION);
+      final XContentType xContentType=XContentType.values()[indexInput.readInt()];
+      final long version=indexInput.readLong();
+      if (version != expectedVersion) {
+        throw new CorruptStateException("State version mismatch expected: " + expectedVersion + " but was: "+ version);
+      }
+      long filePointer=indexInput.getFilePointer();
+      long contentSize=indexInput.length() - CodecUtil.footerLength() - filePointer;
+      try (IndexInput slice=indexInput.slice("state_xcontent",filePointer,contentSize)){
+        try (XContentParser parser=XContentFactory.xContent(xContentType).createParser(new InputStreamIndexInput(slice,contentSize))){
+          return fromXContent(parser);
+        }
+       }
+     }
+ catch (    CorruptIndexException ex) {
+      throw new CorruptStateException(ex);
+    }
+  }
+ }

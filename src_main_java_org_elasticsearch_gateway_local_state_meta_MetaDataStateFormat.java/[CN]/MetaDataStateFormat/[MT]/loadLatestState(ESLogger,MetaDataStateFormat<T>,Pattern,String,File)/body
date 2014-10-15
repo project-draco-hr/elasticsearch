@@ -1,0 +1,60 @@
+{
+  List<FileAndVersion> files=new ArrayList<>();
+  long maxVersion=-1;
+  if (dataLocations != null) {
+    for (    File dataLocation : dataLocations) {
+      File stateDir=new File(dataLocation,MetaDataStateFormat.STATE_DIR_NAME);
+      if (!stateDir.exists() || !stateDir.isDirectory()) {
+        continue;
+      }
+      File[] stateFiles=stateDir.listFiles();
+      if (stateFiles == null) {
+        continue;
+      }
+      for (      File stateFile : stateFiles) {
+        final Matcher matcher=pattern.matcher(stateFile.getName());
+        if (matcher.matches()) {
+          final long version=Long.parseLong(matcher.group(1));
+          maxVersion=Math.max(maxVersion,version);
+          final boolean legacy=MetaDataStateFormat.STATE_FILE_EXTENSION.equals(matcher.group(2)) == false;
+          files.add(new FileAndVersion(stateFile,version,legacy));
+        }
+      }
+    }
+  }
+  final List<Throwable> exceptions=new ArrayList<>();
+  T state=null;
+  for (  FileAndVersion fileAndVersion : Collections2.filter(files,new VersionPredicate(maxVersion))) {
+    try {
+      final File stateFile=fileAndVersion.file;
+      final long version=fileAndVersion.version;
+      final XContentParser parser;
+      if (fileAndVersion.legacy) {
+        try (FileInputStream stream=new FileInputStream(stateFile)){
+          final byte[] data=Streams.copyToByteArray(stream);
+          if (data.length == 0) {
+            logger.debug("{}: no data for [{}], ignoring...",stateType,stateFile.getAbsolutePath());
+            continue;
+          }
+          parser=XContentHelper.createParser(data,0,data.length);
+          state=format.fromXContent(parser);
+          if (state == null) {
+            logger.debug("{}: no data for [{}], ignoring...",stateType,stateFile.getAbsolutePath());
+          }
+        }
+       }
+ else {
+        state=format.read(stateFile,version);
+      }
+      return state;
+    }
+ catch (    Throwable e) {
+      exceptions.add(e);
+      logger.debug("{}: failed to read [{}], ignoring...",e,fileAndVersion.file.getAbsolutePath(),stateType);
+    }
+  }
+  if (files.size() > 0 || exceptions.size() > 0) {
+    ExceptionsHelper.maybeThrowRuntimeAndSuppress(exceptions);
+  }
+  return state;
+}

@@ -1,0 +1,52 @@
+{
+  Preconditions.checkArgument(locations != null,"Locations must not be null");
+  Preconditions.checkArgument(locations.length > 0,"One or more locations required");
+  String fileName=prefix + version + STATE_FILE_EXTENSION;
+  File stateLocation=new File(locations[0],STATE_DIR_NAME);
+  FileSystemUtils.mkdirs(stateLocation);
+  final File tmpStateFile=new File(stateLocation,fileName + ".tmp");
+  final Path tmpStatePath=tmpStateFile.toPath();
+  final Path finalStatePath=new File(stateLocation,fileName).toPath();
+  try {
+    try (OutputStreamIndexOutput out=new OutputStreamIndexOutput(new FileOutputStream(tmpStateFile),BUFFER_SIZE)){
+      CodecUtil.writeHeader(out,STATE_FILE_CODEC,STATE_FILE_VERSION);
+      out.writeInt(format.index());
+      out.writeLong(version);
+      try (XContentBuilder builder=newXContentBuilder(format,new org.elasticsearch.common.lucene.store.OutputStreamIndexOutput(out){
+        @Override public void close() throws IOException {
+        }
+      }
+)){
+        builder.startObject();
+{
+          toXContent(builder,state);
+        }
+        builder.endObject();
+      }
+       CodecUtil.writeFooter(out);
+    }
+     IOUtils.fsync(tmpStateFile,false);
+    Files.move(tmpStatePath,finalStatePath,StandardCopyOption.ATOMIC_MOVE);
+    IOUtils.fsync(stateLocation,true);
+    for (int i=1; i < locations.length; i++) {
+      stateLocation=new File(locations[i],STATE_DIR_NAME);
+      FileSystemUtils.mkdirs(stateLocation);
+      Path tmpPath=new File(stateLocation,fileName + ".tmp").toPath();
+      Path finalPath=new File(stateLocation,fileName).toPath();
+      try {
+        Files.copy(finalStatePath,tmpPath);
+        Files.move(tmpPath,finalPath,StandardCopyOption.ATOMIC_MOVE);
+        IOUtils.fsync(stateLocation,true);
+      }
+  finally {
+        Files.deleteIfExists(tmpPath);
+      }
+    }
+  }
+  finally {
+    Files.deleteIfExists(tmpStateFile.toPath());
+  }
+  if (deleteOldFiles) {
+    cleanupOldFiles(prefix,fileName,locations);
+  }
+}

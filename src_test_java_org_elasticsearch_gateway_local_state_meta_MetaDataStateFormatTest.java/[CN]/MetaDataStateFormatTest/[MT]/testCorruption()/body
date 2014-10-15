@@ -1,0 +1,30 @@
+{
+  File[] dirs=new File[randomIntBetween(1,5)];
+  for (int i=0; i < dirs.length; i++) {
+    dirs[i]=newTempDir(LifecycleScope.TEST);
+  }
+  final boolean deleteOldFiles=randomBoolean();
+  Format format=new Format(randomFrom(XContentType.values()),deleteOldFiles);
+  DummyState state=new DummyState(randomRealisticUnicodeOfCodepointLengthBetween(1,1000),randomInt(),randomLong(),randomDouble(),randomBoolean());
+  int version=between(0,Integer.MAX_VALUE / 2);
+  format.write(state,"foo-",version,dirs);
+  for (  File file : dirs) {
+    File[] list=file.listFiles();
+    assertEquals(list.length,1);
+    assertThat(list[0].getName(),equalTo(MetaDataStateFormat.STATE_DIR_NAME));
+    File stateDir=list[0];
+    assertThat(stateDir.isDirectory(),is(true));
+    list=stateDir.listFiles();
+    assertEquals(list.length,1);
+    assertThat(list[0].getName(),equalTo("foo-" + version + ".st"));
+    DummyState read=format.read(list[0],version);
+    assertThat(read,equalTo(state));
+    corruptFile(list[0],logger);
+    try {
+      format.read(list[0],version);
+      fail("corrupted file");
+    }
+ catch (    CorruptStateException ex) {
+    }
+  }
+}
