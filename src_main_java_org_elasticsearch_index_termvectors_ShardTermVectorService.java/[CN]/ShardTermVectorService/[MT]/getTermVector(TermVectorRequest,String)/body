@@ -5,6 +5,7 @@
   final Term uidTerm=new Term(UidFieldMapper.NAME,Uid.createUidAsBytes(request.type(),request.id()));
   Engine.GetResult get=indexShard.get(new Engine.Get(request.realtime(),uidTerm));
   boolean docFromTranslog=get.source() != null;
+  AggregatedDfs dfs=null;
   if (docFromTranslog) {
     request.doc(get.source().source,false);
     termVectorResponse.setDocVersion(get.version());
@@ -20,7 +21,10 @@
       if (topLevelFields == null) {
         topLevelFields=termVectorsByField;
       }
-      termVectorResponse.setFields(termVectorsByField,request.selectedFields(),request.getFlags(),topLevelFields);
+      if (useDfs(request)) {
+        dfs=getAggregatedDfs(termVectorsByField,request);
+      }
+      termVectorResponse.setFields(termVectorsByField,request.selectedFields(),request.getFlags(),topLevelFields,dfs);
       termVectorResponse.setExists(true);
       termVectorResponse.setArtificial(!docFromTranslog);
     }
@@ -33,7 +37,10 @@
       if (selectedFields != null) {
         termVectorsByField=addGeneratedTermVectors(get,termVectorsByField,request,selectedFields);
       }
-      termVectorResponse.setFields(termVectorsByField,request.selectedFields(),request.getFlags(),topLevelFields);
+      if (useDfs(request)) {
+        dfs=getAggregatedDfs(termVectorsByField,request);
+      }
+      termVectorResponse.setFields(termVectorsByField,request.selectedFields(),request.getFlags(),topLevelFields,dfs);
       termVectorResponse.setDocVersion(docIdAndVersion.version);
       termVectorResponse.setExists(true);
     }
