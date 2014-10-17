@@ -1,0 +1,30 @@
+{
+  final AtomicLong totalThreadedTime=new AtomicLong(0);
+  int THREADS=10;
+  Thread threads[]=new Thread[THREADS];
+  for (int i=0; i < THREADS; i++) {
+    threads[i]=new Thread(new Runnable(){
+      @Override public void run(){
+        long tid=Thread.currentThread().getId();
+        for (int i=0; i < QUERIES; i++) {
+          if (i % 30 == 0) {
+            System.out.println("--> [" + tid + "] query # "+ i);
+          }
+          SearchResponse resp=client.prepareSearch(INDEX).setQuery(matchAllQuery()).addAggregation(terms("myterms").size(AGG_SIZE).field("num")).setSearchType(SearchType.COUNT).get();
+          Terms terms=resp.getAggregations().get("myterms");
+          assertNotNull("term aggs were calculated",terms);
+          totalThreadedTime.addAndGet(resp.getTookInMillis());
+        }
+      }
+    }
+);
+  }
+  System.out.println("--> starting " + THREADS + " threads for parallel aggregating");
+  for (  Thread t : threads) {
+    t.start();
+  }
+  for (  Thread t : threads) {
+    t.join();
+  }
+  System.out.println("--> threaded average time: " + (totalThreadedTime.get() / (THREADS * QUERIES)) + "ms");
+}
