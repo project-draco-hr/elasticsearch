@@ -1,0 +1,29 @@
+{
+  String concreteIndex=concreteIndices.getConcreteIndex(request.index());
+  Exception unavailableException=null;
+  if (concreteIndex == null) {
+    try {
+      concreteIndex=concreteIndices.resolveIfAbsent(request.index(),request.indicesOptions());
+    }
+ catch (    IndexClosedException ice) {
+      unavailableException=ice;
+    }
+catch (    IndexMissingException ime) {
+      unavailableException=ime;
+    }
+  }
+  if (unavailableException == null) {
+    IndexMetaData indexMetaData=metaData.index(concreteIndex);
+    if (indexMetaData.getState() == IndexMetaData.State.CLOSE) {
+      unavailableException=new IndexClosedException(new Index(metaData.index(request.index()).getIndex()));
+    }
+  }
+  if (unavailableException != null) {
+    BulkItemResponse.Failure failure=new BulkItemResponse.Failure(request.index(),request.type(),request.id(),unavailableException);
+    BulkItemResponse bulkItemResponse=new BulkItemResponse(idx,"index",failure);
+    responses.set(idx,bulkItemResponse);
+    bulkRequest.requests.set(idx,null);
+    return true;
+  }
+  return false;
+}
