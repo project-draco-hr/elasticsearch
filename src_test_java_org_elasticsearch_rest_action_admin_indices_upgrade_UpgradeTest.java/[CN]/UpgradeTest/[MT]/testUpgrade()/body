@@ -1,4 +1,7 @@
 {
+  ImmutableSettings.Builder builder=ImmutableSettings.builder();
+  builder.put(ConcurrentRebalanceAllocationDecider.CLUSTER_ROUTING_ALLOCATION_CLUSTER_CONCURRENT_REBALANCE,100);
+  client().admin().cluster().prepareUpdateSettings().setPersistentSettings(builder).get();
   int numIndexes=randomIntBetween(2,4);
   String[] indexNames=new String[numIndexes];
   for (int i=0; i < numIndexes; ++i) {
@@ -9,12 +12,12 @@
     ensureGreen(indexName);
     assertAllShardsOnNodes(indexName,backwardsCluster().backwardsNodePattern());
     int numDocs=scaledRandomIntBetween(100,1000);
-    List<IndexRequestBuilder> builder=new ArrayList<>();
+    List<IndexRequestBuilder> docs=new ArrayList<>();
     for (int j=0; j < numDocs; ++j) {
       String id=Integer.toString(j);
-      builder.add(client().prepareIndex(indexName,"type1",id).setSource("text","sometext"));
+      docs.add(client().prepareIndex(indexName,"type1",id).setSource("text","sometext"));
     }
-    indexRandom(true,builder);
+    indexRandom(true,docs);
     ensureGreen(indexName);
     if (globalCompatibilityVersion().before(Version.V_1_4_0_Beta1)) {
       assertTrue(awaitBusy(new Predicate<Object>(){
@@ -28,18 +31,25 @@
       assertEquals(0,flush(indexName).getFailedShards());
     }
     numDocs=scaledRandomIntBetween(100,1000);
-    builder=new ArrayList<>();
+    docs=new ArrayList<>();
     for (int j=0; j < numDocs; ++j) {
       String id=Integer.toString(j);
-      builder.add(client().prepareIndex(indexName,"type2",id).setSource("text","someothertext"));
+      docs.add(client().prepareIndex(indexName,"type2",id).setSource("text","someothertext"));
     }
-    indexRandom(true,builder);
+    indexRandom(true,docs);
     ensureGreen(indexName);
   }
   logger.debug("--> Upgrading nodes");
   logClusterState();
   logSegmentsState(null);
   backwardsCluster().allowOnAllNodes(indexNames);
+  ensureGreen();
+  builder=ImmutableSettings.builder();
+  builder.put(BalancedShardsAllocator.SETTING_THRESHOLD,100.0f);
+  client().admin().cluster().prepareUpdateSettings().setPersistentSettings(builder).get();
+  builder=ImmutableSettings.builder();
+  builder.put(EnableAllocationDecider.CLUSTER_ROUTING_ALLOCATION_ENABLE,EnableAllocationDecider.Allocation.NONE);
+  client().admin().cluster().prepareUpdateSettings().setTransientSettings(builder).get();
   backwardsCluster().upgradeAllNodes();
   ensureGreen();
   logger.debug("--> Nodes upgrade complete");
