@@ -1,0 +1,23 @@
+{
+  String indexName="xyz";
+  assertAcked(prepareCreate(indexName).addMapping("parent").addMapping("child","_parent","type=parent","count","type=long"));
+  List<IndexRequestBuilder> requests=new ArrayList<>();
+  requests.add(client().prepareIndex(indexName,"parent","1").setSource("{}"));
+  requests.add(client().prepareIndex(indexName,"child","0").setParent("1").setSource("count",1));
+  requests.add(client().prepareIndex(indexName,"child","1").setParent("1").setSource("count",1));
+  requests.add(client().prepareIndex(indexName,"child","2").setParent("1").setSource("count",1));
+  requests.add(client().prepareIndex(indexName,"child","3").setParent("1").setSource("count",1));
+  indexRandom(true,requests);
+  for (int i=0; i < 10; i++) {
+    SearchResponse searchResponse=client().prepareSearch(indexName).addAggregation(children("children").childType("child").subAggregation(sum("counts").field("count"))).get();
+    assertNoFailures(searchResponse);
+    Children children=searchResponse.getAggregations().get("children");
+    assertThat(children.getDocCount(),equalTo(4l));
+    Sum count=children.getAggregations().get("counts");
+    assertThat(count.getValue(),equalTo(4.));
+    String idToUpdate=Integer.toString(randomInt(3));
+    UpdateResponse updateResponse=client().prepareUpdate(indexName,"child",idToUpdate).setParent("1").setDoc("count",1).get();
+    assertThat(updateResponse.getVersion(),greaterThan(1l));
+    refresh();
+  }
+}
