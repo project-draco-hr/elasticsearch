@@ -1,0 +1,30 @@
+{
+  final String firstNode=internalCluster().startNode();
+  client().admin().cluster().prepareUpdateSettings().setTransientSettings(settingsBuilder().put(EnableAllocationDecider.CLUSTER_ROUTING_REBALANCE_ENABLE,EnableAllocationDecider.Rebalance.NONE)).get();
+  final int numShards=2;
+  assertAcked(prepareCreate("test").setSettings(settingsBuilder().put(IndexMetaData.SETTING_NUMBER_OF_REPLICAS,0).put(IndexMetaData.SETTING_NUMBER_OF_SHARDS,numShards)));
+  assertAcked(prepareCreate("test_1").setSettings(settingsBuilder().put(IndexMetaData.SETTING_NUMBER_OF_REPLICAS,0).put(IndexMetaData.SETTING_NUMBER_OF_SHARDS,numShards)));
+  ensureGreen();
+  assertAllShardsOnNodes("test",firstNode);
+  assertAllShardsOnNodes("test_1",firstNode);
+  final String secondNode=internalCluster().startNode();
+  client().admin().indices().prepareUpdateSettings("test").setSettings(settingsBuilder().put(EnableAllocationDecider.INDEX_ROUTING_REBALANCE_ENABLE,EnableAllocationDecider.Rebalance.NONE)).get();
+  client().admin().cluster().prepareReroute().get();
+  ensureGreen();
+  assertAllShardsOnNodes("test",firstNode);
+  assertAllShardsOnNodes("test_1",firstNode);
+  client().admin().indices().prepareUpdateSettings("test").setSettings(settingsBuilder().put(EnableAllocationDecider.INDEX_ROUTING_REBALANCE_ENABLE,randomBoolean() ? EnableAllocationDecider.Rebalance.PRIMARIES : EnableAllocationDecider.Rebalance.ALL)).get();
+  logger.info("--> balance index [test]");
+  client().admin().cluster().prepareReroute().get();
+  ensureGreen("test");
+  Set<String> test=assertAllShardsOnNodes("test",firstNode,secondNode);
+  assertThat("index: [test] expected to be rebalanced on both nodes",test.size(),equalTo(2));
+  client().admin().cluster().prepareUpdateSettings().setTransientSettings(settingsBuilder().put(EnableAllocationDecider.CLUSTER_ROUTING_REBALANCE_ENABLE,randomBoolean() ? EnableAllocationDecider.Rebalance.PRIMARIES : EnableAllocationDecider.Rebalance.ALL)).get();
+  logger.info("--> balance index [test_1]");
+  client().admin().cluster().prepareReroute().get();
+  ensureGreen("test_1");
+  Set<String> test_1=assertAllShardsOnNodes("test_1",firstNode,secondNode);
+  assertThat("index: [test_1] expected to be rebalanced on both nodes",test_1.size(),equalTo(2));
+  test=assertAllShardsOnNodes("test",firstNode,secondNode);
+  assertThat("index: [test] expected to be rebalanced on both nodes",test.size(),equalTo(2));
+}

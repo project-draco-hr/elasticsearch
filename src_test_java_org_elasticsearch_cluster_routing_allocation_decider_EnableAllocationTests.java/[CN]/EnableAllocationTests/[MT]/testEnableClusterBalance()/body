@@ -1,0 +1,74 @@
+{
+  final boolean useClusterSetting=randomBoolean();
+  final Rebalance allowedOnes=RandomPicks.randomFrom(getRandom(),EnumSet.of(Rebalance.PRIMARIES,Rebalance.REPLICAS,Rebalance.ALL));
+  Settings build=settingsBuilder().put(CLUSTER_ROUTING_REBALANCE_ENABLE,useClusterSetting ? Rebalance.NONE : RandomPicks.randomFrom(getRandom(),Rebalance.values())).put(ConcurrentRebalanceAllocationDecider.CLUSTER_ROUTING_ALLOCATION_CLUSTER_CONCURRENT_REBALANCE,3).build();
+  NodeSettingsService nodeSettingsService=new NodeSettingsService(build);
+  AllocationService strategy=createAllocationService(build,nodeSettingsService,getRandom());
+  Settings indexSettings=useClusterSetting ? ImmutableSettings.EMPTY : settingsBuilder().put(EnableAllocationDecider.INDEX_ROUTING_REBALANCE_ENABLE,Rebalance.NONE).build();
+  logger.info("Building initial routing table");
+  MetaData metaData=MetaData.builder().put(IndexMetaData.builder("test").settings(indexSettings).numberOfShards(3).numberOfReplicas(1)).put(IndexMetaData.builder("always_disabled").settings(settingsBuilder().put(EnableAllocationDecider.INDEX_ROUTING_REBALANCE_ENABLE,Rebalance.NONE)).numberOfShards(1).numberOfReplicas(1)).build();
+  RoutingTable routingTable=RoutingTable.builder().addAsNew(metaData.index("test")).addAsNew(metaData.index("always_disabled")).build();
+  ClusterState clusterState=ClusterState.builder(org.elasticsearch.cluster.ClusterName.DEFAULT).metaData(metaData).routingTable(routingTable).build();
+  logger.info("--> adding one nodes and do rerouting");
+  clusterState=ClusterState.builder(clusterState).nodes(DiscoveryNodes.builder().put(newNode("node1")).put(newNode("node2"))).build();
+  routingTable=strategy.reroute(clusterState).routingTable();
+  clusterState=ClusterState.builder(clusterState).routingTable(routingTable).build();
+  assertThat(clusterState.routingNodes().shardsWithState(INITIALIZING).size(),equalTo(4));
+  logger.info("--> start the shards (primaries)");
+  routingTable=strategy.applyStartedShards(clusterState,clusterState.routingNodes().shardsWithState(INITIALIZING)).routingTable();
+  clusterState=ClusterState.builder(clusterState).routingTable(routingTable).build();
+  assertThat(clusterState.routingNodes().shardsWithState(STARTED).size(),equalTo(4));
+  assertThat(clusterState.routingNodes().shardsWithState(INITIALIZING).size(),equalTo(4));
+  routingTable=strategy.applyStartedShards(clusterState,clusterState.routingNodes().shardsWithState(INITIALIZING)).routingTable();
+  clusterState=ClusterState.builder(clusterState).routingTable(routingTable).build();
+  assertThat(clusterState.routingNodes().shardsWithState(STARTED).size(),equalTo(8));
+  assertThat(clusterState.routingNodes().shardsWithState(INITIALIZING).size(),equalTo(0));
+  logger.info("--> adding one nodes and do rerouting");
+  clusterState=ClusterState.builder(clusterState).nodes(DiscoveryNodes.builder().put(newNode("node1")).put(newNode("node2")).put(newNode("node3"))).build();
+  ClusterState prevState=clusterState;
+  routingTable=strategy.reroute(clusterState).routingTable();
+  clusterState=ClusterState.builder(clusterState).routingTable(routingTable).build();
+  assertThat(clusterState.routingNodes().shardsWithState(STARTED).size(),equalTo(8));
+  assertThat(clusterState.routingNodes().shardsWithState(RELOCATING).size(),equalTo(0));
+  if (useClusterSetting) {
+    prevState=clusterState;
+    clusterState=ClusterState.builder(clusterState).metaData(MetaData.builder(metaData).transientSettings(settingsBuilder().put(CLUSTER_ROUTING_REBALANCE_ENABLE,allowedOnes).build())).build();
+  }
+ else {
+    prevState=clusterState;
+    IndexMetaData meta=clusterState.getMetaData().index("test");
+    IndexMetaData meta1=clusterState.getMetaData().index("always_disabled");
+    clusterState=ClusterState.builder(clusterState).metaData(MetaData.builder(metaData).removeAllIndices().put(IndexMetaData.builder(meta1)).put(IndexMetaData.builder(meta).settings(settingsBuilder().put(meta.getSettings()).put(EnableAllocationDecider.INDEX_ROUTING_REBALANCE_ENABLE,allowedOnes).build()))).build();
+  }
+  nodeSettingsService.clusterChanged(new ClusterChangedEvent("foo",clusterState,prevState));
+  routingTable=strategy.reroute(clusterState).routingTable();
+  clusterState=ClusterState.builder(clusterState).routingTable(routingTable).build();
+  assertThat("expected 6 shards to be started 2 to relocate useClusterSettings: " + useClusterSetting,clusterState.routingNodes().shardsWithState(STARTED).size(),equalTo(6));
+  assertThat("expected 2 shards to relocate useClusterSettings: " + useClusterSetting,clusterState.routingNodes().shardsWithState(RELOCATING).size(),equalTo(2));
+  List<MutableShardRouting> mutableShardRoutings=clusterState.routingNodes().shardsWithState(RELOCATING);
+switch (allowedOnes) {
+case PRIMARIES:
+    for (    MutableShardRouting routing : mutableShardRoutings) {
+      assertTrue("only primaries are allowed to relocate",routing.primary());
+      assertThat("only test index can rebalance",routing.getIndex(),equalTo("test"));
+    }
+  break;
+case REPLICAS:
+for (MutableShardRouting routing : mutableShardRoutings) {
+  assertFalse("only replicas are allowed to relocate",routing.primary());
+  assertThat("only test index can rebalance",routing.getIndex(),equalTo("test"));
+}
+break;
+case ALL:
+for (MutableShardRouting routing : mutableShardRoutings) {
+assertThat("only test index can rebalance",routing.getIndex(),equalTo("test"));
+}
+break;
+default :
+fail("only replicas, primaries or all are allowed");
+}
+routingTable=strategy.applyStartedShards(clusterState,clusterState.routingNodes().shardsWithState(INITIALIZING)).routingTable();
+clusterState=ClusterState.builder(clusterState).routingTable(routingTable).build();
+assertThat(clusterState.routingNodes().shardsWithState(STARTED).size(),equalTo(8));
+assertThat(clusterState.routingNodes().shardsWithState(INITIALIZING).size(),equalTo(0));
+}
