@@ -19,11 +19,7 @@
     }
     return;
   }
-  NodesStatsRequest nodesStatsRequest=new NodesStatsRequest("data:true");
-  nodesStatsRequest.clear();
-  nodesStatsRequest.fs(true);
-  nodesStatsRequest.timeout(TimeValue.timeValueSeconds(15));
-  transportNodesStatsAction.execute(nodesStatsRequest,new ActionListener<NodesStatsResponse>(){
+  CountDownLatch nodeLatch=updateNodeStats(new ActionListener<NodesStatsResponse>(){
     @Override public void onResponse(    NodesStatsResponse nodeStatses){
       Map<String,DiskUsage> newUsages=new HashMap<>();
       for (      NodeStats nodeStats : nodeStatses.getNodes()) {
@@ -58,10 +54,7 @@
     }
   }
 );
-  IndicesStatsRequest indicesStatsRequest=new IndicesStatsRequest();
-  indicesStatsRequest.clear();
-  indicesStatsRequest.store(true);
-  transportIndicesStatsAction.execute(indicesStatsRequest,new ActionListener<IndicesStatsResponse>(){
+  CountDownLatch indicesLatch=updateIndicesStats(new ActionListener<IndicesStatsResponse>(){
     @Override public void onResponse(    IndicesStatsResponse indicesStatsResponse){
       ShardStats[] stats=indicesStatsResponse.getShards();
       HashMap<String,Long> newShardSizes=new HashMap<>();
@@ -87,7 +80,24 @@
     }
   }
 );
-  if (logger.isTraceEnabled()) {
-    logger.trace("Finished ClusterInfoUpdateJob");
+  try {
+    nodeLatch.await(15,TimeUnit.SECONDS);
+  }
+ catch (  InterruptedException e) {
+    logger.warn("Failed to update node information for ClusterInfoUpdateJob within 15s timeout");
+  }
+  try {
+    indicesLatch.await(15,TimeUnit.SECONDS);
+  }
+ catch (  InterruptedException e) {
+    logger.warn("Failed to update shard information for ClusterInfoUpdateJob within 15s timeout");
+  }
+  for (  Listener l : listeners) {
+    try {
+      l.onNewInfo(getClusterInfo());
+    }
+ catch (    Exception e) {
+      logger.info("Failed executing ClusterInfoService listener",e);
+    }
   }
 }
