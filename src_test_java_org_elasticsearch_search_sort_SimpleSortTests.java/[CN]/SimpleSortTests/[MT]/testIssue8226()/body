@@ -1,21 +1,27 @@
 {
   int numIndices=between(5,10);
+  final boolean useMapping=randomBoolean();
   for (int i=0; i < numIndices; i++) {
-    assertAcked(prepareCreate("test_" + i).addAlias(new Alias("test")));
+    if (useMapping) {
+      assertAcked(prepareCreate("test_" + i).addAlias(new Alias("test")).addMapping("foo","entry","type=long"));
+    }
+ else {
+      assertAcked(prepareCreate("test_" + i).addAlias(new Alias("test")));
+    }
     if (i > 0) {
       client().prepareIndex("test_" + i,"foo","" + i).setSource("{\"entry\": " + i + "}").get();
     }
   }
   ensureYellow();
   refresh();
-  SearchResponse searchResponse=client().prepareSearch().addSort(new FieldSortBuilder("entry").order(SortOrder.DESC).ignoreUnmapped(true)).setSize(10).get();
+  SearchResponse searchResponse=client().prepareSearch().addSort(new FieldSortBuilder("entry").order(SortOrder.DESC).unmappedType(useMapping ? null : "long")).setSize(10).get();
   assertSearchResponse(searchResponse);
   for (int j=1; j < searchResponse.getHits().hits().length; j++) {
     Number current=(Number)searchResponse.getHits().hits()[j].getSource().get("entry");
     Number previous=(Number)searchResponse.getHits().hits()[j - 1].getSource().get("entry");
     assertThat(searchResponse.toString(),current.intValue(),lessThan(previous.intValue()));
   }
-  searchResponse=client().prepareSearch().addSort(new FieldSortBuilder("entry").order(SortOrder.ASC).ignoreUnmapped(true)).setSize(10).get();
+  searchResponse=client().prepareSearch().addSort(new FieldSortBuilder("entry").order(SortOrder.ASC).unmappedType(useMapping ? null : "long")).setSize(10).get();
   assertSearchResponse(searchResponse);
   for (int j=1; j < searchResponse.getHits().hits().length; j++) {
     Number current=(Number)searchResponse.getHits().hits()[j].getSource().get("entry");
