@@ -1,0 +1,52 @@
+{
+  createIndex("idx");
+  IndexRequestBuilder[] builders=new IndexRequestBuilder[randomInt(30)];
+  IntIntMap values=new IntIntOpenHashMap();
+  long missingValues=0;
+  for (int i=0; i < builders.length; i++) {
+    String name="name_" + randomIntBetween(1,10);
+    if (rarely()) {
+      missingValues++;
+      builders[i]=client().prepareIndex("idx","type").setSource(jsonBuilder().startObject().field("name",name).endObject());
+    }
+ else {
+      int value=randomIntBetween(1,10);
+      values.put(value,values.getOrDefault(value,0) + 1);
+      builders[i]=client().prepareIndex("idx","type").setSource(jsonBuilder().startObject().field("name",name).field("value",value).endObject());
+    }
+  }
+  indexRandom(true,builders);
+  ensureSearchable();
+  final Map<String,Object> nestedMetaData=new HashMap<String,Object>(){
+{
+      put("nested","value");
+    }
+  }
+;
+  Map<String,Object> missingValueMetaData=new HashMap<String,Object>(){
+{
+      put("key","value");
+      put("numeric",1.2);
+      put("bool",true);
+      put("complex",nestedMetaData);
+    }
+  }
+;
+  SearchResponse response=client().prepareSearch("idx").addAggregation(missing("missing_values").field("value").setMetaData(missingValueMetaData)).execute().actionGet();
+  assertSearchResponse(response);
+  Aggregations aggs=response.getAggregations();
+  assertNotNull(aggs);
+  Missing missing=aggs.get("missing_values");
+  assertNotNull(missing);
+  assertThat(missing.getDocCount(),equalTo(missingValues));
+  Map<String,Object> returnedMetaData=missing.getMetaData();
+  assertNotNull(returnedMetaData);
+  assertEquals(4,returnedMetaData.size());
+  assertEquals("value",returnedMetaData.get("key"));
+  assertEquals(1.2,returnedMetaData.get("numeric"));
+  assertEquals(true,returnedMetaData.get("bool"));
+  Object nestedObject=returnedMetaData.get("complex");
+  assertNotNull(nestedObject);
+  Map<String,Object> nestedMap=(Map<String,Object>)nestedObject;
+  assertEquals("value",nestedMap.get("nested"));
+}
