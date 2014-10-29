@@ -1,0 +1,34 @@
+{
+  IndexService service=createIndex("foo");
+  RecoveryState state=new RecoveryState();
+  InternalIndexShard indexShard=(InternalIndexShard)service.shard(0);
+  DiscoveryNode node=new DiscoveryNode("foo",new LocalTransportAddress("bar"),Version.CURRENT);
+  RecoveryStatus status=new RecoveryStatus(indexShard,node,state,new RecoveryTarget.RecoveryListener(){
+    @Override public void onRecoveryDone(    RecoveryState state){
+    }
+    @Override public void onRecoveryFailure(    RecoveryState state,    RecoveryFailedException e,    boolean sendShardFailure){
+    }
+  }
+);
+  try (IndexOutput indexOutput=status.openAndPutIndexOutput("foo.bar",new StoreFileMetaData("foo.bar",8),status.store())){
+    indexOutput.writeInt(1);
+    IndexOutput openIndexOutput=status.getOpenIndexOutput("foo.bar");
+    assertSame(openIndexOutput,indexOutput);
+    openIndexOutput.writeInt(1);
+  }
+   status.removeOpenIndexOutputs("foo.bar");
+  Set<String> strings=Sets.newHashSet(status.store().directory().listAll());
+  String expectedFile=null;
+  for (  String file : strings) {
+    if (Pattern.compile("recovery[.]\\d+[.]foo[.]bar").matcher(file).matches()) {
+      expectedFile=file;
+      break;
+    }
+  }
+  assertNotNull(expectedFile);
+  status.renameAllTempFiles();
+  strings=Sets.newHashSet(status.store().directory().listAll());
+  assertTrue(strings.toString(),strings.contains("foo.bar"));
+  assertFalse(strings.toString(),strings.contains(expectedFile));
+  status.markAsDone();
+}

@@ -1,0 +1,47 @@
+{
+  boolean anyOpenDelFiles=false;
+  DirectoryReader r=DirectoryReader.open(writer,true);
+  while (System.currentTimeMillis() < stopTime && !failed.get()) {
+    if (random().nextBoolean()) {
+      if (VERBOSE) {
+        logger.info("TEST: now reopen r=" + r);
+      }
+      final DirectoryReader r2=DirectoryReader.openIfChanged(r);
+      if (r2 != null) {
+        r.close();
+        r=r2;
+      }
+    }
+ else {
+      if (VERBOSE) {
+        logger.info("TEST: now close reader=" + r);
+      }
+      r.close();
+      writer.commit();
+      final Set<String> openDeletedFiles=getOpenDeletedFiles(dir);
+      if (openDeletedFiles.size() > 0) {
+        logger.info("OBD files: " + openDeletedFiles);
+      }
+      anyOpenDelFiles|=openDeletedFiles.size() > 0;
+      if (VERBOSE) {
+        logger.info("TEST: now open");
+      }
+      r=DirectoryReader.open(writer,true);
+    }
+    if (VERBOSE) {
+      logger.info("TEST: got new reader=" + r);
+    }
+    if (r.numDocs() > 0) {
+      fixedSearcher=new IndexSearcher(r,es);
+      smokeTestSearcher(fixedSearcher);
+      runSearchThreads(System.currentTimeMillis() + 500);
+    }
+  }
+  r.close();
+  final Set<String> openDeletedFiles=getOpenDeletedFiles(dir);
+  if (openDeletedFiles.size() > 0) {
+    logger.info("OBD files: " + openDeletedFiles);
+  }
+  anyOpenDelFiles|=openDeletedFiles.size() > 0;
+  assertFalse("saw non-zero open-but-deleted count",anyOpenDelFiles);
+}
