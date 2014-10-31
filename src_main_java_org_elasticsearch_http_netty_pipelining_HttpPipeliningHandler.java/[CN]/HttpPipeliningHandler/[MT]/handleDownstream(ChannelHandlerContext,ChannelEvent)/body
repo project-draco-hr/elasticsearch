@@ -1,0 +1,35 @@
+{
+  if (e instanceof OrderedDownstreamChannelEvent) {
+    boolean channelShouldClose=false;
+synchronized (holdingQueue) {
+      if (holdingQueue.size() < maxEventsHeld) {
+        final OrderedDownstreamChannelEvent currentEvent=(OrderedDownstreamChannelEvent)e;
+        holdingQueue.add(currentEvent);
+        while (!holdingQueue.isEmpty()) {
+          final OrderedDownstreamChannelEvent nextEvent=holdingQueue.peek();
+          if (nextEvent.getOrderedUpstreamMessageEvent().getSequence() != nextRequiredSequence | nextEvent.getSubsequence() != nextRequiredSubsequence) {
+            break;
+          }
+          holdingQueue.remove();
+          ctx.sendDownstream(nextEvent.getChannelEvent());
+          if (nextEvent.isLast()) {
+            ++nextRequiredSequence;
+            nextRequiredSubsequence=0;
+          }
+ else {
+            ++nextRequiredSubsequence;
+          }
+        }
+      }
+ else {
+        channelShouldClose=true;
+      }
+    }
+    if (channelShouldClose) {
+      Channels.close(e.getChannel());
+    }
+  }
+ else {
+    super.handleDownstream(ctx,e);
+  }
+}

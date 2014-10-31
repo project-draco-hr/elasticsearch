@@ -1,0 +1,26 @@
+{
+  HttpRequest request;
+  OrderedUpstreamMessageEvent oue=null;
+  if (e instanceof OrderedUpstreamMessageEvent) {
+    oue=(OrderedUpstreamMessageEvent)e;
+    request=(HttpRequest)oue.getMessage();
+  }
+ else {
+    request=(HttpRequest)e.getMessage();
+  }
+  ChannelBuffer buffer=ChannelBuffers.copiedBuffer(request.getUri(),Charsets.UTF_8);
+  DefaultHttpResponse httpResponse=new DefaultHttpResponse(HTTP_1_1,OK);
+  httpResponse.headers().add(CONTENT_LENGTH,buffer.readableBytes());
+  httpResponse.setContent(buffer);
+  QueryStringDecoder decoder=new QueryStringDecoder(request.getUri());
+  final int timeout=request.getUri().startsWith("/slow") && decoder.getParameters().containsKey("sleep") ? Integer.valueOf(decoder.getParameters().get("sleep").get(0)) : 0;
+  if (timeout > 0) {
+    sleep(timeout);
+  }
+  if (oue != null) {
+    ctx.sendDownstream(new OrderedDownstreamChannelEvent(oue,0,true,httpResponse));
+  }
+ else {
+    ctx.getChannel().write(httpResponse);
+  }
+}
