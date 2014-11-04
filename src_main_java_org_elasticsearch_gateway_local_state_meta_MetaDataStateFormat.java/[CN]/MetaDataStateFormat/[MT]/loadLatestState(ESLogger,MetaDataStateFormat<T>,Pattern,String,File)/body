@@ -1,6 +1,7 @@
 {
   List<FileAndVersion> files=new ArrayList<>();
   long maxVersion=-1;
+  boolean maxVersionIsLegacy=true;
   if (dataLocations != null) {
     for (    File dataLocation : dataLocations) {
       File stateDir=new File(dataLocation,MetaDataStateFormat.STATE_DIR_NAME);
@@ -17,6 +18,7 @@
           final long version=Long.parseLong(matcher.group(1));
           maxVersion=Math.max(maxVersion,version);
           final boolean legacy=MetaDataStateFormat.STATE_FILE_EXTENSION.equals(matcher.group(2)) == false;
+          maxVersionIsLegacy&=legacy;
           files.add(new FileAndVersion(stateFile,version,legacy));
         }
       }
@@ -24,7 +26,7 @@
   }
   final List<Throwable> exceptions=new ArrayList<>();
   T state=null;
-  for (  FileAndVersion fileAndVersion : Collections2.filter(files,new VersionPredicate(maxVersion))) {
+  for (  FileAndVersion fileAndVersion : Collections2.filter(files,new VersionAndLegacyPredicate(maxVersion,maxVersionIsLegacy))) {
     try {
       final File stateFile=fileAndVersion.file;
       final long version=fileAndVersion.version;
@@ -53,8 +55,9 @@
       logger.debug("{}: failed to read [{}], ignoring...",e,fileAndVersion.file.getAbsolutePath(),stateType);
     }
   }
-  if (files.size() > 0 || exceptions.size() > 0) {
-    ExceptionsHelper.maybeThrowRuntimeAndSuppress(exceptions);
+  ExceptionsHelper.maybeThrowRuntimeAndSuppress(exceptions);
+  if (files.size() > 0) {
+    throw new ElasticsearchIllegalStateException("Could not find a state file to recover from among " + files);
   }
   return state;
 }
