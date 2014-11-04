@@ -1,17 +1,21 @@
 {
-  int nodeCount=scaledRandomIntBetween(1,10);
+  int nodeCount=scaledRandomIntBetween(1,5);
   ImmutableSettings.Builder settings=settingsBuilder().put("discovery.type","zen").put("discovery.zen.ping_timeout","200ms").put("discovery.initial_state_timeout","500ms").put("gateway.type","local");
   if (randomBoolean()) {
     settings.put(ElectMasterService.DISCOVERY_ZEN_MINIMUM_MASTER_NODES,randomIntBetween(1,nodeCount));
   }
+  logger.info("--> starting [{}] nodes",nodeCount);
   internalCluster().startNodesAsync(nodeCount,settings.build()).get();
-  client().admin().cluster().prepareHealth().setWaitForNodes("=" + nodeCount);
+  logger.info("--> waiting for nodes to join");
+  assertFalse(client().admin().cluster().prepareHealth().setWaitForNodes(Integer.toString(nodeCount)).get().isTimedOut());
   int updateCount=randomIntBetween(1,nodeCount);
   logger.info("--> updating [{}] to [{}]",ElectMasterService.DISCOVERY_ZEN_MINIMUM_MASTER_NODES,updateCount);
   assertAcked(client().admin().cluster().prepareUpdateSettings().setPersistentSettings(settingsBuilder().put(ElectMasterService.DISCOVERY_ZEN_MINIMUM_MASTER_NODES,updateCount)));
-  client().admin().cluster().prepareHealth().setWaitForNodes("=" + nodeCount);
+  logger.info("--> verifying no node left and master is up");
+  assertFalse(client().admin().cluster().prepareHealth().setWaitForNodes(Integer.toString(nodeCount)).get().isTimedOut());
   updateCount=nodeCount + randomIntBetween(1,2000);
   logger.info("--> trying to updating [{}] to [{}]",ElectMasterService.DISCOVERY_ZEN_MINIMUM_MASTER_NODES,updateCount);
   assertThat(client().admin().cluster().prepareUpdateSettings().setPersistentSettings(settingsBuilder().put(ElectMasterService.DISCOVERY_ZEN_MINIMUM_MASTER_NODES,updateCount)).get().getPersistentSettings().getAsMap().keySet(),empty());
-  client().admin().cluster().prepareHealth().setWaitForNodes("=" + nodeCount);
+  logger.info("--> verifying no node left and master is up");
+  assertFalse(client().admin().cluster().prepareHealth().setWaitForNodes(Integer.toString(nodeCount)).get().isTimedOut());
 }
