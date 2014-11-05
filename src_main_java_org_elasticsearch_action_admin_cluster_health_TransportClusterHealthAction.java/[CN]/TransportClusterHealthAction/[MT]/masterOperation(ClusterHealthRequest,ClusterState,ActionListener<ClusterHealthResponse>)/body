@@ -1,149 +1,27 @@
 {
-  long endTime=System.currentTimeMillis() + request.timeout().millis();
   if (request.waitForEvents() != null) {
-    final CountDownLatch latch=new CountDownLatch(1);
-    final AtomicReference<ElasticsearchException> failure=new AtomicReference<>();
+    final long endTime=System.currentTimeMillis() + request.timeout().millis();
     clusterService.submitStateUpdateTask("cluster_health (wait_for_events [" + request.waitForEvents() + "])",request.waitForEvents(),new ProcessedClusterStateUpdateTask(){
       @Override public ClusterState execute(      ClusterState currentState){
         return currentState;
       }
       @Override public void clusterStateProcessed(      String source,      ClusterState oldState,      ClusterState newState){
-        latch.countDown();
+        final long timeoutInMillis=Math.max(0,endTime - System.currentTimeMillis());
+        final TimeValue newTimeout=TimeValue.timeValueMillis(timeoutInMillis);
+        request.timeout(newTimeout);
+        executeHealth(request,listener);
       }
       @Override public void onFailure(      String source,      Throwable t){
         logger.error("unexpected failure during [{}]",t,source);
-        failure.set(new ElasticsearchException("Error while waiting for events",t));
-        latch.countDown();
+        listener.onFailure(t);
       }
       @Override public boolean runOnlyOnMaster(){
         return !request.local();
       }
     }
 );
-    try {
-      latch.await(request.timeout().millis(),TimeUnit.MILLISECONDS);
-    }
- catch (    InterruptedException e) {
-    }
-    if (failure.get() != null) {
-      throw failure.get();
-    }
   }
-  int waitFor=5;
-  if (request.waitForStatus() == null) {
-    waitFor--;
-  }
-  if (request.waitForRelocatingShards() == -1) {
-    waitFor--;
-  }
-  if (request.waitForActiveShards() == -1) {
-    waitFor--;
-  }
-  if (request.waitForNodes().isEmpty()) {
-    waitFor--;
-  }
-  if (request.indices().length == 0) {
-    waitFor--;
-  }
-  if (waitFor == 0) {
-    ClusterState clusterState=clusterService.state();
-    listener.onResponse(clusterHealth(request,clusterState));
-    return;
-  }
-  while (true) {
-    int waitForCounter=0;
-    ClusterState clusterState=clusterService.state();
-    ClusterHealthResponse response=clusterHealth(request,clusterState);
-    if (request.waitForStatus() != null && response.getStatus().value() <= request.waitForStatus().value()) {
-      waitForCounter++;
-    }
-    if (request.waitForRelocatingShards() != -1 && response.getRelocatingShards() <= request.waitForRelocatingShards()) {
-      waitForCounter++;
-    }
-    if (request.waitForActiveShards() != -1 && response.getActiveShards() >= request.waitForActiveShards()) {
-      waitForCounter++;
-    }
-    if (request.indices().length > 0) {
-      try {
-        clusterState.metaData().concreteIndices(IndicesOptions.strictExpand(),request.indices());
-        waitForCounter++;
-      }
- catch (      IndexMissingException e) {
-        response.status=ClusterHealthStatus.RED;
-      }
-    }
-    if (!request.waitForNodes().isEmpty()) {
-      if (request.waitForNodes().startsWith(">=")) {
-        int expected=Integer.parseInt(request.waitForNodes().substring(2));
-        if (response.getNumberOfNodes() >= expected) {
-          waitForCounter++;
-        }
-      }
- else       if (request.waitForNodes().startsWith("ge(")) {
-        int expected=Integer.parseInt(request.waitForNodes().substring(3,request.waitForNodes().length() - 1));
-        if (response.getNumberOfNodes() >= expected) {
-          waitForCounter++;
-        }
-      }
- else       if (request.waitForNodes().startsWith("<=")) {
-        int expected=Integer.parseInt(request.waitForNodes().substring(2));
-        if (response.getNumberOfNodes() <= expected) {
-          waitForCounter++;
-        }
-      }
- else       if (request.waitForNodes().startsWith("le(")) {
-        int expected=Integer.parseInt(request.waitForNodes().substring(3,request.waitForNodes().length() - 1));
-        if (response.getNumberOfNodes() <= expected) {
-          waitForCounter++;
-        }
-      }
- else       if (request.waitForNodes().startsWith(">")) {
-        int expected=Integer.parseInt(request.waitForNodes().substring(1));
-        if (response.getNumberOfNodes() > expected) {
-          waitForCounter++;
-        }
-      }
- else       if (request.waitForNodes().startsWith("gt(")) {
-        int expected=Integer.parseInt(request.waitForNodes().substring(3,request.waitForNodes().length() - 1));
-        if (response.getNumberOfNodes() > expected) {
-          waitForCounter++;
-        }
-      }
- else       if (request.waitForNodes().startsWith("<")) {
-        int expected=Integer.parseInt(request.waitForNodes().substring(1));
-        if (response.getNumberOfNodes() < expected) {
-          waitForCounter++;
-        }
-      }
- else       if (request.waitForNodes().startsWith("lt(")) {
-        int expected=Integer.parseInt(request.waitForNodes().substring(3,request.waitForNodes().length() - 1));
-        if (response.getNumberOfNodes() < expected) {
-          waitForCounter++;
-        }
-      }
  else {
-        int expected=Integer.parseInt(request.waitForNodes());
-        if (response.getNumberOfNodes() == expected) {
-          waitForCounter++;
-        }
-      }
-    }
-    if (waitForCounter == waitFor) {
-      listener.onResponse(response);
-      return;
-    }
-    if (System.currentTimeMillis() > endTime) {
-      response.timedOut=true;
-      listener.onResponse(response);
-      return;
-    }
-    try {
-      Thread.sleep(200);
-    }
- catch (    InterruptedException e) {
-      response.timedOut=true;
-      listener.onResponse(response);
-      return;
-    }
+    executeHealth(request,listener);
   }
 }
