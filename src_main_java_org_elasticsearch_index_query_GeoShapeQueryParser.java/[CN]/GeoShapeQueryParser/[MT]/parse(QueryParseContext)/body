@@ -99,7 +99,18 @@
   if (strategyName != null) {
     strategy=shapeFieldMapper.resolveStrategy(strategyName);
   }
-  Query query=strategy.makeQuery(getArgs(shape,shapeRelation));
+  Query query;
+  if (strategy instanceof RecursivePrefixTreeStrategy && shapeRelation == ShapeRelation.DISJOINT) {
+    XBooleanFilter bool=new XBooleanFilter();
+    Filter exists=ExistsFilterParser.newFilter(parseContext,fieldName,null);
+    Filter intersects=strategy.makeFilter(getArgs(shape,ShapeRelation.INTERSECTS));
+    bool.add(exists,BooleanClause.Occur.MUST);
+    bool.add(intersects,BooleanClause.Occur.MUST_NOT);
+    query=new ConstantScoreQuery(bool);
+  }
+ else {
+    query=strategy.makeQuery(getArgs(shape,shapeRelation));
+  }
   query.setBoost(boost);
   if (queryName != null) {
     parseContext.addNamedQuery(queryName,query);

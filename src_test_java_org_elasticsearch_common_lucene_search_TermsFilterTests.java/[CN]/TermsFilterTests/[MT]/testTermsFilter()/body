@@ -1,7 +1,7 @@
 {
   String fieldName="field1";
   Directory rd=new RAMDirectory();
-  IndexWriter w=new IndexWriter(rd,new IndexWriterConfig(Lucene.VERSION,new KeywordAnalyzer()));
+  IndexWriter w=new IndexWriter(rd,new IndexWriterConfig(new KeywordAnalyzer()));
   for (int i=0; i < 100; i++) {
     Document doc=new Document();
     int term=i * 10;
@@ -12,19 +12,21 @@
       w.commit();
     }
   }
-  AtomicReader reader=SlowCompositeReaderWrapper.wrap(DirectoryReader.open(w,true));
+  LeafReader reader=SlowCompositeReaderWrapper.wrap(DirectoryReader.open(w,true));
   w.close();
   TermsFilter tf=new TermsFilter(new Term[]{new Term(fieldName,"19")});
-  FixedBitSet bits=(FixedBitSet)tf.getDocIdSet(reader.getContext(),reader.getLiveDocs());
-  assertThat(bits,nullValue());
+  assertNull(tf.getDocIdSet(reader.getContext(),reader.getLiveDocs()));
   tf=new TermsFilter(new Term[]{new Term(fieldName,"19"),new Term(fieldName,"20")});
-  bits=(FixedBitSet)tf.getDocIdSet(reader.getContext(),reader.getLiveDocs());
+  DocIdSet result=tf.getDocIdSet(reader.getContext(),reader.getLiveDocs());
+  BitSet bits=DocIdSets.toBitSet(result.iterator(),reader.maxDoc());
   assertThat(bits.cardinality(),equalTo(1));
   tf=new TermsFilter(new Term[]{new Term(fieldName,"19"),new Term(fieldName,"20"),new Term(fieldName,"10")});
-  bits=(FixedBitSet)tf.getDocIdSet(reader.getContext(),reader.getLiveDocs());
+  result=tf.getDocIdSet(reader.getContext(),reader.getLiveDocs());
+  bits=DocIdSets.toBitSet(result.iterator(),reader.maxDoc());
   assertThat(bits.cardinality(),equalTo(2));
   tf=new TermsFilter(new Term[]{new Term(fieldName,"19"),new Term(fieldName,"20"),new Term(fieldName,"10"),new Term(fieldName,"00")});
-  bits=(FixedBitSet)tf.getDocIdSet(reader.getContext(),reader.getLiveDocs());
+  result=tf.getDocIdSet(reader.getContext(),reader.getLiveDocs());
+  bits=DocIdSets.toBitSet(result.iterator(),reader.maxDoc());
   assertThat(bits.cardinality(),equalTo(2));
   reader.close();
   rd.close();

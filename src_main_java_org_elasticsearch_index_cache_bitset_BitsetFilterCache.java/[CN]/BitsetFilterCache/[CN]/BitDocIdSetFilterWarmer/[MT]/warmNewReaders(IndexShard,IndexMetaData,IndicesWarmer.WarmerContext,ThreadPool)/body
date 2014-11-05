@@ -1,0 +1,60 @@
+{
+  if (!loadRandomAccessFiltersEagerly) {
+    return TerminationHandle.NO_WAIT;
+  }
+  boolean hasNested=false;
+  final Set<Filter> warmUp=new HashSet<>();
+  final MapperService mapperService=indexShard.mapperService();
+  for (  DocumentMapper docMapper : mapperService.docMappers(false)) {
+    ParentFieldMapper parentFieldMapper=docMapper.parentFieldMapper();
+    if (parentFieldMapper.active()) {
+      warmUp.add(docMapper.typeFilter());
+      DocumentMapper parentDocumentMapper=mapperService.documentMapper(parentFieldMapper.type());
+      if (parentDocumentMapper != null) {
+        warmUp.add(parentDocumentMapper.typeFilter());
+      }
+    }
+    if (docMapper.hasNestedObjects()) {
+      hasNested=true;
+      for (      ObjectMapper objectMapper : docMapper.objectMappers().values()) {
+        if (objectMapper.nested().isNested()) {
+          warmUp.add(objectMapper.nestedTypeFilter());
+        }
+      }
+    }
+  }
+  if (hasNested) {
+    warmUp.add(NonNestedDocsFilter.INSTANCE);
+    warmUp.add(NestedDocsFilter.INSTANCE);
+  }
+  final Executor executor=threadPool.executor(executor());
+  final CountDownLatch latch=new CountDownLatch(context.searcher().reader().leaves().size() * warmUp.size());
+  for (  final LeafReaderContext ctx : context.searcher().reader().leaves()) {
+    for (    final Filter filterToWarm : warmUp) {
+      executor.execute(new Runnable(){
+        @Override public void run(){
+          try {
+            final long start=System.nanoTime();
+            getAndLoadIfNotPresent(filterToWarm,ctx);
+            if (indexShard.warmerService().logger().isTraceEnabled()) {
+              indexShard.warmerService().logger().trace("warmed bitset for [{}], took [{}]",filterToWarm,TimeValue.timeValueNanos(System.nanoTime() - start));
+            }
+          }
+ catch (          Throwable t) {
+            indexShard.warmerService().logger().warn("failed to load bitset for [{}]",t,filterToWarm);
+          }
+ finally {
+            latch.countDown();
+          }
+        }
+      }
+);
+    }
+  }
+  return new TerminationHandle(){
+    @Override public void awaitTermination() throws InterruptedException {
+      latch.await();
+    }
+  }
+;
+}

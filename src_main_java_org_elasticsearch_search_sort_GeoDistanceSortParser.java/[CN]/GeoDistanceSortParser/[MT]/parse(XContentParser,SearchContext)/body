@@ -99,13 +99,13 @@
   }
   final Nested nested;
   if (objectMapper != null && objectMapper.nested().isNested()) {
-    FixedBitSetFilter rootDocumentsFilter=context.fixedBitSetFilterCache().getFixedBitSetFilter(NonNestedDocsFilter.INSTANCE);
-    FixedBitSetFilter innerDocumentsFilter;
+    BitDocIdSetFilter rootDocumentsFilter=context.bitsetFilterCache().getBitDocIdSetFilter(NonNestedDocsFilter.INSTANCE);
+    BitDocIdSetFilter innerDocumentsFilter;
     if (nestedFilter != null) {
-      innerDocumentsFilter=context.fixedBitSetFilterCache().getFixedBitSetFilter(nestedFilter);
+      innerDocumentsFilter=context.bitsetFilterCache().getBitDocIdSetFilter(nestedFilter);
     }
  else {
-      innerDocumentsFilter=context.fixedBitSetFilterCache().getFixedBitSetFilter(objectMapper.nestedTypeFilter());
+      innerDocumentsFilter=context.bitsetFilterCache().getBitDocIdSetFilter(objectMapper.nestedTypeFilter());
     }
     nested=new Nested(rootDocumentsFilter,innerDocumentsFilter);
   }
@@ -117,8 +117,8 @@
       return SortField.Type.DOUBLE;
     }
     @Override public FieldComparator<?> newComparator(    String fieldname,    int numHits,    int sortPos,    boolean reversed) throws IOException {
-      return new FieldComparator.DoubleComparator(numHits,null,null,null){
-        @Override protected Doubles getDoubleValues(        AtomicReaderContext context,        String field) throws IOException {
+      return new FieldComparator.DoubleComparator(numHits,null,null){
+        @Override protected NumericDocValues getNumericDocValues(        LeafReaderContext context,        String field) throws IOException {
           final MultiGeoPointValues geoPointValues=geoIndexFieldData.load(context).getGeoPointValues();
           final SortedNumericDoubleValues distanceValues=GeoDistance.distanceValues(geoPointValues,distances);
           final NumericDoubleValues selectedValues;
@@ -126,16 +126,11 @@
             selectedValues=finalSortMode.select(distanceValues,Double.MAX_VALUE);
           }
  else {
-            final FixedBitSet rootDocs=nested.rootDocs(context);
-            final FixedBitSet innerDocs=nested.innerDocs(context);
+            final BitSet rootDocs=nested.rootDocs(context).bits();
+            final BitSet innerDocs=nested.innerDocs(context).bits();
             selectedValues=finalSortMode.select(distanceValues,Double.MAX_VALUE,rootDocs,innerDocs,context.reader().maxDoc());
           }
-          return new Doubles(){
-            @Override public double get(            int docID){
-              return selectedValues.get(docID);
-            }
-          }
-;
+          return selectedValues.getRawDoubleValues();
         }
       }
 ;

@@ -1,7 +1,7 @@
 {
   Directory directory=newDirectory();
   final Random r=random();
-  final IndexWriterConfig iwc=LuceneTestCase.newIndexWriterConfig(r,LuceneTestCase.TEST_VERSION_CURRENT,new MockAnalyzer(r)).setMaxBufferedDocs(IndexWriterConfig.DISABLE_AUTO_FLUSH).setRAMBufferSizeMB(scaledRandomIntBetween(16,64));
+  final IndexWriterConfig iwc=LuceneTestCase.newIndexWriterConfig(r,new MockAnalyzer(r)).setMaxBufferedDocs(IndexWriterConfig.DISABLE_AUTO_FLUSH).setRAMBufferSizeMB(scaledRandomIntBetween(16,64));
   RandomIndexWriter indexWriter=new RandomIndexWriter(r,directory,iwc);
   int numUniqueParentValues=scaledRandomIntBetween(100,2000);
   String[] parentValues=new String[numUniqueParentValues];
@@ -67,7 +67,7 @@
   ((TestSearchContext)SearchContext.current()).setSearcher(new ContextIndexSearcher(SearchContext.current(),engineSearcher));
   ParentFieldMapper parentFieldMapper=SearchContext.current().mapperService().documentMapper("child").parentFieldMapper();
   ParentChildIndexFieldData parentChildIndexFieldData=SearchContext.current().fieldData().getForField(parentFieldMapper);
-  FixedBitSetFilter childrenFilter=wrap(new TermFilter(new Term(TypeFieldMapper.NAME,"child")));
+  BitDocIdSetFilter childrenFilter=wrap(new TermFilter(new Term(TypeFieldMapper.NAME,"child")));
   Filter rawFilterMe=new NotFilter(new TermFilter(new Term("filter","me")));
   int max=numUniqueParentValues / 4;
   for (int i=0; i < max; i++) {
@@ -101,7 +101,7 @@
     String parentValue=parentValues[random().nextInt(numUniqueParentValues)];
     Query parentQuery=new ConstantScoreQuery(new TermQuery(new Term("field1",parentValue)));
     Query query=new ParentQuery(parentChildIndexFieldData,parentQuery,"parent",childrenFilter);
-    query=new XFilteredQuery(query,filterMe);
+    query=new FilteredQuery(query,filterMe);
     BitSetCollector collector=new BitSetCollector(indexReader.maxDoc());
     int numHits=1 + random().nextInt(25);
     TopScoreDocCollector actualTopDocsCollector=TopScoreDocCollector.create(numHits,false);
@@ -113,8 +113,8 @@
     TopScoreDocCollector expectedTopDocsCollector=TopScoreDocCollector.create(numHits,false);
     expectedTopDocsCollector.setScorer(mockScorer);
     if (parentValueToChildIds.containsKey(parentValue)) {
-      AtomicReader slowAtomicReader=SlowCompositeReaderWrapper.wrap(indexReader);
-      Terms terms=slowAtomicReader.terms(UidFieldMapper.NAME);
+      LeafReader slowLeafReader=SlowCompositeReaderWrapper.wrap(indexReader);
+      Terms terms=slowLeafReader.terms(UidFieldMapper.NAME);
       if (terms != null) {
         NavigableMap<String,Float> childIdsAndScore=parentValueToChildIds.lget();
         TermsEnum termsEnum=terms.iterator(null);
@@ -122,7 +122,7 @@
         for (        Map.Entry<String,Float> entry : childIdsAndScore.entrySet()) {
           TermsEnum.SeekStatus seekStatus=termsEnum.seekCeil(Uid.createUidAsBytes("child",entry.getKey()));
           if (seekStatus == TermsEnum.SeekStatus.FOUND) {
-            docsEnum=termsEnum.docs(slowAtomicReader.getLiveDocs(),docsEnum,DocsEnum.FLAG_NONE);
+            docsEnum=termsEnum.docs(slowLeafReader.getLiveDocs(),docsEnum,DocsEnum.FLAG_NONE);
             expectedResult.set(docsEnum.nextDoc());
             mockScorer.scores.add(entry.getValue());
             expectedTopDocsCollector.collect(docsEnum.docID());

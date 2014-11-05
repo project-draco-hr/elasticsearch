@@ -1,7 +1,7 @@
 {
   Directory directory=newDirectory();
   final Random r=random();
-  final IndexWriterConfig iwc=LuceneTestCase.newIndexWriterConfig(r,LuceneTestCase.TEST_VERSION_CURRENT,new MockAnalyzer(r)).setMaxBufferedDocs(IndexWriterConfig.DISABLE_AUTO_FLUSH).setRAMBufferSizeMB(scaledRandomIntBetween(16,64));
+  final IndexWriterConfig iwc=LuceneTestCase.newIndexWriterConfig(r,new MockAnalyzer(r)).setMaxBufferedDocs(IndexWriterConfig.DISABLE_AUTO_FLUSH).setRAMBufferSizeMB(scaledRandomIntBetween(16,64));
   RandomIndexWriter indexWriter=new RandomIndexWriter(r,directory,iwc);
   int numUniqueChildValues=scaledRandomIntBetween(100,2000);
   String[] childValues=new String[numUniqueChildValues];
@@ -63,7 +63,7 @@
   ((TestSearchContext)SearchContext.current()).setSearcher(new ContextIndexSearcher(SearchContext.current(),engineSearcher));
   ParentFieldMapper parentFieldMapper=SearchContext.current().mapperService().documentMapper("child").parentFieldMapper();
   ParentChildIndexFieldData parentChildIndexFieldData=SearchContext.current().fieldData().getForField(parentFieldMapper);
-  FixedBitSetFilter parentFilter=wrap(new TermFilter(new Term(TypeFieldMapper.NAME,"parent")));
+  BitDocIdSetFilter parentFilter=wrap(new TermFilter(new Term(TypeFieldMapper.NAME,"parent")));
   Filter rawFilterMe=new NotFilter(new TermFilter(new Term("filter","me")));
   int max=numUniqueChildValues / 4;
   for (int i=0; i < max; i++) {
@@ -99,22 +99,22 @@
     String childValue=childValues[random().nextInt(numUniqueChildValues)];
     TermQuery childQuery=new TermQuery(new Term("field1",childValue));
     int shortCircuitParentDocSet=random().nextInt(numParentDocs);
-    FixedBitSetFilter nonNestedDocsFilter=random().nextBoolean() ? wrap(NonNestedDocsFilter.INSTANCE) : null;
+    BitDocIdSetFilter nonNestedDocsFilter=random().nextBoolean() ? wrap(NonNestedDocsFilter.INSTANCE) : null;
     Query query;
     if (random().nextBoolean()) {
       query=new ChildrenConstantScoreQuery(parentChildIndexFieldData,childQuery,"parent","child",parentFilter,shortCircuitParentDocSet,nonNestedDocsFilter);
     }
  else {
-      query=new XConstantScoreQuery(new CustomQueryWrappingFilter(new ChildrenConstantScoreQuery(parentChildIndexFieldData,childQuery,"parent","child",parentFilter,shortCircuitParentDocSet,nonNestedDocsFilter)));
+      query=new ConstantScoreQuery(new CustomQueryWrappingFilter(new ChildrenConstantScoreQuery(parentChildIndexFieldData,childQuery,"parent","child",parentFilter,shortCircuitParentDocSet,nonNestedDocsFilter)));
     }
-    query=new XFilteredQuery(query,filterMe);
+    query=new FilteredQuery(query,filterMe);
     BitSetCollector collector=new BitSetCollector(indexReader.maxDoc());
     searcher.search(query,collector);
     FixedBitSet actualResult=collector.getResult();
     FixedBitSet expectedResult=new FixedBitSet(indexReader.maxDoc());
     if (childValueToParentIds.containsKey(childValue)) {
-      AtomicReader slowAtomicReader=SlowCompositeReaderWrapper.wrap(indexReader);
-      Terms terms=slowAtomicReader.terms(UidFieldMapper.NAME);
+      LeafReader slowLeafReader=SlowCompositeReaderWrapper.wrap(indexReader);
+      Terms terms=slowLeafReader.terms(UidFieldMapper.NAME);
       if (terms != null) {
         NavigableSet<String> parentIds=childValueToParentIds.lget();
         TermsEnum termsEnum=terms.iterator(null);
@@ -122,7 +122,7 @@
         for (        String id : parentIds) {
           TermsEnum.SeekStatus seekStatus=termsEnum.seekCeil(Uid.createUidAsBytes("parent",id));
           if (seekStatus == TermsEnum.SeekStatus.FOUND) {
-            docsEnum=termsEnum.docs(slowAtomicReader.getLiveDocs(),docsEnum,DocsEnum.FLAG_NONE);
+            docsEnum=termsEnum.docs(slowLeafReader.getLiveDocs(),docsEnum,DocsEnum.FLAG_NONE);
             expectedResult.set(docsEnum.nextDoc());
           }
  else           if (seekStatus == TermsEnum.SeekStatus.END) {

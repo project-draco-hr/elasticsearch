@@ -1,0 +1,40 @@
+{
+  final Object coreCacheReader=context.reader().getCoreCacheKey();
+  final ShardId shardId=ShardUtils.extractShardId(context.reader());
+  Cache<Filter,Value> filterToFbs=loadedFilters.get(coreCacheReader,new Callable<Cache<Filter,Value>>(){
+    @Override public Cache<Filter,Value> call() throws Exception {
+      SegmentReaderUtils.registerCoreListener(context.reader(),BitsetFilterCache.this);
+      return CacheBuilder.newBuilder().build();
+    }
+  }
+);
+  return filterToFbs.get(filter,new Callable<Value>(){
+    @Override public Value call() throws Exception {
+      DocIdSet docIdSet=filter.getDocIdSet(context,null);
+      final BitDocIdSet bitSet;
+      if (docIdSet instanceof BitDocIdSet) {
+        bitSet=(BitDocIdSet)docIdSet;
+      }
+ else {
+        BitDocIdSet.Builder builder=new BitDocIdSet.Builder(context.reader().maxDoc());
+        if (docIdSet != null && docIdSet != DocIdSet.EMPTY) {
+          builder.or(docIdSet.iterator());
+        }
+        BitDocIdSet bits=builder.build();
+        if (bits == null) {
+          bits=new BitDocIdSet(new SparseFixedBitSet(context.reader().maxDoc()),0);
+        }
+        bitSet=bits;
+      }
+      Value value=new Value(bitSet,shardId);
+      if (shardId != null) {
+        IndexShard shard=indexService.shard(shardId.id());
+        if (shard != null) {
+          shard.shardBitsetFilterCache().onCached(value.bitset.ramBytesUsed());
+        }
+      }
+      return value;
+    }
+  }
+).bitset;
+}
