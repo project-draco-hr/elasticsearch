@@ -1,19 +1,22 @@
 {
   Map<String,DiskUsage> usages=info.getNodeDiskUsages();
   if (usages != null) {
+    boolean reroute=false;
     for (    DiskUsage entry : usages.values()) {
-      if (entry.getFreeBytes() < DiskThresholdDecider.this.freeBytesThresholdHigh.bytes()) {
+      warnAboutDiskIfNeeded(entry);
+      if (entry.getFreeBytes() < DiskThresholdDecider.this.freeBytesThresholdHigh.bytes() || entry.getFreeDiskAsPercentage() < DiskThresholdDecider.this.freeDiskThresholdHigh) {
         if ((System.currentTimeMillis() - lastRun) > DiskThresholdDecider.this.rerouteInterval.millis()) {
           lastRun=System.currentTimeMillis();
-          logger.info("high watermark [{}/{}%] exceeded on {}, rerouting shards",DiskThresholdDecider.this.freeBytesThresholdHigh,DiskThresholdDecider.this.freeDiskThresholdHigh,entry);
-          client.admin().cluster().prepareReroute().execute();
-          return;
+          reroute=true;
         }
  else {
-          logger.debug("high watermark exceeded on {} but an automatic reroute has occurred in the last [{}], skipping reroute",entry,DiskThresholdDecider.this.rerouteInterval);
-          return;
+          logger.debug("high disk watermark exceeded on {} but an automatic reroute has occurred in the last [{}], skipping reroute",entry,DiskThresholdDecider.this.rerouteInterval);
         }
       }
+    }
+    if (reroute) {
+      logger.info("high disk watermark exceeded on one or more nodes, rerouting shards");
+      client.admin().cluster().prepareReroute().execute();
     }
   }
 }
