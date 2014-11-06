@@ -1,0 +1,60 @@
+{
+  final BlockingQueue<DocumentMapper> documentMappersToUpdate=ConcurrentCollections.newBlockingQueue();
+  final CountDownLatch latch=new CountDownLatch(1);
+  clusterService.submitStateUpdateTask("recovery_mapping_check",new ProcessedClusterStateNonMasterUpdateTask(){
+    @Override public void clusterStateProcessed(    String source,    ClusterState oldState,    ClusterState newState){
+      latch.countDown();
+    }
+    @Override public ClusterState execute(    ClusterState currentState) throws Exception {
+      IndexMetaData indexMetaData=clusterService.state().metaData().getIndices().get(indexService.index().getName());
+      ImmutableOpenMap<String,MappingMetaData> metaDataMappings=null;
+      if (indexMetaData != null) {
+        metaDataMappings=indexMetaData.getMappings();
+      }
+      for (      DocumentMapper documentMapper : indexService.mapperService().docMappers(false)) {
+        MappingMetaData mappingMetaData=metaDataMappings == null ? null : metaDataMappings.get(documentMapper.type());
+        if (mappingMetaData == null || !documentMapper.refreshSource().equals(mappingMetaData.source())) {
+          documentMappersToUpdate.add(documentMapper);
+        }
+      }
+      return currentState;
+    }
+    @Override public void onFailure(    String source,    @Nullable Throwable t){
+      logger.error("unexpected error while checking for pending mapping changes",t);
+      latch.countDown();
+    }
+  }
+);
+  try {
+    latch.await();
+  }
+ catch (  InterruptedException e) {
+    Thread.currentThread().interrupt();
+  }
+  if (documentMappersToUpdate.isEmpty()) {
+    return;
+  }
+  final CountDownLatch updatedOnMaster=new CountDownLatch(documentMappersToUpdate.size());
+  MappingUpdatedAction.MappingUpdateListener listener=new MappingUpdatedAction.MappingUpdateListener(){
+    @Override public void onMappingUpdate(){
+      updatedOnMaster.countDown();
+    }
+    @Override public void onFailure(    Throwable t){
+      logger.debug("{} recovery to {}: failed to update mapping on master",request.shardId(),request.targetNode(),t);
+      updatedOnMaster.countDown();
+    }
+  }
+;
+  for (  DocumentMapper documentMapper : documentMappersToUpdate) {
+    mappingUpdatedAction.updateMappingOnMaster(indexService.index().getName(),documentMapper,indexService.indexUUID(),listener);
+  }
+  try {
+    if (!updatedOnMaster.await(internalActionTimeout.millis(),TimeUnit.MILLISECONDS)) {
+      logger.debug("[{}][{}] recovery [phase2] to {}: waiting on pending mapping update timed out. waited [{}]",indexName,shardId,request.targetNode(),internalActionTimeout);
+    }
+  }
+ catch (  InterruptedException e) {
+    Thread.currentThread().interrupt();
+    logger.debug("interrupted while waiting for mapping to update on master");
+  }
+}

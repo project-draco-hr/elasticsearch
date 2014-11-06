@@ -1,0 +1,20 @@
+{
+  if (shard.state() == IndexShardState.CLOSED) {
+    throw new IndexShardClosedException(request.shardId());
+  }
+  logger.trace("[{}][{}] recovery [phase3] to {}: sending transaction log operations",indexName,shardId,request.targetNode());
+  StopWatch stopWatch=new StopWatch().start();
+  int totalOperations=sendSnapshot(snapshot);
+  transportService.submitRequest(request.targetNode(),RecoveryTarget.Actions.FINALIZE,new RecoveryFinalizeRecoveryRequest(request.recoveryId(),request.shardId()),TransportRequestOptions.options().withTimeout(internalActionLongTimeout),EmptyTransportResponseHandler.INSTANCE_SAME).txGet();
+  if (request.markAsRelocated()) {
+    try {
+      shard.relocated("to " + request.targetNode());
+    }
+ catch (    IllegalIndexShardStateException e) {
+    }
+  }
+  stopWatch.stop();
+  logger.trace("[{}][{}] recovery [phase3] to {}: took [{}]",indexName,shardId,request.targetNode(),stopWatch.totalTime());
+  response.phase3Time=stopWatch.totalTime().millis();
+  response.phase3Operations=totalOperations;
+}
