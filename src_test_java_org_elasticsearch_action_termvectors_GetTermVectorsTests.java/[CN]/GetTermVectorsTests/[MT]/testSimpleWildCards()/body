@@ -1,0 +1,19 @@
+{
+  int numFields=25;
+  XContentBuilder mapping=jsonBuilder().startObject().startObject("type1").startObject("properties");
+  XContentBuilder source=jsonBuilder().startObject();
+  for (int i=0; i < numFields; i++) {
+    mapping.startObject("field" + i).field("type","string").field("term_vector",randomBoolean() ? "yes" : "no").endObject();
+    source.field("field" + i,"some text here");
+  }
+  source.endObject();
+  mapping.endObject().endObject().endObject();
+  assertAcked(prepareCreate("test").addAlias(new Alias("alias")).addMapping("type1",mapping));
+  ensureGreen();
+  client().prepareIndex("test","type1","0").setSource(source).get();
+  refresh();
+  TermVectorsResponse response=client().prepareTermVectors(indexOrAlias(),"type1","0").setSelectedFields("field*").get();
+  assertThat("Doc doesn't exists but should",response.isExists(),equalTo(true));
+  assertThat(response.getIndex(),equalTo("test"));
+  assertThat("All term vectors should have been generated",response.getFields().size(),equalTo(numFields));
+}

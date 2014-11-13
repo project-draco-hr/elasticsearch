@@ -1,0 +1,130 @@
+{
+  FieldType ft=new FieldType();
+  int config=randomInt(6);
+  boolean storePositions=false;
+  boolean storeOffsets=false;
+  boolean storePayloads=false;
+  boolean storeTermVectors=false;
+switch (config) {
+case 0:
+{
+      break;
+    }
+case 1:
+{
+    storeTermVectors=true;
+    break;
+  }
+case 2:
+{
+  storeTermVectors=true;
+  storePositions=true;
+  break;
+}
+case 3:
+{
+storeTermVectors=true;
+storeOffsets=true;
+break;
+}
+case 4:
+{
+storeTermVectors=true;
+storePositions=true;
+storeOffsets=true;
+break;
+}
+case 5:
+{
+storeTermVectors=true;
+storePositions=true;
+storePayloads=true;
+break;
+}
+case 6:
+{
+storeTermVectors=true;
+storePositions=true;
+storeOffsets=true;
+storePayloads=true;
+break;
+}
+}
+ft.setStoreTermVectors(storeTermVectors);
+ft.setStoreTermVectorOffsets(storeOffsets);
+ft.setStoreTermVectorPayloads(storePayloads);
+ft.setStoreTermVectorPositions(storePositions);
+String optionString=AbstractFieldMapper.termVectorOptionsToString(ft);
+XContentBuilder mapping=jsonBuilder().startObject().startObject("type1").startObject("properties").startObject("field").field("type","string").field("term_vector",optionString).field("analyzer","tv_test").endObject().endObject().endObject().endObject();
+assertAcked(prepareCreate("test").addMapping("type1",mapping).setSettings(settingsBuilder().put("index.analysis.analyzer.tv_test.tokenizer","whitespace").putArray("index.analysis.analyzer.tv_test.filter","type_as_payload","lowercase")));
+ensureYellow();
+for (int i=0; i < 10; i++) {
+client().prepareIndex("test","type1",Integer.toString(i)).setSource(jsonBuilder().startObject().field("field","the quick brown fox jumps over the lazy dog").endObject()).execute().actionGet();
+refresh();
+}
+String[] values={"brown","dog","fox","jumps","lazy","over","quick","the"};
+int[] freq={1,1,1,1,1,1,1,2};
+int[][] pos={{2},{8},{3},{4},{7},{5},{1},{0,6}};
+int[][] startOffset={{10},{40},{16},{20},{35},{26},{4},{0,31}};
+int[][] endOffset={{15},{43},{19},{25},{39},{30},{9},{3,34}};
+boolean isPayloadRequested=randomBoolean();
+boolean isOffsetRequested=randomBoolean();
+boolean isPositionsRequested=randomBoolean();
+String infoString=createInfoString(isPositionsRequested,isOffsetRequested,isPayloadRequested,optionString);
+for (int i=0; i < 10; i++) {
+TermVectorsRequestBuilder resp=client().prepareTermVectors("test","type1",Integer.toString(i)).setPayloads(isPayloadRequested).setOffsets(isOffsetRequested).setPositions(isPositionsRequested).setSelectedFields();
+TermVectorsResponse response=resp.execute().actionGet();
+assertThat(infoString + "doc id: " + i+ " doesn't exists but should",response.isExists(),equalTo(true));
+Fields fields=response.getFields();
+assertThat(fields.size(),equalTo(ft.storeTermVectors() ? 1 : 0));
+if (ft.storeTermVectors()) {
+Terms terms=fields.terms("field");
+assertThat(terms.size(),equalTo(8l));
+TermsEnum iterator=terms.iterator(null);
+for (int j=0; j < values.length; j++) {
+String string=values[j];
+BytesRef next=iterator.next();
+assertThat(infoString,next,notNullValue());
+assertThat(infoString + "expected " + string,string,equalTo(next.utf8ToString()));
+assertThat(infoString,next,notNullValue());
+DocsAndPositionsEnum docsAndPositions=iterator.docsAndPositions(null,null);
+assertThat(infoString,docsAndPositions.nextDoc(),equalTo(0));
+assertThat(infoString,freq[j],equalTo(docsAndPositions.freq()));
+int[] termPos=pos[j];
+int[] termStartOffset=startOffset[j];
+int[] termEndOffset=endOffset[j];
+if (isPositionsRequested && storePositions) {
+assertThat(infoString,termPos.length,equalTo(freq[j]));
+}
+if (isOffsetRequested && storeOffsets) {
+assertThat(termStartOffset.length,equalTo(freq[j]));
+assertThat(termEndOffset.length,equalTo(freq[j]));
+}
+for (int k=0; k < freq[j]; k++) {
+int nextPosition=docsAndPositions.nextPosition();
+if (isPositionsRequested && storePositions) {
+assertThat(infoString + "positions for term: " + string,nextPosition,equalTo(termPos[k]));
+}
+ else {
+assertThat(infoString + "positions for term: ",nextPosition,equalTo(-1));
+}
+if (isPayloadRequested && storePayloads) {
+assertThat(infoString + "payloads for term: " + string,docsAndPositions.getPayload(),equalTo(new BytesRef("word")));
+}
+ else {
+assertThat(infoString + "payloads for term: " + string,docsAndPositions.getPayload(),equalTo(null));
+}
+if (isOffsetRequested && storeOffsets) {
+assertThat(infoString + "startOffsets term: " + string,docsAndPositions.startOffset(),equalTo(termStartOffset[k]));
+assertThat(infoString + "endOffsets term: " + string,docsAndPositions.endOffset(),equalTo(termEndOffset[k]));
+}
+ else {
+assertThat(infoString + "startOffsets term: " + string,docsAndPositions.startOffset(),equalTo(-1));
+assertThat(infoString + "endOffsets term: " + string,docsAndPositions.endOffset(),equalTo(-1));
+}
+}
+}
+assertThat(iterator.next(),nullValue());
+}
+}
+}

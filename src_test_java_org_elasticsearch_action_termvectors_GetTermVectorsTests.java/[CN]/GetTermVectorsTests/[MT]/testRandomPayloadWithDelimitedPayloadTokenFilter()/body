@@ -1,0 +1,49 @@
+{
+  int encoding=randomIntBetween(0,2);
+  String encodingString="";
+  if (encoding == 0) {
+    encodingString="float";
+  }
+  if (encoding == 1) {
+    encodingString="int";
+  }
+  if (encoding == 2) {
+    encodingString="identity";
+  }
+  String[] tokens=crateRandomTokens();
+  Map<String,List<BytesRef>> payloads=createPayloads(tokens,encoding);
+  String delimiter=createRandomDelimiter(tokens);
+  String queryString=createString(tokens,payloads,encoding,delimiter.charAt(0));
+  XContentBuilder mapping=jsonBuilder().startObject().startObject("type1").startObject("properties").startObject("field").field("type","string").field("term_vector","with_positions_offsets_payloads").field("analyzer","payload_test").endObject().endObject().endObject().endObject();
+  assertAcked(prepareCreate("test").addMapping("type1",mapping).setSettings(settingsBuilder().put(indexSettings()).put("index.analysis.analyzer.payload_test.tokenizer","whitespace").putArray("index.analysis.analyzer.payload_test.filter","my_delimited_payload_filter").put("index.analysis.filter.my_delimited_payload_filter.delimiter",delimiter).put("index.analysis.filter.my_delimited_payload_filter.encoding",encodingString).put("index.analysis.filter.my_delimited_payload_filter.type","delimited_payload_filter")));
+  ensureYellow();
+  client().prepareIndex("test","type1",Integer.toString(1)).setSource(jsonBuilder().startObject().field("field",queryString).endObject()).execute().actionGet();
+  refresh();
+  TermVectorsRequestBuilder resp=client().prepareTermVectors("test","type1",Integer.toString(1)).setPayloads(true).setOffsets(true).setPositions(true).setSelectedFields();
+  TermVectorsResponse response=resp.execute().actionGet();
+  assertThat("doc id 1 doesn't exists but should",response.isExists(),equalTo(true));
+  Fields fields=response.getFields();
+  assertThat(fields.size(),equalTo(1));
+  Terms terms=fields.terms("field");
+  TermsEnum iterator=terms.iterator(null);
+  while (iterator.next() != null) {
+    String term=iterator.term().utf8ToString();
+    DocsAndPositionsEnum docsAndPositions=iterator.docsAndPositions(null,null);
+    assertThat(docsAndPositions.nextDoc(),equalTo(0));
+    List<BytesRef> curPayloads=payloads.get(term);
+    assertThat(term,curPayloads,notNullValue());
+    assertNotNull(docsAndPositions);
+    for (int k=0; k < docsAndPositions.freq(); k++) {
+      docsAndPositions.nextPosition();
+      if (docsAndPositions.getPayload() != null) {
+        String infoString="\nterm: " + term + " has payload \n"+ docsAndPositions.getPayload().toString()+ "\n but should have payload \n"+ curPayloads.get(k).toString();
+        assertThat(infoString,docsAndPositions.getPayload(),equalTo(curPayloads.get(k)));
+      }
+ else {
+        String infoString="\nterm: " + term + " has no payload but should have payload \n"+ curPayloads.get(k).toString();
+        assertThat(infoString,curPayloads.get(k).length,equalTo(0));
+      }
+    }
+  }
+  assertThat(iterator.next(),nullValue());
+}
