@@ -33,7 +33,7 @@
       boolean markChildAsDeleted=rarely();
       String childValue=childValues[random().nextInt(childValues.length)];
       document=new Document();
-      document.add(new StringField(UidFieldMapper.NAME,Uid.createUid("child",Integer.toString(childDocId)),Field.Store.NO));
+      document.add(new StringField(UidFieldMapper.NAME,Uid.createUid("child",Integer.toString(childDocId++)),Field.Store.NO));
       document.add(new StringField(TypeFieldMapper.NAME,"child",Field.Store.NO));
       document.add(new StringField(ParentFieldMapper.NAME,Uid.createUid("parent",parent),Field.Store.NO));
       document.add(new StringField("field1",childValue,Field.Store.NO));
@@ -61,19 +61,8 @@
   IndexSearcher searcher=new IndexSearcher(indexReader);
   Engine.Searcher engineSearcher=new Engine.SimpleSearcher(ChildrenConstantScoreQueryTests.class.getSimpleName(),searcher);
   ((TestSearchContext)SearchContext.current()).setSearcher(new ContextIndexSearcher(SearchContext.current(),engineSearcher));
-  ParentFieldMapper parentFieldMapper=SearchContext.current().mapperService().documentMapper("child").parentFieldMapper();
-  ParentChildIndexFieldData parentChildIndexFieldData=SearchContext.current().fieldData().getForField(parentFieldMapper);
-  Filter parentFilter=wrap(new TermFilter(new Term(TypeFieldMapper.NAME,"parent")));
-  Filter rawFilterMe=new NotFilter(new TermFilter(new Term("filter","me")));
   int max=numUniqueChildValues / 4;
   for (int i=0; i < max; i++) {
-    Filter filterMe;
-    if (random().nextBoolean()) {
-      filterMe=SearchContext.current().filterCache().cache(rawFilterMe);
-    }
- else {
-      filterMe=rawFilterMe;
-    }
     if (random().nextBoolean()) {
       final int numberOfUpdatableParents=numParentDocs - filteredOrDeletedDocs.size();
       int numberOfUpdates=scaledRandomIntBetween(0,numberOfUpdatableParents);
@@ -97,17 +86,16 @@
       ((TestSearchContext)SearchContext.current()).setSearcher(new ContextIndexSearcher(SearchContext.current(),engineSearcher));
     }
     String childValue=childValues[random().nextInt(numUniqueChildValues)];
-    TermQuery childQuery=new TermQuery(new Term("field1",childValue));
     int shortCircuitParentDocSet=random().nextInt(numParentDocs);
-    BitDocIdSetFilter nonNestedDocsFilter=random().nextBoolean() ? wrapWithFixedBitSetFilter(NonNestedDocsFilter.INSTANCE) : null;
-    Query query;
+    QueryBuilder queryBuilder;
     if (random().nextBoolean()) {
-      query=new ChildrenConstantScoreQuery(parentChildIndexFieldData,childQuery,"parent","child",parentFilter,shortCircuitParentDocSet,nonNestedDocsFilter);
+      queryBuilder=hasChildQuery("child",termQuery("field1",childValue)).setShortCircuitCutoff(shortCircuitParentDocSet);
     }
  else {
-      query=new ConstantScoreQuery(new CustomQueryWrappingFilter(new ChildrenConstantScoreQuery(parentChildIndexFieldData,childQuery,"parent","child",parentFilter,shortCircuitParentDocSet,nonNestedDocsFilter)));
+      queryBuilder=constantScoreQuery(hasChildFilter("child",termQuery("field1",childValue)).setShortCircuitCutoff(shortCircuitParentDocSet));
     }
-    query=new FilteredQuery(query,filterMe);
+    queryBuilder=filteredQuery(queryBuilder,notFilter(termFilter("filter","me")));
+    Query query=parseQuery(queryBuilder);
     BitSetCollector collector=new BitSetCollector(indexReader.maxDoc());
     searcher.search(query,collector);
     FixedBitSet actualResult=collector.getResult();

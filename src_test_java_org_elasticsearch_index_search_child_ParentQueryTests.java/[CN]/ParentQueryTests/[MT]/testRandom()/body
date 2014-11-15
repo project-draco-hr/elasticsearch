@@ -65,19 +65,8 @@
   IndexSearcher searcher=new IndexSearcher(indexReader);
   Engine.Searcher engineSearcher=new Engine.SimpleSearcher(ParentQueryTests.class.getSimpleName(),searcher);
   ((TestSearchContext)SearchContext.current()).setSearcher(new ContextIndexSearcher(SearchContext.current(),engineSearcher));
-  ParentFieldMapper parentFieldMapper=SearchContext.current().mapperService().documentMapper("child").parentFieldMapper();
-  ParentChildIndexFieldData parentChildIndexFieldData=SearchContext.current().fieldData().getForField(parentFieldMapper);
-  Filter childrenFilter=wrap(new TermFilter(new Term(TypeFieldMapper.NAME,"child")));
-  Filter rawFilterMe=new NotFilter(new TermFilter(new Term("filter","me")));
   int max=numUniqueParentValues / 4;
   for (int i=0; i < max; i++) {
-    Filter filterMe;
-    if (random().nextBoolean()) {
-      filterMe=SearchContext.current().filterCache().cache(rawFilterMe);
-    }
- else {
-      filterMe=rawFilterMe;
-    }
     if (random().nextBoolean()) {
       int numberOfUpdates=childIdToParentId.isEmpty() ? 0 : scaledRandomIntBetween(1,5);
       int[] childIds=childIdToParentId.keys().toArray();
@@ -99,9 +88,9 @@
       ((TestSearchContext)SearchContext.current()).setSearcher(new ContextIndexSearcher(SearchContext.current(),engineSearcher));
     }
     String parentValue=parentValues[random().nextInt(numUniqueParentValues)];
-    Query parentQuery=new ConstantScoreQuery(new TermQuery(new Term("field1",parentValue)));
-    Query query=new ParentQuery(parentChildIndexFieldData,parentQuery,"parent",childrenFilter);
-    query=new FilteredQuery(query,filterMe);
+    QueryBuilder queryBuilder=hasParentQuery("parent",constantScoreQuery(termQuery("field1",parentValue)));
+    queryBuilder=filteredQuery(queryBuilder,notFilter(termFilter("filter","me")));
+    Query query=parseQuery(queryBuilder);
     BitSetCollector collector=new BitSetCollector(indexReader.maxDoc());
     int numHits=1 + random().nextInt(25);
     TopScoreDocCollector actualTopDocsCollector=TopScoreDocCollector.create(numHits,false);

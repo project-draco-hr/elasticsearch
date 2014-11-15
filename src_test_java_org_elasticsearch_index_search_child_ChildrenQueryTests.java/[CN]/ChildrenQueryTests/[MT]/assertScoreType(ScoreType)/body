@@ -33,14 +33,9 @@
   IndexSearcher searcher=new IndexSearcher(reader);
   Engine.SimpleSearcher engineSearcher=new Engine.SimpleSearcher(ChildrenQueryTests.class.getSimpleName(),searcher);
   ((TestSearchContext)context).setSearcher(new ContextIndexSearcher(context,engineSearcher));
-  ParentFieldMapper parentFieldMapper=context.mapperService().documentMapper("child").parentFieldMapper();
-  ParentChildIndexFieldData parentChildIndexFieldData=context.fieldData().getForField(parentFieldMapper);
-  Filter parentFilter=wrap(new TermFilter(new Term(TypeFieldMapper.NAME,"parent")));
-  FieldMapper fieldMapper=context.mapperService().smartNameFieldMapper(CHILD_SCORE_NAME);
-  IndexNumericFieldData fieldData=context.fieldData().getForField(fieldMapper);
-  FieldValueFactorFunction fieldScore=new FieldValueFactorFunction(CHILD_SCORE_NAME,1,FieldValueFactorFunction.Modifier.NONE,fieldData);
-  Query childQuery=new FunctionScoreQuery(new FilteredQuery(Queries.newMatchAllQuery(),new TermFilter(new Term(TypeFieldMapper.NAME,"child"))),fieldScore);
-  TopDocs docs=searcher.search(new ChildrenQuery(parentChildIndexFieldData,"parent","child",parentFilter,childQuery,scoreType,0,0,parentDocs,null),parentDocs);
+  QueryBuilder childQueryBuilder=functionScoreQuery(typeFilter("child")).add(new FieldValueFactorFunctionBuilder(CHILD_SCORE_NAME));
+  QueryBuilder queryBuilder=hasChildQuery("child",childQueryBuilder).scoreType(scoreType.name().toLowerCase(Locale.ENGLISH)).setShortCircuitCutoff(parentDocs);
+  TopDocs docs=searcher.search(parseQuery(queryBuilder),parentDocs);
   assertThat("Expected all parents",docs.totalHits,is(parentDocs));
   float topScore=docs.scoreDocs[0].score;
   for (int i=0; i < parentDocs; ++i) {

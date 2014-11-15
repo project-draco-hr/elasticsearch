@@ -65,19 +65,8 @@
   IndexSearcher searcher=new IndexSearcher(indexReader);
   Engine.Searcher engineSearcher=new Engine.SimpleSearcher(ChildrenQueryTests.class.getSimpleName(),searcher);
   ((TestSearchContext)SearchContext.current()).setSearcher(new ContextIndexSearcher(SearchContext.current(),engineSearcher));
-  ParentFieldMapper parentFieldMapper=SearchContext.current().mapperService().documentMapper("child").parentFieldMapper();
-  ParentChildIndexFieldData parentChildIndexFieldData=SearchContext.current().fieldData().getForField(parentFieldMapper);
-  Filter parentFilter=wrap(new TermFilter(new Term(TypeFieldMapper.NAME,"parent")));
-  Filter rawFilterMe=new NotFilter(new TermFilter(new Term("filter","me")));
   int max=numUniqueChildValues / 4;
   for (int i=0; i < max; i++) {
-    Filter filterMe;
-    if (random().nextBoolean()) {
-      filterMe=SearchContext.current().filterCache().cache(rawFilterMe);
-    }
- else {
-      filterMe=rawFilterMe;
-    }
     if (random().nextBoolean()) {
       final int numberOfUpdatableParents=numParentDocs - filteredOrDeletedDocs.size();
       int numberOfUpdates=RandomInts.randomIntBetween(random(),0,Math.min(numberOfUpdatableParents,TEST_NIGHTLY ? 25 : 5));
@@ -101,14 +90,13 @@
       ((TestSearchContext)SearchContext.current()).setSearcher(new ContextIndexSearcher(SearchContext.current(),engineSearcher));
     }
     String childValue=childValues[random().nextInt(numUniqueChildValues)];
-    Query childQuery=new ConstantScoreQuery(new TermQuery(new Term("field1",childValue)));
     int shortCircuitParentDocSet=random().nextInt(numParentDocs);
     ScoreType scoreType=ScoreType.values()[random().nextInt(ScoreType.values().length)];
-    BitDocIdSetFilter nonNestedDocsFilter=random().nextBoolean() ? wrapWithFixedBitSetFilter(NonNestedDocsFilter.INSTANCE) : null;
     int minChildren=random().nextInt(2) * scaledRandomIntBetween(0,110);
     int maxChildren=random().nextInt(2) * scaledRandomIntBetween(minChildren,110);
-    Query query=new ChildrenQuery(parentChildIndexFieldData,"parent","child",parentFilter,childQuery,scoreType,minChildren,maxChildren,shortCircuitParentDocSet,nonNestedDocsFilter);
-    query=new FilteredQuery(query,filterMe);
+    QueryBuilder queryBuilder=hasChildQuery("child",constantScoreQuery(termQuery("field1",childValue))).scoreType(scoreType.name().toLowerCase(Locale.ENGLISH)).minChildren(minChildren).maxChildren(maxChildren).setShortCircuitCutoff(shortCircuitParentDocSet);
+    queryBuilder=filteredQuery(queryBuilder,notFilter(termFilter("filter","me")));
+    Query query=parseQuery(queryBuilder);
     BitSetCollector collector=new BitSetCollector(indexReader.maxDoc());
     int numHits=1 + random().nextInt(25);
     TopScoreDocCollector actualTopDocsCollector=TopScoreDocCollector.create(numHits,false);
