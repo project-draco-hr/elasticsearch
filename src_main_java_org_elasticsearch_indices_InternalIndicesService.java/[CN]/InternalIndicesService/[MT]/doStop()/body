@@ -7,20 +7,29 @@
     indicesStopExecutor.execute(new Runnable(){
       @Override public void run(){
         try {
-          removeIndex(index,"shutdown",shardsStopExecutor);
+          removeIndex(index,"shutdown",shardsStopExecutor,new IndexCloseListener(){
+            @Override public void onAllShardsClosed(            Index index,            List<Throwable> failures){
+              latch.countDown();
+            }
+            @Override public void onShardClosed(            ShardId shardId){
+            }
+            @Override public void onShardCloseFailed(            ShardId shardId,            Throwable t){
+            }
+          }
+);
         }
  catch (        Throwable e) {
-          logger.warn("failed to delete index on stop [" + index + "]",e);
-        }
- finally {
           latch.countDown();
+          logger.warn("failed to delete index on stop [" + index + "]",e);
         }
       }
     }
 );
   }
   try {
-    latch.await();
+    if (latch.await(30,TimeUnit.SECONDS) == false) {
+      logger.warn("Not all shards are closed yet, waited 30sec - stopping service");
+    }
   }
  catch (  InterruptedException e) {
   }

@@ -1,7 +1,7 @@
 {
   final ShardId shardId=new ShardId(new Index("index"),1);
   DirectoryService directoryService=new LuceneManagedDirectoryService(random());
-  Store store=new Store(shardId,ImmutableSettings.EMPTY,null,directoryService,randomDistributor(directoryService));
+  Store store=new Store(shardId,ImmutableSettings.EMPTY,null,directoryService,randomDistributor(directoryService),new DummyShardLock(shardId));
   int incs=randomIntBetween(1,100);
   for (int i=0; i < incs; i++) {
     if (randomBoolean()) {
@@ -17,7 +17,14 @@
     store.ensureOpen();
   }
   store.incRef();
-  store.close();
+  final AtomicBoolean called=new AtomicBoolean(false);
+  Store.OnCloseListener listener=new Store.OnCloseListener(){
+    @Override public void onClose(    ShardId shardId){
+      assertTrue(called.compareAndSet(false,true));
+    }
+  }
+;
+  store.close(listener);
   for (int i=0; i < incs; i++) {
     if (randomBoolean()) {
       store.incRef();
@@ -31,7 +38,9 @@
     store.decRef();
     store.ensureOpen();
   }
+  assertFalse(called.get());
   store.decRef();
+  assertTrue(called.get());
   assertFalse(store.tryIncRef());
   try {
     store.incRef();

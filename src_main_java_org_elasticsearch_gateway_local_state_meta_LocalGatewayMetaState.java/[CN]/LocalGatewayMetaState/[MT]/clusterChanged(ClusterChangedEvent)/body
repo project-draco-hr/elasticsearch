@@ -49,10 +49,13 @@
         logger.debug("[{}] deleting index that is no longer part of the metadata (indices: [{}])",current.index(),newMetaData.indices().keys());
         if (nodeEnv.hasNodeFile()) {
           try {
-            IOUtils.rm(FileSystemUtils.toPaths(nodeEnv.indexLocations(new Index(current.index()))));
+            nodeEnv.deleteIndexDirectorySafe(new Index(current.index()));
           }
- catch (          Exception ex) {
-            logger.debug("[{}] failed to delete index",ex,current.index());
+ catch (          LockObtainFailedException ex) {
+            logger.debug("[{}] failed to delete index - at least one shards is still locked",ex,current.index());
+          }
+catch (          Exception ex) {
+            logger.warn("[{}] failed to delete index",ex,current.index());
           }
         }
         try {
@@ -82,18 +85,28 @@ synchronized (danglingMutex) {
             if (danglingIndices.containsKey(indexName)) {
               continue;
             }
-            IndexMetaData indexMetaData=loadIndexState(indexName);
+            final IndexMetaData indexMetaData=loadIndexState(indexName);
             if (indexMetaData != null) {
               if (danglingTimeout.millis() == 0) {
                 logger.info("[{}] dangling index, exists on local file system, but not in cluster metadata, timeout set to 0, deleting now",indexName);
                 try {
-                  IOUtils.rm(FileSystemUtils.toPaths(nodeEnv.indexLocations(new Index(indexName))));
+                  nodeEnv.deleteIndexDirectorySafe(new Index(indexName));
                 }
- catch (                Exception ex) {
-                  logger.debug("[{}] failed to delete dangling index",ex,indexName);
+ catch (                LockObtainFailedException ex) {
+                  logger.debug("[{}] failed to delete index - at least one shards is still locked",ex,indexName);
+                }
+catch (                Exception ex) {
+                  logger.warn("[{}] failed to delete dangling index",ex,indexName);
                 }
               }
  else {
+                try {
+                  IOUtils.closeWhileHandlingException(nodeEnv.lockAllForIndex(new Index(indexName)));
+                }
+ catch (                IOException ex) {
+                  logger.warn("[{}] skipping locked dangling index, exists on local file system, but not in cluster metadata, auto import to cluster state is set to [{}]",ex,indexName,autoImportDangled);
+                  continue;
+                }
                 logger.info("[{}] dangling index, exists on local file system, but not in cluster metadata, scheduling to delete in [{}], auto import to cluster state [{}]",indexName,danglingTimeout,autoImportDangled);
                 danglingIndices.put(indexName,new DanglingIndex(indexName,threadPool.schedule(danglingTimeout,ThreadPool.Names.SAME,new RemoveDanglingIndex(indexName))));
               }

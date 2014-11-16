@@ -1,35 +1,35 @@
 {
   super(settings);
   if (!DiscoveryNode.nodeRequiresLocalStorage(settings)) {
-    nodeFiles=null;
-    nodeIndicesLocations=null;
+    nodePaths=null;
+    nodeIndicesPaths=null;
     locks=null;
     localNodeId=-1;
     return;
   }
-  File[] nodesFiles=new File[environment.dataWithClusterFiles().length];
-  Lock[] locks=new Lock[environment.dataWithClusterFiles().length];
+  final Path[] nodePaths=new Path[environment.dataWithClusterFiles().length];
+  final Lock[] locks=new Lock[environment.dataWithClusterFiles().length];
   int localNodeId=-1;
   IOException lastException=null;
   int maxLocalStorageNodes=settings.getAsInt("node.max_local_storage_nodes",50);
   for (int possibleLockId=0; possibleLockId < maxLocalStorageNodes; possibleLockId++) {
     for (int dirIndex=0; dirIndex < environment.dataWithClusterFiles().length; dirIndex++) {
-      File dir=new File(new File(environment.dataWithClusterFiles()[dirIndex],"nodes"),Integer.toString(possibleLockId));
-      if (!dir.exists()) {
-        FileSystemUtils.mkdirs(dir);
+      Path dir=environment.dataWithClusterFiles()[dirIndex].toPath().resolve(Paths.get("nodes",Integer.toString(possibleLockId)));
+      if (Files.exists(dir) == false) {
+        Files.createDirectories(dir);
       }
-      logger.trace("obtaining node lock on {} ...",dir.getAbsolutePath());
+      logger.trace("obtaining node lock on {} ...",dir.toAbsolutePath());
       try {
-        NativeFSLockFactory lockFactory=new NativeFSLockFactory(dir.toPath());
+        NativeFSLockFactory lockFactory=new NativeFSLockFactory(dir);
         Lock tmpLock=lockFactory.makeLock("node.lock");
         boolean obtained=tmpLock.obtain();
         if (obtained) {
           locks[dirIndex]=tmpLock;
-          nodesFiles[dirIndex]=dir;
+          nodePaths[dirIndex]=dir;
           localNodeId=possibleLockId;
         }
  else {
-          logger.trace("failed to obtain node lock on {}",dir.getAbsolutePath());
+          logger.trace("failed to obtain node lock on {}",dir.toAbsolutePath());
           for (int i=0; i < locks.length; i++) {
             if (locks[i] != null) {
               IOUtils.closeWhileHandlingException(locks[i]);
@@ -40,8 +40,8 @@
         }
       }
  catch (      IOException e) {
-        logger.trace("failed to obtain node lock on {}",e,dir.getAbsolutePath());
-        lastException=new IOException("failed to obtain lock on " + dir.getAbsolutePath(),e);
+        logger.trace("failed to obtain node lock on {}",e,dir.toAbsolutePath());
+        lastException=new IOException("failed to obtain lock on " + dir.toAbsolutePath(),e);
         for (int i=0; i < locks.length; i++) {
           IOUtils.closeWhileHandlingException(locks[i]);
           locks[i]=null;
@@ -58,19 +58,19 @@
   }
   this.localNodeId=localNodeId;
   this.locks=locks;
-  this.nodeFiles=nodesFiles;
+  this.nodePaths=nodePaths;
   if (logger.isDebugEnabled()) {
-    logger.debug("using node location [{}], local_node_id [{}]",nodesFiles,localNodeId);
+    logger.debug("using node location [{}], local_node_id [{}]",nodePaths,localNodeId);
   }
   if (logger.isTraceEnabled()) {
     StringBuilder sb=new StringBuilder("node data locations details:\n");
-    for (    File file : nodesFiles) {
-      sb.append(" -> ").append(file.getAbsolutePath()).append(", free_space [").append(new ByteSizeValue(file.getFreeSpace())).append("], usable_space [").append(new ByteSizeValue(file.getUsableSpace())).append("]\n");
+    for (    Path file : nodePaths) {
+      sb.append(" -> ").append(file.toAbsolutePath()).append(", free_space [").append(new ByteSizeValue(Files.getFileStore(file).getUnallocatedSpace())).append("], usable_space [").append(new ByteSizeValue(Files.getFileStore(file).getUsableSpace())).append("]\n");
     }
     logger.trace(sb.toString());
   }
-  this.nodeIndicesLocations=new File[nodeFiles.length];
-  for (int i=0; i < nodeFiles.length; i++) {
-    nodeIndicesLocations[i]=new File(nodeFiles[i],"indices");
+  this.nodeIndicesPaths=new Path[nodePaths.length];
+  for (int i=0; i < nodePaths.length; i++) {
+    nodeIndicesPaths[i]=nodePaths[i].resolve("indices");
   }
 }

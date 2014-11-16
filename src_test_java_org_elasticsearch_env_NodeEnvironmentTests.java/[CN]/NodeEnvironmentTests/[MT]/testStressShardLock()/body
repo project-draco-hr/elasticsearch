@@ -1,0 +1,59 @@
+{
+class Int {
+    int value=0;
+  }
+  Settings settings=nodeEnvSettings(tmpPaths());
+  final NodeEnvironment env=new NodeEnvironment(settings,new Environment(settings));
+  final int shards=randomIntBetween(2,10);
+  final Int[] counts=new Int[shards];
+  final AtomicInteger[] countsAtomic=new AtomicInteger[shards];
+  final AtomicInteger[] flipFlop=new AtomicInteger[shards];
+  for (int i=0; i < counts.length; i++) {
+    counts[i]=new Int();
+    countsAtomic[i]=new AtomicInteger();
+    flipFlop[i]=new AtomicInteger();
+  }
+  Thread[] threads=new Thread[randomIntBetween(2,5)];
+  final CountDownLatch latch=new CountDownLatch(1);
+  final int iters=scaledRandomIntBetween(10000,100000);
+  for (int i=0; i < threads.length; i++) {
+    threads[i]=new Thread(){
+      @Override public void run(){
+        try {
+          latch.await();
+        }
+ catch (        InterruptedException e) {
+          fail(e.getMessage());
+        }
+        for (int i=0; i < iters; i++) {
+          int shard=randomIntBetween(0,counts.length - 1);
+          try {
+            try (ShardLock _=env.shardLock(new ShardId("foo",shard),scaledRandomIntBetween(0,10))){
+              counts[shard].value++;
+              countsAtomic[shard].incrementAndGet();
+              assertEquals(flipFlop[shard].incrementAndGet(),1);
+              assertEquals(flipFlop[shard].decrementAndGet(),0);
+            }
+           }
+ catch (          LockObtainFailedException ex) {
+          }
+catch (          IOException ex) {
+            fail(ex.toString());
+          }
+        }
+      }
+    }
+;
+    threads[i].start();
+  }
+  latch.countDown();
+  for (int i=0; i < threads.length; i++) {
+    threads[i].join();
+  }
+  assertTrue("LockedShards: " + env.lockedShards(),env.lockedShards().isEmpty());
+  for (int i=0; i < counts.length; i++) {
+    assertTrue(counts[i].value > 0);
+    assertEquals(flipFlop[i].get(),0);
+    assertEquals(counts[i].value,countsAtomic[i].get());
+  }
+}
