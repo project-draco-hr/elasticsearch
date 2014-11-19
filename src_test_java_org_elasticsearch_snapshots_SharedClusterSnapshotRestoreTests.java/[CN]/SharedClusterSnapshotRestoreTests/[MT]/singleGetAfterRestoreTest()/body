@@ -1,0 +1,24 @@
+{
+  String indexName="testindex";
+  String repoName="test-restore-snapshot-repo";
+  String snapshotName="test-restore-snapshot";
+  String absolutePath=newTempDir().getAbsolutePath();
+  logger.info("Path [{}]",absolutePath);
+  String restoredIndexName=indexName + "-restored";
+  String typeName="actions";
+  String expectedValue="expected";
+  Client client=client();
+  String docId=Integer.toString(randomInt());
+  index(indexName,typeName,docId,"value",expectedValue);
+  waitForConcreteMappingsOnAll(indexName,typeName,"value");
+  logger.info("-->  creating repository");
+  assertAcked(client.admin().cluster().preparePutRepository(repoName).setType("fs").setSettings(ImmutableSettings.settingsBuilder().put("location",absolutePath)));
+  logger.info("--> snapshot");
+  CreateSnapshotResponse createSnapshotResponse=client.admin().cluster().prepareCreateSnapshot(repoName,snapshotName).setWaitForCompletion(true).setIndices(indexName).get();
+  assertThat(createSnapshotResponse.getSnapshotInfo().successfulShards(),greaterThan(0));
+  assertThat(createSnapshotResponse.getSnapshotInfo().successfulShards(),equalTo(createSnapshotResponse.getSnapshotInfo().totalShards()));
+  assertThat(createSnapshotResponse.getSnapshotInfo().state(),equalTo(SnapshotState.SUCCESS));
+  RestoreSnapshotResponse restoreSnapshotResponse=client.admin().cluster().prepareRestoreSnapshot(repoName,snapshotName).setWaitForCompletion(true).setRenamePattern(indexName).setRenameReplacement(restoredIndexName).get();
+  assertThat(restoreSnapshotResponse.getRestoreInfo().totalShards(),greaterThan(0));
+  assertThat(client.prepareGet(restoredIndexName,typeName,docId).get().isExists(),equalTo(true));
+}
