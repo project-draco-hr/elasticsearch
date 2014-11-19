@@ -2,10 +2,16 @@
   if (shard.state() == IndexShardState.CLOSED) {
     throw new IndexShardClosedException(request.shardId());
   }
+  cancelableThreads.failIfCanceled();
   logger.trace("[{}][{}] recovery [phase3] to {}: sending transaction log operations",indexName,shardId,request.targetNode());
   StopWatch stopWatch=new StopWatch().start();
   int totalOperations=sendSnapshot(snapshot);
-  transportService.submitRequest(request.targetNode(),RecoveryTarget.Actions.FINALIZE,new RecoveryFinalizeRecoveryRequest(request.recoveryId(),request.shardId()),TransportRequestOptions.options().withTimeout(internalActionLongTimeout),EmptyTransportResponseHandler.INSTANCE_SAME).txGet();
+  cancelableThreads.run(new Interruptable(){
+    @Override public void run() throws InterruptedException {
+      transportService.submitRequest(request.targetNode(),RecoveryTarget.Actions.FINALIZE,new RecoveryFinalizeRecoveryRequest(request.recoveryId(),request.shardId()),TransportRequestOptions.options().withTimeout(internalActionLongTimeout),EmptyTransportResponseHandler.INSTANCE_SAME).txGet();
+    }
+  }
+);
   if (request.markAsRelocated()) {
     try {
       shard.relocated("to " + request.targetNode());
