@@ -1,28 +1,38 @@
 {
-  Object filterKey=filter;
-  if (filter instanceof CacheKeyFilter) {
-    filterKey=((CacheKeyFilter)filter).cacheKey();
+  if (context.ord == 0) {
+    cachePolicy.onUse(filter);
   }
-  FilterCacheKey cacheKey=new FilterCacheKey(context.reader().getCoreCacheKey(),filterKey);
+  FilterCacheKey cacheKey=new FilterCacheKey(context.reader().getCoreCacheKey(),filterCacheKey);
   Cache<FilterCacheKey,DocIdSet> innerCache=cache.indicesFilterCache.cache();
   DocIdSet cacheValue=innerCache.getIfPresent(cacheKey);
-  if (cacheValue == null) {
-    if (!cache.seenReaders.containsKey(context.reader().getCoreCacheKey())) {
-      Boolean previous=cache.seenReaders.putIfAbsent(context.reader().getCoreCacheKey(),Boolean.TRUE);
-      if (previous == null) {
-        context.reader().addCoreClosedListener(cache);
-      }
-    }
-    cacheValue=DocIdSets.toCacheable(context.reader(),filter.getDocIdSet(context,null));
-    ShardId shardId=ShardUtils.extractShardId(context.reader());
-    if (shardId != null) {
-      IndexShard shard=cache.indexService.shard(shardId.id());
-      if (shard != null) {
-        cacheKey.removalListener=shard.filterCache();
-        shard.filterCache().onCached(DocIdSets.sizeInBytes(cacheValue));
-      }
-    }
-    innerCache.put(cacheKey,cacheValue);
+  final DocIdSet ret;
+  if (cacheValue != null) {
+    ret=cacheValue;
   }
-  return BitsFilteredDocIdSet.wrap(DocIdSets.isEmpty(cacheValue) ? null : cacheValue,acceptDocs);
+ else {
+    final DocIdSet uncached=filter.getDocIdSet(context,null);
+    if (cachePolicy.shouldCache(filter,context,uncached)) {
+      if (!cache.seenReaders.containsKey(context.reader().getCoreCacheKey())) {
+        Boolean previous=cache.seenReaders.putIfAbsent(context.reader().getCoreCacheKey(),Boolean.TRUE);
+        if (previous == null) {
+          context.reader().addCoreClosedListener(cache);
+        }
+      }
+      cacheValue=DocIdSets.toCacheable(context.reader(),uncached);
+      ShardId shardId=ShardUtils.extractShardId(context.reader());
+      if (shardId != null) {
+        IndexShard shard=cache.indexService.shard(shardId.id());
+        if (shard != null) {
+          cacheKey.removalListener=shard.filterCache();
+          shard.filterCache().onCached(DocIdSets.sizeInBytes(cacheValue));
+        }
+      }
+      innerCache.put(cacheKey,cacheValue);
+      ret=cacheValue;
+    }
+ else {
+      ret=uncached;
+    }
+  }
+  return BitsFilteredDocIdSet.wrap(DocIdSets.isEmpty(ret) ? null : ret,acceptDocs);
 }

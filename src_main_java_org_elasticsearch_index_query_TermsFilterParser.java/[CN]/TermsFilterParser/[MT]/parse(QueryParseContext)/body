@@ -1,7 +1,7 @@
 {
   XContentParser parser=parseContext.parser();
   MapperService.SmartNameFieldMappers smartNameFieldMappers;
-  Boolean cache=null;
+  FilterCachingPolicy cache=parseContext.autoFilterCachePolicy();
   String filterName=null;
   String currentFieldName=null;
   String lookupIndex=parseContext.index().name();
@@ -10,7 +10,7 @@
   String lookupPath=null;
   String lookupRouting=null;
   boolean lookupCache=true;
-  CacheKeyFilter.Key cacheKey=null;
+  HashedBytesRef cacheKey=null;
   XContentParser.Token token;
   String execution=EXECUTION_VALUE_PLAIN;
   List<Object> terms=Lists.newArrayList();
@@ -80,10 +80,10 @@
         filterName=parser.text();
       }
  else       if ("_cache".equals(currentFieldName)) {
-        cache=parser.booleanValue();
+        cache=parseContext.parseFilterCachePolicy();
       }
  else       if ("_cache_key".equals(currentFieldName) || "_cacheKey".equals(currentFieldName)) {
-        cacheKey=new CacheKeyFilter.Key(parser.text());
+        cacheKey=new HashedBytesRef(parser.text());
       }
  else {
         throw new QueryParsingException(parseContext.index(),"[terms] filter does not support [" + currentFieldName + "]");
@@ -114,8 +114,8 @@
     if (filter == null) {
       return null;
     }
-    if (cache == null || cache) {
-      filter=parseContext.cacheFilter(filter,cacheKey);
+    if (cache != null) {
+      filter=parseContext.cacheFilter(filter,cacheKey,cache);
     }
     return filter;
   }
@@ -135,35 +135,26 @@
         }
         filter=new TermsFilter(fieldName,filterValues);
       }
-      if (cache == null || cache) {
-        filter=parseContext.cacheFilter(filter,cacheKey);
-      }
     }
  else     if (EXECUTION_VALUE_FIELDDATA.equals(execution)) {
       if (fieldMapper == null) {
         return Queries.MATCH_NO_FILTER;
       }
       filter=fieldMapper.fieldDataTermsFilter(terms,parseContext);
-      if (cache != null && cache) {
-        filter=parseContext.cacheFilter(filter,cacheKey);
-      }
     }
  else     if (EXECUTION_VALUE_BOOL.equals(execution)) {
       XBooleanFilter boolFiler=new XBooleanFilter();
       if (fieldMapper != null) {
         for (        Object term : terms) {
-          boolFiler.add(parseContext.cacheFilter(fieldMapper.termFilter(term,parseContext),null),BooleanClause.Occur.SHOULD);
+          boolFiler.add(parseContext.cacheFilter(fieldMapper.termFilter(term,parseContext),null,parseContext.autoFilterCachePolicy()),BooleanClause.Occur.SHOULD);
         }
       }
  else {
         for (        Object term : terms) {
-          boolFiler.add(parseContext.cacheFilter(new TermFilter(new Term(fieldName,BytesRefs.toBytesRef(term))),null),BooleanClause.Occur.SHOULD);
+          boolFiler.add(parseContext.cacheFilter(new TermFilter(new Term(fieldName,BytesRefs.toBytesRef(term))),null,parseContext.autoFilterCachePolicy()),BooleanClause.Occur.SHOULD);
         }
       }
       filter=boolFiler;
-      if (cache != null && cache) {
-        filter=parseContext.cacheFilter(filter,cacheKey);
-      }
     }
  else     if (EXECUTION_VALUE_BOOL_NOCACHE.equals(execution)) {
       XBooleanFilter boolFiler=new XBooleanFilter();
@@ -178,26 +169,20 @@
         }
       }
       filter=boolFiler;
-      if (cache == null || cache) {
-        filter=parseContext.cacheFilter(filter,cacheKey);
-      }
     }
  else     if (EXECUTION_VALUE_AND.equals(execution)) {
       List<Filter> filters=Lists.newArrayList();
       if (fieldMapper != null) {
         for (        Object term : terms) {
-          filters.add(parseContext.cacheFilter(fieldMapper.termFilter(term,parseContext),null));
+          filters.add(parseContext.cacheFilter(fieldMapper.termFilter(term,parseContext),null,parseContext.autoFilterCachePolicy()));
         }
       }
  else {
         for (        Object term : terms) {
-          filters.add(parseContext.cacheFilter(new TermFilter(new Term(fieldName,BytesRefs.toBytesRef(term))),null));
+          filters.add(parseContext.cacheFilter(new TermFilter(new Term(fieldName,BytesRefs.toBytesRef(term))),null,parseContext.autoFilterCachePolicy()));
         }
       }
       filter=new AndFilter(filters);
-      if (cache != null && cache) {
-        filter=parseContext.cacheFilter(filter,cacheKey);
-      }
     }
  else     if (EXECUTION_VALUE_AND_NOCACHE.equals(execution)) {
       List<Filter> filters=Lists.newArrayList();
@@ -212,26 +197,20 @@
         }
       }
       filter=new AndFilter(filters);
-      if (cache == null || cache) {
-        filter=parseContext.cacheFilter(filter,cacheKey);
-      }
     }
  else     if (EXECUTION_VALUE_OR.equals(execution)) {
       List<Filter> filters=Lists.newArrayList();
       if (fieldMapper != null) {
         for (        Object term : terms) {
-          filters.add(parseContext.cacheFilter(fieldMapper.termFilter(term,parseContext),null));
+          filters.add(parseContext.cacheFilter(fieldMapper.termFilter(term,parseContext),null,parseContext.autoFilterCachePolicy()));
         }
       }
  else {
         for (        Object term : terms) {
-          filters.add(parseContext.cacheFilter(new TermFilter(new Term(fieldName,BytesRefs.toBytesRef(term))),null));
+          filters.add(parseContext.cacheFilter(new TermFilter(new Term(fieldName,BytesRefs.toBytesRef(term))),null,parseContext.autoFilterCachePolicy()));
         }
       }
       filter=new OrFilter(filters);
-      if (cache != null && cache) {
-        filter=parseContext.cacheFilter(filter,cacheKey);
-      }
     }
  else     if (EXECUTION_VALUE_OR_NOCACHE.equals(execution)) {
       List<Filter> filters=Lists.newArrayList();
@@ -246,12 +225,12 @@
         }
       }
       filter=new OrFilter(filters);
-      if (cache == null || cache) {
-        filter=parseContext.cacheFilter(filter,cacheKey);
-      }
     }
  else {
       throw new QueryParsingException(parseContext.index(),"terms filter execution value [" + execution + "] not supported");
+    }
+    if (cache != null) {
+      filter=parseContext.cacheFilter(filter,cacheKey,cache);
     }
     filter=wrapSmartNameFilter(filter,smartNameFieldMappers,parseContext);
     if (filterName != null) {
