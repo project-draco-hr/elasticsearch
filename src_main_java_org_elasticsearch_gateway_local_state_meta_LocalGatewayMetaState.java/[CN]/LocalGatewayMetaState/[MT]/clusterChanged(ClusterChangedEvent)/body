@@ -87,6 +87,19 @@ synchronized (danglingMutex) {
             }
             final IndexMetaData indexMetaData=loadIndexState(indexName);
             if (indexMetaData != null) {
+              final Index index=new Index(indexName);
+              try {
+                final List<ShardLock> shardLocks=nodeEnv.lockAllForIndex(index);
+                if (shardLocks.isEmpty()) {
+                  nodeEnv.deleteIndexDirectorySafe(index);
+                  continue;
+                }
+                IOUtils.closeWhileHandlingException(shardLocks);
+              }
+ catch (              IOException ex) {
+                logger.warn("[{}] skipping locked dangling index, exists on local file system, but not in cluster metadata, auto import to cluster state is set to [{}]",ex,indexName,autoImportDangled);
+                continue;
+              }
               if (autoImportDangled.shouldImport()) {
                 logger.info("[{}] dangling index, exists on local file system, but not in cluster metadata, auto import to cluster state [{}]",indexName,autoImportDangled);
                 danglingIndices.put(indexName,new DanglingIndex(indexName,null));
@@ -104,13 +117,6 @@ catch (                Exception ex) {
                 }
               }
  else {
-                try {
-                  IOUtils.closeWhileHandlingException(nodeEnv.lockAllForIndex(new Index(indexName)));
-                }
- catch (                IOException ex) {
-                  logger.warn("[{}] skipping locked dangling index, exists on local file system, but not in cluster metadata, auto import to cluster state is set to [{}]",ex,indexName,autoImportDangled);
-                  continue;
-                }
                 logger.info("[{}] dangling index, exists on local file system, but not in cluster metadata, scheduling to delete in [{}], auto import to cluster state [{}]",indexName,danglingTimeout,autoImportDangled);
                 danglingIndices.put(indexName,new DanglingIndex(indexName,threadPool.schedule(danglingTimeout,ThreadPool.Names.SAME,new RemoveDanglingIndex(indexName))));
               }
