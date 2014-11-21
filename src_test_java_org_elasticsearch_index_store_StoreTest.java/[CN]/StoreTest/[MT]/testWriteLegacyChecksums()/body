@@ -2,7 +2,8 @@
   final ShardId shardId=new ShardId(new Index("index"),1);
   DirectoryService directoryService=new LuceneManagedDirectoryService(random());
   Store store=new Store(shardId,ImmutableSettings.EMPTY,null,directoryService,randomDistributor(directoryService),new DummyShardLock(shardId));
-  IndexWriter writer=new IndexWriter(store.directory(),newIndexWriterConfig(random(),new MockAnalyzer(random())).setCodec(actualDefaultCodec()));
+  final boolean usesOldCodec=randomBoolean();
+  IndexWriter writer=new IndexWriter(store.directory(),newIndexWriterConfig(random(),new MockAnalyzer(random())).setCodec(usesOldCodec ? new OldSIMockingCodec() : actualDefaultCodec()));
   int docs=1 + random().nextInt(100);
   for (int i=0; i < docs; i++) {
     Document doc=new Document();
@@ -39,20 +40,32 @@
     if (file.equals("write.lock") || file.equals(IndexFileNames.OLD_SEGMENTS_GEN)) {
       continue;
     }
-    try (IndexInput input=store.directory().openInput(file,IOContext.READONCE)){
-      String checksum=Store.digestToString(CodecUtil.retrieveChecksum(input));
-      StoreFileMetaData storeFileMetaData=new StoreFileMetaData(file,store.directory().fileLength(file),checksum,null);
-      legacyMeta.put(file,storeFileMetaData);
-      checksums.add(storeFileMetaData);
-    }
-   }
+    StoreFileMetaData storeFileMetaData=new StoreFileMetaData(file,store.directory().fileLength(file),file + "checksum",null);
+    legacyMeta.put(file,storeFileMetaData);
+    checksums.add(storeFileMetaData);
+  }
   checksums.write(store);
   metadata=store.getMetadata();
   Map<String,StoreFileMetaData> stringStoreFileMetaDataMap=metadata.asMap();
   assertThat(legacyMeta.size(),equalTo(stringStoreFileMetaDataMap.size()));
-  for (  StoreFileMetaData meta : legacyMeta.values()) {
-    assertTrue(stringStoreFileMetaDataMap.containsKey(meta.name()));
-    assertTrue(stringStoreFileMetaDataMap.get(meta.name()).isSame(meta));
+  if (usesOldCodec) {
+    for (    StoreFileMetaData meta : legacyMeta.values()) {
+      assertTrue(meta.toString(),stringStoreFileMetaDataMap.containsKey(meta.name()));
+      assertEquals(meta.name() + "checksum",meta.checksum());
+      assertTrue(meta + " vs. " + stringStoreFileMetaDataMap.get(meta.name()),stringStoreFileMetaDataMap.get(meta.name()).isSame(meta));
+    }
+  }
+ else {
+    for (    StoreFileMetaData meta : legacyMeta.values()) {
+      assertTrue(meta.toString(),stringStoreFileMetaDataMap.containsKey(meta.name()));
+      assertFalse(meta + " vs. " + stringStoreFileMetaDataMap.get(meta.name()),stringStoreFileMetaDataMap.get(meta.name()).isSame(meta));
+      StoreFileMetaData storeFileMetaData=metadata.get(meta.name());
+      try (IndexInput input=store.openVerifyingInput(meta.name(),IOContext.DEFAULT,storeFileMetaData)){
+        assertTrue(storeFileMetaData.toString(),input instanceof Store.VerifyingIndexInput);
+        input.seek(meta.length());
+        Store.verify(input);
+      }
+     }
   }
   assertDeleteContent(store,directoryService);
   IOUtils.close(store);
