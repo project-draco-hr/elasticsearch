@@ -49,7 +49,9 @@
         logger.debug("[{}] deleting index that is no longer part of the metadata (indices: [{}])",current.index(),newMetaData.indices().keys());
         if (nodeEnv.hasNodeFile()) {
           try {
-            nodeEnv.deleteIndexDirectorySafe(new Index(current.index()));
+            final Index idx=new Index(current.index());
+            MetaDataStateFormat.deleteMetaState(nodeEnv.indexPaths(idx));
+            nodeEnv.deleteIndexDirectorySafe(idx);
           }
  catch (          LockObtainFailedException ex) {
             logger.debug("[{}] failed to delete index - at least one shards is still locked",ex,current.index());
@@ -86,8 +88,8 @@ synchronized (danglingMutex) {
               continue;
             }
             final IndexMetaData indexMetaData=loadIndexState(indexName);
+            final Index index=new Index(indexName);
             if (indexMetaData != null) {
-              final Index index=new Index(indexName);
               try {
                 final List<ShardLock> shardLocks=nodeEnv.lockAllForIndex(index);
                 if (shardLocks.isEmpty()) {
@@ -107,7 +109,7 @@ synchronized (danglingMutex) {
  else               if (danglingTimeout.millis() == 0) {
                 logger.info("[{}] dangling index, exists on local file system, but not in cluster metadata, timeout set to 0, deleting now",indexName);
                 try {
-                  nodeEnv.deleteIndexDirectorySafe(new Index(indexName));
+                  nodeEnv.deleteIndexDirectorySafe(index);
                 }
  catch (                LockObtainFailedException ex) {
                   logger.debug("[{}] failed to delete index - at least one shards is still locked",ex,indexName);
@@ -118,7 +120,7 @@ catch (                Exception ex) {
               }
  else {
                 logger.info("[{}] dangling index, exists on local file system, but not in cluster metadata, scheduling to delete in [{}], auto import to cluster state [{}]",indexName,danglingTimeout,autoImportDangled);
-                danglingIndices.put(indexName,new DanglingIndex(indexName,threadPool.schedule(danglingTimeout,ThreadPool.Names.SAME,new RemoveDanglingIndex(indexName))));
+                danglingIndices.put(indexName,new DanglingIndex(indexName,threadPool.schedule(danglingTimeout,ThreadPool.Names.SAME,new RemoveDanglingIndex(index))));
               }
             }
           }
