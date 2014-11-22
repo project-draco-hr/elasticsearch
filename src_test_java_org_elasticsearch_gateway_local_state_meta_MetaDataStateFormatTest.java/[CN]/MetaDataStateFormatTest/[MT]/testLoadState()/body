@@ -1,25 +1,25 @@
 {
   final ToXContent.Params params=ToXContent.EMPTY_PARAMS;
-  final File[] dirs=new File[randomIntBetween(1,5)];
+  final Path[] dirs=new Path[randomIntBetween(1,5)];
   int numStates=randomIntBetween(1,5);
   int numLegacy=randomIntBetween(0,numStates);
   List<MetaData> meta=new ArrayList<>();
   for (int i=0; i < numStates; i++) {
     meta.add(randomMeta());
   }
-  Set<File> corruptedFiles=new HashSet<>();
+  Set<Path> corruptedFiles=new HashSet<>();
   MetaDataStateFormat<MetaData> format=LocalGatewayMetaState.globalStateFormat(randomFrom(XContentType.values()),params,randomBoolean());
   for (int i=0; i < dirs.length; i++) {
-    dirs[i]=newTempDir(LifecycleScope.TEST);
-    Files.createDirectories(new File(dirs[i],MetaDataStateFormat.STATE_DIR_NAME).toPath());
+    dirs[i]=newTempDir(LifecycleScope.TEST).toPath();
+    Files.createDirectories(dirs[i].resolve(MetaDataStateFormat.STATE_DIR_NAME));
     for (int j=0; j < numLegacy; j++) {
       XContentType type=format.format();
       if (randomBoolean() && (j < numStates - 1 || dirs.length > 0 && i != 0)) {
-        File file=new File(new File(dirs[i],MetaDataStateFormat.STATE_DIR_NAME),"global-" + j);
-        Files.createFile(file.toPath());
+        Path file=dirs[i].resolve(MetaDataStateFormat.STATE_DIR_NAME).resolve("global-" + j);
+        Files.createFile(file);
       }
  else {
-        try (XContentBuilder xcontentBuilder=XContentFactory.contentBuilder(type,new FileOutputStream(new File(new File(dirs[i],MetaDataStateFormat.STATE_DIR_NAME),"global-" + j)))){
+        try (XContentBuilder xcontentBuilder=XContentFactory.contentBuilder(type,Files.newOutputStream(dirs[i].resolve(MetaDataStateFormat.STATE_DIR_NAME).resolve("global-" + j)))){
           xcontentBuilder.startObject();
           MetaData.Builder.toXContent(meta.get(j),xcontentBuilder,params);
           xcontentBuilder.endObject();
@@ -29,15 +29,15 @@
     for (int j=numLegacy; j < numStates; j++) {
       format.write(meta.get(j),LocalGatewayMetaState.GLOBAL_STATE_FILE_PREFIX,j,dirs[i]);
       if (randomBoolean() && (j < numStates - 1 || dirs.length > 0 && i != 0)) {
-        File file=new File(new File(dirs[i],MetaDataStateFormat.STATE_DIR_NAME),"global-" + j + ".st");
+        Path file=dirs[i].resolve(MetaDataStateFormat.STATE_DIR_NAME).resolve("global-" + j + ".st");
         corruptedFiles.add(file);
         MetaDataStateFormatTest.corruptFile(file,logger);
       }
     }
   }
-  List<File> dirList=Arrays.asList(dirs);
+  List<Path> dirList=Arrays.asList(dirs);
   Collections.shuffle(dirList,getRandom());
-  MetaData loadedMetaData=MetaDataStateFormat.loadLatestState(logger,format,LocalGatewayMetaState.GLOBAL_STATE_FILE_PATTERN,"foobar",dirList.toArray(new File[0]));
+  MetaData loadedMetaData=MetaDataStateFormat.loadLatestState(logger,format,LocalGatewayMetaState.GLOBAL_STATE_FILE_PATTERN,"foobar",dirList.toArray(new Path[0]));
   MetaData latestMetaData=meta.get(numStates - 1);
   assertThat(loadedMetaData.uuid(),not(equalTo("_na_")));
   assertThat(loadedMetaData.uuid(),equalTo(latestMetaData.uuid()));
@@ -52,14 +52,14 @@
   }
   if (numStates > numLegacy) {
     for (int i=0; i < dirs.length; i++) {
-      File file=new File(new File(dirs[i],MetaDataStateFormat.STATE_DIR_NAME),"global-" + (numStates - 1) + ".st");
+      Path file=dirs[i].resolve(MetaDataStateFormat.STATE_DIR_NAME).resolve("global-" + (numStates - 1) + ".st");
       if (corruptedFiles.contains(file)) {
         continue;
       }
       MetaDataStateFormatTest.corruptFile(file,logger);
     }
     try {
-      MetaDataStateFormat.loadLatestState(logger,format,LocalGatewayMetaState.GLOBAL_STATE_FILE_PATTERN,"foobar",dirList.toArray(new File[0]));
+      MetaDataStateFormat.loadLatestState(logger,format,LocalGatewayMetaState.GLOBAL_STATE_FILE_PATTERN,"foobar",dirList.toArray(new Path[0]));
       fail("latest version can not be read");
     }
  catch (    ElasticsearchException ex) {

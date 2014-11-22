@@ -1,0 +1,61 @@
+{
+  List<PathAndVersion> files=new ArrayList<>();
+  long maxVersion=-1;
+  boolean maxVersionIsLegacy=true;
+  if (dataLocations != null) {
+    for (    Path dataLocation : dataLocations) {
+      final Path stateDir=dataLocation.resolve(STATE_DIR_NAME);
+      if (!Files.exists(stateDir) || !Files.isDirectory(stateDir)) {
+        continue;
+      }
+      try (DirectoryStream<Path> paths=Files.newDirectoryStream(stateDir)){
+        for (        Path stateFile : paths) {
+          final Matcher matcher=pattern.matcher(stateFile.getFileName().toString());
+          if (matcher.matches()) {
+            final long version=Long.parseLong(matcher.group(1));
+            maxVersion=Math.max(maxVersion,version);
+            final boolean legacy=MetaDataStateFormat.STATE_FILE_EXTENSION.equals(matcher.group(2)) == false;
+            maxVersionIsLegacy&=legacy;
+            files.add(new PathAndVersion(stateFile,version,legacy));
+          }
+        }
+      }
+     }
+  }
+  final List<Throwable> exceptions=new ArrayList<>();
+  T state=null;
+  for (  PathAndVersion pathAndVersion : Collections2.filter(files,new VersionAndLegacyPredicate(maxVersion,maxVersionIsLegacy))) {
+    try {
+      final Path stateFile=pathAndVersion.file;
+      final long version=pathAndVersion.version;
+      final XContentParser parser;
+      if (pathAndVersion.legacy) {
+        try (InputStream stream=Files.newInputStream(stateFile)){
+          final byte[] data=Streams.copyToByteArray(stream);
+          if (data.length == 0) {
+            logger.debug("{}: no data for [{}], ignoring...",stateType,stateFile.toAbsolutePath());
+            continue;
+          }
+          parser=XContentHelper.createParser(data,0,data.length);
+          state=format.fromXContent(parser);
+          if (state == null) {
+            logger.debug("{}: no data for [{}], ignoring...",stateType,stateFile.toAbsolutePath());
+          }
+        }
+       }
+ else {
+        state=format.read(stateFile,version);
+      }
+      return state;
+    }
+ catch (    Throwable e) {
+      exceptions.add(e);
+      logger.debug("{}: failed to read [{}], ignoring...",e,pathAndVersion.file.toAbsolutePath(),stateType);
+    }
+  }
+  ExceptionsHelper.maybeThrowRuntimeAndSuppress(exceptions);
+  if (files.size() > 0) {
+    throw new ElasticsearchIllegalStateException("Could not find a state file to recover from among " + files);
+  }
+  return state;
+}

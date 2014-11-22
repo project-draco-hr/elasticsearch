@@ -1,22 +1,22 @@
 {
-  File fileToCorrupt=file;
-  try (final SimpleFSDirectory dir=new SimpleFSDirectory(fileToCorrupt.getParentFile().toPath())){
+  Path fileToCorrupt=file;
+  try (final SimpleFSDirectory dir=new SimpleFSDirectory(fileToCorrupt.getParent())){
     long checksumBeforeCorruption;
-    try (IndexInput input=dir.openInput(fileToCorrupt.getName(),IOContext.DEFAULT)){
+    try (IndexInput input=dir.openInput(fileToCorrupt.getFileName().toString(),IOContext.DEFAULT)){
       checksumBeforeCorruption=CodecUtil.retrieveChecksum(input);
     }
-     try (RandomAccessFile raf=new RandomAccessFile(fileToCorrupt,"rw")){
+     try (RandomAccessFile raf=new RandomAccessFile(fileToCorrupt.toAbsolutePath().toString(),"rw")){
       raf.seek(randomIntBetween(0,(int)Math.min(Integer.MAX_VALUE,raf.length() - 1)));
       long filePointer=raf.getFilePointer();
       byte b=raf.readByte();
       raf.seek(filePointer);
       raf.writeByte(~b);
       raf.getFD().sync();
-      logger.debug("Corrupting file {} --  flipping at position {} from {} to {} ",fileToCorrupt.getName(),filePointer,Integer.toHexString(b),Integer.toHexString(~b));
+      logger.debug("Corrupting file {} --  flipping at position {} from {} to {} ",fileToCorrupt.getFileName().toString(),filePointer,Integer.toHexString(b),Integer.toHexString(~b));
     }
      long checksumAfterCorruption;
     long actualChecksumAfterCorruption;
-    try (ChecksumIndexInput input=dir.openChecksumInput(fileToCorrupt.getName(),IOContext.DEFAULT)){
+    try (ChecksumIndexInput input=dir.openChecksumInput(fileToCorrupt.getFileName().toString(),IOContext.DEFAULT)){
       assertThat(input.getFilePointer(),is(0l));
       input.seek(input.length() - 8);
       checksumAfterCorruption=input.getChecksum();
@@ -26,7 +26,7 @@
     msg.append("Checksum before: [").append(checksumBeforeCorruption).append("]");
     msg.append(" after: [").append(checksumAfterCorruption).append("]");
     msg.append(" checksum value after corruption: ").append(actualChecksumAfterCorruption).append("]");
-    msg.append(" file: ").append(fileToCorrupt.getName()).append(" length: ").append(dir.fileLength(fileToCorrupt.getName()));
+    msg.append(" file: ").append(fileToCorrupt.getFileName().toString()).append(" length: ").append(dir.fileLength(fileToCorrupt.getFileName().toString()));
     logger.debug(msg.toString());
     assumeTrue("Checksum collision - " + msg.toString(),checksumAfterCorruption != checksumBeforeCorruption || actualChecksumAfterCorruption != checksumBeforeCorruption);
   }
