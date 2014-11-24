@@ -1,7 +1,7 @@
 {
   logger.warn("{} received shard failed for {}",shardRoutingEntry.shardRouting.shardId(),shardRoutingEntry);
   failedShardQueue.add(shardRoutingEntry);
-  clusterService.submitStateUpdateTask("shard-failed (" + shardRoutingEntry.shardRouting + "), reason ["+ shardRoutingEntry.reason+ "]",Priority.HIGH,new ClusterStateUpdateTask(){
+  clusterService.submitStateUpdateTask("shard-failed (" + shardRoutingEntry.shardRouting + "), reason ["+ shardRoutingEntry.reason+ "]",Priority.HIGH,new ProcessedClusterStateUpdateTask(){
     @Override public ClusterState execute(    ClusterState currentState){
       if (shardRoutingEntry.processed) {
         return currentState;
@@ -36,6 +36,12 @@
     }
     @Override public void onFailure(    String source,    Throwable t){
       logger.error("unexpected failure during [{}]",t,source);
+    }
+    @Override public void clusterStateProcessed(    String source,    ClusterState oldState,    ClusterState newState){
+      if (oldState != newState && newState.getRoutingNodes().hasUnassigned()) {
+        logger.trace("unassigned shards after shard failures. scheduling a reroute.");
+        routingService.scheduleReroute();
+      }
     }
   }
 );
