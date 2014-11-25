@@ -73,19 +73,23 @@
       recoveryState.getStart().checkIndexTime(indexShard.checkIndexTook());
       return;
     }
-    FsTranslog translog=(FsTranslog)indexShard.translog();
-    String translogName="translog-" + translogId;
-    String recoverTranslogName=translogName + ".recovering";
-    File recoveringTranslogFile=null;
-    for (    File translogLocation : translog.locations()) {
-      File tmpRecoveringFile=new File(translogLocation,recoverTranslogName);
-      if (!tmpRecoveringFile.exists()) {
-        File tmpTranslogFile=new File(translogLocation,translogName);
-        if (tmpTranslogFile.exists()) {
+    Translog translog=indexShard.translog();
+    final Path translogName=translog.getPath(translogId);
+    final Path recoverTranslogName=translogName.resolveSibling(translogName.getFileName() + ".recovering");
+    Path recoveringTranslogFile=null;
+    for (    Path translogLocation : translog.locations()) {
+      final Path tmpRecoveringFile=translogLocation.resolve(recoverTranslogName);
+      if (Files.exists(tmpRecoveringFile) == false) {
+        Path tmpTranslogFile=translogLocation.resolve(translogName);
+        if (Files.exists(tmpTranslogFile)) {
           for (int i=0; i < RECOVERY_TRANSLOG_RENAME_RETRIES; i++) {
-            if (tmpTranslogFile.renameTo(tmpRecoveringFile)) {
+            try {
+              Files.move(tmpTranslogFile,tmpRecoveringFile,StandardCopyOption.ATOMIC_MOVE);
               recoveringTranslogFile=tmpRecoveringFile;
               break;
+            }
+ catch (            Exception ex) {
+              logger.debug("Failed to rename tmp recovery file",ex);
             }
           }
         }
@@ -95,7 +99,7 @@
         break;
       }
     }
-    if (recoveringTranslogFile == null || !recoveringTranslogFile.exists()) {
+    if (recoveringTranslogFile == null || Files.exists(recoveringTranslogFile) == false) {
       indexShard.postRecovery("post recovery from gateway, no translog");
       recoveryState.getStart().time(System.currentTimeMillis() - recoveryState.getStart().startTime());
       recoveryState.getStart().checkIndexTime(indexShard.checkIndexTook());
@@ -155,7 +159,7 @@ catch (        IOException e) {
       }
     }
  catch (    Throwable e) {
-      indexShard.translog().closeWithDelete();
+      IOUtils.closeWhileHandlingException(indexShard.translog());
       throw new IndexShardGatewayRecoveryException(shardId,"failed to recover shard",e);
     }
  finally {
@@ -163,7 +167,7 @@ catch (        IOException e) {
     }
     indexShard.performRecoveryFinalization(true);
     try {
-      Files.deleteIfExists(recoveringTranslogFile.toPath());
+      Files.deleteIfExists(recoveringTranslogFile);
     }
  catch (    Exception ex) {
       logger.debug("Failed to delete recovering translog file {}",ex,recoveringTranslogFile);

@@ -31,19 +31,14 @@
       throw new EngineCreationFailureException(shardId,"failed to create engine",e);
     }
     try {
+      translogIdGenerator.set(Math.max(0,translog.findLargestPresentTranslogId()));
+      translogIdGenerator.incrementAndGet();
+      boolean mustCommitTranslogId=true;
       if (Lucene.indexExists(store.directory())) {
-        Map<String,String> commitUserData=Lucene.readSegmentInfos(store.directory()).getUserData();
-        if (commitUserData.containsKey(Translog.TRANSLOG_ID_KEY)) {
-          translogIdGenerator.set(Long.parseLong(commitUserData.get(Translog.TRANSLOG_ID_KEY)));
-        }
- else {
-          translogIdGenerator.set(System.currentTimeMillis());
-          indexWriter.setCommitData(Collections.singletonMap(Translog.TRANSLOG_ID_KEY,Long.toString(translogIdGenerator.get())));
-          indexWriter.commit();
-        }
+        final Map<String,String> commitUserData=Lucene.readSegmentInfos(store.directory()).getUserData();
+        mustCommitTranslogId=!commitUserData.containsKey(Translog.TRANSLOG_ID_KEY);
       }
- else {
-        translogIdGenerator.set(System.currentTimeMillis());
+      if (mustCommitTranslogId) {
         indexWriter.setCommitData(Collections.singletonMap(Translog.TRANSLOG_ID_KEY,Long.toString(translogIdGenerator.get())));
         indexWriter.commit();
       }

@@ -3,9 +3,9 @@
   try {
     FsTranslogFile newFile;
     long size=Long.MAX_VALUE;
-    File location=null;
-    for (    File file : locations) {
-      long currentFree=file.getFreeSpace();
+    Path location=null;
+    for (    Path file : locations) {
+      long currentFree=Files.getFileStore(file).getUsableSpace();
       if (currentFree < size) {
         size=currentFree;
         location=file;
@@ -15,20 +15,14 @@
       }
     }
     try {
-      newFile=type.create(shardId,id,new RafReference(new File(location,"translog-" + id)),bufferSize);
+      newFile=type.create(shardId,id,new InternalChannelReference(location.resolve(getPath(id)),StandardOpenOption.READ,StandardOpenOption.WRITE,StandardOpenOption.CREATE_NEW),bufferSize);
     }
  catch (    IOException e) {
       throw new TranslogException(shardId,"failed to create new translog file",e);
     }
     FsTranslogFile old=current;
     current=newFile;
-    if (old != null) {
-      boolean delete=true;
-      if (old.id() == id) {
-        delete=false;
-      }
-      old.close(delete);
-    }
+    IOUtils.close(old);
   }
   finally {
     rwl.writeLock().unlock();

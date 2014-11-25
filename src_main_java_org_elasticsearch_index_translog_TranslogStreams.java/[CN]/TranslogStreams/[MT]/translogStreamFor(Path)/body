@@ -1,0 +1,33 @@
+{
+  try (InputStreamStreamInput headerStream=new InputStreamStreamInput(Files.newInputStream(translogFile))){
+    if (Files.exists(translogFile) == false || Files.size(translogFile) == 0) {
+      return CHECKSUMMED_TRANSLOG_STREAM;
+    }
+    byte b1=headerStream.readByte();
+    if (b1 == LUCENE_CODEC_HEADER_BYTE) {
+      byte b2=headerStream.readByte();
+      byte b3=headerStream.readByte();
+      byte b4=headerStream.readByte();
+      int header=((b1 & 0xFF) << 24) + ((b2 & 0xFF) << 16) + ((b3 & 0xFF) << 8)+ ((b4 & 0xFF) << 0);
+      if (header != CodecUtil.CODEC_MAGIC) {
+        throw new TranslogCorruptedException("translog looks like version 1 or later, but has corrupted header");
+      }
+      int version=CodecUtil.checkHeaderNoMagic(new InputStreamDataInput(headerStream),TRANSLOG_CODEC,1,Integer.MAX_VALUE);
+switch (version) {
+case ChecksummedTranslogStream.VERSION:
+        return CHECKSUMMED_TRANSLOG_STREAM;
+default :
+      throw new TranslogCorruptedException("No known translog stream version: " + version);
+  }
+}
+ else if (b1 == UNVERSIONED_TRANSLOG_HEADER_BYTE) {
+  return LEGACY_TRANSLOG_STREAM;
+}
+ else {
+  throw new TranslogCorruptedException("Invalid first byte in translog file, got: " + Long.toHexString(b1) + ", expected 0x00 or 0x3f");
+}
+}
+ catch (CorruptIndexException|IndexFormatTooOldException|IndexFormatTooNewException e) {
+throw new TranslogCorruptedException("Translog header corrupted",e);
+}
+}

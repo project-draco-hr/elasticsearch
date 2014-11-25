@@ -1,27 +1,26 @@
 {
   rwl.writeLock().lock();
   try {
-    for (    File location : locations) {
-      File[] files=location.listFiles();
-      if (files != null) {
-        for (        File file : files) {
-          if (file.getName().equals("translog-" + current.id())) {
-            continue;
-          }
-          if (trans != null && file.getName().equals("translog-" + trans.id())) {
-            continue;
-          }
-          try {
-            Files.delete(file.toPath());
-          }
- catch (          Exception ex) {
-            logger.debug("failed to delete " + file,ex);
+    for (    Path location : locations) {
+      try (DirectoryStream<Path> stream=Files.newDirectoryStream(location,TRANSLOG_FILE_PREFIX + "[0-9]*")){
+        for (        Path file : stream) {
+          if (isReferencedTranslogFile(file) == false) {
+            try {
+              logger.trace("delete unreferenced translog file: " + file);
+              Files.delete(file);
+            }
+ catch (            Exception ex) {
+              logger.debug("failed to delete " + file,ex);
+            }
           }
         }
       }
-    }
+     }
   }
-  finally {
+ catch (  IOException ex) {
+    logger.debug("failed to clear unreferenced files ",ex);
+  }
+ finally {
     rwl.writeLock().unlock();
   }
 }

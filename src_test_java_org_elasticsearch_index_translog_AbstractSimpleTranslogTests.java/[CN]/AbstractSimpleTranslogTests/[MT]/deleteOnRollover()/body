@@ -1,0 +1,44 @@
+{
+  translog.add(new Translog.Create("test","1",new byte[]{1}));
+  Translog.Snapshot firstSnapshot=translog.snapshot();
+  MatcherAssert.assertThat(firstSnapshot,TranslogSizeMatcher.translogSize(1));
+  assertThat(firstSnapshot.estimatedTotalOperations(),equalTo(1));
+  translog.newTransientTranslog(2);
+  assertFileIsPresent(translog,1);
+  translog.add(new Translog.Index("test","2",new byte[]{2}));
+  MatcherAssert.assertThat(firstSnapshot,TranslogSizeMatcher.translogSize(1));
+  assertThat(firstSnapshot.estimatedTotalOperations(),equalTo(1));
+  if (randomBoolean()) {
+    translog.clearUnreferenced();
+  }
+  translog.makeTransientCurrent();
+  Translog.Snapshot secondSnapshot=translog.snapshot();
+  translog.add(new Translog.Index("test","3",new byte[]{3}));
+  MatcherAssert.assertThat(secondSnapshot,TranslogSizeMatcher.translogSize(1));
+  assertThat(secondSnapshot.estimatedTotalOperations(),equalTo(1));
+  assertFileIsPresent(translog,1);
+  assertFileIsPresent(translog,2);
+  if (randomBoolean()) {
+    translog.clearUnreferenced();
+  }
+  firstSnapshot.close();
+  assertFileDeleted(translog,1);
+  assertFileIsPresent(translog,2);
+  secondSnapshot.close();
+  assertFileIsPresent(translog,2);
+  if (randomBoolean()) {
+    translog.clearUnreferenced();
+  }
+  translog.newTransientTranslog(3);
+  translog.makeTransientCurrent();
+  if (randomBoolean()) {
+    translog.clearUnreferenced();
+  }
+  assertFileIsPresent(translog,3);
+  assertFileDeleted(translog,2);
+  assertEquals(3,translog.findLargestPresentTranslogId());
+  translog.newTransientTranslog(4);
+  translog.revertTransient();
+  assertFileIsPresent(translog,3);
+  assertFileDeleted(translog,4);
+}
