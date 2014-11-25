@@ -19,7 +19,7 @@
       IndexMetaData currentIndexMetaData;
       if (currentMetaData == null) {
         try {
-          currentIndexMetaData=loadIndexState(indexMetaData.index());
+          currentIndexMetaData=loadIndexState(indexMetaData.index(),indexMetaData.settings());
         }
  catch (        IOException ex) {
           throw new ElasticsearchException("failed to load index state",ex);
@@ -55,8 +55,8 @@
         if (nodeEnv.hasNodeFile()) {
           try {
             final Index idx=new Index(current.index());
-            MetaDataStateFormat.deleteMetaState(nodeEnv.indexPaths(idx));
-            nodeEnv.deleteIndexDirectorySafe(idx);
+            MetaDataStateFormat.deleteMetaState(nodeEnv.indexPaths(idx,current.settings()));
+            nodeEnv.deleteIndexDirectorySafe(idx,current.settings());
           }
  catch (          LockObtainFailedException ex) {
             logger.debug("[{}] failed to delete index - at least one shards is still locked",ex,current.index());
@@ -92,13 +92,13 @@ synchronized (danglingMutex) {
             if (danglingIndices.containsKey(indexName)) {
               continue;
             }
-            final IndexMetaData indexMetaData=loadIndexState(indexName);
+            final IndexMetaData indexMetaData=loadIndexState(indexName,ImmutableSettings.EMPTY);
             final Index index=new Index(indexName);
             if (indexMetaData != null) {
               try {
                 final List<ShardLock> shardLocks=nodeEnv.lockAllForIndex(index);
                 if (shardLocks.isEmpty()) {
-                  nodeEnv.deleteIndexDirectorySafe(index);
+                  nodeEnv.deleteIndexDirectorySafe(index,indexMetaData.settings());
                   continue;
                 }
                 IOUtils.closeWhileHandlingException(shardLocks);
@@ -114,7 +114,7 @@ synchronized (danglingMutex) {
  else               if (danglingTimeout.millis() == 0) {
                 logger.info("[{}] dangling index, exists on local file system, but not in cluster metadata, timeout set to 0, deleting now",indexName);
                 try {
-                  nodeEnv.deleteIndexDirectorySafe(index);
+                  nodeEnv.deleteIndexDirectorySafe(index,indexMetaData.settings());
                 }
  catch (                LockObtainFailedException ex) {
                   logger.debug("[{}] failed to delete index - at least one shards is still locked",ex,indexName);
@@ -125,7 +125,7 @@ catch (                Exception ex) {
               }
  else {
                 logger.info("[{}] dangling index, exists on local file system, but not in cluster metadata, scheduling to delete in [{}], auto import to cluster state [{}]",indexName,danglingTimeout,autoImportDangled);
-                danglingIndices.put(indexName,new DanglingIndex(indexName,threadPool.schedule(danglingTimeout,ThreadPool.Names.SAME,new RemoveDanglingIndex(index))));
+                danglingIndices.put(indexName,new DanglingIndex(indexName,threadPool.schedule(danglingTimeout,ThreadPool.Names.SAME,new RemoveDanglingIndex(index,indexMetaData.settings()))));
               }
             }
           }
@@ -140,7 +140,7 @@ catch (                Exception ex) {
       for (      String indexName : danglingIndices.keySet()) {
         IndexMetaData indexMetaData;
         try {
-          indexMetaData=loadIndexState(indexName);
+          indexMetaData=loadIndexState(indexName,ImmutableSettings.EMPTY);
         }
  catch (        IOException ex) {
           throw new ElasticsearchException("failed to load index state",ex);
