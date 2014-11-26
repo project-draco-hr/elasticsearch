@@ -10,7 +10,9 @@
   XContentParser.Token token;
   String currentFieldName=null;
   List<String> likeTexts=new ArrayList<>();
-  MultiTermVectorsRequest items=new MultiTermVectorsRequest();
+  MultiTermVectorsRequest likeItems=new MultiTermVectorsRequest();
+  List<String> ignoreTexts=new ArrayList<>();
+  MultiTermVectorsRequest ignoreItems=new MultiTermVectorsRequest();
   while ((token=parser.nextToken()) != XContentParser.Token.END_OBJECT) {
     if (token == XContentParser.Token.FIELD_NAME) {
       currentFieldName=parser.currentName();
@@ -20,7 +22,10 @@
         likeTexts.add(parser.text());
       }
  else       if (Fields.LIKE.match(currentFieldName,parseContext.parseFlags())) {
-        parseLikeField(parser,likeTexts,items);
+        parseLikeField(parser,likeTexts,likeItems);
+      }
+ else       if (Fields.IGNORE_LIKE.match(currentFieldName,parseContext.parseFlags())) {
+        parseLikeField(parser,ignoreTexts,ignoreItems);
       }
  else       if (Fields.MIN_TERM_FREQ.match(currentFieldName,parseContext.parseFlags())) {
         mltQuery.setMinTermFrequency(parser.intValue());
@@ -91,7 +96,7 @@
           if (!token.isValue()) {
             throw new ElasticsearchIllegalArgumentException("ids array element should only contain ids");
           }
-          items.add(newTermVectorsRequest().id(parser.text()));
+          likeItems.add(newTermVectorsRequest().id(parser.text()));
         }
       }
  else       if (Fields.DOCUMENTS.match(currentFieldName,parseContext.parseFlags())) {
@@ -99,12 +104,17 @@
           if (token != XContentParser.Token.START_OBJECT) {
             throw new ElasticsearchIllegalArgumentException("docs array element should include an object");
           }
-          items.add(parseDocument(parser));
+          likeItems.add(parseDocument(parser));
         }
       }
  else       if (Fields.LIKE.match(currentFieldName,parseContext.parseFlags())) {
         while ((token=parser.nextToken()) != XContentParser.Token.END_ARRAY) {
-          parseLikeField(parser,likeTexts,items);
+          parseLikeField(parser,likeTexts,likeItems);
+        }
+      }
+ else       if (Fields.IGNORE_LIKE.match(currentFieldName,parseContext.parseFlags())) {
+        while ((token=parser.nextToken()) != XContentParser.Token.END_ARRAY) {
+          parseLikeField(parser,ignoreTexts,ignoreItems);
         }
       }
  else {
@@ -113,15 +123,18 @@
     }
  else     if (token == XContentParser.Token.START_OBJECT) {
       if (Fields.LIKE.match(currentFieldName,parseContext.parseFlags())) {
-        parseLikeField(parser,likeTexts,items);
+        parseLikeField(parser,likeTexts,likeItems);
+      }
+ else       if (Fields.IGNORE_LIKE.match(currentFieldName,parseContext.parseFlags())) {
+        parseLikeField(parser,ignoreTexts,ignoreItems);
       }
  else {
         throw new QueryParsingException(parseContext.index(),"[mlt] query does not support [" + currentFieldName + "]");
       }
     }
   }
-  if (likeTexts.isEmpty() && items.isEmpty()) {
-    throw new QueryParsingException(parseContext.index(),"more_like_this requires at least 'like_text' or 'ids/docs' to be specified");
+  if (likeTexts.isEmpty() && likeItems.isEmpty()) {
+    throw new QueryParsingException(parseContext.index(),"more_like_this requires 'like' to be specified");
   }
   if (moreLikeFields != null && moreLikeFields.isEmpty()) {
     throw new QueryParsingException(parseContext.index(),"more_like_this requires 'fields' to be non-empty");
@@ -145,7 +158,14 @@
   if (!likeTexts.isEmpty()) {
     mltQuery.setLikeText(likeTexts);
   }
-  if (!items.isEmpty()) {
+  if (!ignoreTexts.isEmpty()) {
+    mltQuery.setIgnoreText(ignoreTexts);
+  }
+  if (!likeItems.isEmpty()) {
+    MultiTermVectorsRequest items=likeItems;
+    for (    TermVectorsRequest item : ignoreItems) {
+      items.add(item);
+    }
     for (    TermVectorsRequest item : items) {
       if (item.index() == null) {
         item.index(parseContext.index().name());
@@ -168,11 +188,17 @@
       }
     }
     BooleanQuery boolQuery=new BooleanQuery();
-    org.apache.lucene.index.Fields[] likeFields=fetchService.fetch(items);
-    mltQuery.setLikeText(likeFields);
+    MultiTermVectorsResponse responses=fetchService.fetchResponse(items);
+    mltQuery.setLikeText(MoreLikeThisFetchService.getFields(responses,likeItems));
+    if (!ignoreItems.isEmpty()) {
+      org.apache.lucene.index.Fields[] ignoreFields=MoreLikeThisFetchService.getFields(responses,ignoreItems);
+      if (ignoreFields.length > 0) {
+        mltQuery.setIgnoreText(ignoreFields);
+      }
+    }
     boolQuery.add(mltQuery,BooleanClause.Occur.SHOULD);
     if (!include) {
-      handleExclude(boolQuery,items);
+      handleExclude(boolQuery,likeItems);
     }
     return boolQuery;
   }
