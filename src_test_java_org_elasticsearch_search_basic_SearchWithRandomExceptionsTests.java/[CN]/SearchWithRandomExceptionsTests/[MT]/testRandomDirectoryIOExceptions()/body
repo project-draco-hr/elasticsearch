@@ -22,7 +22,7 @@
     exceptionRate=0d;
     exceptionOnOpenRate=0d;
   }
-  boolean createIndexWithoutErrors=randomBoolean();
+  final boolean createIndexWithoutErrors=randomBoolean();
   long numInitialDocs=0;
   if (createIndexWithoutErrors) {
     Builder settings=settingsBuilder().put("index.number_of_replicas",randomIntBetween(0,1)).put("gateway.type","local");
@@ -31,7 +31,7 @@
     numInitialDocs=between(10,100);
     ensureGreen();
     for (int i=0; i < numInitialDocs; i++) {
-      client().prepareIndex("test","initial","" + i).setSource("test","init").get();
+      client().prepareIndex("test","type","init" + i).setSource("test","init").get();
     }
     client().admin().indices().prepareRefresh("test").execute().get();
     client().admin().indices().prepareFlush("test").setWaitIfOngoing(true).execute().get();
@@ -89,7 +89,7 @@
       searchResponse=client().prepareSearch().setTypes("type").setQuery(QueryBuilders.matchAllQuery()).get();
       logger.info("Match all Successful shards: [{}]  numShards: [{}]",searchResponse.getSuccessfulShards(),numShards.numPrimaries);
       if (searchResponse.getSuccessfulShards() == numShards.numPrimaries && !refreshFailed) {
-        assertThat(searchResponse.getHits().getTotalHits(),Matchers.equalTo(numCreated));
+        assertThat(searchResponse.getHits().getTotalHits(),Matchers.equalTo(numCreated + numInitialDocs));
       }
     }
  catch (    SearchPhaseExecutionException ex) {
@@ -104,7 +104,8 @@
     client().admin().indices().prepareUpdateSettings("test").setSettings(settingsBuilder().put(MockDirectoryHelper.RANDOM_IO_EXCEPTION_RATE,0).put(MockDirectoryHelper.RANDOM_IO_EXCEPTION_RATE_ON_OPEN,0));
     client().admin().indices().prepareOpen("test").execute().get();
     ensureGreen();
-    SearchResponse searchResponse=client().prepareSearch().setTypes("initial").setQuery(QueryBuilders.matchQuery("test","init")).get();
+    SearchResponse searchResponse=client().prepareSearch().setTypes("type").setQuery(QueryBuilders.matchQuery("test","init")).get();
+    assertNoFailures(searchResponse);
     assertHitCount(searchResponse,numInitialDocs);
   }
 }
