@@ -9,13 +9,13 @@
     if (shard.state() == IndexShardState.CLOSED) {
       throw new IndexShardClosedException(request.shardId());
     }
-    cancelableThreads.failIfCanceled();
+    cancellableThreads.checkForCancel();
     operations.add(operation);
     ops+=1;
     size+=operation.estimateSize();
     totalOperations++;
     if (ops >= recoverySettings.translogOps() || size >= recoverySettings.translogSize().bytes()) {
-      cancelableThreads.run(new Interruptable(){
+      cancellableThreads.execute(new Interruptable(){
         @Override public void run() throws InterruptedException {
           final RecoveryTranslogOperationsRequest translogOperationsRequest=new RecoveryTranslogOperationsRequest(request.recoveryId(),request.shardId(),operations);
           transportService.submitRequest(request.targetNode(),RecoveryTarget.Actions.TRANSLOG_OPS,translogOperationsRequest,recoveryOptions,EmptyTransportResponseHandler.INSTANCE_SAME).txGet();
@@ -29,7 +29,7 @@
     operation=snapshot.next();
   }
   if (!operations.isEmpty()) {
-    cancelableThreads.run(new Interruptable(){
+    cancellableThreads.execute(new Interruptable(){
       @Override public void run() throws InterruptedException {
         RecoveryTranslogOperationsRequest translogOperationsRequest=new RecoveryTranslogOperationsRequest(request.recoveryId(),request.shardId(),operations);
         transportService.submitRequest(request.targetNode(),RecoveryTarget.Actions.TRANSLOG_OPS,translogOperationsRequest,recoveryOptions,EmptyTransportResponseHandler.INSTANCE_SAME).txGet();

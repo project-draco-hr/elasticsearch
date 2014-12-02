@@ -1,0 +1,83 @@
+{
+  Thread[] threads=new Thread[randomIntBetween(3,10)];
+  final TestPlan[] plans=new TestPlan[threads.length];
+  final Throwable[] throwables=new Throwable[threads.length];
+  final boolean[] interrupted=new boolean[threads.length];
+  final CancellableThreads cancellableThreads=new CancellableThreads();
+  final CountDownLatch readyForCancel=new CountDownLatch(threads.length);
+  for (int i=0; i < threads.length; i++) {
+    final TestPlan plan=new TestPlan(i);
+    plans[i]=plan;
+    threads[i]=new Thread(new Runnable(){
+      @Override public void run(){
+        try {
+          if (plan.presetInterrupt) {
+            Thread.currentThread().interrupt();
+          }
+          cancellableThreads.execute(new Interruptable(){
+            @Override public void run() throws InterruptedException {
+              assertFalse("interrupt thread should have been clear",Thread.currentThread().isInterrupted());
+              if (plan.exceptBeforeCancel) {
+                throw new CustomException("thread [" + plan.id + "] pre-cancel exception");
+              }
+ else               if (plan.exitBeforeCancel) {
+                return;
+              }
+              readyForCancel.countDown();
+              try {
+                if (plan.busySpin) {
+                  while (!Thread.currentThread().isInterrupted()) {
+                  }
+                }
+ else {
+                  Thread.sleep(50000);
+                }
+              }
+  finally {
+                if (plan.exceptAfterCancel) {
+                  throw new CustomException("thread [" + plan.id + "] post-cancel exception");
+                }
+              }
+            }
+          }
+);
+        }
+ catch (        Throwable t) {
+          throwables[plan.id]=t;
+        }
+        if (plan.exceptBeforeCancel || plan.exitBeforeCancel) {
+          readyForCancel.countDown();
+        }
+        interrupted[plan.id]=Thread.currentThread().isInterrupted();
+      }
+    }
+);
+    threads[i].setDaemon(true);
+    threads[i].start();
+  }
+  readyForCancel.await();
+  cancellableThreads.cancel("test");
+  for (  Thread thread : threads) {
+    thread.join(20000);
+    assertFalse(thread.isAlive());
+  }
+  for (int i=0; i < threads.length; i++) {
+    TestPlan plan=plans[i];
+    if (plan.exceptBeforeCancel) {
+      assertThat(throwables[i],Matchers.instanceOf(CustomException.class));
+    }
+ else     if (plan.exitBeforeCancel) {
+      assertNull(throwables[i]);
+    }
+ else {
+      assertThat(throwables[i],Matchers.instanceOf(CancellableThreads.ExecutionCancelledException.class));
+      if (plan.exceptAfterCancel) {
+        assertThat(throwables[i].getSuppressed(),Matchers.arrayContaining(Matchers.instanceOf(CustomException.class)));
+      }
+ else {
+        assertThat(throwables[i].getSuppressed(),Matchers.emptyArray());
+      }
+    }
+    assertThat(interrupted[plan.id],Matchers.equalTo(plan.presetInterrupt));
+  }
+}
