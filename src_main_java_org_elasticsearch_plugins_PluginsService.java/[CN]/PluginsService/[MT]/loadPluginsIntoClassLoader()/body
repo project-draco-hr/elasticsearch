@@ -1,5 +1,5 @@
 {
-  File pluginsDirectory=environment.pluginsFile();
+  Path pluginsDirectory=environment.pluginsFile();
   if (!isAccessibleDirectory(pluginsDirectory,logger)) {
     return;
   }
@@ -20,30 +20,30 @@
     logger.debug("failed to find addURL method on classLoader [" + classLoader + "] to add methods");
     return;
   }
-  for (  File plugin : pluginsDirectory.listFiles()) {
-    if (!isAccessibleDirectory(plugin,logger)) {
-      continue;
-    }
-    logger.trace("--- adding plugin [{}]",plugin.getAbsolutePath());
-    try {
-      addURL.invoke(classLoader,plugin.toURI().toURL());
-      List<File> libFiles=Lists.newArrayList();
-      if (plugin.listFiles() != null) {
-        libFiles.addAll(Arrays.asList(plugin.listFiles()));
+  try (DirectoryStream<Path> stream=Files.newDirectoryStream(pluginsDirectory)){
+    for (    Path plugin : stream) {
+      if (!isAccessibleDirectory(plugin,logger)) {
+        continue;
       }
-      File libLocation=new File(plugin,"lib");
-      if (libLocation.exists() && libLocation.isDirectory() && libLocation.listFiles() != null) {
-        libFiles.addAll(Arrays.asList(libLocation.listFiles()));
-      }
-      for (      File libFile : libFiles) {
-        if (!(libFile.getName().endsWith(".jar") || libFile.getName().endsWith(".zip"))) {
-          continue;
+      logger.trace("--- adding plugin [{}]",plugin.toAbsolutePath());
+      try {
+        addURL.invoke(classLoader,plugin.toUri().toURL());
+        List<Path> libFiles=Lists.newArrayList();
+        libFiles.addAll(Arrays.asList(files(plugin)));
+        Path libLocation=plugin.resolve("lib");
+        if (Files.exists(libLocation) && Files.isDirectory(libLocation)) {
+          libFiles.addAll(Arrays.asList(files(libLocation)));
         }
-        addURL.invoke(classLoader,libFile.toURI().toURL());
+        for (        Path libFile : libFiles) {
+          if (!(libFile.getFileName().endsWith(".jar") || libFile.getFileName().endsWith(".zip"))) {
+            continue;
+          }
+          addURL.invoke(classLoader,libFile.toUri().toURL());
+        }
       }
-    }
- catch (    Throwable e) {
-      logger.warn("failed to add plugin [" + plugin + "]",e);
+ catch (      Throwable e) {
+        logger.warn("failed to add plugin [" + plugin + "]",e);
+      }
     }
   }
-}
+ }

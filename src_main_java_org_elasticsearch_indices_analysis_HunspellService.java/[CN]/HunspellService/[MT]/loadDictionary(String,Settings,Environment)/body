@@ -2,13 +2,13 @@
   if (logger.isDebugEnabled()) {
     logger.debug("Loading hunspell dictionary [{}]...",locale);
   }
-  File dicDir=new File(hunspellDir,locale);
-  if (!dicDir.exists() || !dicDir.isDirectory()) {
+  Path dicDir=hunspellDir.resolve(locale);
+  if (FileSystemUtils.isAccessibleDirectory(dicDir,logger) == false) {
     throw new ElasticsearchException(String.format(Locale.ROOT,"Could not find hunspell dictionary [%s]",locale));
   }
   nodeSettings=loadDictionarySettings(dicDir,nodeSettings.getByPrefix("indices.analysis.hunspell.dictionary." + locale + "."));
   boolean ignoreCase=nodeSettings.getAsBoolean("ignore_case",defaultIgnoreCase);
-  File[] affixFiles=dicDir.listFiles(AFFIX_FILE_FILTER);
+  Path[] affixFiles=FileSystemUtils.files(dicDir,"*.aff");
   if (affixFiles.length == 0) {
     throw new ElasticsearchException(String.format(Locale.ROOT,"Missing affix file for hunspell dictionary [%s]",locale));
   }
@@ -16,13 +16,13 @@
     throw new ElasticsearchException(String.format(Locale.ROOT,"Too many affix files exist for hunspell dictionary [%s]",locale));
   }
   InputStream affixStream=null;
-  File[] dicFiles=dicDir.listFiles(DIC_FILE_FILTER);
+  Path[] dicFiles=FileSystemUtils.files(dicDir,"*.dic");
   List<InputStream> dicStreams=new ArrayList<>(dicFiles.length);
   try {
     for (int i=0; i < dicFiles.length; i++) {
-      dicStreams.add(new FileInputStream(dicFiles[i]));
+      dicStreams.add(Files.newInputStream(dicFiles[i]));
     }
-    affixStream=new FileInputStream(affixFiles[0]);
+    affixStream=Files.newInputStream(affixFiles[0]);
     return new Dictionary(affixStream,dicStreams,ignoreCase);
   }
  catch (  Exception e) {

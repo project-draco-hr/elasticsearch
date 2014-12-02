@@ -6,23 +6,22 @@
       templates.add(template);
     }
   }
-  File templatesDir=new File(environment.configFile(),"templates");
-  if (templatesDir.exists() && templatesDir.isDirectory()) {
-    File[] templatesFiles=templatesDir.listFiles();
-    if (templatesFiles != null) {
-      for (      File templatesFile : templatesFiles) {
-        if (templatesFile.isFile()) {
+  final Path templatesDir=environment.configFile().resolve("templates");
+  if (Files.exists(templatesDir) && Files.isDirectory(templatesDir)) {
+    try (DirectoryStream<Path> stream=Files.newDirectoryStream(templatesDir)){
+      for (      Path templatesFile : stream) {
+        if (Files.isRegularFile(templatesFile)) {
           XContentParser parser=null;
           try {
-            byte[] templatesData=Streams.copyToByteArray(templatesFile);
+            final byte[] templatesData=Files.readAllBytes(templatesFile);
             parser=XContentHelper.createParser(templatesData,0,templatesData.length);
-            IndexTemplateMetaData template=IndexTemplateMetaData.Builder.fromXContent(parser,templatesFile.getName());
+            IndexTemplateMetaData template=IndexTemplateMetaData.Builder.fromXContent(parser,templatesFile.getFileName().toString());
             if (indexTemplateFilter.apply(request,template)) {
               templates.add(template);
             }
           }
  catch (          Exception e) {
-            logger.warn("[{}] failed to read template [{}] from config",e,request.index(),templatesFile.getAbsolutePath());
+            logger.warn("[{}] failed to read template [{}] from config",e,request.index(),templatesFile.toAbsolutePath());
           }
  finally {
             Releasables.closeWhileHandlingException(parser);
@@ -30,7 +29,7 @@
         }
       }
     }
-  }
+   }
   CollectionUtil.timSort(templates,new Comparator<IndexTemplateMetaData>(){
     @Override public int compare(    IndexTemplateMetaData o1,    IndexTemplateMetaData o2){
       return o2.order() - o1.order();
