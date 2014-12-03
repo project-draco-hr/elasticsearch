@@ -1,0 +1,55 @@
+{
+  DocumentMapper parentDocMapper=parseContext.mapperService().documentMapper(parentType);
+  if (parentDocMapper == null) {
+    throw new QueryParsingException(parseContext.index(),"[has_parent] query configured 'parent_type' [" + parentType + "] is not a valid type");
+  }
+  if (innerHits != null) {
+    InnerHitsContext.ParentChildInnerHits parentChildInnerHits=new InnerHitsContext.ParentChildInnerHits(innerHits.v2(),innerQuery,null,parentDocMapper);
+    String name=innerHits.v1() != null ? innerHits.v1() : parentType;
+    parseContext.addInnerHits(name,parentChildInnerHits);
+  }
+  Set<String> parentTypes=new HashSet<>(5);
+  parentTypes.add(parentDocMapper.type());
+  ParentChildIndexFieldData parentChildIndexFieldData=null;
+  for (  DocumentMapper documentMapper : parseContext.mapperService().docMappers(false)) {
+    ParentFieldMapper parentFieldMapper=documentMapper.parentFieldMapper();
+    if (parentFieldMapper.active()) {
+      DocumentMapper parentTypeDocumentMapper=parseContext.mapperService().documentMapper(parentFieldMapper.type());
+      parentChildIndexFieldData=parseContext.getForField(parentFieldMapper);
+      if (parentTypeDocumentMapper == null) {
+        parentTypes.add(parentFieldMapper.type());
+      }
+    }
+  }
+  if (parentChildIndexFieldData == null) {
+    throw new QueryParsingException(parseContext.index(),"[has_parent] no _parent field configured");
+  }
+  Filter parentFilter=null;
+  if (parentTypes.size() == 1) {
+    DocumentMapper documentMapper=parseContext.mapperService().documentMapper(parentTypes.iterator().next());
+    if (documentMapper != null) {
+      parentFilter=documentMapper.typeFilter();
+    }
+  }
+ else {
+    XBooleanFilter parentsFilter=new XBooleanFilter();
+    for (    String parentTypeStr : parentTypes) {
+      DocumentMapper documentMapper=parseContext.mapperService().documentMapper(parentTypeStr);
+      if (documentMapper != null) {
+        parentsFilter.add(documentMapper.typeFilter(),BooleanClause.Occur.SHOULD);
+      }
+    }
+    parentFilter=parentsFilter;
+  }
+  if (parentFilter == null) {
+    return null;
+  }
+  innerQuery=new FilteredQuery(innerQuery,parseContext.cacheFilter(parentDocMapper.typeFilter(),null,parseContext.autoFilterCachePolicy()));
+  Filter childrenFilter=parseContext.cacheFilter(new NotFilter(parentFilter),null,parseContext.autoFilterCachePolicy());
+  if (score) {
+    return new ParentQuery(parentChildIndexFieldData,innerQuery,parentDocMapper.type(),childrenFilter);
+  }
+ else {
+    return new ParentConstantScoreQuery(parentChildIndexFieldData,innerQuery,parentDocMapper.type(),childrenFilter);
+  }
+}

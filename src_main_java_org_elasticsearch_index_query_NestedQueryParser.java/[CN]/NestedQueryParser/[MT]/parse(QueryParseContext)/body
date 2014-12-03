@@ -8,6 +8,7 @@
   String path=null;
   ScoreMode scoreMode=ScoreMode.Avg;
   String queryName=null;
+  Tuple<String,SubSearchContext> innerHits=null;
   LateBindingParentFilter currentParentFilterContext=parentFilterContext.get();
   LateBindingParentFilter usAsParentFilter=new LateBindingParentFilter();
   parentFilterContext.set(usAsParentFilter);
@@ -26,6 +27,9 @@
  else         if ("filter".equals(currentFieldName)) {
           filterFound=true;
           filter=parseContext.parseInnerFilter();
+        }
+ else         if ("inner_hits".equals(currentFieldName)) {
+          innerHits=innerHitsQueryParserHelper.parse(parseContext);
         }
  else {
           throw new QueryParsingException(parseContext.index(),"[nested] query does not support [" + currentFieldName + "]");
@@ -90,6 +94,13 @@
     BitDocIdSetFilter childFilter=parseContext.bitsetFilter(objectMapper.nestedTypeFilter());
     usAsParentFilter.filter=childFilter;
     query=new FilteredQuery(query,childFilter);
+    if (innerHits != null) {
+      DocumentMapper childDocumentMapper=mapper.docMapper();
+      ObjectMapper parentObjectMapper=childDocumentMapper.findParentObjectMapper(objectMapper);
+      NestedInnerHits nestedInnerHits=new NestedInnerHits(innerHits.v2(),query,null,parentObjectMapper,objectMapper);
+      String name=innerHits.v1() != null ? innerHits.v1() : path;
+      parseContext.addInnerHits(name,nestedInnerHits);
+    }
     BitDocIdSetFilter parentFilter=currentParentFilterContext;
     if (parentFilter == null) {
       parentFilter=parseContext.bitsetFilter(NonNestedDocsFilter.INSTANCE);
