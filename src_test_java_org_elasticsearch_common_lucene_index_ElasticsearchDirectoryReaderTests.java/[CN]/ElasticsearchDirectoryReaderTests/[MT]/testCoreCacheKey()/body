@@ -1,0 +1,25 @@
+{
+  Directory dir=newDirectory();
+  IndexWriterConfig iwc=new IndexWriterConfig(null);
+  iwc.setMaxBufferedDocs(100);
+  iwc.setMergePolicy(NoMergePolicy.INSTANCE);
+  IndexWriter iw=new IndexWriter(dir,iwc);
+  Document doc=new Document();
+  Field idField=new StringField("id","",Field.Store.NO);
+  doc.add(idField);
+  idField.setStringValue("0");
+  iw.addDocument(doc);
+  idField.setStringValue("1");
+  iw.addDocument(doc);
+  ShardId shardId=new ShardId(new Index("fake"),1);
+  DirectoryReader ir=ElasticsearchDirectoryReader.wrap(DirectoryReader.open(iw,true),shardId);
+  assertEquals(2,ir.numDocs());
+  assertEquals(1,ir.leaves().size());
+  iw.deleteDocuments(new Term("id","0"));
+  DirectoryReader ir2=DirectoryReader.openIfChanged(ir);
+  assertEquals(1,ir2.numDocs());
+  assertEquals(1,ir2.leaves().size());
+  assertSame(ir.leaves().get(0).reader().getCoreCacheKey(),ir2.leaves().get(0).reader().getCoreCacheKey());
+  assertNotSame(ir.leaves().get(0).reader().getCombinedCoreAndDeletesKey(),ir2.leaves().get(0).reader().getCombinedCoreAndDeletesKey());
+  IOUtils.close(ir,ir2,iw,dir);
+}
