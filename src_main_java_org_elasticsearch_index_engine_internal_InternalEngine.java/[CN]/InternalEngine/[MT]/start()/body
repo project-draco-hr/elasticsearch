@@ -1,63 +1,72 @@
 {
   store.incRef();
+  final Closeable storeRef=new Closeable(){
+    private final AtomicBoolean closed=new AtomicBoolean(false);
+    @Override public void close() throws IOException {
+      if (closed.compareAndSet(false,true)) {
+        store.decRef();
+      }
+    }
+  }
+;
+  final List<Closeable> closeOnFailure=new ArrayList<>(Arrays.asList(storeRef));
   try (InternalLock _=writeLock.acquire()){
+    IndexWriter indexWriter=this.indexWriter;
     if (indexWriter != null) {
       throw new EngineAlreadyStartedException(shardId);
     }
     if (closed) {
       throw new EngineClosedException(shardId);
     }
+    storeReference=storeRef;
     if (logger.isDebugEnabled()) {
       logger.debug("starting engine");
     }
     try {
-      this.indexWriter=createWriter();
+      indexWriter=createWriter();
+      closeOnFailure.add(indexWriter);
     }
  catch (    IOException e) {
       maybeFailEngine(e,"start");
-      if (this.indexWriter != null) {
-        try {
-          IndexWriter pending=indexWriter;
-          indexWriter=null;
-          pending.rollback();
-        }
- catch (        IOException e1) {
-          e.addSuppressed(e1);
-        }
-      }
       throw new EngineCreationFailureException(shardId,"failed to create engine",e);
     }
     try {
-      translogIdGenerator.set(Math.max(0,translog.findLargestPresentTranslogId()));
-      translogIdGenerator.incrementAndGet();
+      final long translogId=Math.max(0,translog.findLargestPresentTranslogId()) + 1;
       boolean mustCommitTranslogId=true;
       if (Lucene.indexExists(store.directory())) {
         final Map<String,String> commitUserData=Lucene.readSegmentInfos(store.directory()).getUserData();
         mustCommitTranslogId=!commitUserData.containsKey(Translog.TRANSLOG_ID_KEY);
       }
       if (mustCommitTranslogId) {
-        indexWriter.setCommitData(Collections.singletonMap(Translog.TRANSLOG_ID_KEY,Long.toString(translogIdGenerator.get())));
+        indexWriter.setCommitData(Collections.singletonMap(Translog.TRANSLOG_ID_KEY,Long.toString(translogId)));
         indexWriter.commit();
       }
-      translog.newTranslog(translogIdGenerator.get());
-      this.searcherManager=buildSearchManager(indexWriter);
+      translog.newTranslog(translogId);
+      final SearcherManager searcherManager=buildSearchManager(indexWriter);
+      closeOnFailure.add(searcherManager);
       versionMap.setManager(searcherManager);
-      readLastCommittedSegmentsInfo();
+      this.lastCommittedSegmentInfos=store.readLastCommittedSegmentsInfo();
+      this.searcherManager=searcherManager;
+      translogIdGenerator.set(translogId);
+      this.indexWriter=indexWriter;
+      closeOnFailure.clear();
     }
  catch (    IOException e) {
       maybeFailEngine(e,"start");
       try {
-        indexWriter.rollback();
+        if (indexWriter != null) {
+          indexWriter.rollback();
+        }
       }
  catch (      IOException e1) {
-      }
- finally {
-        IOUtils.closeWhileHandlingException(indexWriter);
+        e.addSuppressed(e1);
       }
       throw new EngineCreationFailureException(shardId,"failed to open reader on writer",e);
     }
   }
   finally {
-    store.decRef();
+    if (closeOnFailure.isEmpty() == false) {
+      IOUtils.closeWhileHandlingException(closeOnFailure);
+    }
   }
 }

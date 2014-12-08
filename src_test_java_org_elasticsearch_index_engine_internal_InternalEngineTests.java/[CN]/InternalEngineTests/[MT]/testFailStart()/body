@@ -1,0 +1,44 @@
+{
+  final int iters=scaledRandomIntBetween(10,100);
+  for (int i=0; i < iters; i++) {
+    MockDirectoryWrapper wrapper=newMockDirectory();
+    wrapper.setFailOnOpenInput(randomBoolean());
+    wrapper.setAllowRandomFileNotFoundException(randomBoolean());
+    wrapper.setRandomIOExceptionRate(randomDouble());
+    wrapper.setRandomIOExceptionRateOnOpen(randomDouble());
+    try (Store store=createStore(wrapper)){
+      int refCount=store.refCount();
+      assertTrue("refCount: " + store.refCount(),store.refCount() > 0);
+      Translog translog=createTranslog();
+      Settings build=ImmutableSettings.builder().put(IndexMetaData.SETTING_VERSION_CREATED,Version.CURRENT).build();
+      IndexSettingsService indexSettingsService=new IndexSettingsService(shardId.index(),build);
+      Engine holder=createEngine(indexSettingsService,store,translog);
+      indexSettingsService.refreshSettings(ImmutableSettings.builder().put(IndexMetaData.SETTING_VERSION_CREATED,Version.CURRENT).put(InternalEngineHolder.INDEX_FAIL_ON_CORRUPTION,true).build());
+      assertEquals(store.refCount(),refCount + 1);
+      final int numStarts=scaledRandomIntBetween(1,5);
+      for (int j=0; j < numStarts; j++) {
+        try {
+          holder.start();
+          assertEquals(store.refCount(),refCount + 2);
+          break;
+        }
+ catch (        EngineCreationFailureException ex) {
+          if (ex.getCause() instanceof CorruptIndexException) {
+            assertEquals(store.refCount(),refCount);
+            try {
+              holder.start();
+              fail("Engine must have failed on corrupt index");
+            }
+ catch (            EngineClosedException e) {
+            }
+            break;
+          }
+          assertEquals(store.refCount(),refCount + 1);
+        }
+      }
+      translog.close();
+      holder.close();
+      assertEquals(store.refCount(),refCount);
+    }
+   }
+}
