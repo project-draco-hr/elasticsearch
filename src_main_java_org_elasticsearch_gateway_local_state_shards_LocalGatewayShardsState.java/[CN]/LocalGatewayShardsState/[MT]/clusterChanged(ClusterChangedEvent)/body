@@ -1,56 +1,27 @@
 {
-  if (event.state().blocks().disableStatePersistence()) {
-    return;
-  }
-  if (!event.state().nodes().localNode().dataNode()) {
-    return;
-  }
-  if (!event.routingTableChanged()) {
-    return;
-  }
-  Map<ShardId,ShardStateInfo> newState=Maps.newHashMap();
-  newState.putAll(this.currentState);
-  for (  IndexRoutingTable indexRoutingTable : event.state().routingTable()) {
-    for (    IndexShardRoutingTable indexShardRoutingTable : indexRoutingTable) {
-      if (indexShardRoutingTable.countWithState(ShardRoutingState.STARTED) == indexShardRoutingTable.size()) {
-        newState.remove(indexShardRoutingTable.shardId());
+  final ClusterState state=event.state();
+  if (state.blocks().disableStatePersistence() == false && state.nodes().localNode().dataNode() && event.routingTableChanged()) {
+    RoutingNode routingNode=state.readOnlyRoutingNodes().node(state.nodes().localNodeId());
+    final Map<ShardId,ShardStateInfo> newState;
+    if (routingNode != null) {
+      newState=persistRoutingNodeState(routingNode);
+    }
+ else {
+      newState=Maps.newHashMap();
+    }
+    final RoutingTable indexRoutingTables=state.routingTable();
+    for (    Map.Entry<ShardId,ShardStateInfo> entry : this.currentState.entrySet()) {
+      ShardId shardId=entry.getKey();
+      if (newState.containsKey(shardId) == false) {
+        String indexName=shardId.index().getName();
+        if (state.metaData().hasIndex(indexName)) {
+          IndexRoutingTable index=indexRoutingTables.index(indexName);
+          if (index != null && index.shard(shardId.id()).allShardsStarted() == false) {
+            newState.put(shardId,entry.getValue());
+          }
+        }
       }
     }
+    this.currentState=newState;
   }
-  for (  ShardId shardId : currentState.keySet()) {
-    if (!event.state().metaData().hasIndex(shardId.index().name())) {
-      newState.remove(shardId);
-    }
-  }
-  RoutingNode routingNode=event.state().readOnlyRoutingNodes().node(event.state().nodes().localNodeId());
-  if (routingNode != null) {
-    for (    MutableShardRouting shardRouting : routingNode) {
-      if (shardRouting.active()) {
-        newState.put(shardRouting.shardId(),new ShardStateInfo(shardRouting.version(),shardRouting.primary()));
-      }
-    }
-  }
-  for (Iterator<Map.Entry<ShardId,ShardStateInfo>> it=newState.entrySet().iterator(); it.hasNext(); ) {
-    Map.Entry<ShardId,ShardStateInfo> entry=it.next();
-    ShardId shardId=entry.getKey();
-    ShardStateInfo shardStateInfo=entry.getValue();
-    String writeReason=null;
-    ShardStateInfo currentShardStateInfo=currentState.get(shardId);
-    if (currentShardStateInfo == null) {
-      writeReason="freshly started, version [" + shardStateInfo.version + "]";
-    }
- else     if (currentShardStateInfo.version != shardStateInfo.version) {
-      writeReason="version changed from [" + currentShardStateInfo.version + "] to ["+ shardStateInfo.version+ "]";
-    }
-    if (writeReason == null) {
-      continue;
-    }
-    try {
-      writeShardState(writeReason,shardId,shardStateInfo,currentShardStateInfo);
-    }
- catch (    Exception e) {
-      it.remove();
-    }
-  }
-  this.currentState=newState;
 }
