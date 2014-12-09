@@ -5,14 +5,17 @@
     try (IndexInput input=dir.openInput(fileToCorrupt.getFileName().toString(),IOContext.DEFAULT)){
       checksumBeforeCorruption=CodecUtil.retrieveChecksum(input);
     }
-     try (RandomAccessFile raf=new RandomAccessFile(fileToCorrupt.toAbsolutePath().toString(),"rw")){
-      raf.seek(randomIntBetween(0,(int)Math.min(Integer.MAX_VALUE,raf.length() - 1)));
-      long filePointer=raf.getFilePointer();
-      byte b=raf.readByte();
-      raf.seek(filePointer);
-      raf.writeByte(~b);
-      raf.getFD().sync();
-      logger.debug("Corrupting file {} --  flipping at position {} from {} to {} ",fileToCorrupt.getFileName().toString(),filePointer,Integer.toHexString(b),Integer.toHexString(~b));
+     try (FileChannel raf=FileChannel.open(fileToCorrupt,StandardOpenOption.READ,StandardOpenOption.WRITE)){
+      raf.position(randomIntBetween(0,(int)Math.min(Integer.MAX_VALUE,raf.size() - 1)));
+      long filePointer=raf.position();
+      ByteBuffer bb=ByteBuffer.wrap(new byte[1]);
+      raf.read(bb);
+      bb.flip();
+      byte oldValue=bb.get(0);
+      byte newValue=(byte)~oldValue;
+      raf.position(filePointer);
+      raf.write(bb);
+      logger.debug("Corrupting file {} --  flipping at position {} from {} to {} ",fileToCorrupt.getFileName().toString(),filePointer,Integer.toHexString(oldValue),Integer.toHexString(newValue));
     }
      long checksumAfterCorruption;
     long actualChecksumAfterCorruption;
