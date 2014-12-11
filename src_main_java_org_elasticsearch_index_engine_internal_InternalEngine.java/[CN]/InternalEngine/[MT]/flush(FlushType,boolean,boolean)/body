@@ -1,0 +1,123 @@
+{
+  ensureOpen();
+  if (type == FlushType.NEW_WRITER || type == FlushType.COMMIT_TRANSLOG) {
+    if (onGoingRecoveries.get() > 0) {
+      throw new FlushNotAllowedEngineException(shardId,"recovery is in progress, flush [" + type + "] is not allowed");
+    }
+  }
+  int currentFlushing=flushing.incrementAndGet();
+  if (currentFlushing > 1 && waitIfOngoing == false) {
+    flushing.decrementAndGet();
+    throw new FlushNotAllowedEngineException(shardId,"already flushing...");
+  }
+  flushLock.lock();
+  try {
+    if (type == FlushType.NEW_WRITER) {
+      try (InternalLock _=writeLock.acquire()){
+        if (onGoingRecoveries.get() > 0) {
+          throw new FlushNotAllowedEngineException(shardId,"Recovery is in progress, flush is not allowed");
+        }
+        dirty=false;
+        try {
+{
+            final long translogId=translog.currentId();
+            indexWriter.setCommitData(Collections.singletonMap(Translog.TRANSLOG_ID_KEY,Long.toString(translogId)));
+            indexWriter.commit();
+            indexWriter.rollback();
+          }
+          indexWriter=createWriter();
+          if (flushNeeded || force) {
+            flushNeeded=false;
+            long translogId=translogIdGenerator.incrementAndGet();
+            indexWriter.setCommitData(Collections.singletonMap(Translog.TRANSLOG_ID_KEY,Long.toString(translogId)));
+            indexWriter.commit();
+            translog.newTranslog(translogId);
+          }
+          SearcherManager current=this.searcherManager;
+          this.searcherManager=buildSearchManager(indexWriter);
+          versionMap.setManager(searcherManager);
+          try {
+            IOUtils.close(current);
+          }
+ catch (          Throwable t) {
+            logger.warn("Failed to close current SearcherManager",t);
+          }
+          maybePruneDeletedTombstones();
+        }
+ catch (        Throwable t) {
+          throw new FlushFailedEngineException(shardId,t);
+        }
+      }
+     }
+ else     if (type == FlushType.COMMIT_TRANSLOG) {
+      try (InternalLock _=readLock.acquire()){
+        final IndexWriter indexWriter=currentIndexWriter();
+        if (onGoingRecoveries.get() > 0) {
+          throw new FlushNotAllowedEngineException(shardId,"Recovery is in progress, flush is not allowed");
+        }
+        if (flushNeeded || force) {
+          flushNeeded=false;
+          try {
+            long translogId=translogIdGenerator.incrementAndGet();
+            translog.newTransientTranslog(translogId);
+            indexWriter.setCommitData(Collections.singletonMap(Translog.TRANSLOG_ID_KEY,Long.toString(translogId)));
+            indexWriter.commit();
+            refresh("version_table_flush",true);
+            translog.makeTransientCurrent();
+          }
+ catch (          Throwable e) {
+            try {
+              translog.revertTransient();
+            }
+ catch (            IOException ex) {
+              e.addSuppressed(ex);
+            }
+            throw new FlushFailedEngineException(shardId,e);
+          }
+        }
+      }
+       if (enableGcDeletes) {
+        pruneDeletedTombstones();
+      }
+    }
+ else     if (type == FlushType.COMMIT) {
+      try (InternalLock _=readLock.acquire()){
+        final IndexWriter indexWriter=currentIndexWriter();
+        try {
+          long translogId=translog.currentId();
+          indexWriter.setCommitData(Collections.singletonMap(Translog.TRANSLOG_ID_KEY,Long.toString(translogId)));
+          indexWriter.commit();
+        }
+ catch (        Throwable e) {
+          throw new FlushFailedEngineException(shardId,e);
+        }
+      }
+       if (enableGcDeletes) {
+        pruneDeletedTombstones();
+      }
+    }
+ else {
+      throw new ElasticsearchIllegalStateException("flush type [" + type + "] not supported");
+    }
+    try (InternalLock _=readLock.acquire()){
+      ensureOpen();
+      lastCommittedSegmentInfos=store.readLastCommittedSegmentsInfo();
+    }
+ catch (    Throwable e) {
+      if (!closed) {
+        logger.warn("failed to read latest segment infos on flush",e);
+        if (Lucene.isCorruptionException(e)) {
+          throw new FlushFailedEngineException(shardId,e);
+        }
+      }
+    }
+  }
+ catch (  FlushFailedEngineException ex) {
+    maybeFailEngine(ex,"flush");
+    throw ex;
+  }
+ finally {
+    flushLock.unlock();
+    flushing.decrementAndGet();
+  }
+}
