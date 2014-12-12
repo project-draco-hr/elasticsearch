@@ -1,0 +1,27 @@
+{
+  Settings defaultSettings=ImmutableSettings.builder().put(FaultDetection.SETTING_PING_TIMEOUT,"1s").put(FaultDetection.SETTING_PING_RETRIES,"1").put("discovery.type","zen").build();
+  Settings masterNodeSettings=ImmutableSettings.builder().put("node.data",false).put(defaultSettings).build();
+  String master=internalCluster().startNode(masterNodeSettings);
+  Settings dateNodeSettings=ImmutableSettings.builder().put("node.master",false).put(defaultSettings).build();
+  internalCluster().startNodesAsync(2,dateNodeSettings).get();
+  client().admin().cluster().prepareHealth().setWaitForNodes("3").get();
+  ClusterService clusterService=internalCluster().getInstance(ClusterService.class,master);
+  final ArrayList<ClusterState> statesFound=new ArrayList<>();
+  final CountDownLatch nodesStopped=new CountDownLatch(1);
+  clusterService.add(new ClusterStateListener(){
+    @Override public void clusterChanged(    ClusterChangedEvent event){
+      statesFound.add(event.state());
+      try {
+        nodesStopped.await();
+      }
+ catch (      InterruptedException e) {
+      }
+    }
+  }
+);
+  internalCluster().stopRandomNonMasterNode();
+  internalCluster().stopRandomNonMasterNode();
+  nodesStopped.countDown();
+  client().admin().cluster().prepareHealth().setWaitForEvents(Priority.LANGUID).get();
+  assertThat(statesFound,Matchers.hasSize(2));
+}
