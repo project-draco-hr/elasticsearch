@@ -1,0 +1,33 @@
+{
+  logger.info("--> restoring snapshot");
+  RestoreSnapshotResponse response=client().admin().cluster().prepareRestoreSnapshot(repo,snapshot).setRestoreGlobalState(true).setWaitForCompletion(true).get();
+  assertThat(response.status(),equalTo(RestStatus.OK));
+  RestoreInfo restoreInfo=response.getRestoreInfo();
+  assertThat(restoreInfo.successfulShards(),greaterThan(0));
+  assertThat(restoreInfo.successfulShards(),equalTo(restoreInfo.totalShards()));
+  assertThat(restoreInfo.failedShards(),equalTo(0));
+  String index=restoreInfo.indices().get(0);
+  logger.info("--> check search");
+  SearchResponse searchResponse=client().prepareSearch(index).get();
+  assertThat(searchResponse.getHits().totalHits(),greaterThan(1L));
+  logger.info("--> check settings");
+  ClusterState clusterState=client().admin().cluster().prepareState().get().getState();
+  assertThat(clusterState.metaData().persistentSettings().get(FilterAllocationDecider.CLUSTER_ROUTING_EXCLUDE_GROUP + "version_attr"),equalTo(version));
+  logger.info("--> check templates");
+  IndexTemplateMetaData template=clusterState.getMetaData().templates().get("template_" + version.toLowerCase(Locale.ROOT));
+  assertThat(template,notNullValue());
+  assertThat(template.template(),equalTo("te*"));
+  assertThat(template.settings().getAsInt(IndexMetaData.SETTING_NUMBER_OF_SHARDS,-1),equalTo(1));
+  assertThat(template.mappings().size(),equalTo(1));
+  assertThat(template.mappings().get("type1").string(),equalTo("{\"type1\":{\"_source\":{\"enabled\":false}}}"));
+  if (Version.fromString(version).onOrAfter(Version.V_1_1_0)) {
+    assertThat(template.aliases().size(),equalTo(3));
+    assertThat(template.aliases().get("alias1"),notNullValue());
+    assertThat(template.aliases().get("alias2").filter().string(),containsString(version));
+    assertThat(template.aliases().get("alias2").indexRouting(),equalTo("kimchy"));
+    assertThat(template.aliases().get("{index}-alias"),notNullValue());
+  }
+  logger.info("--> cleanup");
+  cluster().wipeIndices(restoreInfo.indices().toArray(new String[restoreInfo.indices().size()]));
+  cluster().wipeTemplates();
+}
