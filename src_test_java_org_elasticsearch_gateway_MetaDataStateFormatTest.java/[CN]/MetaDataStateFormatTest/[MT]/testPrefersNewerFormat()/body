@@ -1,0 +1,25 @@
+{
+  final ToXContent.Params params=ToXContent.EMPTY_PARAMS;
+  MetaDataStateFormat<MetaData> format=GatewayMetaState.globalStateFormat(randomFrom(XContentType.values()),params,randomBoolean());
+  final Path[] dirs=new Path[2];
+  dirs[0]=newTempDirPath(LifecycleScope.TEST);
+  dirs[1]=newTempDirPath(LifecycleScope.TEST);
+  for (  Path dir : dirs) {
+    Files.createDirectories(dir.resolve(MetaDataStateFormat.STATE_DIR_NAME));
+  }
+  final Path dir1=randomFrom(dirs);
+  final long v=randomInt(10);
+  MetaData meta=randomMeta();
+  String uuid=meta.uuid();
+  final Path dir2=randomFrom(dirs);
+  MetaData meta2=randomMeta();
+  assertFalse(meta2.uuid().equals(uuid));
+  try (XContentBuilder xcontentBuilder=XContentFactory.contentBuilder(format.format(),Files.newOutputStream(dir2.resolve(MetaDataStateFormat.STATE_DIR_NAME).resolve(GatewayMetaState.GLOBAL_STATE_FILE_PREFIX + v)))){
+    xcontentBuilder.startObject();
+    MetaData.Builder.toXContent(randomMeta(),xcontentBuilder,params);
+    xcontentBuilder.endObject();
+  }
+   format.write(meta,GatewayMetaState.GLOBAL_STATE_FILE_PREFIX,v,dir1);
+  MetaData state=MetaDataStateFormat.loadLatestState(logger,format,GatewayMetaState.GLOBAL_STATE_FILE_PATTERN,"foobar",dirs);
+  assertThat(state.uuid(),equalTo(uuid));
+}

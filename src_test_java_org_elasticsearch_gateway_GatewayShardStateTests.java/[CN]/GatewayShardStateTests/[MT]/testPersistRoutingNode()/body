@@ -1,0 +1,56 @@
+{
+  try (NodeEnvironment env=newNodeEnvironment()){
+    GatewayShardsState state=new GatewayShardsState(ImmutableSettings.EMPTY,env,null);
+    int numShards=between(0,100);
+    List<MutableShardRouting> shards=new ArrayList<>();
+    List<MutableShardRouting> active=new ArrayList<>();
+    for (int i=0; i < numShards; i++) {
+      long version=between(1,Integer.MAX_VALUE / 2);
+      ShardRoutingState shardRoutingState=randomFrom(ShardRoutingState.INITIALIZING,ShardRoutingState.RELOCATING,ShardRoutingState.STARTED);
+      MutableShardRouting mutableShardRouting=new MutableShardRouting("idx",i,"foo",randomBoolean(),shardRoutingState,version);
+      if (mutableShardRouting.active()) {
+        active.add(mutableShardRouting);
+      }
+      shards.add(mutableShardRouting);
+    }
+    RoutingNode node=new RoutingNode("foo",new DiscoveryNode("foo",null,Version.CURRENT),shards);
+    Map<ShardId,ShardStateInfo> shardIdShardStateInfoMap=state.persistRoutingNodeState(node);
+    assertEquals(shardIdShardStateInfoMap.size(),active.size());
+    for (    Map.Entry<ShardId,ShardStateInfo> written : shardIdShardStateInfoMap.entrySet()) {
+      ShardStateInfo shardStateInfo=state.loadShardInfo(written.getKey());
+      assertEquals(shardStateInfo,written.getValue());
+      if (randomBoolean()) {
+        assertNull(state.loadShardInfo(new ShardId("no_such_index",written.getKey().id())));
+      }
+    }
+    assertTrue(state.getCurrentState().isEmpty());
+    state.getCurrentState().putAll(shardIdShardStateInfoMap);
+    if (randomBoolean()) {
+      shardIdShardStateInfoMap=state.persistRoutingNodeState(node);
+      assertEquals(shardIdShardStateInfoMap.size(),active.size());
+      for (      Map.Entry<ShardId,ShardStateInfo> written : shardIdShardStateInfoMap.entrySet()) {
+        ShardStateInfo shardStateInfo=state.loadShardInfo(written.getKey());
+        assertEquals(shardStateInfo,written.getValue());
+        if (randomBoolean()) {
+          assertNull(state.loadShardInfo(new ShardId("no_such_index",written.getKey().id())));
+        }
+      }
+    }
+    List<MutableShardRouting> nextRoundOfShards=new ArrayList<>();
+    for (    MutableShardRouting routing : shards) {
+      nextRoundOfShards.add(new MutableShardRouting(routing,routing.version() + 1));
+    }
+    node=new RoutingNode("foo",new DiscoveryNode("foo",null,Version.CURRENT),nextRoundOfShards);
+    Map<ShardId,ShardStateInfo> shardIdShardStateInfoMapNew=state.persistRoutingNodeState(node);
+    assertEquals(shardIdShardStateInfoMapNew.size(),active.size());
+    for (    Map.Entry<ShardId,ShardStateInfo> written : shardIdShardStateInfoMapNew.entrySet()) {
+      ShardStateInfo shardStateInfo=state.loadShardInfo(written.getKey());
+      assertEquals(shardStateInfo,written.getValue());
+      ShardStateInfo oldStateInfo=shardIdShardStateInfoMap.get(written.getKey());
+      assertEquals(oldStateInfo.version,written.getValue().version - 1);
+      if (randomBoolean()) {
+        assertNull(state.loadShardInfo(new ShardId("no_such_index",written.getKey().id())));
+      }
+    }
+  }
+ }

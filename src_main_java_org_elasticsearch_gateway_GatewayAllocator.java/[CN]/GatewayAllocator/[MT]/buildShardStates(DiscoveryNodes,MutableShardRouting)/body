@@ -1,0 +1,46 @@
+{
+  ObjectLongOpenHashMap<DiscoveryNode> shardStates=cachedShardsState.get(shard.shardId());
+  ObjectOpenHashSet<String> nodeIds;
+  if (shardStates == null) {
+    shardStates=new ObjectLongOpenHashMap<>();
+    cachedShardsState.put(shard.shardId(),shardStates);
+    nodeIds=ObjectOpenHashSet.from(nodes.dataNodes().keys());
+  }
+ else {
+    shardStates.keys().removeAll(new ObjectPredicate<DiscoveryNode>(){
+      @Override public boolean apply(      DiscoveryNode node){
+        return !nodes.nodeExists(node.id());
+      }
+    }
+);
+    nodeIds=ObjectOpenHashSet.newInstance();
+    for (    ObjectCursor<DiscoveryNode> cursor : nodes.dataNodes().values()) {
+      DiscoveryNode node=cursor.value;
+      if (!shardStates.containsKey(node)) {
+        nodeIds.add(node.id());
+      }
+    }
+  }
+  if (nodeIds.isEmpty()) {
+    return shardStates;
+  }
+  String[] nodesIdsArray=nodeIds.toArray(String.class);
+  TransportNodesListGatewayStartedShards.NodesGatewayStartedShards response=listGatewayStartedShards.list(shard.shardId(),nodesIdsArray,listTimeout).actionGet();
+  if (logger.isDebugEnabled()) {
+    if (response.failures().length > 0) {
+      StringBuilder sb=new StringBuilder(shard + ": failures when trying to list shards on nodes:");
+      for (int i=0; i < response.failures().length; i++) {
+        Throwable cause=ExceptionsHelper.unwrapCause(response.failures()[i]);
+        if (cause instanceof ConnectTransportException) {
+          continue;
+        }
+        sb.append("\n    -> ").append(response.failures()[i].getDetailedMessage());
+      }
+      logger.debug(sb.toString());
+    }
+  }
+  for (  TransportNodesListGatewayStartedShards.NodeGatewayStartedShards nodeShardState : response) {
+    shardStates.put(nodeShardState.getNode(),nodeShardState.version());
+  }
+  return shardStates;
+}
