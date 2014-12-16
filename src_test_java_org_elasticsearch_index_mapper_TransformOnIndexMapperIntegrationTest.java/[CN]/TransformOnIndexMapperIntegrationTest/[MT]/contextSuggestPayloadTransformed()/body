@@ -1,0 +1,21 @@
+{
+  XContentBuilder builder=XContentFactory.jsonBuilder().startObject();
+  builder.startObject("properties");
+  builder.startObject("suggest").field("type","completion").field("payloads",true).endObject();
+  builder.endObject();
+  builder.startObject("transform");
+  builder.field("script","ctx._source.suggest = ['input': ctx._source.text];ctx._source.suggest.payload = ['display': ctx._source.text, 'display_detail': 'on the fly']");
+  builder.field("lang","groovy");
+  builder.endObject();
+  assertAcked(client().admin().indices().prepareCreate("test").addMapping("test",builder));
+  XContentType type=XContentType.values()[between(0,XContentType.values().length - 1)];
+  XContentBuilder source=XContentFactory.contentBuilder(type);
+  source.startObject().field("text","findme").endObject();
+  indexRandom(true,client().prepareIndex("test","test","findme").setSource(source));
+  SuggestResponse response=client().prepareSuggest("test").addSuggestion(SuggestBuilders.completionSuggestion("test").field("suggest").text("findme")).get();
+  assertSuggestion(response.getSuggest(),0,0,"test","findme");
+  CompletionSuggestion.Entry.Option option=(CompletionSuggestion.Entry.Option)response.getSuggest().getSuggestion("test").getEntries().get(0).getOptions().get(0);
+  XContentBuilder expected=XContentFactory.contentBuilder(type);
+  expected.startObject().field("display","findme").field("display_detail","on the fly").endObject();
+  assertEquals(expected.string(),option.getPayloadAsString());
+}
