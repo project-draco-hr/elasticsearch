@@ -22,7 +22,7 @@
     assertFalse(Files.exists(path.resolve("2")));
   }
   try {
-    env.deleteIndexDirectorySafe(new Index("foo"));
+    env.deleteIndexDirectorySafe(new Index("foo"),randomIntBetween(0,10));
     fail("shard is locked");
   }
  catch (  LockObtainFailedException ex) {
@@ -31,7 +31,23 @@
   for (  Path path : env.indexPaths(new Index("foo"))) {
     assertTrue(Files.exists(path));
   }
-  env.deleteIndexDirectorySafe(new Index("foo"));
+  final AtomicReference<Throwable> threadException=new AtomicReference<>();
+  if (randomBoolean()) {
+    Thread t=new Thread(new AbstractRunnable(){
+      @Override public void onFailure(      Throwable t){
+        threadException.set(t);
+      }
+      @Override protected void doRun() throws Exception {
+        try (ShardLock fooLock=env.shardLock(new ShardId("foo",1))){
+          Thread.sleep(100);
+        }
+       }
+    }
+);
+    t.start();
+  }
+  env.deleteIndexDirectorySafe(new Index("foo"),5000);
+  assertNull(threadException.get());
   for (  Path path : env.indexPaths(new Index("foo"))) {
     assertFalse(Files.exists(path));
   }
