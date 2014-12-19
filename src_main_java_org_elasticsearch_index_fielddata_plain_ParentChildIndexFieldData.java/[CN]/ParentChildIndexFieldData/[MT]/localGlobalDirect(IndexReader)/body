@@ -1,64 +1,29 @@
 {
   final long startTime=System.nanoTime();
-  final Map<String,SortedDocValues[]> types=new HashMap<>();
+  final Set<String> parentTypes=new HashSet<>();
 synchronized (lock) {
-    for (    BytesRef type : parentTypes) {
-      final SortedDocValues[] values=new SortedDocValues[indexReader.leaves().size()];
-      Arrays.fill(values,DocValues.emptySorted());
-      types.put(type.utf8ToString(),values);
-    }
-  }
-  for (  Map.Entry<String,SortedDocValues[]> entry : types.entrySet()) {
-    final String parentType=entry.getKey();
-    final SortedDocValues[] values=entry.getValue();
-    for (    LeafReaderContext context : indexReader.leaves()) {
-      SortedDocValues vals=load(context).getOrdinalsValues(parentType);
-      if (vals != null) {
-        values[context.ord]=vals;
-      }
+    for (    BytesRef type : this.parentTypes) {
+      parentTypes.add(type.utf8ToString());
     }
   }
   long ramBytesUsed=0;
-  @SuppressWarnings("unchecked") final Map<String,SortedDocValues>[] global=new Map[indexReader.leaves().size()];
-  for (  Map.Entry<String,SortedDocValues[]> entry : types.entrySet()) {
-    final String parentType=entry.getKey();
-    final SortedDocValues[] values=entry.getValue();
-    final OrdinalMap ordinalMap=OrdinalMap.build(null,entry.getValue(),PackedInts.DEFAULT);
-    ramBytesUsed+=ordinalMap.ramBytesUsed();
-    for (int i=0; i < values.length; ++i) {
-      final SortedDocValues segmentValues=values[i];
-      final LongValues globalOrds=ordinalMap.getGlobalOrds(i);
-      final SortedDocValues globalSortedValues=new SortedDocValues(){
-        @Override public BytesRef lookupOrd(        int ord){
-          final int segmentNum=ordinalMap.getFirstSegmentNumber(ord);
-          final int segmentOrd=(int)ordinalMap.getFirstSegmentOrd(ord);
-          return values[segmentNum].lookupOrd(segmentOrd);
-        }
-        @Override public int getValueCount(){
-          return (int)ordinalMap.getValueCount();
-        }
-        @Override public int getOrd(        int docID){
-          final int segmentOrd=segmentValues.getOrd(docID);
-          if (segmentOrd >= 0) {
-            return (int)globalOrds.get(segmentOrd);
-          }
- else {
-            return segmentOrd;
-          }
-        }
-      }
-;
-      Map<String,SortedDocValues> perSegmentGlobal=global[i];
-      if (perSegmentGlobal == null) {
-        perSegmentGlobal=new HashMap<>(1);
-        global[i]=perSegmentGlobal;
-      }
-      perSegmentGlobal.put(parentType,globalSortedValues);
+  final Map<String,OrdinalMapAndAtomicFieldData> perType=new HashMap<>();
+  for (  String type : parentTypes) {
+    final AtomicParentChildFieldData[] fieldData=new AtomicParentChildFieldData[indexReader.leaves().size()];
+    for (    LeafReaderContext context : indexReader.leaves()) {
+      fieldData[context.ord]=load(context);
     }
+    final OrdinalMap ordMap=buildOrdinalMap(fieldData,type);
+    ramBytesUsed+=ordMap.ramBytesUsed();
+    perType.put(type,new OrdinalMapAndAtomicFieldData(ordMap,fieldData));
+  }
+  final AtomicParentChildFieldData[] fielddata=new AtomicParentChildFieldData[indexReader.leaves().size()];
+  for (int i=0; i < fielddata.length; ++i) {
+    fielddata[i]=new GlobalAtomicFieldData(parentTypes,perType,i);
   }
   breakerService.getBreaker(CircuitBreaker.Name.FIELDDATA).addWithoutBreaking(ramBytesUsed);
   if (logger.isDebugEnabled()) {
     logger.debug("Global-ordinals[_parent] took {}",new TimeValue(System.nanoTime() - startTime,TimeUnit.NANOSECONDS));
   }
-  return new GlobalFieldData(indexReader,global,ramBytesUsed);
+  return new GlobalFieldData(indexReader,fielddata,ramBytesUsed);
 }

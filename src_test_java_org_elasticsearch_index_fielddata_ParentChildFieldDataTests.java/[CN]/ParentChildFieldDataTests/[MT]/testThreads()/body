@@ -1,0 +1,54 @@
+{
+  final ParentChildIndexFieldData indexFieldData=getForField(childType);
+  final DirectoryReader reader=DirectoryReader.open(writer,true);
+  final IndexParentChildFieldData global=indexFieldData.loadGlobal(reader);
+  final AtomicReference<Exception> error=new AtomicReference<>();
+  final int numThreads=scaledRandomIntBetween(3,8);
+  final Thread[] threads=new Thread[numThreads];
+  final CountDownLatch latch=new CountDownLatch(1);
+  final Map<Object,BytesRef[]> expected=new HashMap<>();
+  for (  LeafReaderContext context : reader.leaves()) {
+    AtomicParentChildFieldData leafData=global.load(context);
+    SortedDocValues parentIds=leafData.getOrdinalsValues(parentType);
+    final BytesRef[] ids=new BytesRef[parentIds.getValueCount()];
+    for (int j=0; j < parentIds.getValueCount(); ++j) {
+      final BytesRef id=parentIds.lookupOrd(j);
+      if (id != null) {
+        ids[j]=BytesRef.deepCopyOf(id);
+      }
+    }
+    expected.put(context.reader().getCoreCacheKey(),ids);
+  }
+  for (int i=0; i < numThreads; ++i) {
+    threads[i]=new Thread(){
+      @Override public void run(){
+        try {
+          latch.await();
+          for (int i=0; i < 100000; ++i) {
+            for (            LeafReaderContext context : reader.leaves()) {
+              AtomicParentChildFieldData leafData=global.load(context);
+              SortedDocValues parentIds=leafData.getOrdinalsValues(parentType);
+              final BytesRef[] expectedIds=expected.get(context.reader().getCoreCacheKey());
+              for (int j=0; j < parentIds.getValueCount(); ++j) {
+                final BytesRef id=parentIds.lookupOrd(j);
+                assertEquals(expectedIds[j],id);
+              }
+            }
+          }
+        }
+ catch (        Exception e) {
+          error.compareAndSet(null,e);
+        }
+      }
+    }
+;
+    threads[i].start();
+  }
+  latch.countDown();
+  for (  Thread thread : threads) {
+    thread.join();
+  }
+  if (error.get() != null) {
+    throw error.get();
+  }
+}

@@ -1,0 +1,33 @@
+{
+  final OrdinalMapAndAtomicFieldData atomicFD=this.atomicFD.get(type);
+  final OrdinalMap ordMap=atomicFD.ordMap;
+  final SortedDocValues[] allSegmentValues=new SortedDocValues[atomicFD.fieldData.length];
+  for (int i=0; i < allSegmentValues.length; ++i) {
+    allSegmentValues[i]=atomicFD.fieldData[i].getOrdinalsValues(type);
+  }
+  final SortedDocValues segmentValues=allSegmentValues[segmentIndex];
+  if (segmentValues.getValueCount() == ordMap.getValueCount()) {
+    return segmentValues;
+  }
+  final LongValues globalOrds=ordMap.getGlobalOrds(segmentIndex);
+  return new SortedDocValues(){
+    @Override public BytesRef lookupOrd(    int ord){
+      final int segmentIndex=ordMap.getFirstSegmentNumber(ord);
+      final int segmentOrd=(int)ordMap.getFirstSegmentOrd(ord);
+      return allSegmentValues[segmentIndex].lookupOrd(segmentOrd);
+    }
+    @Override public int getValueCount(){
+      return (int)ordMap.getValueCount();
+    }
+    @Override public int getOrd(    int docID){
+      final int segmentOrd=segmentValues.getOrd(docID);
+      if (segmentOrd >= 0) {
+        return (int)globalOrds.get(segmentOrd);
+      }
+ else {
+        return segmentOrd;
+      }
+    }
+  }
+;
+}
