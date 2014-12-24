@@ -9,7 +9,6 @@
   String lookupId=null;
   String lookupPath=null;
   String lookupRouting=null;
-  boolean lookupCache=true;
   HashedBytesRef cacheKey=null;
   XContentParser.Token token;
   String execution=EXECUTION_VALUE_PLAIN;
@@ -54,9 +53,6 @@
  else           if ("routing".equals(currentFieldName)) {
             lookupRouting=parser.textOrNull();
           }
- else           if ("cache".equals(currentFieldName)) {
-            lookupCache=parser.booleanValue();
-          }
  else {
             throw new QueryParsingException(parseContext.index(),"[terms] filter does not support [" + currentFieldName + "] within lookup element");
           }
@@ -93,7 +89,7 @@
   if (fieldName == null) {
     throw new QueryParsingException(parseContext.index(),"terms filter requires a field name, followed by array of terms");
   }
-  FieldMapper fieldMapper=null;
+  FieldMapper<?> fieldMapper=null;
   smartNameFieldMappers=parseContext.smartFieldMappers(fieldName);
   String[] previousTypes=null;
   if (smartNameFieldMappers != null) {
@@ -106,11 +102,12 @@
     }
   }
   if (lookupId != null) {
-    if (fieldMapper == null) {
-      return Queries.MATCH_NO_FILTER;
+    final TermsLookup lookup=new TermsLookup(lookupIndex,lookupType,lookupId,lookupRouting,lookupPath,parseContext);
+    final GetResponse getResponse=client.get(new GetRequest(lookup.getIndex(),lookup.getType(),lookup.getId()).preference("_local").routing(lookup.getRouting())).actionGet();
+    if (getResponse.isExists()) {
+      List<Object> values=XContentMapValues.extractRawValues(lookup.getPath(),getResponse.getSourceAsMap());
+      terms.addAll(values);
     }
-    TermsLookup termsLookup=new TermsLookup(lookupIndex,lookupType,lookupId,lookupRouting,lookupPath,parseContext);
-    terms.addAll(termsFilterCache.terms(termsLookup,lookupCache,cacheKey));
   }
   if (terms.isEmpty()) {
     return Queries.MATCH_NO_FILTER;
