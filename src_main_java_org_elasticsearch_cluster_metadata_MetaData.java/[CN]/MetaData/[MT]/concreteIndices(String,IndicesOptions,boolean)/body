@@ -15,22 +15,52 @@
     }
   }
   String[] indices=aliasAndIndexToIndexMap.getOrDefault(aliasOrIndex,Strings.EMPTY_ARRAY);
-  if (indices.length == 0 && !failNoIndices) {
+  if (indices.length == 0 && failNoIndices) {
     throw new IndexMissingException(new Index(aliasOrIndex));
   }
   if (indices.length > 1 && !options.allowAliasesToMultipleIndices()) {
     throw new ElasticsearchIllegalArgumentException("Alias [" + aliasOrIndex + "] has more than one indices associated with it ["+ Arrays.toString(indices)+ "], can't execute a single index op");
   }
-  indexMetaData=this.indices.get(aliasOrIndex);
-  if (indexMetaData != null && indexMetaData.getState() == IndexMetaData.State.CLOSE) {
-    if (failClosed) {
-      throw new IndexClosedException(new Index(aliasOrIndex));
-    }
+  if (allClosedIndices.length == 0) {
+    return indices;
+  }
+switch (indices.length) {
+case 0:
+    return indices;
+case 1:
+  indexMetaData=this.indices.get(indices[0]);
+if (indexMetaData != null && indexMetaData.getState() == IndexMetaData.State.CLOSE) {
+  if (failClosed) {
+    throw new IndexClosedException(new Index(indexMetaData.getIndex()));
+  }
  else {
-      if (options.forbidClosedIndices()) {
-        return Strings.EMPTY_ARRAY;
-      }
+    if (options.forbidClosedIndices()) {
+      return Strings.EMPTY_ARRAY;
     }
   }
-  return indices;
+}
+return indices;
+default :
+ObjectArrayList<String> concreteIndices=new ObjectArrayList<>();
+for (String index : indices) {
+indexMetaData=this.indices.get(index);
+if (indexMetaData != null) {
+if (indexMetaData.getState() == IndexMetaData.State.CLOSE) {
+if (failClosed) {
+  throw new IndexClosedException(new Index(indexMetaData.getIndex()));
+}
+ else if (!options.forbidClosedIndices()) {
+  concreteIndices.add(index);
+}
+}
+ else if (indexMetaData.getState() == IndexMetaData.State.OPEN) {
+concreteIndices.add(index);
+}
+ else {
+throw new IllegalStateException("index state [" + indexMetaData.getState() + "] not supported");
+}
+}
+}
+return concreteIndices.toArray(String.class);
+}
 }
