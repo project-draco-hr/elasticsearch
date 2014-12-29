@@ -3,13 +3,14 @@
     final IndexService indexService;
     final Injector indexInjector;
 synchronized (this) {
-      indexInjector=indicesInjectors.remove(index);
-      if (indexInjector == null) {
+      if (indices.containsKey(index) == false) {
         return;
       }
       logger.debug("[{}] closing ... (reason [{}])",index,reason);
-      Map<String,IndexService> tmpMap=newHashMap(indices);
-      indexService=tmpMap.remove(index);
+      Map<String,Tuple<IndexService,Injector>> tmpMap=newHashMap(indices);
+      Tuple<IndexService,Injector> remove=tmpMap.remove(index);
+      indexService=remove.v1();
+      indexInjector=remove.v2();
       indices=ImmutableMap.copyOf(tmpMap);
     }
     indicesLifecycle.beforeIndexClosed(indexService);
@@ -23,7 +24,7 @@ synchronized (this) {
     }
 ));
     logger.debug("[{}] closing index service (reason [{}])",index,reason);
-    indexService.close(reason);
+    indexService.close(reason,delete);
     logger.debug("[{}] closing index cache (reason [{}])",index,reason);
     indexInjector.getInstance(IndexCache.class).close();
     logger.debug("[{}] clearing index field data (reason [{}])",index,reason);
@@ -36,7 +37,6 @@ synchronized (this) {
     indexInjector.getInstance(IndexQueryParserService.class).close();
     logger.debug("[{}] closing index service (reason [{}])",index,reason);
     indexInjector.getInstance(IndexStore.class).close();
-    Injectors.close(injector);
     logger.debug("[{}] closed... (reason [{}])",index,reason);
     indicesLifecycle.afterIndexClosed(indexService.index());
     if (delete) {

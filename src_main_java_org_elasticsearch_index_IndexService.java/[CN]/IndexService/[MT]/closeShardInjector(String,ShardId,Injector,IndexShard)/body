@@ -1,0 +1,33 @@
+{
+  final int shardId=sId.id();
+  try {
+    indicesLifecycle.beforeIndexShardClosed(sId,indexShard);
+    for (    Class<? extends Closeable> closeable : pluginsService.shardServices()) {
+      try {
+        shardInjector.getInstance(closeable).close();
+      }
+ catch (      Throwable e) {
+        logger.debug("[{}] failed to clean plugin shard service [{}]",e,shardId,closeable);
+      }
+    }
+    closeInjectorResource(sId,shardInjector,TranslogService.class);
+    if (indexShard != null) {
+      try {
+        indexShard.close(reason);
+      }
+ catch (      Throwable e) {
+        logger.debug("[{}] failed to close index shard",e,shardId);
+      }
+    }
+    closeInjectorResource(sId,shardInjector,Engine.class,MergeSchedulerProvider.class,MergePolicyProvider.class,IndexShardGatewayService.class,Translog.class,PercolatorQueriesRegistry.class);
+    indicesLifecycle.afterIndexShardClosed(sId,indexShard);
+  }
+  finally {
+    try {
+      shardInjector.getInstance(Store.class).close();
+    }
+ catch (    Throwable e) {
+      logger.warn("[{}] failed to close store on shard removal (reason: [{}])",e,shardId,reason);
+    }
+  }
+}

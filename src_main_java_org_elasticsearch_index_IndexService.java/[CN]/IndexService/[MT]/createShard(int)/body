@@ -2,12 +2,13 @@
   if (closed.get()) {
     throw new ElasticsearchIllegalStateException("Can't create shard [" + index.name() + "]["+ sShardId+ "], closed");
   }
-  ShardId shardId=new ShardId(index,sShardId);
+  final ShardId shardId=new ShardId(index,sShardId);
   ShardLock lock=null;
   boolean success=false;
+  Injector shardInjector=null;
   try {
     lock=nodeEnv.shardLock(shardId,TimeUnit.SECONDS.toMillis(5));
-    if (shardsInjectors.containsKey(shardId.id())) {
+    if (shards.containsKey(shardId.id())) {
       throw new IndexShardAlreadyExistsException(shardId + " already exists");
     }
     indicesLifecycle.beforeIndexShardCreated(shardId);
@@ -18,7 +19,7 @@
     modules.add(new ShardIndexingModule());
     modules.add(new ShardSearchModule());
     modules.add(new ShardGetModule());
-    modules.add(new StoreModule(indexSettings,injector.getInstance(IndexStore.class),lock));
+    modules.add(new StoreModule(indexSettings,injector.getInstance(IndexStore.class),lock,new StoreCloseListener(shardId)));
     modules.add(new DeletionPolicyModule(indexSettings));
     modules.add(new MergePolicyModule(indexSettings));
     modules.add(new MergeSchedulerModule(indexSettings));
@@ -33,7 +34,6 @@
     modules.add(new ShardTermVectorsModule());
     modules.add(new IndexShardSnapshotModule());
     modules.add(new SuggestShardModule());
-    Injector shardInjector;
     try {
       shardInjector=modules.createChildInjector(injector);
     }
@@ -43,11 +43,10 @@
 catch (    Throwable e) {
       throw new IndexShardCreationException(shardId,e);
     }
-    shardsInjectors=newMapBuilder(shardsInjectors).put(shardId.id(),shardInjector).immutableMap();
     IndexShard indexShard=shardInjector.getInstance(IndexShard.class);
     indicesLifecycle.indexShardStateChanged(indexShard,null,"shard created");
     indicesLifecycle.afterIndexShardCreated(indexShard);
-    shards=newMapBuilder(shards).put(shardId.id(),indexShard).immutableMap();
+    shards=newMapBuilder(shards).put(shardId.id(),new Tuple<>(indexShard,shardInjector)).immutableMap();
     success=true;
     return indexShard;
   }
@@ -57,6 +56,10 @@ catch (    Throwable e) {
  finally {
     if (success == false) {
       IOUtils.closeWhileHandlingException(lock);
+      if (shardInjector != null) {
+        IndexShard indexShard=shardInjector.getInstance(IndexShard.class);
+        closeShardInjector("initialization failed",shardId,shardInjector,indexShard);
+      }
     }
   }
 }
