@@ -1,20 +1,37 @@
 {
-  final Class<? extends HashFunction> pre20HashFunction=settings.getAsClass(DEPRECATED_SETTING_ROUTING_HASH_FUNCTION,null,"org.elasticsearch.cluster.routing.operation.hash.","HashFunction");
-  final Boolean pre20UseType=settings.getAsBoolean(DEPRECATED_SETTING_ROUTING_USE_TYPE,null);
-  MetaData metaData=loadMetaState();
-  for (  IndexMetaData indexMetaData : metaData) {
-    if (indexMetaData.settings().get(IndexMetaData.SETTING_LEGACY_ROUTING_HASH_FUNCTION) == null && indexMetaData.getCreationVersion().before(Version.V_2_0_0)) {
-      Settings indexSettings=ImmutableSettings.builder().put(indexMetaData.settings()).put(IndexMetaData.SETTING_LEGACY_ROUTING_HASH_FUNCTION,pre20HashFunction == null ? DjbHashFunction.class : pre20HashFunction).put(IndexMetaData.SETTING_LEGACY_ROUTING_USE_TYPE,pre20UseType == null ? false : pre20UseType).build();
-      IndexMetaData newMetaData=IndexMetaData.builder(indexMetaData).version(indexMetaData.version()).settings(indexSettings).build();
-      writeIndex("upgrade",newMetaData,null);
-    }
- else     if (indexMetaData.getCreationVersion().onOrAfter(Version.V_2_0_0)) {
-      if (indexMetaData.getSettings().get(IndexMetaData.SETTING_LEGACY_ROUTING_HASH_FUNCTION) != null || indexMetaData.getSettings().get(IndexMetaData.SETTING_LEGACY_ROUTING_USE_TYPE) != null) {
-        throw new ElasticsearchIllegalStateException("Indices created on or after 2.0 should NOT contain [" + IndexMetaData.SETTING_LEGACY_ROUTING_HASH_FUNCTION + "] + or ["+ IndexMetaData.SETTING_LEGACY_ROUTING_USE_TYPE+ "] in their index settings");
-      }
-    }
-  }
-  if (pre20HashFunction != null || pre20UseType != null) {
-    logger.warn("Settings [{}] and [{}] are deprecated. Index settings from your old indices have been updated to record the fact that they " + "used some custom routing logic, you can now remove these settings from your `elasticsearch.yml` file",DEPRECATED_SETTING_ROUTING_HASH_FUNCTION,DEPRECATED_SETTING_ROUTING_USE_TYPE);
-  }
+  final Class<? extends HashFunction> pre20HashFunction;
+  final String pre20HashFunctionName=settings.get(DEPRECATED_SETTING_ROUTING_HASH_FUNCTION,null);
+  final boolean hasCustomPre20HashFunction=pre20HashFunctionName != null;
+  if (hasCustomPre20HashFunction) {
+switch (pre20HashFunctionName) {
+case "org.elasticsearch.cluster.routing.operation.hash.simple.SimpleHashFunction":
+      pre20HashFunction=SimpleHashFunction.class;
+    break;
+case "org.elasticsearch.cluster.routing.operation.hash.djb.DjbHashFunction":
+  pre20HashFunction=DjbHashFunction.class;
+break;
+default :
+pre20HashFunction=settings.getAsClass(DEPRECATED_SETTING_ROUTING_HASH_FUNCTION,DjbHashFunction.class,"org.elasticsearch.cluster.routing.","HashFunction");
+}
+}
+ else {
+pre20HashFunction=DjbHashFunction.class;
+}
+final Boolean pre20UseType=settings.getAsBoolean(DEPRECATED_SETTING_ROUTING_USE_TYPE,null);
+MetaData metaData=loadMetaState();
+for (IndexMetaData indexMetaData : metaData) {
+if (indexMetaData.settings().get(IndexMetaData.SETTING_LEGACY_ROUTING_HASH_FUNCTION) == null && indexMetaData.getCreationVersion().before(Version.V_2_0_0)) {
+Settings indexSettings=ImmutableSettings.builder().put(indexMetaData.settings()).put(IndexMetaData.SETTING_LEGACY_ROUTING_HASH_FUNCTION,pre20HashFunction).put(IndexMetaData.SETTING_LEGACY_ROUTING_USE_TYPE,pre20UseType == null ? false : pre20UseType).build();
+IndexMetaData newMetaData=IndexMetaData.builder(indexMetaData).version(indexMetaData.version()).settings(indexSettings).build();
+writeIndex("upgrade",newMetaData,null);
+}
+ else if (indexMetaData.getCreationVersion().onOrAfter(Version.V_2_0_0)) {
+if (indexMetaData.getSettings().get(IndexMetaData.SETTING_LEGACY_ROUTING_HASH_FUNCTION) != null || indexMetaData.getSettings().get(IndexMetaData.SETTING_LEGACY_ROUTING_USE_TYPE) != null) {
+throw new ElasticsearchIllegalStateException("Indices created on or after 2.0 should NOT contain [" + IndexMetaData.SETTING_LEGACY_ROUTING_HASH_FUNCTION + "] + or ["+ IndexMetaData.SETTING_LEGACY_ROUTING_USE_TYPE+ "] in their index settings");
+}
+}
+}
+if (hasCustomPre20HashFunction || pre20UseType != null) {
+logger.warn("Settings [{}] and [{}] are deprecated. Index settings from your old indices have been updated to record the fact that they " + "used some custom routing logic, you can now remove these settings from your `elasticsearch.yml` file",DEPRECATED_SETTING_ROUTING_HASH_FUNCTION,DEPRECATED_SETTING_ROUTING_USE_TYPE);
+}
 }
