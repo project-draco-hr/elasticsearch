@@ -32,26 +32,33 @@
     assertTrue(Files.exists(path));
   }
   final AtomicReference<Throwable> threadException=new AtomicReference<>();
+  final CountDownLatch latch=new CountDownLatch(1);
   if (randomBoolean()) {
     Thread t=new Thread(new AbstractRunnable(){
       @Override public void onFailure(      Throwable t){
         logger.error("unexpected error",t);
         threadException.set(t);
+        latch.countDown();
       }
       @Override protected void doRun() throws Exception {
         try (ShardLock fooLock=env.shardLock(new ShardId("foo",1))){
           Thread.sleep(100);
         }
-       }
+         latch.countDown();
+      }
     }
 );
     t.start();
+  }
+ else {
+    latch.countDown();
   }
   env.deleteIndexDirectorySafe(new Index("foo"),5000,idxSettings);
   assertNull(threadException.get());
   for (  Path path : env.indexPaths(new Index("foo"))) {
     assertFalse(Files.exists(path));
   }
+  latch.await();
   assertTrue("LockedShards: " + env.lockedShards(),env.lockedShards().isEmpty());
   env.close();
 }
