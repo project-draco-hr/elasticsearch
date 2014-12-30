@@ -1,0 +1,68 @@
+{
+  final Aggregator first=factory.create(context,parent,true);
+  return new Aggregator(first.name(),AggregatorFactories.EMPTY,first.context(),first.parent(),first.metaData()){
+    ObjectArray<Aggregator> aggregators;
+    LeafReaderContext readerContext;
+{
+      aggregators=bigArrays.newObjectArray(1);
+      aggregators.set(0,first);
+    }
+    @Override public boolean shouldCollect(){
+      return first.shouldCollect();
+    }
+    @Override protected void doPreCollection() throws IOException {
+      for (long i=0; i < aggregators.size(); ++i) {
+        final Aggregator aggregator=aggregators.get(i);
+        if (aggregator != null) {
+          aggregator.preCollection();
+        }
+      }
+    }
+    @Override protected void doPostCollection() throws IOException {
+      for (long i=0; i < aggregators.size(); ++i) {
+        final Aggregator aggregator=aggregators.get(i);
+        if (aggregator != null) {
+          aggregator.postCollection();
+        }
+      }
+    }
+    @Override public void collect(    int doc,    long owningBucketOrdinal) throws IOException {
+      aggregators=bigArrays.grow(aggregators,owningBucketOrdinal + 1);
+      Aggregator aggregator=aggregators.get(owningBucketOrdinal);
+      if (aggregator == null) {
+        aggregator=factory.create(context,parent,true);
+        aggregator.preCollection();
+        aggregator.setNextReader(readerContext);
+        aggregators.set(owningBucketOrdinal,aggregator);
+      }
+      aggregator.collect(doc,0);
+    }
+    @Override public void setNextReader(    LeafReaderContext context) throws IOException {
+      this.readerContext=context;
+      for (long i=0; i < aggregators.size(); ++i) {
+        final Aggregator aggregator=aggregators.get(i);
+        if (aggregator != null) {
+          aggregator.setNextReader(context);
+        }
+      }
+    }
+    @Override public InternalAggregation buildAggregation(    long owningBucketOrdinal){
+      throw new ElasticsearchIllegalStateException("Invalid context - aggregation must use addResults() to collect child results");
+    }
+    @Override public InternalAggregation buildEmptyAggregation(){
+      return first.buildEmptyAggregation();
+    }
+    @Override public void doClose(){
+      Releasables.close(aggregators);
+    }
+    @Override public void gatherAnalysis(    BucketAnalysisCollector results,    long owningBucketOrdinal) throws IOException {
+      if (owningBucketOrdinal >= aggregators.size() || aggregators.get(owningBucketOrdinal) == null) {
+        results.add(first.buildEmptyAggregation());
+      }
+ else {
+        aggregators.get(owningBucketOrdinal).gatherAnalysis(results,0);
+      }
+    }
+  }
+;
+}
