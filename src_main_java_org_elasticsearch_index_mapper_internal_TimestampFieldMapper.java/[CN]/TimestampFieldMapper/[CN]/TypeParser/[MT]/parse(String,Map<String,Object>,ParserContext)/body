@@ -1,6 +1,8 @@
 {
   TimestampFieldMapper.Builder builder=timestamp();
   parseField(builder,builder.name,node,parserContext);
+  boolean defaultSet=false;
+  Boolean ignoreMissing=null;
   for (Iterator<Map.Entry<String,Object>> iterator=node.entrySet().iterator(); iterator.hasNext(); ) {
     Map.Entry<String,Object> entry=iterator.next();
     String fieldName=Strings.toUnderscoreCase(entry.getKey());
@@ -19,9 +21,28 @@
       iterator.remove();
     }
  else     if (fieldName.equals("default")) {
-      builder.defaultTimestamp(fieldNode == null ? null : fieldNode.toString());
+      if (fieldNode == null) {
+        if (parserContext.indexVersionCreated().onOrAfter(Version.V_1_4_0_Beta1) && parserContext.indexVersionCreated().before(Version.V_1_5_0)) {
+          builder.ignoreMissing(false);
+        }
+ else {
+          throw new TimestampParsingException("default timestamp can not be set to null");
+        }
+      }
+ else {
+        builder.defaultTimestamp(fieldNode.toString());
+        defaultSet=true;
+      }
       iterator.remove();
     }
+ else     if (fieldName.equals("ignore_missing")) {
+      ignoreMissing=nodeBooleanValue(fieldNode);
+      builder.ignoreMissing(ignoreMissing);
+      iterator.remove();
+    }
+  }
+  if (defaultSet && (ignoreMissing != null && ignoreMissing == false)) {
+    throw new TimestampParsingException("default timestamp can not be set with ignore_missing set to false");
   }
   return builder;
 }
