@@ -1,0 +1,21 @@
+{
+  RoutingTable routingTable;
+  AllocationService strategy=createAllocationService(settingsBuilder().build());
+  RoutingAllocation.Result reroute=strategy.reroute(clusterState);
+  routingTable=reroute.routingTable();
+  clusterState=ClusterState.builder(clusterState).routingTable(routingTable).build();
+  routingTable=clusterState.routingTable();
+  int numRelocations=0;
+  while (true) {
+    List<ShardRouting> initializing=routingTable.shardsWithState(INITIALIZING);
+    if (initializing.isEmpty()) {
+      break;
+    }
+    logger.debug(initializing.toString());
+    numRelocations+=initializing.size();
+    routingTable=strategy.applyStartedShards(clusterState,initializing).routingTable();
+    clusterState=ClusterState.builder(clusterState).routingTable(routingTable).build();
+  }
+  logger.debug("--> num relocations to get balance: " + numRelocations);
+  return clusterState;
+}
