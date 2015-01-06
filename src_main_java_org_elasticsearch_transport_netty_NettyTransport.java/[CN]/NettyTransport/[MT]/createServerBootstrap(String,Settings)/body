@@ -9,12 +9,14 @@
   ByteSizeValue tcpSendBufferSize=settings.getAsBytesSize("tcp_send_buffer_size",TCP_DEFAULT_SEND_BUFFER_SIZE);
   ByteSizeValue tcpReceiveBufferSize=settings.getAsBytesSize("tcp_receive_buffer_size",TCP_DEFAULT_RECEIVE_BUFFER_SIZE);
   logger.debug("using profile[{}], worker_count[{}], port[{}], bind_host[{}], publish_host[{}], compress[{}], connect_timeout[{}], connections_per_node[{}/{}/{}/{}/{}], receive_predictor[{}->{}]",name,workerCount,port,bindHost,publishHost,compress,connectTimeout,connectionsPerNodeRecovery,connectionsPerNodeBulk,connectionsPerNodeReg,connectionsPerNodeState,connectionsPerNodePing,receivePredictorMin,receivePredictorMax);
+  final ThreadFactory bossFactory=daemonThreadFactory(this.settings,HTTP_SERVER_BOSS_THREAD_NAME_PREFIX,name);
+  final ThreadFactory workerFactory=daemonThreadFactory(this.settings,HTTP_SERVER_WORKER_THREAD_NAME_PREFIX,name);
   ServerBootstrap serverBootstrap;
   if (blockingServer) {
-    serverBootstrap=new ServerBootstrap(new OioServerSocketChannelFactory(Executors.newCachedThreadPool(daemonThreadFactory(this.settings,"transport_server_boss",name)),Executors.newCachedThreadPool(daemonThreadFactory(this.settings,"transport_server_worker",name))));
+    serverBootstrap=new ServerBootstrap(new OioServerSocketChannelFactory(Executors.newCachedThreadPool(bossFactory),Executors.newCachedThreadPool(workerFactory)));
   }
  else {
-    serverBootstrap=new ServerBootstrap(new NioServerSocketChannelFactory(Executors.newCachedThreadPool(daemonThreadFactory(this.settings,"transport_server_boss",name)),Executors.newCachedThreadPool(daemonThreadFactory(this.settings,"transport_server_worker",name)),workerCount));
+    serverBootstrap=new ServerBootstrap(new NioServerSocketChannelFactory(Executors.newCachedThreadPool(bossFactory),Executors.newCachedThreadPool(workerFactory),workerCount));
   }
   serverBootstrap.setPipelineFactory(configureServerChannelPipelineFactory(name,settings));
   if (!"default".equals(tcpNoDelay)) {
