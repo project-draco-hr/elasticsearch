@@ -49,7 +49,7 @@
   System.arraycopy(docCounts,0,extendedValueCounts,addedBucketsLeft,docCounts.length);
   SearchResponse response=null;
   try {
-    response=client().prepareSearch("idx2").addAggregation(dateHistogram("histo").field("date").interval(DateHistogram.Interval.days(interval)).minDocCount(0).extendedBounds(format(boundsMin,pattern),format(boundsMax,pattern)).format(pattern)).execute().actionGet();
+    response=client().prepareSearch("idx2").addAggregation(dateHistogram("histo").field("date").interval(DateHistogramInterval.days(interval)).minDocCount(0).extendedBounds(format(boundsMin,pattern),format(boundsMax,pattern)).format(pattern)).execute().actionGet();
     if (invalidBoundsError) {
       fail("Expected an exception to be thrown when bounds.min is greater than bounds.max");
       return;
@@ -64,15 +64,17 @@
     }
   }
   assertSearchResponse(response);
-  DateHistogram histo=response.getAggregations().get("histo");
+  Histogram histo=response.getAggregations().get("histo");
   assertThat(histo,notNullValue());
   assertThat(histo.getName(),equalTo("histo"));
-  assertThat(histo.getBuckets().size(),equalTo(bucketsCount));
+  List<? extends Bucket> buckets=histo.getBuckets();
+  assertThat(buckets.size(),equalTo(bucketsCount));
   DateTime key=baseKey.isBefore(boundsMinKey) ? baseKey : boundsMinKey;
   for (int i=0; i < bucketsCount; i++) {
-    DateHistogram.Bucket bucket=histo.getBucketByKey(format(key,pattern));
+    Histogram.Bucket bucket=buckets.get(i);
     assertThat(bucket,notNullValue());
-    assertThat(bucket.getKeyAsDate(),equalTo(key));
+    assertThat(((DateTime)bucket.getKey()),equalTo(key));
+    assertThat(bucket.getKeyAsString(),equalTo(format(key,pattern)));
     assertThat(bucket.getDocCount(),equalTo(extendedValueCounts[i]));
     key=key.plusDays(interval);
   }
