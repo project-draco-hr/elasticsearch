@@ -1,0 +1,29 @@
+{
+  Directory dir=newDirectory();
+  IndexWriter iw=new IndexWriter(dir,new IndexWriterConfig(null));
+  Document doc=new Document();
+  Token token=new Token("1",0,1);
+  token.setPayload(new BytesRef(Numbers.longToBytes(3)));
+  doc.add(new TextField(UidFieldMapper.NAME,new CannedTokenStream(token)));
+  iw.addDocument(doc);
+  doc=new Document();
+  token=new Token("2",0,1);
+  token.setPayload(new BytesRef(Numbers.longToBytes(4)));
+  doc.add(new TextField(UidFieldMapper.NAME,new CannedTokenStream(token)));
+  iw.addDocument(doc);
+  iw.commit();
+  CodecReader reader=getOnlySegmentReader(DirectoryReader.open(iw,true));
+  CodecReader upgraded=VersionFieldUpgrader.wrap(reader);
+  assertNotSame(reader,upgraded);
+  FieldInfo versionField=upgraded.getFieldInfos().fieldInfo(VersionFieldMapper.NAME);
+  assertNotNull(versionField);
+  assertEquals(DocValuesType.NUMERIC,versionField.getDocValuesType());
+  assertEquals(3,upgraded.getNumericDocValues(VersionFieldMapper.NAME).get(0));
+  assertEquals(4,upgraded.getNumericDocValues(VersionFieldMapper.NAME).get(1));
+  assertTrue(upgraded.getDocsWithField(VersionFieldMapper.NAME).get(0));
+  assertTrue(upgraded.getDocsWithField(VersionFieldMapper.NAME).get(1));
+  TestUtil.checkReader(upgraded);
+  reader.close();
+  iw.close();
+  dir.close();
+}
