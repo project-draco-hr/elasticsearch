@@ -27,6 +27,7 @@
             RestoreSource restoreSource=new RestoreSource(snapshotId,index);
             String renamedIndex=indexEntry.getKey();
             IndexMetaData snapshotIndexMetaData=metaData.index(index);
+            snapshotIndexMetaData=updateIndexSettings(snapshotIndexMetaData,request.indexSettings,request.ignoreIndexSettings);
             IndexMetaData currentIndexMetaData=currentState.metaData().index(renamedIndex);
             IntSet ignoreShards=new IntOpenHashSet();
             if (currentIndexMetaData == null) {
@@ -131,6 +132,52 @@
         if (currentIndexMetaData.getNumberOfShards() != snapshotIndexMetaData.getNumberOfShards()) {
           throw new SnapshotRestoreException(snapshotId,"cannot restore index [" + renamedIndex + "] with ["+ currentIndexMetaData.getNumberOfShards()+ "] shard from snapshot with ["+ snapshotIndexMetaData.getNumberOfShards()+ "] shards");
         }
+      }
+      /** 
+ * Optionally updates index settings in indexMetaData by removing settings listed in ignoreSettings and
+ * merging them with settings in changeSettings.
+ */
+      private IndexMetaData updateIndexSettings(      IndexMetaData indexMetaData,      Settings changeSettings,      String[] ignoreSettings){
+        if (changeSettings.names().isEmpty() && ignoreSettings.length == 0) {
+          return indexMetaData;
+        }
+        IndexMetaData.Builder builder=IndexMetaData.builder(indexMetaData);
+        Map<String,String> settingsMap=newHashMap(indexMetaData.settings().getAsMap());
+        List<String> simpleMatchPatterns=newArrayList();
+        for (        String ignoredSetting : ignoreSettings) {
+          if (!Regex.isSimpleMatchPattern(ignoredSetting)) {
+            if (UNREMOVABLE_SETTINGS.contains(ignoredSetting)) {
+              throw new SnapshotRestoreException(snapshotId,"cannot remove setting [" + ignoredSetting + "] on restore");
+            }
+ else {
+              settingsMap.remove(ignoredSetting);
+            }
+          }
+ else {
+            simpleMatchPatterns.add(ignoredSetting);
+          }
+        }
+        if (!simpleMatchPatterns.isEmpty()) {
+          String[] removePatterns=simpleMatchPatterns.toArray(new String[simpleMatchPatterns.size()]);
+          Iterator<Map.Entry<String,String>> iterator=settingsMap.entrySet().iterator();
+          while (iterator.hasNext()) {
+            Map.Entry<String,String> entry=iterator.next();
+            if (UNREMOVABLE_SETTINGS.contains(entry.getKey()) == false) {
+              if (Regex.simpleMatch(removePatterns,entry.getKey())) {
+                iterator.remove();
+              }
+            }
+          }
+        }
+        for (        Map.Entry<String,String> entry : changeSettings.getAsMap().entrySet()) {
+          if (UNMODIFIABLE_SETTINGS.contains(entry.getKey())) {
+            throw new SnapshotRestoreException(snapshotId,"cannot modify setting [" + entry.getKey() + "] on restore");
+          }
+ else {
+            settingsMap.put(entry.getKey(),entry.getValue());
+          }
+        }
+        return builder.settings(ImmutableSettings.builder().put(settingsMap)).build();
       }
       private void restoreGlobalStateIfRequested(      MetaData.Builder mdBuilder){
         if (request.includeGlobalState()) {
