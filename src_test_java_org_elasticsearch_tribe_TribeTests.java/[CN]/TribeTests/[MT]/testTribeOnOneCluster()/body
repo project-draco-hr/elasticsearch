@@ -1,8 +1,8 @@
 {
   setupTribeNode(ImmutableSettings.EMPTY);
   logger.info("create 2 indices, test1 on t1, and test2 on t2");
-  internalCluster().client().admin().indices().prepareCreate("test1").get();
-  cluster2.client().admin().indices().prepareCreate("test2").get();
+  assertAcked(internalCluster().client().admin().indices().prepareCreate("test1"));
+  assertAcked(cluster2.client().admin().indices().prepareCreate("test2"));
   logger.info("wait till test1 and test2 exists in the tribe node state");
   awaitIndicesInClusterState("test1","test2");
   logger.info("wait till tribe has the same nodes as the 2 clusters");
@@ -26,7 +26,7 @@
   logger.info("write to another type");
   tribeClient.prepareIndex("test1","type2","1").setSource("field1","value1").get();
   tribeClient.prepareIndex("test2","type2","1").setSource("field1","value1").get();
-  tribeClient.admin().indices().prepareRefresh().get();
+  assertNoFailures(tribeClient.admin().indices().prepareRefresh().get());
   logger.info("verify they are there");
   assertHitCount(tribeClient.prepareCount().get(),4l);
   assertHitCount(tribeClient.prepareSearch().get(),4l);
@@ -49,17 +49,14 @@
   }
   logger.info("delete an index, and make sure its reflected");
   cluster2.client().admin().indices().prepareDelete("test2").get();
-  assertBusy(new Runnable(){
-    @Override public void run(){
-      ClusterState tribeState=tribeNode.client().admin().cluster().prepareState().get().getState();
-      assertTrue(tribeState.getMetaData().hasIndex("test1"));
-      assertFalse(tribeState.getMetaData().hasIndex("test2"));
-      assertTrue(tribeState.getRoutingTable().hasIndex("test1"));
-      assertFalse(tribeState.getRoutingTable().hasIndex("test2"));
-    }
+  awaitIndicesNotInClusterState("test2");
+  try {
+    logger.info("stop a node, make sure its reflected");
+    cluster2.stopRandomDataNode();
+    awaitSameNodeCounts();
   }
-);
-  logger.info("stop a node, make sure its reflected");
-  cluster2.stopRandomDataNode();
-  awaitSameNodeCounts();
+  finally {
+    cluster2.startNode();
+    awaitSameNodeCounts();
+  }
 }
