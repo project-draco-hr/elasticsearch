@@ -1,5 +1,7 @@
 {
   CompletionFieldMapper.Builder builder=completionField(name);
+  NamedAnalyzer indexAnalyzer=null;
+  NamedAnalyzer searchAnalyzer=null;
   for (Iterator<Map.Entry<String,Object>> iterator=node.entrySet().iterator(); iterator.hasNext(); ) {
     Map.Entry<String,Object> entry=iterator.next();
     String fieldName=entry.getKey();
@@ -7,18 +9,12 @@
     if (fieldName.equals("type")) {
       continue;
     }
-    if (fieldName.equals("analyzer")) {
-      NamedAnalyzer analyzer=getNamedAnalyzer(parserContext,fieldNode.toString());
-      builder.indexAnalyzer(analyzer);
-      builder.searchAnalyzer(analyzer);
-      iterator.remove();
-    }
- else     if (Fields.INDEX_ANALYZER.match(fieldName)) {
-      builder.indexAnalyzer(getNamedAnalyzer(parserContext,fieldNode.toString()));
+    if (Fields.ANALYZER.equals(fieldName) || fieldName.equals("index_analyzer") && parserContext.indexVersionCreated().before(Version.V_2_0_0)) {
+      indexAnalyzer=getNamedAnalyzer(parserContext,fieldNode.toString());
       iterator.remove();
     }
  else     if (Fields.SEARCH_ANALYZER.match(fieldName)) {
-      builder.searchAnalyzer(getNamedAnalyzer(parserContext,fieldNode.toString()));
+      searchAnalyzer=getNamedAnalyzer(parserContext,fieldNode.toString());
       iterator.remove();
     }
  else     if (fieldName.equals(Fields.PAYLOADS)) {
@@ -47,12 +43,17 @@
       iterator.remove();
     }
   }
-  if (builder.searchAnalyzer == null) {
-    builder.searchAnalyzer(parserContext.analysisService().analyzer("simple"));
+  if (indexAnalyzer == null) {
+    if (searchAnalyzer != null) {
+      throw new MapperParsingException("analyzer on completion field [" + name + "] must be set when search_analyzer is set");
+    }
+    indexAnalyzer=searchAnalyzer=parserContext.analysisService().analyzer("simple");
   }
-  if (builder.indexAnalyzer == null) {
-    builder.indexAnalyzer(parserContext.analysisService().analyzer("simple"));
+ else   if (searchAnalyzer == null) {
+    searchAnalyzer=indexAnalyzer;
   }
+  builder.indexAnalyzer(indexAnalyzer);
+  builder.searchAnalyzer(searchAnalyzer);
   builder.postingsFormat(parserContext.postingFormatService().get("default"));
   return builder;
 }
