@@ -7,15 +7,27 @@
  else {
     topDocsCollector=TopScoreDocCollector.create(topN);
   }
-  String field;
-  ParentFieldMapper hitParentFieldMapper=documentMapper.parentFieldMapper();
-  if (hitParentFieldMapper.active()) {
+  final String term;
+  final String field;
+  if (documentMapper.parentFieldMapper().active()) {
     field=ParentFieldMapper.NAME;
+    term=Uid.createUid(hitContext.hit().type(),hitContext.hit().id());
   }
  else {
     field=UidFieldMapper.NAME;
+    SearchHitField parentField=hitContext.hit().field(ParentFieldMapper.NAME);
+    if (parentField != null) {
+      term=parentField.getValue();
+    }
+ else {
+      SingleFieldsVisitor fieldsVisitor=new SingleFieldsVisitor(ParentFieldMapper.NAME);
+      hitContext.reader().document(hitContext.docId(),fieldsVisitor);
+      if (fieldsVisitor.fields().isEmpty()) {
+        return Lucene.EMPTY_TOP_DOCS;
+      }
+      term=(String)fieldsVisitor.fields().get(ParentFieldMapper.NAME).get(0);
+    }
   }
-  String term=Uid.createUid(hitContext.hit().type(),hitContext.hit().id());
   Filter filter=new TermFilter(new Term(field,term));
   Filter typeFilter=documentMapper.typeFilter();
   context.searcher().search(new FilteredQuery(query,new AndFilter(Arrays.asList(filter,typeFilter))),topDocsCollector);
