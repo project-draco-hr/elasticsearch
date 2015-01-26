@@ -1,11 +1,15 @@
 {
+  if (random == null) {
+    random=RandomizedTest.getRandom();
+  }
   failures=new CopyOnWriteArrayList<>();
   writers=new Thread[writerCount];
   stopLatch=new CountDownLatch(writers.length);
   logger.info("--> creating {} indexing threads (auto start: [{}], numOfDocs: [{}])",writerCount,autoStart,numOfDocs);
   for (int i=0; i < writers.length; i++) {
     final int indexerId=i;
-    final boolean batch=RandomizedTest.getRandom().nextBoolean();
+    final boolean batch=random.nextBoolean();
+    final Random threadRandom=new Random(random.nextLong());
     writers[i]=new Thread(){
       @Override public void run(){
         long id=-1;
@@ -14,7 +18,7 @@
           logger.info("**** starting indexing thread {}",indexerId);
           while (!stop.get()) {
             if (batch) {
-              int batchSize=RandomizedTest.getRandom().nextInt(20) + 1;
+              int batchSize=threadRandom.nextInt(20) + 1;
               if (hasBudget.get()) {
                 batchSize=Math.max(Math.min(batchSize,availableBudget.availablePermits()),1);
                 if (!availableBudget.tryAcquire(batchSize,250,TimeUnit.MILLISECONDS)) {
@@ -24,7 +28,7 @@
               BulkRequestBuilder bulkRequest=client.prepareBulk();
               for (int i=0; i < batchSize; i++) {
                 id=idGenerator.incrementAndGet();
-                bulkRequest.add(client.prepareIndex(index,type,Long.toString(id)).setSource("test","value" + id));
+                bulkRequest.add(client.prepareIndex(index,type,Long.toString(id)).setSource(generateSource(id,threadRandom)));
               }
               BulkResponse bulkResponse=bulkRequest.get();
               for (              BulkItemResponse bulkItemResponse : bulkResponse) {
@@ -41,7 +45,7 @@
                 continue;
               }
               id=idGenerator.incrementAndGet();
-              client.prepareIndex(index,type,Long.toString(id) + "-" + indexerId).setSource("test","value" + id).get();
+              client.prepareIndex(index,type,Long.toString(id) + "-" + indexerId).setSource(generateSource(id,threadRandom)).get();
               indexCounter.incrementAndGet();
             }
           }
