@@ -27,7 +27,7 @@
   assertAcked(prepareCreate("test").setSettings(settings).addMapping("type",mapping));
   ensureSearchable();
   final int numDocs=between(10,100);
-  long numCreated=0;
+  int numCreated=0;
   boolean[] added=new boolean[numDocs];
   for (int i=0; i < numDocs; i++) {
     try {
@@ -49,17 +49,17 @@
   for (int i=0; i < numSearches; i++) {
     try {
       int docToQuery=between(0,numDocs - 1);
-      long expectedResults=added[docToQuery] ? 1 : 0;
+      int expectedResults=added[docToQuery] ? 1 : 0;
       logger.info("Searching for [test:{}]",English.intToEnglish(docToQuery));
-      SearchResponse searchResponse=client().prepareSearch().setQuery(QueryBuilders.matchQuery("test",English.intToEnglish(docToQuery))).get();
+      SearchResponse searchResponse=client().prepareSearch().setQuery(QueryBuilders.matchQuery("test",English.intToEnglish(docToQuery))).setSize(expectedResults).get();
       logger.info("Successful shards: [{}]  numShards: [{}]",searchResponse.getSuccessfulShards(),test.numPrimaries);
       if (searchResponse.getSuccessfulShards() == test.numPrimaries && !refreshFailed) {
-        assertThat(searchResponse.getHits().getTotalHits(),Matchers.equalTo(expectedResults));
+        assertResultsAndLogOnFailure(expectedResults,searchResponse);
       }
-      searchResponse=client().prepareSearch().setQuery(QueryBuilders.matchAllQuery()).get();
+      searchResponse=client().prepareSearch().setQuery(QueryBuilders.matchAllQuery()).setSize(numCreated).addSort("_id",SortOrder.ASC).get();
       logger.info("Match all Successful shards: [{}]  numShards: [{}]",searchResponse.getSuccessfulShards(),test.numPrimaries);
       if (searchResponse.getSuccessfulShards() == test.numPrimaries && !refreshFailed) {
-        assertThat(searchResponse.getHits().getTotalHits(),Matchers.equalTo(numCreated));
+        assertResultsAndLogOnFailure(numCreated,searchResponse);
       }
     }
  catch (    SearchPhaseExecutionException ex) {
