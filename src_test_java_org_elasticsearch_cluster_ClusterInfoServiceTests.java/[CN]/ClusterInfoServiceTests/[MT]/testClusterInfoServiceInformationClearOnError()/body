@@ -1,0 +1,62 @@
+{
+  internalCluster().startNodesAsync(2,ImmutableSettings.builder().put(InternalClusterInfoService.INTERNAL_CLUSTER_INFO_UPDATE_INTERVAL,"60m").build()).get();
+  createIndex("test");
+  ensureGreen("test");
+  InternalTestCluster internalTestCluster=internalCluster();
+  InternalClusterInfoService infoService=(InternalClusterInfoService)internalTestCluster.getInstance(ClusterInfoService.class,internalTestCluster.getMasterName());
+  InfoListener listener=new InfoListener();
+  infoService.addListener(listener);
+  infoService.updateOnce();
+  ClusterInfo info=listener.get();
+  assertNotNull("failed to collect info",info);
+  assertThat("some usages are populated",info.getNodeDiskUsages().size(),Matchers.equalTo(2));
+  assertThat("some shard sizes are populated",info.getShardSizes().size(),greaterThan(0));
+  MockTransportService mockTransportService=(MockTransportService)internalCluster().getInstance(TransportService.class,internalTestCluster.getMasterName());
+  final AtomicBoolean timeout=new AtomicBoolean(false);
+  final Set<String> blockedActions=ImmutableSet.of(NodesStatsAction.NAME,NodesStatsAction.NAME + "[n]",IndicesStatsAction.NAME,IndicesStatsAction.NAME + "[s]");
+  for (  DiscoveryNode node : internalTestCluster.clusterService().state().getNodes()) {
+    mockTransportService.addDelegate(node,new MockTransportService.DelegateTransport(mockTransportService.original()){
+      @Override public void sendRequest(      DiscoveryNode node,      long requestId,      String action,      TransportRequest request,      TransportRequestOptions options) throws IOException, TransportException {
+        if (blockedActions.contains(action)) {
+          if (timeout.get()) {
+            logger.info("dropping [{}] to [{}]",action,node);
+            return;
+          }
+        }
+        super.sendRequest(node,requestId,action,request,options);
+      }
+    }
+);
+  }
+  timeout.set(true);
+  listener.reset();
+  infoService.updateOnce();
+  info=listener.get();
+  assertNotNull("info should not be null",info);
+  assertThat(info.getNodeDiskUsages().size(),greaterThanOrEqualTo(1));
+  assertThat(info.getShardSizes().size(),greaterThan(1));
+  timeout.set(false);
+  ActionFilters actionFilters=internalTestCluster.getInstance(ActionFilters.class,internalTestCluster.getMasterName());
+  BlockingActionFilter blockingActionFilter=null;
+  for (  ActionFilter filter : actionFilters.filters()) {
+    if (filter instanceof BlockingActionFilter) {
+      blockingActionFilter=(BlockingActionFilter)filter;
+      break;
+    }
+  }
+  assertNotNull("failed to find BlockingActionFilter",blockingActionFilter);
+  blockingActionFilter.blockActions(blockedActions.toArray(Strings.EMPTY_ARRAY));
+  listener.reset();
+  infoService.updateOnce();
+  info=listener.get();
+  assertNotNull("info should not be null",info);
+  assertThat(info.getNodeDiskUsages().size(),equalTo(0));
+  assertThat(info.getShardSizes().size(),equalTo(0));
+  blockingActionFilter.blockActions();
+  listener.reset();
+  infoService.updateOnce();
+  info=listener.get();
+  assertNotNull("info should not be null",info);
+  assertThat(info.getNodeDiskUsages().size(),equalTo(2));
+  assertThat(info.getShardSizes().size(),greaterThan(0));
+}
