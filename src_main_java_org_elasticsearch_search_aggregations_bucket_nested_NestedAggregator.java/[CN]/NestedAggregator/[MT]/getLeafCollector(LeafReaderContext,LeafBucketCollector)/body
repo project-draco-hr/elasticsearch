@@ -1,0 +1,41 @@
+{
+  this.parentFilter=null;
+  DocIdSet childDocIdSet=childFilter.getDocIdSet(ctx,null);
+  if (DocIdSets.isEmpty(childDocIdSet)) {
+    childDocs=null;
+  }
+ else {
+    childDocs=childDocIdSet.iterator();
+  }
+  return new LeafBucketCollectorBase(sub,null){
+    @Override public void collect(    int parentDoc,    long bucket) throws IOException {
+      if (parentDoc == 0 || childDocs == null) {
+        return;
+      }
+      if (parentFilter == null) {
+        Filter parentFilterNotCached=findClosestNestedPath(parent());
+        if (parentFilterNotCached == null) {
+          parentFilterNotCached=NonNestedDocsFilter.INSTANCE;
+        }
+        parentFilter=context.searchContext().bitsetFilterCache().getBitDocIdSetFilter(parentFilterNotCached);
+        BitDocIdSet parentSet=parentFilter.getDocIdSet(ctx);
+        if (DocIdSets.isEmpty(parentSet)) {
+          childDocs=null;
+          return;
+        }
+ else {
+          parentDocs=parentSet.bits();
+        }
+      }
+      final int prevParentDoc=parentDocs.prevSetBit(parentDoc - 1);
+      int childDocId=childDocs.docID();
+      if (childDocId <= prevParentDoc) {
+        childDocId=childDocs.advance(prevParentDoc + 1);
+      }
+      for (; childDocId < parentDoc; childDocId=childDocs.nextDoc()) {
+        collectBucket(sub,childDocId,bucket);
+      }
+    }
+  }
+;
+}

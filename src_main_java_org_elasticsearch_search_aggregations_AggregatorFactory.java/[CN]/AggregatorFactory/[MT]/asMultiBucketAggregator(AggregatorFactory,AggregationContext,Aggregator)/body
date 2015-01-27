@@ -1,16 +1,31 @@
 {
   final Aggregator first=factory.create(context,parent,true);
-  return new Aggregator(first.name(),AggregatorFactories.EMPTY,first.context(),first.parent(),first.metaData()){
+  final BigArrays bigArrays=context.bigArrays();
+  return new Aggregator(){
     ObjectArray<Aggregator> aggregators;
-    LeafReaderContext readerContext;
+    ObjectArray<LeafBucketCollector> collectors;
 {
+      context.searchContext().addReleasable(this,Lifetime.PHASE);
       aggregators=bigArrays.newObjectArray(1);
       aggregators.set(0,first);
+      collectors=bigArrays.newObjectArray(1);
     }
-    @Override public boolean shouldCollect(){
-      return first.shouldCollect();
+    @Override public String name(){
+      return first.name();
     }
-    @Override protected void doPreCollection() throws IOException {
+    @Override public AggregationContext context(){
+      return first.context();
+    }
+    @Override public Aggregator parent(){
+      return first.parent();
+    }
+    @Override public boolean needsScores(){
+      return first.needsScores();
+    }
+    @Override public Aggregator subAggregator(    String name){
+      throw new UnsupportedOperationException();
+    }
+    @Override public void preCollection() throws IOException {
       for (long i=0; i < aggregators.size(); ++i) {
         final Aggregator aggregator=aggregators.get(i);
         if (aggregator != null) {
@@ -18,7 +33,7 @@
         }
       }
     }
-    @Override protected void doPostCollection() throws IOException {
+    @Override public void postCollection() throws IOException {
       for (long i=0; i < aggregators.size(); ++i) {
         final Aggregator aggregator=aggregators.get(i);
         if (aggregator != null) {
@@ -26,42 +41,49 @@
         }
       }
     }
-    @Override public void collect(    int doc,    long owningBucketOrdinal) throws IOException {
-      aggregators=bigArrays.grow(aggregators,owningBucketOrdinal + 1);
-      Aggregator aggregator=aggregators.get(owningBucketOrdinal);
-      if (aggregator == null) {
-        aggregator=factory.create(context,parent,true);
-        aggregator.preCollection();
-        aggregator.setNextReader(readerContext);
-        aggregators.set(owningBucketOrdinal,aggregator);
+    @Override public LeafBucketCollector getLeafCollector(    final LeafReaderContext ctx){
+      for (long i=0; i < collectors.size(); ++i) {
+        collectors.set(i,null);
       }
-      aggregator.collect(doc,0);
-    }
-    @Override public void setNextReader(    LeafReaderContext context) throws IOException {
-      this.readerContext=context;
-      for (long i=0; i < aggregators.size(); ++i) {
-        final Aggregator aggregator=aggregators.get(i);
-        if (aggregator != null) {
-          aggregator.setNextReader(context);
+      return new LeafBucketCollector(){
+        Scorer scorer;
+        @Override public void setScorer(        Scorer scorer) throws IOException {
+          this.scorer=scorer;
+        }
+        @Override public void collect(        int doc,        long bucket) throws IOException {
+          aggregators=bigArrays.grow(aggregators,bucket + 1);
+          collectors=bigArrays.grow(collectors,bucket + 1);
+          LeafBucketCollector collector=collectors.get(bucket);
+          if (collector == null) {
+            Aggregator aggregator=aggregators.get(bucket);
+            if (aggregator == null) {
+              aggregator=factory.create(context,parent,true);
+              aggregator.preCollection();
+              aggregators.set(bucket,aggregator);
+            }
+            collector=aggregator.getLeafCollector(ctx);
+            collector.setScorer(scorer);
+            collectors.set(bucket,collector);
+          }
+          collector.collect(doc,0);
         }
       }
+;
     }
-    @Override public InternalAggregation buildAggregation(    long owningBucketOrdinal){
-      throw new ElasticsearchIllegalStateException("Invalid context - aggregation must use addResults() to collect child results");
+    @Override public InternalAggregation buildAggregation(    long bucket) throws IOException {
+      if (bucket < aggregators.size()) {
+        Aggregator aggregator=aggregators.get(bucket);
+        if (aggregator != null) {
+          return aggregator.buildAggregation(0);
+        }
+      }
+      return buildEmptyAggregation();
     }
     @Override public InternalAggregation buildEmptyAggregation(){
       return first.buildEmptyAggregation();
     }
-    @Override public void doClose(){
-      Releasables.close(aggregators);
-    }
-    @Override public void gatherAnalysis(    BucketAnalysisCollector results,    long owningBucketOrdinal) throws IOException {
-      if (owningBucketOrdinal >= aggregators.size() || aggregators.get(owningBucketOrdinal) == null) {
-        results.add(first.buildEmptyAggregation());
-      }
- else {
-        aggregators.get(owningBucketOrdinal).gatherAnalysis(results,0);
-      }
+    @Override public void close(){
+      Releasables.close(aggregators,collectors);
     }
   }
 ;

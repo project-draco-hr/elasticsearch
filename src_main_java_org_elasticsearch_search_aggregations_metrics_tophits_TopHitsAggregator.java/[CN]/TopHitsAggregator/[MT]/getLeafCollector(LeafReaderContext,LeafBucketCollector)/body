@@ -1,0 +1,29 @@
+{
+  for (  LongObjectPagedHashMap.Cursor<TopDocsAndLeafCollector> cursor : topDocsCollectors) {
+    cursor.value.leafCollector=cursor.value.topLevelCollector.getLeafCollector(ctx);
+  }
+  return new LeafBucketCollectorBase(sub,null){
+    Scorer scorer;
+    @Override public void setScorer(    Scorer scorer) throws IOException {
+      this.scorer=scorer;
+      for (      LongObjectPagedHashMap.Cursor<TopDocsAndLeafCollector> cursor : topDocsCollectors) {
+        cursor.value.leafCollector.setScorer(scorer);
+      }
+      super.setScorer(scorer);
+    }
+    @Override public void collect(    int docId,    long bucket) throws IOException {
+      TopDocsAndLeafCollector collectors=topDocsCollectors.get(bucket);
+      if (collectors == null) {
+        Sort sort=subSearchContext.sort();
+        int topN=subSearchContext.from() + subSearchContext.size();
+        TopDocsCollector<?> topLevelCollector=sort != null ? TopFieldCollector.create(sort,topN,true,subSearchContext.trackScores(),subSearchContext.trackScores()) : TopScoreDocCollector.create(topN);
+        collectors=new TopDocsAndLeafCollector(topLevelCollector);
+        collectors.leafCollector=collectors.topLevelCollector.getLeafCollector(ctx);
+        collectors.leafCollector.setScorer(scorer);
+        topDocsCollectors.put(bucket,collectors);
+      }
+      collectors.leafCollector.collect(docId);
+    }
+  }
+;
+}

@@ -5,26 +5,18 @@
   final FieldMapper<?> idMapper=context.mapperService().smartNameFieldMapper(IdFieldMapper.NAME);
   this.idFieldData=context.fieldData().getForField(idMapper);
   this.isNestedDoc=isNestedDoc;
-  ImmutableList.Builder<Collector> aggCollectorBuilder=ImmutableList.builder();
+  List<Aggregator> aggregatorCollectors=new ArrayList<>();
   if (context.aggregations() != null) {
     AggregationContext aggregationContext=new AggregationContext(context);
     context.aggregations().aggregationContext(aggregationContext);
-    List<Aggregator> aggregatorCollectors=new ArrayList<>();
     Aggregator[] aggregators=context.aggregations().factories().createTopLevelAggregators(aggregationContext);
     for (int i=0; i < aggregators.length; i++) {
       if (!(aggregators[i] instanceof GlobalAggregator)) {
         Aggregator aggregator=aggregators[i];
-        if (aggregator.shouldCollect()) {
-          aggregatorCollectors.add(aggregator);
-        }
+        aggregatorCollectors.add(aggregator);
       }
     }
     context.aggregations().aggregators(aggregators);
-    if (!aggregatorCollectors.isEmpty()) {
-      aggCollectorBuilder.add(new AggregationPhase.AggregationsCollector(aggregatorCollectors,aggregationContext));
-    }
-    aggregationContext.setNextReader(context.searcher().getIndexReader().getContext());
   }
-  aggregatorCollector=aggCollectorBuilder.build();
-  aggregatorLeafCollectors=new ArrayList<>(aggregatorCollector.size());
+  aggregatorCollector=BucketCollector.wrap(aggregatorCollectors);
 }

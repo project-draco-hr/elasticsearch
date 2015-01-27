@@ -1,0 +1,28 @@
+{
+  if (valuesSource == null) {
+    return new EmptyCollector();
+  }
+  if (!rehash) {
+    MurmurHash3Values hashValues=MurmurHash3Values.cast(((ValuesSource.Numeric)valuesSource).longValues(ctx));
+    return new DirectCollector(counts,hashValues);
+  }
+  if (valuesSource instanceof ValuesSource.Numeric) {
+    ValuesSource.Numeric source=(ValuesSource.Numeric)valuesSource;
+    MurmurHash3Values hashValues=source.isFloatingPoint() ? MurmurHash3Values.hash(source.doubleValues(ctx)) : MurmurHash3Values.hash(source.longValues(ctx));
+    return new DirectCollector(counts,hashValues);
+  }
+  if (valuesSource instanceof ValuesSource.Bytes.WithOrdinals) {
+    ValuesSource.Bytes.WithOrdinals source=(ValuesSource.Bytes.WithOrdinals)valuesSource;
+    final RandomAccessOrds ordinalValues=source.ordinalsValues(ctx);
+    final long maxOrd=ordinalValues.getValueCount();
+    if (maxOrd == 0) {
+      return new EmptyCollector();
+    }
+    final long ordinalsMemoryUsage=OrdinalsCollector.memoryOverhead(maxOrd);
+    final long countsMemoryUsage=HyperLogLogPlusPlus.memoryUsage(precision);
+    if (ordinalsMemoryUsage < countsMemoryUsage / 4) {
+      return new OrdinalsCollector(counts,ordinalValues,context.bigArrays());
+    }
+  }
+  return new DirectCollector(counts,MurmurHash3Values.hash(valuesSource.bytesValues(ctx)));
+}
