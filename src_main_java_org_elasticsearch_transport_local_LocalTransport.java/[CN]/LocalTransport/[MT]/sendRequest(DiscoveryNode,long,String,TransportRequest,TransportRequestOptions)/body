@@ -1,25 +1,25 @@
 {
   final Version version=Version.smallest(node.version(),this.version);
-  BytesStreamOutput bStream=new BytesStreamOutput();
-  StreamOutput stream=new HandlesStreamOutput(bStream);
-  stream.setVersion(version);
-  stream.writeLong(requestId);
-  byte status=0;
-  status=TransportStatus.setRequest(status);
-  stream.writeByte(status);
-  stream.writeString(action);
-  request.writeTo(stream);
-  stream.close();
-  final LocalTransport targetTransport=connectedNodes.get(node);
-  if (targetTransport == null) {
-    throw new NodeNotConnectedException(node,"Node not connected");
-  }
-  final byte[] data=bStream.bytes().toBytes();
-  transportServiceAdapter.sent(data.length);
-  targetTransport.workers().execute(new Runnable(){
-    @Override public void run(){
-      targetTransport.messageReceived(data,action,LocalTransport.this,version,requestId);
+  try (BytesStreamOutput stream=new BytesStreamOutput()){
+    stream.setVersion(version);
+    stream.writeLong(requestId);
+    byte status=0;
+    status=TransportStatus.setRequest(status);
+    stream.writeByte(status);
+    stream.writeString(action);
+    request.writeTo(stream);
+    stream.close();
+    final LocalTransport targetTransport=connectedNodes.get(node);
+    if (targetTransport == null) {
+      throw new NodeNotConnectedException(node,"Node not connected");
     }
-  }
+    final byte[] data=stream.bytes().toBytes();
+    transportServiceAdapter.sent(data.length);
+    targetTransport.workers().execute(new Runnable(){
+      @Override public void run(){
+        targetTransport.messageReceived(data,action,LocalTransport.this,version,requestId);
+      }
+    }
 );
-}
+  }
+ }
