@@ -2,8 +2,10 @@
   final TermVectorsResponse termVectorsResponse=new TermVectorsResponse(concreteIndex,request.type(),request.id());
   final Term uidTerm=new Term(UidFieldMapper.NAME,Uid.createUidAsBytes(request.type(),request.id()));
   Engine.GetResult get=indexShard.get(new Engine.Get(request.realtime(),uidTerm).version(request.version()).versionType(request.versionType()));
+  Fields termVectorsByField=null;
   boolean docFromTranslog=get.source() != null;
   AggregatedDfs dfs=null;
+  TermVectorsFilter termVectorsFilter=null;
   if (docFromTranslog) {
     request.doc(get.source().source,false);
     termVectorsResponse.setDocVersion(get.version());
@@ -16,19 +18,15 @@
     Fields topLevelFields=MultiFields.getFields(get.searcher() != null ? get.searcher().reader() : searcher.reader());
     Versions.DocIdAndVersion docIdAndVersion=get.docIdAndVersion();
     if (request.doc() != null) {
-      Fields termVectorsByField=generateTermVectorsFromDoc(request,!docFromTranslog);
+      termVectorsByField=generateTermVectorsFromDoc(request,!docFromTranslog);
       if (topLevelFields == null) {
         topLevelFields=termVectorsByField;
       }
-      if (termVectorsByField != null && useDfs(request)) {
-        dfs=getAggregatedDfs(termVectorsByField,request);
-      }
-      termVectorsResponse.setFields(termVectorsByField,request.selectedFields(),request.getFlags(),topLevelFields,dfs);
-      termVectorsResponse.setExists(true);
       termVectorsResponse.setArtificial(!docFromTranslog);
+      termVectorsResponse.setExists(true);
     }
  else     if (docIdAndVersion != null) {
-      Fields termVectorsByField=docIdAndVersion.context.reader().getTermVectors(docIdAndVersion.docId);
+      termVectorsByField=docIdAndVersion.context.reader().getTermVectors(docIdAndVersion.docId);
       Set<String> selectedFields=request.selectedFields();
       if (selectedFields == null && request.perFieldAnalyzer() != null) {
         selectedFields=getFieldsToGenerate(request.perFieldAnalyzer(),termVectorsByField);
@@ -36,15 +34,27 @@
       if (selectedFields != null) {
         termVectorsByField=addGeneratedTermVectors(get,termVectorsByField,request,selectedFields);
       }
-      if (termVectorsByField != null && useDfs(request)) {
-        dfs=getAggregatedDfs(termVectorsByField,request);
-      }
-      termVectorsResponse.setFields(termVectorsByField,request.selectedFields(),request.getFlags(),topLevelFields,dfs);
       termVectorsResponse.setDocVersion(docIdAndVersion.version);
       termVectorsResponse.setExists(true);
     }
  else {
       termVectorsResponse.setExists(false);
+    }
+    if (termVectorsByField != null) {
+      if (useDfs(request)) {
+        dfs=getAggregatedDfs(termVectorsByField,request);
+      }
+      if (request.filterSettings() != null) {
+        termVectorsFilter=new TermVectorsFilter(termVectorsByField,topLevelFields,request.selectedFields(),dfs);
+        termVectorsFilter.setSettings(request.filterSettings());
+        try {
+          termVectorsFilter.selectBestTerms();
+        }
+ catch (        IOException e) {
+          throw new ElasticsearchException("failed to select best terms",e);
+        }
+      }
+      termVectorsResponse.setFields(termVectorsByField,request.selectedFields(),request.getFlags(),topLevelFields,dfs,termVectorsFilter);
     }
   }
  catch (  Throwable ex) {
