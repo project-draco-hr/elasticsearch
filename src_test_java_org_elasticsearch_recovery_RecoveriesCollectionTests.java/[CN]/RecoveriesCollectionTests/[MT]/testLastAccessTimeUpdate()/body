@@ -1,0 +1,20 @@
+{
+  createIndex("test",ImmutableSettings.builder().put(IndexMetaData.SETTING_NUMBER_OF_SHARDS,1,IndexMetaData.SETTING_NUMBER_OF_REPLICAS,0).build());
+  ensureGreen();
+  final RecoveriesCollection collection=new RecoveriesCollection(logger,getInstanceFromNode(ThreadPool.class));
+  final long recoveryId=startRecovery(collection);
+  try (RecoveriesCollection.StatusRef status=collection.getStatus(recoveryId)){
+    final long lastSeenTime=status.status().lastAccessTime();
+    assertBusy(new Runnable(){
+      @Override public void run(){
+        try (RecoveriesCollection.StatusRef currentStatus=collection.getStatus(recoveryId)){
+          assertThat("access time failed to update",lastSeenTime,lessThan(currentStatus.status().lastAccessTime()));
+        }
+       }
+    }
+);
+  }
+  finally {
+    collection.cancelRecovery(recoveryId,"life");
+  }
+}
