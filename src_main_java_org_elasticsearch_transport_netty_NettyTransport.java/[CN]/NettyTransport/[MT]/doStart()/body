@@ -6,16 +6,16 @@
   final OpenChannelsHandler openChannels=new OpenChannelsHandler(logger);
   this.serverOpenChannels=openChannels;
   Map<String,Settings> profiles=settings.getGroups("transport.profiles",true);
-  if (!profiles.containsKey("default")) {
+  if (!profiles.containsKey(DEFAULT_PROFILE)) {
     profiles=Maps.newHashMap(profiles);
-    profiles.put("default",ImmutableSettings.EMPTY);
+    profiles.put(DEFAULT_PROFILE,ImmutableSettings.EMPTY);
   }
   Settings fallbackSettings=createFallbackSettings();
-  Settings defaultSettings=profiles.get("default");
+  Settings defaultSettings=profiles.get(DEFAULT_PROFILE);
   for (  Map.Entry<String,Settings> entry : profiles.entrySet()) {
     Settings profileSettings=entry.getValue();
     String name=entry.getKey();
-    if ("default".equals(name)) {
+    if (DEFAULT_PROFILE.equals(name)) {
       profileSettings=settingsBuilder().put(profileSettings).put("port",profileSettings.get("port",componentSettings.get("port",this.settings.get("transport.tcp.port",DEFAULT_PORT_RANGE)))).build();
     }
  else {
@@ -28,18 +28,9 @@
     createServerBootstrap(name,mergedSettings);
     bindServerBootstrap(name,mergedSettings);
   }
-  InetSocketAddress boundAddress=(InetSocketAddress)serverChannels.get("default").getLocalAddress();
-  InetSocketAddress publishAddress;
-  int publishPort=componentSettings.getAsInt("publish_port",settings.getAsInt("transport.publish_port",0));
-  if (0 == publishPort) {
-    publishPort=boundAddress.getPort();
-  }
-  try {
-    String publishHost=componentSettings.get("publish_host",settings.get("transport.publish_host",settings.get("transport.host")));
-    publishAddress=new InetSocketAddress(networkService.resolvePublishHostAddress(publishHost),publishPort);
-  }
- catch (  Exception e) {
-    throw new BindTransportException("Failed to resolve publish address",e);
-  }
+  InetSocketAddress boundAddress=(InetSocketAddress)serverChannels.get(DEFAULT_PROFILE).getLocalAddress();
+  int publishPort=componentSettings.getAsInt("publish_port",settings.getAsInt("transport.publish_port",boundAddress.getPort()));
+  String publishHost=componentSettings.get("publish_host",settings.get("transport.publish_host",settings.get("transport.host")));
+  InetSocketAddress publishAddress=createPublishAddress(publishHost,publishPort);
   this.boundAddress=new BoundTransportAddress(new InetSocketTransportAddress(boundAddress),new InetSocketTransportAddress(publishAddress));
 }
