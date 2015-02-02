@@ -1,0 +1,28 @@
+{
+  int offset=randomIntBetween(2,interval);
+  SearchResponse response=client().prepareSearch("idx").addAggregation(histogram("histo").field(SINGLE_VALUED_FIELD_NAME).interval(interval).offset(offset)).execute().actionGet();
+  assertSearchResponse(response);
+  int expectedNumberOfBuckets=(offset >= (numDocs % interval + 1)) ? numValueBuckets : numValueBuckets + 1;
+  Histogram histo=response.getAggregations().get("histo");
+  assertThat(histo,notNullValue());
+  assertThat(histo.getName(),equalTo("histo"));
+  assertThat(histo.getBuckets().size(),equalTo(expectedNumberOfBuckets));
+  int docsCounted=0;
+  for (int i=0; i < expectedNumberOfBuckets; ++i) {
+    Histogram.Bucket bucket=histo.getBuckets().get(i);
+    assertThat(bucket,notNullValue());
+    assertThat(((Number)bucket.getKey()).longValue(),equalTo((long)((i - 1) * interval + offset)));
+    if (i == 0) {
+      long expectedFirstBucketCount=offset - 1;
+      assertThat(bucket.getDocCount(),equalTo(expectedFirstBucketCount));
+      docsCounted+=expectedFirstBucketCount;
+    }
+ else     if (i < expectedNumberOfBuckets - 1) {
+      assertThat(bucket.getDocCount(),equalTo((long)interval));
+      docsCounted+=interval;
+    }
+ else {
+      assertThat(bucket.getDocCount(),equalTo((long)numDocs - docsCounted));
+    }
+  }
+}
