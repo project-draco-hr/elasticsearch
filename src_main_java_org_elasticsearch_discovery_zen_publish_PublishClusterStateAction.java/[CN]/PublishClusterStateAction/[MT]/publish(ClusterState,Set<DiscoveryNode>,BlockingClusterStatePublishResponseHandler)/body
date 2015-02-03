@@ -1,12 +1,8 @@
 {
-  DiscoveryNode localNode=nodesProvider.nodes().localNode();
   Map<Version,BytesReference> serializedStates=Maps.newHashMap();
   final AtomicBoolean timedOutWaitingForNodes=new AtomicBoolean(false);
   final TimeValue publishTimeout=discoverySettings.getPublishTimeout();
-  for (  final DiscoveryNode node : clusterState.nodes()) {
-    if (node.equals(localNode)) {
-      continue;
-    }
+  for (  final DiscoveryNode node : nodesToPublishTo) {
     BytesReference bytes=serializedStates.get(node.version());
     if (bytes == null) {
       try {
@@ -49,7 +45,10 @@
     try {
       timedOutWaitingForNodes.set(!publishResponseHandler.awaitAllNodes(publishTimeout));
       if (timedOutWaitingForNodes.get()) {
-        logger.debug("timed out waiting for all nodes to process published state [{}] (timeout [{}])",clusterState.version(),publishTimeout);
+        DiscoveryNode[] pendingNodes=publishResponseHandler.pendingNodes();
+        if (pendingNodes.length > 0) {
+          logger.warn("timed out waiting for all nodes to process published state [{}] (timeout [{}], pending nodes: {})",clusterState.version(),publishTimeout,pendingNodes);
+        }
       }
     }
  catch (    InterruptedException e) {

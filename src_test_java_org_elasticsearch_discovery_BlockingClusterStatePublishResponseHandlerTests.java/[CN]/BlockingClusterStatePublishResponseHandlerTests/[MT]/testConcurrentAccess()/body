@@ -1,0 +1,37 @@
+{
+  int nodeCount=scaledRandomIntBetween(10,20);
+  DiscoveryNode[] allNodes=new DiscoveryNode[nodeCount];
+  for (int i=0; i < nodeCount; i++) {
+    DiscoveryNode node=new DiscoveryNode("node_" + i,DummyTransportAddress.INSTANCE,Version.CURRENT);
+    allNodes[i]=node;
+  }
+  BlockingClusterStatePublishResponseHandler handler=new BlockingClusterStatePublishResponseHandler(new HashSet<>(Arrays.asList(allNodes)));
+  int firstRound=randomIntBetween(5,nodeCount - 1);
+  Thread[] threads=new Thread[firstRound];
+  CyclicBarrier barrier=new CyclicBarrier(firstRound);
+  Set<DiscoveryNode> completedNodes=new HashSet<>();
+  for (int i=0; i < threads.length; i++) {
+    completedNodes.add(allNodes[i]);
+    threads[i]=new Thread(new PublishResponder(randomBoolean(),allNodes[i],barrier,logger,handler));
+    threads[i].start();
+  }
+  for (  Thread t : threads) {
+    t.join();
+  }
+  assertFalse("expected handler wait to timeout as not all nodes responded",handler.awaitAllNodes(new TimeValue(10)));
+  Set<DiscoveryNode> pendingNodes=new HashSet<>(Arrays.asList(handler.pendingNodes()));
+  assertThat(completedNodes,not(contains(pendingNodes.toArray(new DiscoveryNode[0]))));
+  assertThat(completedNodes.size() + pendingNodes.size(),equalTo(allNodes.length));
+  int secondRound=allNodes.length - firstRound;
+  threads=new Thread[secondRound];
+  barrier=new CyclicBarrier(secondRound);
+  for (int i=0; i < threads.length; i++) {
+    threads[i]=new Thread(new PublishResponder(randomBoolean(),allNodes[firstRound + i],barrier,logger,handler));
+    threads[i].start();
+  }
+  for (  Thread t : threads) {
+    t.join();
+  }
+  assertTrue("expected handler not to timeout as all nodes responded",handler.awaitAllNodes(new TimeValue(10)));
+  assertThat(handler.pendingNodes(),arrayWithSize(0));
+}
