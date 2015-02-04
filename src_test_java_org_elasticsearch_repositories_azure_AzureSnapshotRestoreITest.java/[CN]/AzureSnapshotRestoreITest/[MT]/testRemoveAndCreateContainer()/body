@@ -1,0 +1,30 @@
+{
+  final String container=getContainerName();
+  final AzureStorageService storageService=internalCluster().getInstance(AzureStorageService.class);
+  assertThat(awaitBusy(new Predicate<Object>(){
+    public boolean apply(    Object obj){
+      try {
+        storageService.createContainer(container);
+        logger.debug(" -> container created...");
+        return true;
+      }
+ catch (      URISyntaxException e) {
+        return false;
+      }
+catch (      StorageException e) {
+        logger.debug(" -> container is being removed. Let's wait a bit...");
+        return false;
+      }
+    }
+  }
+,30,TimeUnit.SECONDS),equalTo(true));
+  storageService.removeContainer(container);
+  ClusterAdminClient client=client().admin().cluster();
+  logger.info("-->  creating azure repository while container is being removed");
+  try {
+    client.preparePutRepository("test-repo").setType("azure").setSettings(ImmutableSettings.settingsBuilder().put(AzureStorageService.Fields.CONTAINER,container)).get();
+    fail("we should get a RepositoryVerificationException");
+  }
+ catch (  RepositoryVerificationException e) {
+  }
+}
