@@ -1,0 +1,41 @@
+{
+  boolean success=false;
+  SearcherManager searcherManager=null;
+  try {
+    try {
+      final long translogId=Math.max(0,translog.findLargestPresentTranslogId()) + 1;
+      boolean mustCommitTranslogId=true;
+      if (Lucene.indexExists(store.directory())) {
+        final Map<String,String> commitUserData=Lucene.readSegmentInfos(store.directory()).getUserData();
+        mustCommitTranslogId=!commitUserData.containsKey(Translog.TRANSLOG_ID_KEY);
+      }
+      if (mustCommitTranslogId) {
+        indexWriter.setCommitData(Collections.singletonMap(Translog.TRANSLOG_ID_KEY,Long.toString(translogId)));
+        indexWriter.commit();
+      }
+      final DirectoryReader directoryReader=ElasticsearchDirectoryReader.wrap(DirectoryReader.open(indexWriter,true),shardId);
+      searcherManager=new SearcherManager(directoryReader,searcherFactory);
+      lastCommittedSegmentInfos=store.readLastCommittedSegmentsInfo();
+      translog.newTranslog(translogId);
+      versionMap.setManager(searcherManager);
+      translogIdGenerator.set(translogId);
+      success=true;
+      return searcherManager;
+    }
+ catch (    IOException e) {
+      maybeFailEngine(e,"start");
+      try {
+        indexWriter.rollback();
+      }
+ catch (      IOException e1) {
+        e.addSuppressed(e1);
+      }
+      throw new EngineCreationFailureException(shardId,"failed to open reader on writer",e);
+    }
+  }
+  finally {
+    if (success == false) {
+      IOUtils.closeWhileHandlingException(searcherManager,indexWriter);
+    }
+  }
+}

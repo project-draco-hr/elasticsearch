@@ -1,8 +1,8 @@
 {
   ensureOpen();
-  if (type == FlushType.COMMIT_TRANSLOG) {
+  if (commitTranslog) {
     if (onGoingRecoveries.get() > 0) {
-      throw new FlushNotAllowedEngineException(shardId,"recovery is in progress, flush [" + type + "] is not allowed");
+      throw new FlushNotAllowedEngineException(shardId,"recovery is in progress, flush with committing translog is not allowed");
     }
   }
   int currentFlushing=flushing.incrementAndGet();
@@ -12,9 +12,9 @@
   }
   flushLock.lock();
   try {
-    if (type == FlushType.COMMIT_TRANSLOG) {
+    if (commitTranslog) {
       try (InternalLock _=readLock.acquire()){
-        final IndexWriter indexWriter=currentIndexWriter();
+        ensureOpen();
         if (onGoingRecoveries.get() > 0) {
           throw new FlushNotAllowedEngineException(shardId,"Recovery is in progress, flush is not allowed");
         }
@@ -43,9 +43,9 @@
         pruneDeletedTombstones();
       }
     }
- else     if (type == FlushType.COMMIT) {
+ else {
       try (InternalLock _=readLock.acquire()){
-        final IndexWriter indexWriter=currentIndexWriter();
+        ensureOpen();
         try {
           long translogId=translog.currentId();
           indexWriter.setCommitData(Collections.singletonMap(Translog.TRANSLOG_ID_KEY,Long.toString(translogId)));
@@ -58,9 +58,6 @@
        if (engineConfig.isEnableGcDeletes()) {
         pruneDeletedTombstones();
       }
-    }
- else {
-      throw new ElasticsearchIllegalStateException("flush type [" + type + "] not supported");
     }
     try (InternalLock _=readLock.acquire()){
       ensureOpen();
