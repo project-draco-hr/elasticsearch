@@ -1,7 +1,14 @@
 {
   final BlockingQueue<DocumentMapper> documentMappersToUpdate=ConcurrentCollections.newBlockingQueue();
   final CountDownLatch latch=new CountDownLatch(1);
-  clusterService.submitStateUpdateTask("recovery_mapping_check",new ProcessedClusterStateNonMasterUpdateTask(){
+  final AtomicReference<Throwable> mappingCheckException=new AtomicReference<>();
+  clusterService.submitStateUpdateTask("recovery_mapping_check",Priority.IMMEDIATE,new TimeoutClusterStateUpdateTask(){
+    @Override public boolean runOnlyOnMaster(){
+      return false;
+    }
+    @Override public TimeValue timeout(){
+      return recoverySettings.internalActionTimeout();
+    }
     @Override public void clusterStateProcessed(    String source,    ClusterState oldState,    ClusterState newState){
       latch.countDown();
     }
@@ -19,8 +26,8 @@
       }
       return currentState;
     }
-    @Override public void onFailure(    String source,    @Nullable Throwable t){
-      logger.error("unexpected error while checking for pending mapping changes",t);
+    @Override public void onFailure(    String source,    Throwable t){
+      mappingCheckException.set(t);
       latch.countDown();
     }
   }
@@ -31,6 +38,10 @@
     }
   }
 );
+  if (mappingCheckException.get() != null) {
+    logger.warn("error during mapping check, failing recovery",mappingCheckException.get());
+    throw new ElasticsearchException("error during mapping check",mappingCheckException.get());
+  }
   if (documentMappersToUpdate.isEmpty()) {
     return;
   }
