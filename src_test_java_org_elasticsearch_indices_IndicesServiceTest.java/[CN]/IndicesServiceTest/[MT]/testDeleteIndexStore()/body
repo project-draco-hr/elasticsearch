@@ -1,0 +1,49 @@
+{
+  IndicesService indicesService=getIndicesService();
+  IndexService test=createIndex("test");
+  ClusterService clusterService=getInstanceFromNode(ClusterService.class);
+  IndexMetaData firstMetaData=clusterService.state().metaData().index("test");
+  assertTrue(test.hasShard(0));
+  try {
+    indicesService.deleteIndexStore("boom",firstMetaData);
+    fail();
+  }
+ catch (  ElasticsearchIllegalStateException ex) {
+  }
+  GatewayMetaState gwMetaState=getInstanceFromNode(GatewayMetaState.class);
+  MetaData meta=gwMetaState.loadMetaState();
+  assertNotNull(meta);
+  assertNotNull(meta.index("test"));
+  assertAcked(client().admin().indices().prepareDelete("test"));
+  meta=gwMetaState.loadMetaState();
+  assertNotNull(meta);
+  assertNull(meta.index("test"));
+  createIndex("test");
+  client().prepareIndex("test","type","1").setSource("field","value").setRefresh(true).get();
+  client().admin().indices().prepareFlush("test").get();
+  assertHitCount(client().prepareSearch("test").get(),1);
+  IndexMetaData secondMetaData=clusterService.state().metaData().index("test");
+  assertAcked(client().admin().indices().prepareClose("test"));
+  NodeEnvironment nodeEnv=getInstanceFromNode(NodeEnvironment.class);
+  Path[] paths=nodeEnv.shardDataPaths(new ShardId("test",0),clusterService.state().getMetaData().index("test").getSettings());
+  for (  Path path : paths) {
+    assertTrue(Files.exists(path));
+  }
+  try {
+    indicesService.deleteIndexStore("boom",secondMetaData);
+    fail();
+  }
+ catch (  ElasticsearchIllegalStateException ex) {
+  }
+  for (  Path path : paths) {
+    assertTrue(Files.exists(path));
+  }
+  try {
+    indicesService.deleteIndexStore("boom",firstMetaData);
+    fail();
+  }
+ catch (  ElasticsearchIllegalStateException ex) {
+  }
+  assertAcked(client().admin().indices().prepareOpen("test"));
+  ensureGreen("test");
+}
