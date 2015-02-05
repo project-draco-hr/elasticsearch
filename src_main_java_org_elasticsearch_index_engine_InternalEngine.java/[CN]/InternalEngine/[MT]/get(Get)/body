@@ -1,0 +1,47 @@
+{
+  try (ReleasableLock _=readLock.acquire()){
+    ensureOpen();
+    if (get.realtime()) {
+      VersionValue versionValue=versionMap.getUnderLock(get.uid().bytes());
+      if (versionValue != null) {
+        if (versionValue.delete()) {
+          return GetResult.NOT_EXISTS;
+        }
+        if (get.versionType().isVersionConflictForReads(versionValue.version(),get.version())) {
+          Uid uid=Uid.createUid(get.uid().text());
+          throw new VersionConflictEngineException(shardId,uid.type(),uid.id(),versionValue.version(),get.version());
+        }
+        if (!get.loadSource()) {
+          return new GetResult(true,versionValue.version(),null);
+        }
+        Translog.Operation op=translog.read(versionValue.translogLocation());
+        if (op != null) {
+          return new GetResult(true,versionValue.version(),op.getSource());
+        }
+      }
+    }
+    final Searcher searcher=acquireSearcher("get");
+    final Versions.DocIdAndVersion docIdAndVersion;
+    try {
+      docIdAndVersion=Versions.loadDocIdAndVersion(searcher.reader(),get.uid());
+    }
+ catch (    Throwable e) {
+      Releasables.closeWhileHandlingException(searcher);
+      throw new EngineException(shardId,"Couldn't resolve version",e);
+    }
+    if (docIdAndVersion != null) {
+      if (get.versionType().isVersionConflictForReads(docIdAndVersion.version,get.version())) {
+        Releasables.close(searcher);
+        Uid uid=Uid.createUid(get.uid().text());
+        throw new VersionConflictEngineException(shardId,uid.type(),uid.id(),docIdAndVersion.version,get.version());
+      }
+    }
+    if (docIdAndVersion != null) {
+      return new GetResult(searcher,docIdAndVersion);
+    }
+ else {
+      Releasables.close(searcher);
+      return GetResult.NOT_EXISTS;
+    }
+  }
+ }
