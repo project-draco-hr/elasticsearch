@@ -142,7 +142,41 @@
     }
     cancellableThreads.execute(new Interruptable(){
       @Override public void run() throws InterruptedException {
-        transportService.submitRequest(request.targetNode(),RecoveryTarget.Actions.CLEAN_FILES,new RecoveryCleanFilesRequest(request.recoveryId(),shard.shardId(),recoverySourceMetadata),TransportRequestOptions.options().withTimeout(recoverySettings.internalActionTimeout()),EmptyTransportResponseHandler.INSTANCE_SAME).txGet();
+        try {
+          transportService.submitRequest(request.targetNode(),RecoveryTarget.Actions.CLEAN_FILES,new RecoveryCleanFilesRequest(request.recoveryId(),shard.shardId(),recoverySourceMetadata),TransportRequestOptions.options().withTimeout(recoverySettings.internalActionTimeout()),EmptyTransportResponseHandler.INSTANCE_SAME).txGet();
+        }
+ catch (        RemoteTransportException remoteException) {
+          final IOException corruptIndexException;
+          if ((corruptIndexException=ExceptionsHelper.unwrapCorruption(remoteException)) != null) {
+            try {
+              final Store.MetadataSnapshot recoverySourceMetadata=store.getMetadata(snapshot);
+              StoreFileMetaData[] metadata=Iterables.toArray(recoverySourceMetadata,StoreFileMetaData.class);
+              ArrayUtil.timSort(metadata,new Comparator<StoreFileMetaData>(){
+                @Override public int compare(                StoreFileMetaData o1,                StoreFileMetaData o2){
+                  return Long.compare(o1.length(),o2.length());
+                }
+              }
+);
+              for (              StoreFileMetaData md : metadata) {
+                logger.debug("{} checking integrity for file {} after remove corruption exception",shard.shardId(),md);
+                if (store.checkIntegrityNoException(md) == false) {
+                  logger.warn("{} Corrupted file detected {} checksum mismatch",shard.shardId(),md);
+                  throw corruptIndexException;
+                }
+              }
+            }
+ catch (            IOException ex) {
+              remoteException.addSuppressed(ex);
+              throw remoteException;
+            }
+            RemoteTransportException exception=new RemoteTransportException("File corruption occurred on recovery but checksums are ok",null);
+            exception.addSuppressed(remoteException);
+            logger.warn("{} Remote file corruption during finalization on node {}, recovering {}. local checksum OK",corruptIndexException,shard.shardId(),request.targetNode());
+          }
+ else {
+            throw remoteException;
+          }
+        }
       }
     }
 );
