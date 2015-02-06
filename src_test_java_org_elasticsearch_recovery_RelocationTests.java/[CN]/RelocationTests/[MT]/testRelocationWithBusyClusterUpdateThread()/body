@@ -8,7 +8,6 @@
   final String node2=nodes.get(1);
   ClusterHealthResponse response=client().admin().cluster().prepareHealth().setWaitForNodes("3").get();
   assertThat(response.isTimedOut(),is(false));
-  ClusterService clusterService=internalCluster().getInstance(ClusterService.class,node1);
   client().admin().indices().prepareCreate(indexName).setSettings(ImmutableSettings.builder().put(FilterAllocationDecider.INDEX_ROUTING_INCLUDE_GROUP + "_name",node1).put(IndexMetaData.SETTING_NUMBER_OF_SHARDS,1).put(IndexMetaData.SETTING_NUMBER_OF_REPLICAS,0)).get();
   List<IndexRequestBuilder> requests=new ArrayList<>();
   int numDocs=scaledRandomIntBetween(25,250);
@@ -19,8 +18,9 @@
   ensureSearchable(indexName);
   final CountDownLatch allReplicasAssigned=new CountDownLatch(1);
   final CountDownLatch releaseClusterState=new CountDownLatch(1);
+  final CountDownLatch unassignedShardsAfterReplicasAssigned=new CountDownLatch(1);
   try {
-    clusterService.addLast(new ClusterStateListener(){
+    internalCluster().getInstance(ClusterService.class,node1).addLast(new ClusterStateListener(){
       @Override public void clusterChanged(      ClusterChangedEvent event){
         if (event.state().routingNodes().hasUnassignedShards() == false) {
           allReplicasAssigned.countDown();
@@ -33,18 +33,20 @@
       }
     }
 );
+    internalCluster().getInstance(ClusterService.class,master).addLast(new ClusterStateListener(){
+      @Override public void clusterChanged(      ClusterChangedEvent event){
+        if (event.state().routingNodes().hasUnassigned() && allReplicasAssigned.getCount() == 0) {
+          unassignedShardsAfterReplicasAssigned.countDown();
+        }
+      }
+    }
+);
     logger.info("--> starting replica recovery");
     assertFalse(client().admin().indices().prepareUpdateSettings(indexName).setSettings(ImmutableSettings.builder().put(FilterAllocationDecider.INDEX_ROUTING_INCLUDE_GROUP + "_name",node1 + "," + node2).put(IndexMetaData.SETTING_NUMBER_OF_REPLICAS,1)).setTimeout("200ms").get().isAcknowledged());
     logger.info("--> waiting for node1 to process replica existence");
     allReplicasAssigned.await();
     logger.info("--> waiting for recovery to fail");
-    assertBusy(new Runnable(){
-      @Override public void run(){
-        ClusterHealthResponse response=client().admin().cluster().prepareHealth().get();
-        assertThat(response.getUnassignedShards(),equalTo(1));
-      }
-    }
-);
+    unassignedShardsAfterReplicasAssigned.countDown();
   }
   finally {
     logger.info("--> releasing cluster state update thread");
