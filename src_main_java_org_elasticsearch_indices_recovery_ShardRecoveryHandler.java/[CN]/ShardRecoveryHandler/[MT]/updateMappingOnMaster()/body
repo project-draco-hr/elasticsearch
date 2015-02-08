@@ -2,36 +2,7 @@
   final BlockingQueue<DocumentMapper> documentMappersToUpdate=ConcurrentCollections.newBlockingQueue();
   final CountDownLatch latch=new CountDownLatch(1);
   final AtomicReference<Throwable> mappingCheckException=new AtomicReference<>();
-  clusterService.submitStateUpdateTask("recovery_mapping_check",Priority.IMMEDIATE,new TimeoutClusterStateUpdateTask(){
-    @Override public boolean runOnlyOnMaster(){
-      return false;
-    }
-    @Override public TimeValue timeout(){
-      return recoverySettings.internalActionTimeout();
-    }
-    @Override public void clusterStateProcessed(    String source,    ClusterState oldState,    ClusterState newState){
-      latch.countDown();
-    }
-    @Override public ClusterState execute(    ClusterState currentState) throws Exception {
-      IndexMetaData indexMetaData=clusterService.state().metaData().getIndices().get(indexService.index().getName());
-      ImmutableOpenMap<String,MappingMetaData> metaDataMappings=null;
-      if (indexMetaData != null) {
-        metaDataMappings=indexMetaData.getMappings();
-      }
-      for (      DocumentMapper documentMapper : indexService.mapperService().docMappers(false)) {
-        MappingMetaData mappingMetaData=metaDataMappings == null ? null : metaDataMappings.get(documentMapper.type());
-        if (mappingMetaData == null || !documentMapper.refreshSource().equals(mappingMetaData.source())) {
-          documentMappersToUpdate.add(documentMapper);
-        }
-      }
-      return currentState;
-    }
-    @Override public void onFailure(    String source,    Throwable t){
-      mappingCheckException.set(t);
-      latch.countDown();
-    }
-  }
-);
+  clusterService.submitStateUpdateTask("recovery_mapping_check",Priority.IMMEDIATE,new MappingUpdateTask(clusterService,indexService,recoverySettings,latch,documentMappersToUpdate,mappingCheckException,this.cancellableThreads));
   cancellableThreads.execute(new Interruptable(){
     @Override public void run() throws InterruptedException {
       latch.await();
