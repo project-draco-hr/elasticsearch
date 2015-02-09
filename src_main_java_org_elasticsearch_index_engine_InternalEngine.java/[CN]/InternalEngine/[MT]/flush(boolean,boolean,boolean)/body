@@ -24,7 +24,7 @@
             long translogId=translogIdGenerator.incrementAndGet();
             translog.newTransientTranslog(translogId);
             indexWriter.setCommitData(Collections.singletonMap(Translog.TRANSLOG_ID_KEY,Long.toString(translogId)));
-            indexWriter.commit();
+            commitIndexWriter(indexWriter);
             refresh("version_table_flush");
             translog.makeTransientCurrent();
           }
@@ -49,7 +49,7 @@
         try {
           long translogId=translog.currentId();
           indexWriter.setCommitData(Collections.singletonMap(Translog.TRANSLOG_ID_KEY,Long.toString(translogId)));
-          indexWriter.commit();
+          commitIndexWriter(indexWriter);
         }
  catch (        Throwable e) {
           throw new FlushFailedEngineException(shardId,e);
@@ -59,21 +59,25 @@
         pruneDeletedTombstones();
       }
     }
+    store.incRef();
     try (ReleasableLock _=readLock.acquire()){
       ensureOpen();
       lastCommittedSegmentInfos=store.readLastCommittedSegmentsInfo();
     }
  catch (    Throwable e) {
-      if (closedOrFailed == false) {
+      if (isClosed.get() == false) {
         logger.warn("failed to read latest segment infos on flush",e);
         if (Lucene.isCorruptionException(e)) {
           throw new FlushFailedEngineException(shardId,e);
         }
       }
     }
+ finally {
+      store.decRef();
+    }
   }
  catch (  FlushFailedEngineException ex) {
-    maybeFailEngine(ex,"flush");
+    maybeFailEngine("flush",ex);
     throw ex;
   }
  finally {
