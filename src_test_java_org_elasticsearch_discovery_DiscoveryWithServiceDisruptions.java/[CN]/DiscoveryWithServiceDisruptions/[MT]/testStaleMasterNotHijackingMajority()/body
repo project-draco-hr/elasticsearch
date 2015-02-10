@@ -1,0 +1,57 @@
+{
+  List<String> nodes=startUnicastCluster(3,null,2);
+  final String oldMasterNode=internalCluster().getMasterName();
+  for (  String node : nodes) {
+    ensureStableCluster(3,node);
+  }
+  assertMaster(oldMasterNode,nodes);
+  SingleNodeDisruption masterNodeDisruption=new LongGCDisruption(getRandom(),oldMasterNode);
+  final List<String> majoritySide=new ArrayList<>(nodes);
+  majoritySide.remove(oldMasterNode);
+  final Map<String,List<Tuple<String,String>>> masters=Collections.synchronizedMap(new HashMap<String,List<Tuple<String,String>>>());
+  for (  final String node : majoritySide) {
+    masters.put(node,new ArrayList<Tuple<String,String>>());
+    internalCluster().getInstance(ClusterService.class,node).add(new ClusterStateListener(){
+      @Override public void clusterChanged(      ClusterChangedEvent event){
+        DiscoveryNode previousMaster=event.previousState().nodes().getMasterNode();
+        DiscoveryNode currentMaster=event.state().nodes().getMasterNode();
+        if (!Objects.equals(previousMaster,currentMaster)) {
+          String previousMasterNodeName=previousMaster != null ? previousMaster.name() : null;
+          String currentMasterNodeName=currentMaster != null ? currentMaster.name() : null;
+          masters.get(node).add(new Tuple<>(previousMasterNodeName,currentMasterNodeName));
+        }
+      }
+    }
+);
+  }
+  internalCluster().setDisruptionScheme(masterNodeDisruption);
+  logger.info("freezing node [{}]",oldMasterNode);
+  masterNodeDisruption.startDisrupting();
+  ensureStableCluster(2,majoritySide.get(0));
+  ensureStableCluster(2,majoritySide.get(1));
+  internalCluster().getInstance(ClusterService.class,oldMasterNode).submitStateUpdateTask("sneaky-update",Priority.IMMEDIATE,new ClusterStateUpdateTask(){
+    @Override public ClusterState execute(    ClusterState currentState) throws Exception {
+      return ClusterState.builder(currentState).build();
+    }
+    @Override public void onFailure(    String source,    Throwable t){
+      logger.warn("failure [{}]",t,source);
+    }
+  }
+);
+  final String newMasterNode=internalCluster().getMasterName(majoritySide.get(0));
+  logger.info("new detected master node [{}]",newMasterNode);
+  logger.info("Unfreeze node [{}]",oldMasterNode);
+  masterNodeDisruption.stopDisrupting();
+  assertDiscoveryCompleted(nodes);
+  assertMaster(newMasterNode,nodes);
+  assertThat(masters.size(),equalTo(2));
+  for (  Map.Entry<String,List<Tuple<String,String>>> entry : masters.entrySet()) {
+    String nodeName=entry.getKey();
+    List<Tuple<String,String>> recordedMasterTransition=entry.getValue();
+    assertThat("[" + nodeName + "] Each node should only record two master node transitions",recordedMasterTransition.size(),equalTo(2));
+    assertThat("[" + nodeName + "] First transition's previous master should be [null]",recordedMasterTransition.get(0).v1(),equalTo(oldMasterNode));
+    assertThat("[" + nodeName + "] First transition's current master should be ["+ newMasterNode+ "]",recordedMasterTransition.get(0).v2(),nullValue());
+    assertThat("[" + nodeName + "] Second transition's previous master should be [null]",recordedMasterTransition.get(1).v1(),nullValue());
+    assertThat("[" + nodeName + "] jSecond transition's current master should be ["+ newMasterNode+ "]",recordedMasterTransition.get(1).v2(),equalTo(newMasterNode));
+  }
+}
