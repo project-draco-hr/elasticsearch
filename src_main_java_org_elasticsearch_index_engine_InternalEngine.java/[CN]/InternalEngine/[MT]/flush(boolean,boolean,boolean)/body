@@ -1,21 +1,28 @@
 {
   ensureOpen();
-  updateIndexWriterSettings();
   if (commitTranslog) {
     if (onGoingRecoveries.get() > 0) {
       throw new FlushNotAllowedEngineException(shardId,"recovery is in progress, flush with committing translog is not allowed");
     }
   }
-  int currentFlushing=flushing.incrementAndGet();
-  if (currentFlushing > 1 && waitIfOngoing == false) {
-    flushing.decrementAndGet();
-    throw new FlushNotAllowedEngineException(shardId,"already flushing...");
-  }
-  flushLock.lock();
-  try {
-    if (commitTranslog) {
-      try (ReleasableLock _=readLock.acquire()){
-        ensureOpen();
+  try (ReleasableLock _=readLock.acquire()){
+    ensureOpen();
+    updateIndexWriterSettings();
+    if (flushLock.tryLock() == false) {
+      if (waitIfOngoing) {
+        logger.trace("waiting fore in-flight flush to finish");
+        flushLock.lock();
+        logger.trace("acquired flush lock after blocking");
+      }
+ else {
+        throw new FlushNotAllowedEngineException(shardId,"already flushing...");
+      }
+    }
+ else {
+      logger.trace("acquired flush lock immediately");
+    }
+    try {
+      if (commitTranslog) {
         if (onGoingRecoveries.get() > 0) {
           throw new FlushNotAllowedEngineException(shardId,"Recovery is in progress, flush is not allowed");
         }
@@ -40,13 +47,7 @@
           }
         }
       }
-       if (engineConfig.isEnableGcDeletes()) {
-        pruneDeletedTombstones();
-      }
-    }
  else {
-      try (ReleasableLock _=readLock.acquire()){
-        ensureOpen();
         try {
           long translogId=translog.currentId();
           indexWriter.setCommitData(Collections.singletonMap(Translog.TRANSLOG_ID_KEY,Long.toString(translogId)));
@@ -56,33 +57,27 @@
           throw new FlushFailedEngineException(shardId,e);
         }
       }
-       if (engineConfig.isEnableGcDeletes()) {
-        pruneDeletedTombstones();
+      try {
+        lastCommittedSegmentInfos=store.readLastCommittedSegmentsInfo();
       }
-    }
-    store.incRef();
-    try (ReleasableLock _=readLock.acquire()){
-      ensureOpen();
-      lastCommittedSegmentInfos=store.readLastCommittedSegmentsInfo();
-    }
- catch (    Throwable e) {
-      if (isClosed.get() == false) {
-        logger.warn("failed to read latest segment infos on flush",e);
-        if (Lucene.isCorruptionException(e)) {
-          throw new FlushFailedEngineException(shardId,e);
+ catch (      Throwable e) {
+        if (isClosed.get() == false) {
+          logger.warn("failed to read latest segment infos on flush",e);
+          if (Lucene.isCorruptionException(e)) {
+            throw new FlushFailedEngineException(shardId,e);
+          }
         }
       }
     }
+ catch (    FlushFailedEngineException ex) {
+      maybeFailEngine("flush",ex);
+      throw ex;
+    }
  finally {
-      store.decRef();
+      flushLock.unlock();
     }
   }
- catch (  FlushFailedEngineException ex) {
-    maybeFailEngine("flush",ex);
-    throw ex;
-  }
- finally {
-    flushLock.unlock();
-    flushing.decrementAndGet();
+   if (engineConfig.isEnableGcDeletes()) {
+    pruneDeletedTombstones();
   }
 }
