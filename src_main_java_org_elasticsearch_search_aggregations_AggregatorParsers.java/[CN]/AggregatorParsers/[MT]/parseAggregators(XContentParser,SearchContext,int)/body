@@ -14,7 +14,8 @@
     if (token != XContentParser.Token.START_OBJECT) {
       throw new SearchParseException(context,"Aggregation definition for [" + aggregationName + " starts with a ["+ token+ "], expected a ["+ XContentParser.Token.START_OBJECT+ "].");
     }
-    AggregatorFactory factory=null;
+    AggregatorFactory aggFactory=null;
+    ReducerFactory reducerFactory=null;
     AggregatorFactories subFactories=null;
     Map<String,Object> metaData=null;
     while ((token=parser.nextToken()) != XContentParser.Token.END_OBJECT) {
@@ -38,29 +39,48 @@ case "aggs":
   subFactories=parseAggregators(parser,context,level + 1);
 break;
 default :
-if (factory != null) {
-throw new SearchParseException(context,"Found two aggregation type definitions in [" + aggregationName + "]: ["+ factory.type+ "] and ["+ fieldName+ "]");
+if (aggFactory != null) {
+throw new SearchParseException(context,"Found two aggregation type definitions in [" + aggregationName + "]: ["+ aggFactory.type+ "] and ["+ fieldName+ "]");
 }
 Aggregator.Parser aggregatorParser=parser(fieldName);
 if (aggregatorParser == null) {
+Reducer.Parser reducerParser=reducer(fieldName);
+if (reducerParser == null) {
 throw new SearchParseException(context,"Could not find aggregator type [" + fieldName + "] in ["+ aggregationName+ "]");
 }
-factory=aggregatorParser.parse(aggregationName,parser,context);
+ else {
+reducerFactory=reducerParser.parse(aggregationName,parser,context);
 }
 }
-if (factory == null) {
+ else {
+aggFactory=aggregatorParser.parse(aggregationName,parser,context);
+}
+}
+}
+if (aggFactory == null && reducerFactory == null) {
 throw new SearchParseException(context,"Missing definition for aggregation [" + aggregationName + "]");
 }
+ else if (aggFactory != null) {
 if (metaData != null) {
-factory.setMetaData(metaData);
+aggFactory.setMetaData(metaData);
 }
 if (subFactories != null) {
-factory.subFactories(subFactories);
+aggFactory.subFactories(subFactories);
 }
 if (level == 0) {
-factory.validate();
+aggFactory.validate();
 }
-factories.add(factory);
+factories.addAggregator(aggFactory);
+}
+ else if (reducerFactory != null) {
+if (subFactories != null) {
+throw new SearchParseException(context,"Aggregation [" + aggregationName + "] cannot define sub-aggregations");
+}
+factories.addReducer(reducerFactory);
+}
+ else {
+throw new SearchParseException(context,"Found two sub aggregation definitions under [" + aggregationName + "]");
+}
 }
 return factories.build();
 }
