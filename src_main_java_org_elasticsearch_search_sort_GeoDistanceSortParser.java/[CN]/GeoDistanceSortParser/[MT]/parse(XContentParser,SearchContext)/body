@@ -5,8 +5,7 @@
   GeoDistance geoDistance=GeoDistance.DEFAULT;
   boolean reverse=false;
   MultiValueMode sortMode=null;
-  String nestedPath=null;
-  Filter nestedFilter=null;
+  NestedInnerQueryParseSupport nestedHelper=null;
   boolean normalizeLon=true;
   boolean normalizeLat=true;
   XContentParser.Token token;
@@ -21,8 +20,10 @@
     }
  else     if (token == XContentParser.Token.START_OBJECT) {
       if ("nested_filter".equals(currentName) || "nestedFilter".equals(currentName)) {
-        ParsedFilter parsedFilter=context.queryParserService().parseInnerFilter(parser);
-        nestedFilter=parsedFilter == null ? null : parsedFilter.filter();
+        if (nestedHelper == null) {
+          nestedHelper=new NestedInnerQueryParseSupport(parser,context);
+        }
+        nestedHelper.filter();
       }
  else {
         fieldName=currentName;
@@ -52,7 +53,10 @@
         sortMode=MultiValueMode.fromString(parser.text());
       }
  else       if ("nested_path".equals(currentName) || "nestedPath".equals(currentName)) {
-        nestedPath=parser.text();
+        if (nestedHelper == null) {
+          nestedHelper=new NestedInnerQueryParseSupport(parser,context);
+        }
+        nestedHelper.setPath(parser.text());
       }
  else {
         GeoPoint point=new GeoPoint();
@@ -83,29 +87,24 @@
   for (int i=0; i < geoPoints.size(); i++) {
     distances[i]=geoDistance.fixedSourceDistance(geoPoints.get(i).lat(),geoPoints.get(i).lon(),unit);
   }
-  ObjectMapper objectMapper;
-  if (nestedPath != null) {
-    ObjectMappers objectMappers=context.mapperService().objectMapper(nestedPath);
-    if (objectMappers == null) {
-      throw new ElasticsearchIllegalArgumentException("failed to find nested object mapping for explicit nested path [" + nestedPath + "]");
+  if (nestedHelper == null || nestedHelper.getNestedObjectMapper() == null) {
+    ObjectMapper objectMapper=context.mapperService().resolveClosestNestedObjectMapper(fieldName);
+    if (objectMapper != null && objectMapper.nested().isNested()) {
+      if (nestedHelper == null) {
+        nestedHelper=new NestedInnerQueryParseSupport(context.queryParserService().getParseContext());
+      }
+      nestedHelper.setPath(objectMapper.fullPath());
     }
-    objectMapper=objectMappers.mapper();
-    if (!objectMapper.nested().isNested()) {
-      throw new ElasticsearchIllegalArgumentException("mapping for explicit nested path is not mapped as nested: [" + nestedPath + "]");
-    }
-  }
- else {
-    objectMapper=context.mapperService().resolveClosestNestedObjectMapper(fieldName);
   }
   final Nested nested;
-  if (objectMapper != null && objectMapper.nested().isNested()) {
+  if (nestedHelper != null && nestedHelper.getPath() != null) {
     BitDocIdSetFilter rootDocumentsFilter=context.bitsetFilterCache().getBitDocIdSetFilter(NonNestedDocsFilter.INSTANCE);
     BitDocIdSetFilter innerDocumentsFilter;
-    if (nestedFilter != null) {
-      innerDocumentsFilter=context.bitsetFilterCache().getBitDocIdSetFilter(nestedFilter);
+    if (nestedHelper.filterFound()) {
+      innerDocumentsFilter=context.bitsetFilterCache().getBitDocIdSetFilter(nestedHelper.getInnerFilter());
     }
  else {
-      innerDocumentsFilter=context.bitsetFilterCache().getBitDocIdSetFilter(objectMapper.nestedTypeFilter());
+      innerDocumentsFilter=context.bitsetFilterCache().getBitDocIdSetFilter(nestedHelper.getNestedObjectMapper().nestedTypeFilter());
     }
     nested=new Nested(rootDocumentsFilter,innerDocumentsFilter);
   }

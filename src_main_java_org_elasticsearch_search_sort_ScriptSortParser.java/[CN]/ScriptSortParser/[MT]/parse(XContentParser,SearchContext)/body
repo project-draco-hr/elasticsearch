@@ -5,8 +5,7 @@
   Map<String,Object> params=null;
   boolean reverse=false;
   MultiValueMode sortMode=null;
-  String nestedPath=null;
-  Filter nestedFilter=null;
+  NestedInnerQueryParseSupport nestedHelper=null;
   XContentParser.Token token;
   String currentName=parser.currentName();
   ScriptService.ScriptType scriptType=ScriptService.ScriptType.INLINE;
@@ -19,8 +18,10 @@
         params=parser.map();
       }
  else       if ("nested_filter".equals(currentName) || "nestedFilter".equals(currentName)) {
-        ParsedFilter parsedFilter=context.queryParserService().parseInnerFilter(parser);
-        nestedFilter=parsedFilter == null ? null : parsedFilter.filter();
+        if (nestedHelper == null) {
+          nestedHelper=new NestedInnerQueryParseSupport(parser,context);
+        }
+        nestedHelper.filter();
       }
     }
  else     if (token.isValue()) {
@@ -52,7 +53,10 @@
         sortMode=MultiValueMode.fromString(parser.text());
       }
  else       if ("nested_path".equals(currentName) || "nestedPath".equals(currentName)) {
-        nestedPath=parser.text();
+        if (nestedHelper == null) {
+          nestedHelper=new NestedInnerQueryParseSupport(parser,context);
+        }
+        nestedHelper.setPath(parser.text());
       }
     }
   }
@@ -71,22 +75,14 @@
   }
   ObjectMapper objectMapper;
   final Nested nested;
-  if (nestedPath != null) {
-    ObjectMappers objectMappers=context.mapperService().objectMapper(nestedPath);
-    if (objectMappers == null) {
-      throw new ElasticsearchIllegalArgumentException("failed to find nested object mapping for explicit nested path [" + nestedPath + "]");
-    }
-    objectMapper=objectMappers.mapper();
-    if (!objectMapper.nested().isNested()) {
-      throw new ElasticsearchIllegalArgumentException("mapping for explicit nested path is not mapped as nested: [" + nestedPath + "]");
-    }
+  if (nestedHelper != null && nestedHelper.getPath() != null) {
     BitDocIdSetFilter rootDocumentsFilter=context.bitsetFilterCache().getBitDocIdSetFilter(NonNestedDocsFilter.INSTANCE);
     BitDocIdSetFilter innerDocumentsFilter;
-    if (nestedFilter != null) {
-      innerDocumentsFilter=context.bitsetFilterCache().getBitDocIdSetFilter(nestedFilter);
+    if (nestedHelper.filterFound()) {
+      innerDocumentsFilter=context.bitsetFilterCache().getBitDocIdSetFilter(nestedHelper.getInnerFilter());
     }
  else {
-      innerDocumentsFilter=context.bitsetFilterCache().getBitDocIdSetFilter(objectMapper.nestedTypeFilter());
+      innerDocumentsFilter=context.bitsetFilterCache().getBitDocIdSetFilter(nestedHelper.getNestedObjectMapper().nestedTypeFilter());
     }
     nested=new Nested(rootDocumentsFilter,innerDocumentsFilter);
   }
