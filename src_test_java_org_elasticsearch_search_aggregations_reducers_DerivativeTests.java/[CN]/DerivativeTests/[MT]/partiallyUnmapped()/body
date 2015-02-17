@@ -1,0 +1,19 @@
+{
+  SearchResponse response=client().prepareSearch("idx","idx_unmapped").addAggregation(histogram("histo").field(SINGLE_VALUED_FIELD_NAME).interval(interval).subAggregation(derivative("deriv").setBucketsPaths("_count"))).execute().actionGet();
+  assertSearchResponse(response);
+  InternalHistogram deriv=response.getAggregations().get("histo");
+  assertThat(deriv,notNullValue());
+  assertThat(deriv.getName(),equalTo("histo"));
+  List<? extends Bucket> buckets=deriv.getBuckets();
+  assertThat(deriv.getBuckets().size(),equalTo(numFirstDerivValueBuckets));
+  for (int i=0; i < numFirstDerivValueBuckets; ++i) {
+    Histogram.Bucket bucket=buckets.get(i);
+    assertThat(bucket,notNullValue());
+    assertThat(bucket.getKeyAsString(),equalTo(String.valueOf(i * interval)));
+    assertThat(((Number)bucket.getKey()).longValue(),equalTo((long)i * interval));
+    assertThat(bucket.getDocCount(),equalTo(valueCounts[i]));
+    SimpleValue docCountDeriv=bucket.getAggregations().get("deriv");
+    assertThat(docCountDeriv,notNullValue());
+    assertThat(docCountDeriv.value(),equalTo((double)firstDerivValueCounts[i]));
+  }
+}
