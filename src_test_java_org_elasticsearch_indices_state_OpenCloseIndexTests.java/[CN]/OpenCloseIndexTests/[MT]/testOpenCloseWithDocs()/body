@@ -1,0 +1,20 @@
+{
+  String mapping=XContentFactory.jsonBuilder().startObject().startObject("type").startObject("properties").startObject("test").field("type","string").field("index","not_analyzed").endObject().endObject().endObject().endObject().string();
+  assertAcked(client().admin().indices().prepareCreate("test").addMapping("type",mapping));
+  ensureGreen();
+  int docs=between(10,100);
+  IndexRequestBuilder[] builder=new IndexRequestBuilder[docs];
+  for (int i=0; i < docs; i++) {
+    builder[i]=client().prepareIndex("test","initial","" + i).setSource("test","init");
+  }
+  indexRandom(true,builder);
+  if (randomBoolean()) {
+    client().admin().indices().prepareFlush("test").setWaitIfOngoing(true).setForce(true).execute().get();
+  }
+  client().admin().indices().prepareClose("test").execute().get();
+  client().admin().indices().prepareOpen("test").execute().get();
+  ensureGreen();
+  SearchResponse searchResponse=client().prepareSearch().setTypes("initial").setQuery(QueryBuilders.matchQuery("test","init")).get();
+  assertNoFailures(searchResponse);
+  assertHitCount(searchResponse,docs);
+}
