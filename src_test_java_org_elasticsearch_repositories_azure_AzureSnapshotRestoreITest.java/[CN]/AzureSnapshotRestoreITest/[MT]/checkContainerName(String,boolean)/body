@@ -1,13 +1,25 @@
 {
   logger.info("-->  creating azure repository with container name [{}]",container);
-  try {
-    PutRepositoryResponse putRepositoryResponse=client().admin().cluster().preparePutRepository("test-repo").setType("azure").setSettings(ImmutableSettings.settingsBuilder().put(AzureStorageService.Fields.CONTAINER,container).put(AzureStorageService.Fields.BASE_PATH,getRepositoryPath()).put(AzureStorageService.Fields.CHUNK_SIZE,randomIntBetween(1000,10000))).get();
-    assertThat(putRepositoryResponse.isAcknowledged(),is(correct));
-    client().admin().cluster().prepareDeleteRepository("test-repo").get();
-  }
- catch (  RepositoryException e) {
-    if (correct) {
-      throw e;
+  assertThat(awaitBusy(new Predicate<Object>(){
+    public boolean apply(    Object obj){
+      try {
+        PutRepositoryResponse putRepositoryResponse=client().admin().cluster().preparePutRepository("test-repo").setType("azure").setSettings(ImmutableSettings.settingsBuilder().put(AzureStorageService.Fields.CONTAINER,container).put(AzureStorageService.Fields.BASE_PATH,getRepositoryPath()).put(AzureStorageService.Fields.CHUNK_SIZE,randomIntBetween(1000,10000))).get();
+        client().admin().cluster().prepareDeleteRepository("test-repo").get();
+        try {
+          cleanRepositoryFiles(container);
+        }
+ catch (        StorageException|URISyntaxException e) {
+        }
+        return (putRepositoryResponse.isAcknowledged() == correct);
+      }
+ catch (      RepositoryVerificationException e) {
+        if (!correct) {
+          return true;
+        }
+        logger.debug(" -> container is being removed. Let's wait a bit...");
+        return false;
+      }
     }
   }
+,5,TimeUnit.MINUTES),equalTo(true));
 }
