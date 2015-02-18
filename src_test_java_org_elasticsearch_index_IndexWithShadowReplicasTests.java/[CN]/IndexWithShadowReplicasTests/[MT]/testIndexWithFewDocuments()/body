@@ -1,0 +1,39 @@
+{
+  Settings nodeSettings=ImmutableSettings.builder().put("node.add_id_to_custom_path",false).put("node.enable_custom_paths",true).build();
+  internalCluster().startNodesAsync(3,nodeSettings).get();
+  final String IDX="test";
+  final Path dataPath=newTempDirPath();
+  Settings idxSettings=ImmutableSettings.builder().put(IndexMetaData.SETTING_NUMBER_OF_SHARDS,1).put(IndexMetaData.SETTING_NUMBER_OF_REPLICAS,2).put(IndexMetaData.SETTING_DATA_PATH,dataPath.toAbsolutePath().toString()).put(IndexMetaData.SETTING_SHADOW_REPLICAS,true).put(IndexMetaData.SETTING_SHARED_FILESYSTEM,true).build();
+  prepareCreate(IDX).setSettings(idxSettings).addMapping("doc","foo","type=string").get();
+  ensureGreen(IDX);
+  client().prepareIndex(IDX,"doc","1").setSource("foo","bar").get();
+  client().prepareIndex(IDX,"doc","2").setSource("foo","bar").get();
+  GetResponse gResp1=client().prepareGet(IDX,"doc","1").setRealtime(true).setFields("foo").get();
+  GetResponse gResp2=client().prepareGet(IDX,"doc","2").setRealtime(true).setFields("foo").get();
+  assertThat(gResp1.getField("foo").getValue().toString(),equalTo("bar"));
+  assertThat(gResp2.getField("foo").getValue().toString(),equalTo("bar"));
+  flushAndRefresh(IDX);
+  client().prepareIndex(IDX,"doc","3").setSource("foo","bar").get();
+  client().prepareIndex(IDX,"doc","4").setSource("foo","bar").get();
+  refresh();
+  gResp1=client().prepareGet(IDX,"doc","1").setRealtime(false).setFields("foo").get();
+  gResp2=client().prepareGet(IDX,"doc","2").setRealtime(false).setFields("foo").get();
+  assertThat(gResp1.getField("foo").getValue().toString(),equalTo("bar"));
+  assertThat(gResp2.getField("foo").getValue().toString(),equalTo("bar"));
+  logger.info("--> restarting both nodes");
+  if (randomBoolean()) {
+    logger.info("--> rolling restart");
+    internalCluster().rollingRestart();
+  }
+ else {
+    logger.info("--> full restart");
+    internalCluster().fullRestart();
+  }
+  client().admin().cluster().prepareHealth().setWaitForNodes("3").get();
+  ensureGreen(IDX);
+  logger.info("--> performing query");
+  SearchResponse resp=client().prepareSearch(IDX).setQuery(matchAllQuery()).get();
+  assertHitCount(resp,4);
+  logger.info("--> deleting index");
+  assertAcked(client().admin().indices().prepareDelete(IDX));
+}

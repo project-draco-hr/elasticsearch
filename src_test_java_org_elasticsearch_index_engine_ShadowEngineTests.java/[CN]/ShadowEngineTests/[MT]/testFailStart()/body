@@ -1,0 +1,45 @@
+{
+  ParsedDocument doc=testParsedDocument("1","1","test",null,-1,-1,testDocumentWithTextField(),B_1,false);
+  primaryEngine.create(new Engine.Create(null,newUid("1"),doc));
+  primaryEngine.flush();
+  final int iters=scaledRandomIntBetween(10,100);
+  for (int i=0; i < iters; i++) {
+    MockDirectoryWrapper wrapper=newMockFSDirectory(dirPath);
+    wrapper.setFailOnOpenInput(randomBoolean());
+    wrapper.setAllowRandomFileNotFoundException(randomBoolean());
+    wrapper.setRandomIOExceptionRate(randomDouble());
+    wrapper.setRandomIOExceptionRateOnOpen(randomDouble());
+    try (Store store=createStore(wrapper)){
+      int refCount=store.refCount();
+      assertTrue("refCount: " + store.refCount(),store.refCount() > 0);
+      Translog translog=createTranslog();
+      ShadowEngine holder;
+      try {
+        holder=createShadowEngine(store,translog);
+      }
+ catch (      EngineCreationFailureException ex) {
+        assertEquals(store.refCount(),refCount);
+        continue;
+      }
+      holder.config().setFailEngineOnCorruption(true);
+      assertEquals(store.refCount(),refCount + 1);
+      final int numStarts=scaledRandomIntBetween(1,5);
+      for (int j=0; j < numStarts; j++) {
+        try {
+          assertEquals(store.refCount(),refCount + 1);
+          holder.close();
+          holder=createShadowEngine(store,translog);
+          holder.config().setFailEngineOnCorruption(true);
+          assertEquals(store.refCount(),refCount + 1);
+        }
+ catch (        EngineCreationFailureException ex) {
+          assertEquals(store.refCount(),refCount);
+          break;
+        }
+      }
+      translog.close();
+      holder.close();
+      assertEquals(store.refCount(),refCount);
+    }
+   }
+}

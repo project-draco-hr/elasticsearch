@@ -1,0 +1,65 @@
+{
+  if (closed.get()) {
+    throw new ElasticsearchIllegalStateException("Can't create shard [" + index.name() + "]["+ sShardId+ "], closed");
+  }
+  final ShardId shardId=new ShardId(index,sShardId);
+  ShardLock lock=null;
+  boolean success=false;
+  Injector shardInjector=null;
+  try {
+    lock=nodeEnv.shardLock(shardId,TimeUnit.SECONDS.toMillis(5));
+    if (shards.containsKey(shardId.id())) {
+      throw new IndexShardAlreadyExistsException(shardId + " already exists");
+    }
+    indicesLifecycle.beforeIndexShardCreated(shardId,indexSettings);
+    logger.debug("creating shard_id {}",shardId);
+    final boolean canDeleteShardContent=IndexMetaData.isOnSharedFilesystem(indexSettings) == false || (primary && IndexMetaData.isOnSharedFilesystem(indexSettings));
+    ModulesBuilder modules=new ModulesBuilder();
+    modules.add(new ShardsPluginsModule(indexSettings,pluginsService));
+    modules.add(new IndexShardModule(shardId,primary,indexSettings));
+    modules.add(new ShardIndexingModule());
+    modules.add(new ShardSearchModule());
+    modules.add(new ShardGetModule());
+    modules.add(new StoreModule(indexSettings,injector.getInstance(IndexStore.class),lock,new StoreCloseListener(shardId,canDeleteShardContent)));
+    modules.add(new DeletionPolicyModule(indexSettings));
+    modules.add(new MergePolicyModule(indexSettings));
+    modules.add(new MergeSchedulerModule(indexSettings));
+    modules.add(new ShardFilterCacheModule());
+    modules.add(new ShardQueryCacheModule());
+    modules.add(new ShardBitsetFilterCacheModule());
+    modules.add(new ShardFieldDataModule());
+    modules.add(new TranslogModule(indexSettings));
+    modules.add(new IndexShardGatewayModule());
+    modules.add(new PercolatorShardModule());
+    modules.add(new ShardTermVectorsModule());
+    modules.add(new IndexShardSnapshotModule());
+    modules.add(new SuggestShardModule());
+    try {
+      shardInjector=modules.createChildInjector(injector);
+    }
+ catch (    CreationException e) {
+      throw new IndexShardCreationException(shardId,Injectors.getFirstErrorFailure(e));
+    }
+catch (    Throwable e) {
+      throw new IndexShardCreationException(shardId,e);
+    }
+    IndexShard indexShard=shardInjector.getInstance(IndexShard.class);
+    indicesLifecycle.indexShardStateChanged(indexShard,null,"shard created");
+    indicesLifecycle.afterIndexShardCreated(indexShard);
+    shards=newMapBuilder(shards).put(shardId.id(),new Tuple<>(indexShard,shardInjector)).immutableMap();
+    success=true;
+    return indexShard;
+  }
+ catch (  IOException ex) {
+    throw new IndexShardCreationException(shardId,ex);
+  }
+ finally {
+    if (success == false) {
+      IOUtils.closeWhileHandlingException(lock);
+      if (shardInjector != null) {
+        IndexShard indexShard=shardInjector.getInstance(IndexShard.class);
+        closeShardInjector("initialization failed",shardId,shardInjector,indexShard);
+      }
+    }
+  }
+}
