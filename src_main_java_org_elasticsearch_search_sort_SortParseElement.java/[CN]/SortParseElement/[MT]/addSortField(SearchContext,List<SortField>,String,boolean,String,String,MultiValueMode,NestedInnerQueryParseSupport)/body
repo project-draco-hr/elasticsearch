@@ -1,0 +1,66 @@
+{
+  if (SCORE_FIELD_NAME.equals(fieldName)) {
+    if (reverse) {
+      sortFields.add(SORT_SCORE_REVERSE);
+    }
+ else {
+      sortFields.add(SORT_SCORE);
+    }
+  }
+ else   if (DOC_FIELD_NAME.equals(fieldName)) {
+    if (reverse) {
+      sortFields.add(SORT_DOC_REVERSE);
+    }
+ else {
+      sortFields.add(SORT_DOC);
+    }
+  }
+ else {
+    FieldMapper<?> fieldMapper=context.smartNameFieldMapper(fieldName);
+    if (fieldMapper == null) {
+      if (unmappedType != null) {
+        fieldMapper=context.mapperService().unmappedFieldMapper(unmappedType);
+      }
+ else {
+        throw new SearchParseException(context,"No mapping found for [" + fieldName + "] in order to sort on");
+      }
+    }
+    if (!fieldMapper.isSortable()) {
+      throw new SearchParseException(context,"Sorting not supported for field[" + fieldName + "]");
+    }
+    if (!(fieldMapper instanceof NumberFieldMapper) && (sortMode == MultiValueMode.SUM || sortMode == MultiValueMode.AVG)) {
+      sortMode=null;
+    }
+    if (sortMode == null) {
+      sortMode=resolveDefaultSortMode(reverse);
+    }
+    if (!(context instanceof SubSearchContext)) {
+      if (nestedHelper == null || nestedHelper.getNestedObjectMapper() == null) {
+        ObjectMapper objectMapper=context.mapperService().resolveClosestNestedObjectMapper(fieldName);
+        if (objectMapper != null && objectMapper.nested().isNested()) {
+          if (nestedHelper == null) {
+            nestedHelper=new NestedInnerQueryParseSupport(context.queryParserService().getParseContext());
+          }
+          nestedHelper.setPath(objectMapper.fullPath());
+        }
+      }
+    }
+    final Nested nested;
+    if (nestedHelper != null && nestedHelper.getPath() != null) {
+      BitDocIdSetFilter rootDocumentsFilter=context.bitsetFilterCache().getBitDocIdSetFilter(NonNestedDocsFilter.INSTANCE);
+      BitDocIdSetFilter innerDocumentsFilter;
+      if (nestedHelper.filterFound()) {
+        innerDocumentsFilter=context.bitsetFilterCache().getBitDocIdSetFilter(nestedHelper.getInnerFilter());
+      }
+ else {
+        innerDocumentsFilter=context.bitsetFilterCache().getBitDocIdSetFilter(nestedHelper.getNestedObjectMapper().nestedTypeFilter());
+      }
+      nested=new Nested(rootDocumentsFilter,innerDocumentsFilter);
+    }
+ else {
+      nested=null;
+    }
+    IndexFieldData.XFieldComparatorSource fieldComparatorSource=context.fieldData().getForField(fieldMapper).comparatorSource(missing,sortMode,nested);
+    sortFields.add(new SortField(fieldMapper.names().indexName(),fieldComparatorSource,reverse));
+  }
+}
