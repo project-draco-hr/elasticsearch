@@ -50,32 +50,42 @@
   @SuppressWarnings("unchecked") AtomicArray.Entry<? extends QuerySearchResultProvider>[] sortedResults=results.toArray(new AtomicArray.Entry[results.size()]);
   Arrays.sort(sortedResults,QUERY_RESULT_ORDERING);
   QuerySearchResultProvider firstResult=sortedResults[0].value;
-  final Sort sort;
-  if (firstResult.queryResult().topDocs() instanceof TopFieldDocs) {
-    TopFieldDocs firstTopDocs=(TopFieldDocs)firstResult.queryResult().topDocs();
-    sort=new Sort(firstTopDocs.fields);
-  }
- else {
-    sort=null;
-  }
   int topN=firstResult.queryResult().size();
-  TopDocs[] shardTopDocs=new TopDocs[resultsArr.length()];
   if (firstResult.includeFetch()) {
     topN*=sortedResults.length;
-  }
-  for (  AtomicArray.Entry<? extends QuerySearchResultProvider> sortedResult : sortedResults) {
-    TopDocs topDocs=sortedResult.value.queryResult().topDocs();
-    shardTopDocs[sortedResult.index]=topDocs;
   }
   int from=firstResult.queryResult().from();
   if (ignoreFrom) {
     from=0;
   }
-  for (int i=0; i < shardTopDocs.length; i++) {
-    if (shardTopDocs[i] == null) {
-      shardTopDocs[i]=Lucene.EMPTY_TOP_DOCS;
+  final TopDocs mergedTopDocs;
+  if (firstResult.queryResult().topDocs() instanceof TopFieldDocs) {
+    TopFieldDocs firstTopDocs=(TopFieldDocs)firstResult.queryResult().topDocs();
+    final Sort sort=new Sort(firstTopDocs.fields);
+    final TopFieldDocs[] shardTopDocs=new TopFieldDocs[resultsArr.length()];
+    for (    AtomicArray.Entry<? extends QuerySearchResultProvider> sortedResult : sortedResults) {
+      TopDocs topDocs=sortedResult.value.queryResult().topDocs();
+      shardTopDocs[sortedResult.index]=(TopFieldDocs)topDocs;
     }
+    for (int i=0; i < shardTopDocs.length; ++i) {
+      if (shardTopDocs[i] == null) {
+        shardTopDocs[i]=new TopFieldDocs(0,new FieldDoc[0],sort.getSort(),Float.NaN);
+      }
+    }
+    mergedTopDocs=TopDocs.merge(sort,from,topN,shardTopDocs);
   }
-  TopDocs mergedTopDocs=TopDocs.merge(sort,from,topN,shardTopDocs);
+ else {
+    final TopDocs[] shardTopDocs=new TopDocs[resultsArr.length()];
+    for (    AtomicArray.Entry<? extends QuerySearchResultProvider> sortedResult : sortedResults) {
+      TopDocs topDocs=sortedResult.value.queryResult().topDocs();
+      shardTopDocs[sortedResult.index]=topDocs;
+    }
+    for (int i=0; i < shardTopDocs.length; ++i) {
+      if (shardTopDocs[i] == null) {
+        shardTopDocs[i]=Lucene.EMPTY_TOP_DOCS;
+      }
+    }
+    mergedTopDocs=TopDocs.merge(from,topN,shardTopDocs);
+  }
   return mergedTopDocs.scoreDocs;
 }
