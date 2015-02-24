@@ -11,44 +11,59 @@
 synchronized (pendingDeletes) {
       remove=pendingDeletes.remove(index);
     }
-    final long maxSleepTimeMs=10 * 1000;
-    long sleepTime=10;
-    do {
-      if (remove == null || remove.isEmpty()) {
-        break;
-      }
-      Iterator<PendingDelete> iterator=remove.iterator();
-      while (iterator.hasNext()) {
-        PendingDelete delete=iterator.next();
-        ShardLock shardLock=locks.get(delete.shardId);
-        if (shardLock != null) {
-          try {
-            deleteShardStore("pending delete",shardLock,delete.settings);
-            iterator.remove();
-          }
- catch (          IOException ex) {
-            logger.debug("{} retry pending delete",ex,shardLock.getShardId());
-          }
+    if (remove != null && remove.isEmpty() == false) {
+      CollectionUtil.timSort(remove);
+      final long maxSleepTimeMs=10 * 1000;
+      long sleepTime=10;
+      do {
+        if (remove.isEmpty()) {
+          break;
         }
+        Iterator<PendingDelete> iterator=remove.iterator();
+        while (iterator.hasNext()) {
+          PendingDelete delete=iterator.next();
+          if (delete.deleteIndex) {
+            logger.debug("{} deleting index store reason [{}]",index,"pending delete");
+            try {
+              nodeEnv.deleteIndexDirectoryUnderLock(index,indexSettings);
+              iterator.remove();
+            }
+ catch (            IOException ex) {
+              logger.debug("{} retry pending delete",ex,index);
+            }
+          }
  else {
-          logger.warn("{} no shard lock for pending delete",delete.shardId);
-          iterator.remove();
+            ShardLock shardLock=locks.get(delete.shardId);
+            if (shardLock != null) {
+              try {
+                deleteShardStore("pending delete",shardLock,delete.settings);
+                iterator.remove();
+              }
+ catch (              IOException ex) {
+                logger.debug("{} retry pending delete",ex,shardLock.getShardId());
+              }
+            }
+ else {
+              logger.warn("{} no shard lock for pending delete",delete.shardId);
+              iterator.remove();
+            }
+          }
+        }
+        if (remove.isEmpty() == false) {
+          logger.warn("{} still pending deletes present for shards {} - retrying",index,remove.toString());
+          try {
+            Thread.sleep(sleepTime);
+            sleepTime=Math.min(maxSleepTimeMs,sleepTime * 2);
+            logger.debug("{} schedule pending delete retry after {} ms",index,sleepTime);
+          }
+ catch (          InterruptedException e) {
+            Thread.interrupted();
+            return;
+          }
         }
       }
-      if (remove.isEmpty() == false) {
-        logger.warn("{} still pending deletes present for shards {} - retrying",index,remove.toString());
-        try {
-          Thread.sleep(sleepTime);
-          sleepTime=Math.min(maxSleepTimeMs,sleepTime * 2);
-          logger.debug("{} schedule pending delete retry after {} ms",index,sleepTime);
-        }
- catch (        InterruptedException e) {
-          Thread.interrupted();
-          return;
-        }
-      }
-    }
  while ((System.currentTimeMillis() - startTime) < timeout.millis());
+    }
   }
   finally {
     IOUtils.close(shardLocks);
