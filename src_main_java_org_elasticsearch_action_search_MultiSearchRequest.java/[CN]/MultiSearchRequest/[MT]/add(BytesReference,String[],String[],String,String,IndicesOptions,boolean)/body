@@ -1,2 +1,71 @@
 {
+  XContent xContent=XContentFactory.xContent(data);
+  int from=0;
+  int length=data.length();
+  byte marker=xContent.streamSeparator();
+  while (true) {
+    int nextMarker=findNextMarker(marker,from,data,length);
+    if (nextMarker == -1) {
+      break;
+    }
+    if (nextMarker == 0) {
+      from=nextMarker + 1;
+      continue;
+    }
+    SearchRequest searchRequest=new SearchRequest();
+    if (indices != null) {
+      searchRequest.indices(indices);
+    }
+    if (indicesOptions != null) {
+      searchRequest.indicesOptions(indicesOptions);
+    }
+    if (types != null && types.length > 0) {
+      searchRequest.types(types);
+    }
+    if (routing != null) {
+      searchRequest.routing(routing);
+    }
+    searchRequest.searchType(searchType);
+    IndicesOptions defaultOptions=IndicesOptions.strictExpandOpenAndForbidClosed();
+    if (nextMarker - from > 0) {
+      try (XContentParser parser=xContent.createParser(data.slice(from,nextMarker - from))){
+        Map<String,Object> source=parser.map();
+        for (        Map.Entry<String,Object> entry : source.entrySet()) {
+          Object value=entry.getValue();
+          if ("index".equals(entry.getKey()) || "indices".equals(entry.getKey())) {
+            if (!allowExplicitIndex) {
+              throw new ElasticsearchIllegalArgumentException("explicit index in multi percolate is not allowed");
+            }
+            searchRequest.indices(nodeStringArrayValue(value));
+          }
+ else           if ("type".equals(entry.getKey()) || "types".equals(entry.getKey())) {
+            searchRequest.types(nodeStringArrayValue(value));
+          }
+ else           if ("search_type".equals(entry.getKey()) || "searchType".equals(entry.getKey())) {
+            searchRequest.searchType(nodeStringValue(value,null));
+          }
+ else           if ("query_cache".equals(entry.getKey()) || "queryCache".equals(entry.getKey())) {
+            searchRequest.queryCache(nodeBooleanValue(value));
+          }
+ else           if ("preference".equals(entry.getKey())) {
+            searchRequest.preference(nodeStringValue(value,null));
+          }
+ else           if ("routing".equals(entry.getKey())) {
+            searchRequest.routing(nodeStringValue(value,null));
+          }
+        }
+        defaultOptions=IndicesOptions.fromMap(source,defaultOptions);
+      }
+     }
+    searchRequest.indicesOptions(defaultOptions);
+    from=nextMarker + 1;
+    nextMarker=findNextMarker(marker,from,data,length);
+    if (nextMarker == -1) {
+      break;
+    }
+    searchRequest.source(data.slice(from,nextMarker - from));
+    from=nextMarker + 1;
+    add(searchRequest);
+  }
+  return this;
 }
