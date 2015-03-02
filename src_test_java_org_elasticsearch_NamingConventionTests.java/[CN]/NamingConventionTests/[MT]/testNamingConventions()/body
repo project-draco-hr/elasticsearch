@@ -1,0 +1,84 @@
+{
+  final Set<Class> notImplementing=new HashSet<>();
+  final Set<Class> pureUnitTest=new HashSet<>();
+  final Set<Class> missingSuffix=new HashSet<>();
+  String[] packages={"org.elasticsearch","org.apache.lucene"};
+  for (  final String packageName : packages) {
+    final String path="/" + packageName.replace('.','/');
+    final Path startPath=Paths.get(NamingConventionTests.class.getResource(path).toURI());
+    final Set<Path> ignore=Sets.newHashSet(Paths.get("/org/elasticsearch/stresstest"),Paths.get("/org/elasticsearch/benchmark/stress"));
+    Files.walkFileTree(startPath,new FileVisitor<Path>(){
+      private Path pkgPrefix=Paths.get(path).getParent();
+      @Override public FileVisitResult preVisitDirectory(      Path dir,      BasicFileAttributes attrs) throws IOException {
+        Path next=pkgPrefix.resolve(dir.getFileName());
+        if (ignore.contains(next)) {
+          return FileVisitResult.SKIP_SUBTREE;
+        }
+        pkgPrefix=next;
+        return FileVisitResult.CONTINUE;
+      }
+      @Override public FileVisitResult visitFile(      Path file,      BasicFileAttributes attrs) throws IOException {
+        try {
+          String filename=file.getFileName().toString();
+          if (filename.endsWith(".class")) {
+            Class<?> clazz=loadClass(filename);
+            if (Modifier.isAbstract(clazz.getModifiers()) == false && Modifier.isInterface(clazz.getModifiers()) == false) {
+              if ((clazz.getName().endsWith("Tests") || clazz.getName().endsWith("Test"))) {
+                if (isTestCase(clazz) == false) {
+                  notImplementing.add(clazz);
+                }
+              }
+ else               if (isTestCase(clazz)) {
+                missingSuffix.add(clazz);
+              }
+ else               if (junit.framework.Test.class.isAssignableFrom(clazz) || hasTestAnnotation(clazz)) {
+                pureUnitTest.add(clazz);
+              }
+            }
+          }
+        }
+ catch (        ClassNotFoundException e) {
+          throw new RuntimeException(e);
+        }
+        return FileVisitResult.CONTINUE;
+      }
+      private boolean hasTestAnnotation(      Class<?> clazz){
+        for (        Method method : clazz.getDeclaredMethods()) {
+          if (method.getAnnotation(Test.class) != null) {
+            return true;
+          }
+        }
+        return false;
+      }
+      private boolean isTestCase(      Class<?> clazz){
+        return ElasticsearchTestCase.class.isAssignableFrom(clazz) || ElasticsearchLuceneTestCase.class.isAssignableFrom(clazz) || ElasticsearchTokenStreamTestCase.class.isAssignableFrom(clazz)|| LuceneTestCase.class.isAssignableFrom(clazz);
+      }
+      private Class<?> loadClass(      String filename) throws ClassNotFoundException {
+        StringBuilder pkg=new StringBuilder();
+        for (        Path p : pkgPrefix) {
+          pkg.append(p.getFileName().toString()).append(".");
+        }
+        pkg.append(filename.substring(0,filename.length() - 6));
+        return Class.forName(pkg.toString());
+      }
+      @Override public FileVisitResult visitFileFailed(      Path file,      IOException exc) throws IOException {
+        throw exc;
+      }
+      @Override public FileVisitResult postVisitDirectory(      Path dir,      IOException exc) throws IOException {
+        pkgPrefix=pkgPrefix.getParent();
+        return FileVisitResult.CONTINUE;
+      }
+    }
+);
+  }
+  assertTrue(missingSuffix.remove(WrongName.class));
+  assertTrue(missingSuffix.remove(WrongNameTheSecond.class));
+  assertTrue(notImplementing.remove(NotImplementingTests.class));
+  assertTrue(notImplementing.remove(NotImplementingTest.class));
+  assertTrue(pureUnitTest.remove(PlainUnit.class));
+  assertTrue(pureUnitTest.remove(PlainUnitTheSecond.class));
+  String classesToSubclass=Joiner.on(',').join(ElasticsearchTestCase.class.getSimpleName(),ElasticsearchLuceneTestCase.class.getSimpleName(),ElasticsearchTokenStreamTestCase.class.getSimpleName(),LuceneTestCase.class.getSimpleName());
+  assertTrue("Not all subclasses of " + ElasticsearchTestCase.class.getSimpleName() + " match the naming convention. Concrete classes must end with [Test|Tests]: "+ missingSuffix.toString(),missingSuffix.isEmpty());
+  assertTrue("Pure Unit-Test found must subclass one of [" + classesToSubclass + "] "+ pureUnitTest.toString(),pureUnitTest.isEmpty());
+  assertTrue("Classes ending with Test|Tests] must subclass [" + classesToSubclass + "] "+ notImplementing.toString(),notImplementing.isEmpty());
+}
