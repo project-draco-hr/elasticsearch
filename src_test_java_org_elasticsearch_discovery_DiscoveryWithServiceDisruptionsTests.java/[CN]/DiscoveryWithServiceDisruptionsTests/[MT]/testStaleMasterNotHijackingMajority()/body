@@ -24,6 +24,15 @@
     }
 );
   }
+  final CountDownLatch oldMasterNodeSteppedDown=new CountDownLatch(1);
+  internalCluster().getInstance(ClusterService.class,oldMasterNode).add(new ClusterStateListener(){
+    @Override public void clusterChanged(    ClusterChangedEvent event){
+      if (event.state().nodes().masterNodeId() == null) {
+        oldMasterNodeSteppedDown.countDown();
+      }
+    }
+  }
+);
   internalCluster().setDisruptionScheme(masterNodeDisruption);
   logger.info("freezing node [{}]",oldMasterNode);
   masterNodeDisruption.startDisrupting();
@@ -42,6 +51,7 @@
   logger.info("new detected master node [{}]",newMasterNode);
   logger.info("Unfreeze node [{}]",oldMasterNode);
   masterNodeDisruption.stopDisrupting();
+  oldMasterNodeSteppedDown.await(30,TimeUnit.SECONDS);
   assertDiscoveryCompleted(nodes);
   assertBusy(new Runnable(){
     @Override public void run(){
@@ -57,6 +67,6 @@
     assertThat("[" + nodeName + "] First transition's previous master should be [null]",recordedMasterTransition.get(0).v1(),equalTo(oldMasterNode));
     assertThat("[" + nodeName + "] First transition's current master should be ["+ newMasterNode+ "]",recordedMasterTransition.get(0).v2(),nullValue());
     assertThat("[" + nodeName + "] Second transition's previous master should be [null]",recordedMasterTransition.get(1).v1(),nullValue());
-    assertThat("[" + nodeName + "] jSecond transition's current master should be ["+ newMasterNode+ "]",recordedMasterTransition.get(1).v2(),equalTo(newMasterNode));
+    assertThat("[" + nodeName + "] Second transition's current master should be ["+ newMasterNode+ "]",recordedMasterTransition.get(1).v2(),equalTo(newMasterNode));
   }
 }
