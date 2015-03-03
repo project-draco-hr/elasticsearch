@@ -1,52 +1,35 @@
 {
   SearchResponse response=client().prepareSearch("idx").addAggregation(histogram("histo").field(SINGLE_VALUED_FIELD_NAME).interval(interval).subAggregation(sum("sum").field(SINGLE_VALUED_FIELD_NAME)).subAggregation(derivative("deriv").setBucketsPaths("sum"))).execute().actionGet();
   assertSearchResponse(response);
-  InternalHistogram deriv=response.getAggregations().get("histo");
+  InternalHistogram<Bucket> deriv=response.getAggregations().get("histo");
   assertThat(deriv,notNullValue());
   assertThat(deriv.getName(),equalTo("histo"));
   assertThat(deriv.getBuckets().size(),equalTo(numValueBuckets));
   Object[] propertiesKeys=(Object[])deriv.getProperty("_key");
   Object[] propertiesDocCounts=(Object[])deriv.getProperty("_count");
   Object[] propertiesSumCounts=(Object[])deriv.getProperty("sum.value");
-  List<Histogram.Bucket> buckets=new ArrayList<>(deriv.getBuckets());
+  List<Bucket> buckets=new ArrayList<Bucket>(deriv.getBuckets());
+  Long expectedSumPreviousBucket=Long.MIN_VALUE;
   for (int i=0; i < numValueBuckets; ++i) {
     Histogram.Bucket bucket=buckets.get(i);
-    assertThat(bucket,notNullValue());
-    assertThat(bucket.getKeyAsString(),equalTo(String.valueOf(i * interval)));
-    assertThat(((Number)bucket.getKey()).longValue(),equalTo((long)i * interval));
-    assertThat(bucket.getDocCount(),equalTo(valueCounts[i]));
-    assertThat(bucket.getAggregations().asList().isEmpty(),is(false));
+    checkBucketKeyAndDocCount("Bucket " + i,bucket,i * interval,valueCounts[i]);
     Sum sum=bucket.getAggregations().get("sum");
     assertThat(sum,notNullValue());
-    long s=0;
-    for (int j=0; j < numDocs; ++j) {
-      if ((j + 1) / interval == i) {
-        s+=j + 1;
-      }
-    }
+    long expectedSum=valueCounts[i] * (i * interval);
+    assertThat(sum.getValue(),equalTo((double)expectedSum));
     SimpleValue sumDeriv=bucket.getAggregations().get("deriv");
-    assertThat(sum.getValue(),equalTo((double)s));
     if (i > 0) {
       assertThat(sumDeriv,notNullValue());
-      long s1=0;
-      long s2=0;
-      for (int j=0; j < numDocs; ++j) {
-        if ((j + 1) / interval == i - 1) {
-          s1+=j + 1;
-        }
-        if ((j + 1) / interval == i) {
-          s2+=j + 1;
-        }
-      }
-      long sumDerivValue=s2 - s1;
+      long sumDerivValue=expectedSum - expectedSumPreviousBucket;
       assertThat(sumDeriv.value(),equalTo((double)sumDerivValue));
       assertThat((double)bucket.getProperty("histo",AggregationPath.parse("deriv.value").getPathElementsAsStringList()),equalTo((double)sumDerivValue));
     }
  else {
       assertThat(sumDeriv,nullValue());
     }
+    expectedSumPreviousBucket=expectedSum;
     assertThat((long)propertiesKeys[i],equalTo((long)i * interval));
     assertThat((long)propertiesDocCounts[i],equalTo(valueCounts[i]));
-    assertThat((double)propertiesSumCounts[i],equalTo((double)s));
+    assertThat((double)propertiesSumCounts[i],equalTo((double)expectedSum));
   }
 }
