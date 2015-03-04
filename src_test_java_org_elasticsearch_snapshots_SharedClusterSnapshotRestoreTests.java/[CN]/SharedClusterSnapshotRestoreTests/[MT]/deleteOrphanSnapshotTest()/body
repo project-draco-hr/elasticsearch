@@ -1,0 +1,37 @@
+{
+  Client client=client();
+  logger.info("-->  creating repository");
+  assertAcked(client.admin().cluster().preparePutRepository("test-repo").setType(MockRepositoryModule.class.getCanonicalName()).setSettings(ImmutableSettings.settingsBuilder().put("location",newTempDirPath()).put("compress",randomBoolean()).put("chunk_size",randomIntBetween(100,1000))));
+  createIndex("test-idx");
+  ensureGreen();
+  ClusterService clusterService=internalCluster().getInstance(ClusterService.class,internalCluster().getMasterName());
+  final CountDownLatch countDownLatch=new CountDownLatch(1);
+  logger.info("--> snapshot");
+  CreateSnapshotResponse createSnapshotResponse=client.admin().cluster().prepareCreateSnapshot("test-repo","test-snap").setWaitForCompletion(true).setIndices("test-idx").get();
+  assertThat(createSnapshotResponse.getSnapshotInfo().successfulShards(),greaterThan(0));
+  assertThat(createSnapshotResponse.getSnapshotInfo().successfulShards(),equalTo(createSnapshotResponse.getSnapshotInfo().totalShards()));
+  logger.info("--> emulate an orphan snapshot");
+  clusterService.submitStateUpdateTask("orphan snapshot test",new ProcessedClusterStateUpdateTask(){
+    @Override public ClusterState execute(    ClusterState currentState){
+      ImmutableMap.Builder<ShardId,ShardSnapshotStatus> shards=ImmutableMap.builder();
+      shards.put(new ShardId("test-idx",0),new ShardSnapshotStatus("unknown-node",State.ABORTED));
+      shards.put(new ShardId("test-idx",1),new ShardSnapshotStatus("unknown-node",State.ABORTED));
+      shards.put(new ShardId("test-idx",2),new ShardSnapshotStatus("unknown-node",State.ABORTED));
+      ImmutableList.Builder<Entry> entries=ImmutableList.builder();
+      entries.add(new Entry(new SnapshotId("test-repo","test-snap"),true,State.ABORTED,ImmutableList.of("test-idx"),System.currentTimeMillis(),shards.build()));
+      MetaData.Builder mdBuilder=MetaData.builder(currentState.metaData());
+      mdBuilder.putCustom(SnapshotMetaData.TYPE,new SnapshotMetaData(entries.build()));
+      return ClusterState.builder(currentState).metaData(mdBuilder).build();
+    }
+    @Override public void onFailure(    String source,    Throwable t){
+      fail();
+    }
+    @Override public void clusterStateProcessed(    String source,    ClusterState oldState,    final ClusterState newState){
+      countDownLatch.countDown();
+    }
+  }
+);
+  countDownLatch.await();
+  logger.info("--> try deleting the orphan snapshot");
+  assertAcked(client.admin().cluster().prepareDeleteSnapshot("test-repo","test-snap").get("10s"));
+}

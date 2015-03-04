@@ -36,8 +36,22 @@
           endSnapshot(snapshot);
         }
  else {
-          logger.trace("trying to delete completed snapshot - save to delete");
-          return currentState;
+          boolean hasUncompletedShards=false;
+          for (          ShardSnapshotStatus shardStatus : snapshot.shards().values()) {
+            if (shardStatus.state().completed() == false && shardStatus.nodeId() != null && currentState.nodes().get(shardStatus.nodeId()) != null) {
+              hasUncompletedShards=true;
+              break;
+            }
+          }
+          if (hasUncompletedShards) {
+            logger.debug("trying to delete completed snapshot - should wait for shards to finalize on all nodes");
+            return currentState;
+          }
+ else {
+            logger.debug("trying to delete completed snapshot with no finalizing shards - can delete immediately");
+            shards=snapshot.shards();
+            endSnapshot(snapshot);
+          }
         }
         SnapshotMetaData.Entry newSnapshot=new SnapshotMetaData.Entry(snapshot,State.ABORTED,shards);
         snapshots=new SnapshotMetaData(newSnapshot);
