@@ -1,0 +1,24 @@
+{
+  final Integer numShards=settings.getAsInt(IndexMetaData.SETTING_NUMBER_OF_SHARDS,null);
+  if (numShards == null || numShards <= 0) {
+    throw new IllegalArgumentException("settings must contain a non-null > 0 number of shards");
+  }
+  logger.trace("locking all shards for index {} - [{}]",index,numShards);
+  List<ShardLock> allLocks=new ArrayList<>(numShards);
+  boolean success=false;
+  long startTime=System.currentTimeMillis();
+  try {
+    for (int i=0; i < numShards; i++) {
+      long timeoutLeft=Math.max(0,lockTimeoutMS - (System.currentTimeMillis() - startTime));
+      allLocks.add(shardLock(new ShardId(index,i),timeoutLeft));
+    }
+    success=true;
+  }
+  finally {
+    if (success == false) {
+      logger.trace("unable to lock all shards for index {}",index);
+      IOUtils.closeWhileHandlingException(allLocks);
+    }
+  }
+  return allLocks;
+}

@@ -1,0 +1,35 @@
+{
+  final DiscoveryNodes nodes=clusterState.nodes();
+  if (nodes.localNodeMaster()) {
+    threadPool.generic().execute(new AbstractRunnable(){
+      @Override public void onFailure(      Throwable t){
+        logger.warn("[{}]failed to ack index store deleted for index",t,index);
+      }
+      @Override protected void doRun() throws Exception {
+        innerNodeIndexDeleted(index,nodeId);
+        if (nodes.localNode().isDataNode() == false) {
+          logger.trace("[{}] not acking store deletion (not a data node)");
+          return;
+        }
+        lockIndexAndAck(index,nodes,nodeId,clusterState,indexSettings);
+      }
+    }
+);
+  }
+ else {
+    transportService.sendRequest(clusterState.nodes().masterNode(),INDEX_DELETED_ACTION_NAME,new NodeIndexDeletedMessage(index,nodeId),EmptyTransportResponseHandler.INSTANCE_SAME);
+    if (nodes.localNode().isDataNode() == false) {
+      logger.trace("[{}] not acking store deletion (not a data node)");
+      return;
+    }
+    threadPool.generic().execute(new AbstractRunnable(){
+      @Override public void onFailure(      Throwable t){
+        logger.warn("[{}]failed to ack index store deleted for  index",t,index);
+      }
+      @Override protected void doRun() throws Exception {
+        lockIndexAndAck(index,nodes,nodeId,clusterState,indexSettings);
+      }
+    }
+);
+  }
+}

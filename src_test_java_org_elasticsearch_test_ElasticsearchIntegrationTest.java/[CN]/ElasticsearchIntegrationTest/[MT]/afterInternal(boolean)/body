@@ -1,0 +1,35 @@
+{
+  boolean success=false;
+  try {
+    logger.info("[{}#{}]: cleaning up after test",getTestClass().getSimpleName(),getTestName());
+    clearDisruptionScheme();
+    final Scope currentClusterScope=getCurrentClusterScope();
+    try {
+      if (cluster() != null) {
+        if (currentClusterScope != Scope.TEST) {
+          MetaData metaData=client().admin().cluster().prepareState().execute().actionGet().getState().getMetaData();
+          assertThat("test leaves persistent cluster metadata behind: " + metaData.persistentSettings().getAsMap(),metaData.persistentSettings().getAsMap().size(),equalTo(0));
+          assertThat("test leaves transient cluster metadata behind: " + metaData.transientSettings().getAsMap(),metaData.transientSettings().getAsMap().size(),equalTo(0));
+        }
+        ensureClusterSizeConsistency();
+        cluster().wipe();
+        if (afterClass || currentClusterScope == Scope.TEST) {
+          cluster().close();
+        }
+        cluster().assertAfterTest();
+      }
+    }
+  finally {
+      if (currentClusterScope == Scope.TEST) {
+        clearClusters();
+      }
+    }
+    logger.info("[{}#{}]: cleaned up after test",getTestClass().getSimpleName(),getTestName());
+    success=true;
+  }
+  finally {
+    if (!success) {
+      afterTestRule.forceFailure();
+    }
+  }
+}

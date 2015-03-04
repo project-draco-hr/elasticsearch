@@ -1,15 +1,23 @@
 {
   failIfCorrupted();
   metadataLock.writeLock().lock();
-  try {
+  try (Lock writeLock=directory.makeLock(IndexWriter.WRITE_LOCK_NAME)){
+    if (!writeLock.obtain(IndexWriterConfig.getDefaultWriteLockTimeout())) {
+      throw new LockObtainFailedException("Index locked for write: " + writeLock);
+    }
     final StoreDirectory dir=directory;
     for (    String existingFile : dir.listAll()) {
-      if (!sourceMetaData.contains(existingFile) && !Store.isChecksum(existingFile)) {
-        try {
-          dir.deleteFile(reason,existingFile);
+      if (existingFile.equals(IndexWriter.WRITE_LOCK_NAME) || Store.isChecksum(existingFile) || sourceMetaData.contains(existingFile)) {
+        continue;
+      }
+      try {
+        dir.deleteFile(reason,existingFile);
+      }
+ catch (      IOException ex) {
+        if (existingFile.startsWith(IndexFileNames.SEGMENTS) || existingFile.equals(IndexFileNames.OLD_SEGMENTS_GEN)) {
+          throw new ElasticsearchIllegalStateException("Can't delete " + existingFile + " - cleanup failed",ex);
         }
- catch (        Exception e) {
-        }
+        logger.debug("failed to delete file [{}]",ex,existingFile);
       }
     }
     final Store.MetadataSnapshot metadataOrEmpty=getMetadata();

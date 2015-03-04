@@ -1,0 +1,46 @@
+{
+  final Translog translog=new Translog();
+  AtomicBoolean stop=new AtomicBoolean();
+  Streamer<Translog> streamer=new Streamer<Translog>(stop,translog){
+    @Override Translog createObj(){
+      return new Translog();
+    }
+  }
+;
+  translog.start();
+  assertThat(translog.currentTranslogOperations(),equalTo(0));
+  streamer.start();
+  streamer.serializeDeserialize();
+  int ops=0;
+  for (int i=scaledRandomIntBetween(10,200); i > 0; i--) {
+    for (int j=randomIntBetween(1,10); j > 0; j--) {
+      ops++;
+      translog.incrementTranslogOperations();
+    }
+    assertThat(translog.currentTranslogOperations(),equalTo(ops));
+    assertThat(streamer.lastRead().currentTranslogOperations(),greaterThanOrEqualTo(0));
+    assertThat(streamer.lastRead().currentTranslogOperations(),lessThanOrEqualTo(ops));
+  }
+  boolean stopped=false;
+  if (randomBoolean()) {
+    translog.stop();
+    stopped=true;
+  }
+  if (randomBoolean()) {
+    translog.reset();
+    ops=0;
+    assertThat(translog.currentTranslogOperations(),equalTo(0));
+  }
+  stop.set(true);
+  streamer.join();
+  final Translog lastRead=streamer.lastRead();
+  assertThat(lastRead.currentTranslogOperations(),equalTo(ops));
+  assertThat(lastRead.startTime(),equalTo(translog.startTime()));
+  assertThat(lastRead.stopTime(),equalTo(translog.stopTime()));
+  if (stopped) {
+    assertThat(lastRead.time(),equalTo(translog.time()));
+  }
+ else {
+    assertThat(lastRead.time(),lessThanOrEqualTo(translog.time()));
+  }
+}

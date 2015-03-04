@@ -1,0 +1,35 @@
+{
+  Settings nodeSettings=ImmutableSettings.builder().put("node.add_id_to_custom_path",false).put("node.enable_custom_paths",true).build();
+  internalCluster().startNodesAsync(2,nodeSettings).get();
+  Path dataPath=newTempDirPath();
+  String IDX="test";
+  Settings idxSettings=ImmutableSettings.builder().put(IndexMetaData.SETTING_NUMBER_OF_SHARDS,10).put(IndexMetaData.SETTING_NUMBER_OF_REPLICAS,1).put(IndexMetaData.SETTING_DATA_PATH,dataPath.toAbsolutePath().toString()).put(IndexMetaData.SETTING_SHADOW_REPLICAS,true).put(IndexMetaData.SETTING_SHARED_FILESYSTEM,true).build();
+  prepareCreate(IDX).setSettings(idxSettings).addMapping("doc","foo","type=string").get();
+  ensureGreen(IDX);
+  int docCount=randomIntBetween(10,100);
+  List<IndexRequestBuilder> builders=newArrayList();
+  for (int i=0; i < docCount; i++) {
+    builders.add(client().prepareIndex(IDX,"doc",i + "").setSource("foo","bar"));
+  }
+  indexRandom(true,true,true,builders);
+  flushAndRefresh(IDX);
+  final String node3=internalCluster().startNode(nodeSettings);
+  assertBusy(new Runnable(){
+    @Override public void run(){
+      client().admin().cluster().prepareHealth().setWaitForNodes("3").get();
+      ClusterStateResponse resp=client().admin().cluster().prepareState().get();
+      RoutingNodes nodes=resp.getState().getRoutingNodes();
+      for (      RoutingNode node : nodes) {
+        logger.info("--> node has {} shards",node.numberOfOwningShards());
+        assertThat("at least 5 shards on node",node.numberOfOwningShards(),greaterThanOrEqualTo(5));
+      }
+    }
+  }
+);
+  ensureGreen(IDX);
+  logger.info("--> performing query");
+  SearchResponse resp=client().prepareSearch(IDX).setQuery(matchAllQuery()).get();
+  assertHitCount(resp,docCount);
+  assertAcked(client().admin().indices().prepareDelete(IDX));
+  assertPathHasBeenCleared(dataPath);
+}

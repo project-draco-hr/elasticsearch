@@ -1,0 +1,57 @@
+{
+  if (st == null) {
+    st=ShapeType.randomType(r);
+  }
+  if (within == null) {
+    within=xRandomRectangle(r,nearPoint);
+  }
+switch (st) {
+case POINT:
+    Point p=xRandomPointIn(r,within);
+  PointBuilder pb=new PointBuilder().coordinate(new Coordinate(p.getX(),p.getY(),Double.NaN));
+return pb;
+case MULTIPOINT:
+case LINESTRING:
+int numPoints=RandomInts.randomIntBetween(r,3,10);
+PointCollection pcb=(st == ShapeType.MULTIPOINT) ? new MultiPointBuilder() : new LineStringBuilder();
+for (int i=0; i < numPoints; ++i) {
+p=xRandomPointIn(r,within);
+pcb.point(p.getX(),p.getY());
+}
+return pcb;
+case MULTILINESTRING:
+MultiLineStringBuilder mlsb=new MultiLineStringBuilder();
+for (int i=0; i < RandomInts.randomIntBetween(r,1,10); ++i) {
+mlsb.linestring((BaseLineStringBuilder)createShape(r,nearPoint,within,ShapeType.LINESTRING,false));
+}
+return mlsb;
+case POLYGON:
+numPoints=RandomInts.randomIntBetween(r,5,25);
+Coordinate[] coordinates=new Coordinate[numPoints];
+for (int i=0; i < numPoints; ++i) {
+p=(Point)createShape(r,nearPoint,within,ShapeType.POINT,false).build();
+coordinates[i]=new Coordinate(p.getX(),p.getY());
+}
+Geometry shell=new ConvexHull(coordinates,ctx.getGeometryFactory()).getConvexHull();
+Coordinate[] shellCoords=shell.getCoordinates();
+if (shellCoords.length < 3) {
+shellCoords=new Coordinate[4];
+shellCoords[0]=new Coordinate(within.getMinX(),within.getMinY());
+shellCoords[1]=new Coordinate(within.getMinX(),within.getMaxY());
+shellCoords[2]=new Coordinate(within.getMaxX(),within.getMaxY());
+shellCoords[3]=new Coordinate(within.getMaxX(),within.getMinY());
+}
+PolygonBuilder pgb=new PolygonBuilder().points(shellCoords).close();
+if (validate) {
+try {
+pgb.build();
+}
+ catch (InvalidShapeException e) {
+return null;
+}
+}
+return pgb;
+default :
+throw new ElasticsearchException("Unable to create shape of type [" + st + "]");
+}
+}
