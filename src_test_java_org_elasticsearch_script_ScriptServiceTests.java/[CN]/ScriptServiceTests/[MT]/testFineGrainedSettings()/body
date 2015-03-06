@@ -1,0 +1,118 @@
+{
+  int numScriptSettings=randomIntBetween(0,ScriptType.values().length);
+  Map<ScriptType,ScriptMode> scriptSourceSettings=new HashMap<>();
+  for (int i=0; i < numScriptSettings; i++) {
+    ScriptType scriptType;
+    do {
+      scriptType=randomFrom(ScriptType.values());
+    }
+ while (scriptSourceSettings.containsKey(scriptType));
+    scriptSourceSettings.put(scriptType,randomFrom(ScriptMode.values()));
+  }
+  int numScriptContextSettings=randomIntBetween(0,ScriptContext.values().length);
+  Map<ScriptContext,ScriptMode> scriptContextSettings=new HashMap<>();
+  for (int i=0; i < numScriptContextSettings; i++) {
+    ScriptContext scriptContext;
+    do {
+      scriptContext=randomFrom(ScriptContext.values());
+    }
+ while (scriptContextSettings.containsKey(scriptContext));
+    scriptContextSettings.put(scriptContext,randomFrom(ScriptMode.values()));
+  }
+  int numEngineSettings=randomIntBetween(0,10);
+  Map<String,ScriptMode> engineSettings=new HashMap<>();
+  for (int i=0; i < numEngineSettings; i++) {
+    String settingKey;
+    do {
+      ScriptEngineService[] scriptEngineServices=this.scriptEngineServices.toArray(new ScriptEngineService[this.scriptEngineServices.size()]);
+      ScriptEngineService scriptEngineService=randomFrom(scriptEngineServices);
+      ScriptType scriptType=randomFrom(ScriptType.values());
+      ScriptContext scriptContext=randomFrom(ScriptContext.values());
+      settingKey=scriptEngineService.types()[0] + "." + scriptType+ "."+ scriptContext;
+    }
+ while (engineSettings.containsKey(settingKey));
+    engineSettings.put(settingKey,randomFrom(ScriptMode.values()));
+  }
+  ImmutableSettings.Builder builder=ImmutableSettings.builder();
+  for (  Map.Entry<ScriptType,ScriptMode> entry : scriptSourceSettings.entrySet()) {
+switch (entry.getValue()) {
+case ON:
+      builder.put(ScriptModes.SCRIPT_SETTINGS_PREFIX + entry.getKey(),randomFrom(ScriptModesTests.ENABLE_VALUES));
+    break;
+case OFF:
+  builder.put(ScriptModes.SCRIPT_SETTINGS_PREFIX + entry.getKey(),randomFrom(ScriptModesTests.DISABLE_VALUES));
+break;
+case SANDBOX:
+builder.put(ScriptModes.SCRIPT_SETTINGS_PREFIX + entry.getKey(),ScriptMode.SANDBOX);
+break;
+}
+}
+for (Map.Entry<ScriptContext,ScriptMode> entry : scriptContextSettings.entrySet()) {
+switch (entry.getValue()) {
+case ON:
+builder.put(ScriptModes.SCRIPT_SETTINGS_PREFIX + entry.getKey(),randomFrom(ScriptModesTests.ENABLE_VALUES));
+break;
+case OFF:
+builder.put(ScriptModes.SCRIPT_SETTINGS_PREFIX + entry.getKey(),randomFrom(ScriptModesTests.DISABLE_VALUES));
+break;
+case SANDBOX:
+builder.put(ScriptModes.SCRIPT_SETTINGS_PREFIX + entry.getKey(),ScriptMode.SANDBOX);
+break;
+}
+}
+for (Map.Entry<String,ScriptMode> entry : engineSettings.entrySet()) {
+int delimiter=entry.getKey().indexOf('.');
+String part1=entry.getKey().substring(0,delimiter);
+String part2=entry.getKey().substring(delimiter + 1);
+String lang=randomFrom(scriptEnginesByLangMap.get(part1).types());
+switch (entry.getValue()) {
+case ON:
+builder.put(ScriptModes.ENGINE_SETTINGS_PREFIX + "." + lang+ "."+ part2,randomFrom(ScriptModesTests.ENABLE_VALUES));
+break;
+case OFF:
+builder.put(ScriptModes.ENGINE_SETTINGS_PREFIX + "." + lang+ "."+ part2,randomFrom(ScriptModesTests.DISABLE_VALUES));
+break;
+case SANDBOX:
+builder.put(ScriptModes.ENGINE_SETTINGS_PREFIX + "." + lang+ "."+ part2,ScriptMode.SANDBOX);
+break;
+}
+}
+buildScriptService(builder.build());
+createFileScripts("groovy","expression","mustache","test");
+for (ScriptEngineService scriptEngineService : scriptEngineServices) {
+for (ScriptType scriptType : ScriptType.values()) {
+String script=scriptType == ScriptType.FILE ? "file_script" : "script";
+for (ScriptContext scriptContext : ScriptContext.values()) {
+ScriptMode scriptMode=engineSettings.get(scriptEngineService.types()[0] + "." + scriptType+ "."+ scriptContext);
+;
+if (scriptMode == null) {
+scriptMode=scriptContextSettings.get(scriptContext);
+}
+if (scriptMode == null) {
+scriptMode=scriptSourceSettings.get(scriptType);
+}
+if (scriptMode == null) {
+scriptMode=DEFAULT_SCRIPT_MODES.get(scriptType);
+}
+for (String lang : scriptEngineService.types()) {
+switch (scriptMode) {
+case ON:
+assertCompileAccepted(lang,script,scriptType,scriptContext);
+break;
+case OFF:
+assertCompileRejected(lang,script,scriptType,scriptContext);
+break;
+case SANDBOX:
+if (scriptEngineService.sandboxed()) {
+assertCompileAccepted(lang,script,scriptType,scriptContext);
+}
+ else {
+assertCompileRejected(lang,script,scriptType,scriptContext);
+}
+break;
+}
+}
+}
+}
+}
+}
