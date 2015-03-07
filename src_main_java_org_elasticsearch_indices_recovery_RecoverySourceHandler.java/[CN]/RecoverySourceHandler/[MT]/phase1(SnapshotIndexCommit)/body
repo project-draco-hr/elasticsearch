@@ -40,7 +40,7 @@
     logger.trace("[{}][{}] recovery [phase1] to {}: recovering_files [{}] with total_size [{}], reusing_files [{}] with total_size [{}]",indexName,shardId,request.targetNode(),response.phase1FileNames.size(),new ByteSizeValue(totalSize),response.phase1ExistingFileNames.size(),new ByteSizeValue(existingTotalSize));
     cancellableThreads.execute(new Interruptable(){
       @Override public void run() throws InterruptedException {
-        RecoveryFilesInfoRequest recoveryInfoFilesRequest=new RecoveryFilesInfoRequest(request.recoveryId(),request.shardId(),response.phase1FileNames,response.phase1FileSizes,response.phase1ExistingFileNames,response.phase1ExistingFileSizes);
+        RecoveryFilesInfoRequest recoveryInfoFilesRequest=new RecoveryFilesInfoRequest(request.recoveryId(),request.shardId(),response.phase1FileNames,response.phase1FileSizes,response.phase1ExistingFileNames,response.phase1ExistingFileSizes,shard.translog().estimatedNumberOfOperations());
         transportService.submitRequest(request.targetNode(),RecoveryTarget.Actions.FILES_INFO,recoveryInfoFilesRequest,TransportRequestOptions.options().withTimeout(recoverySettings.internalActionTimeout()),EmptyTransportResponseHandler.INSTANCE_SAME).txGet();
       }
     }
@@ -94,7 +94,7 @@
               final boolean lastChunk=readCount == len;
               cancellableThreads.execute(new Interruptable(){
                 @Override public void run() throws InterruptedException {
-                  transportService.submitRequest(request.targetNode(),RecoveryTarget.Actions.FILE_CHUNK,new RecoveryFileChunkRequest(request.recoveryId(),request.shardId(),md,position,content,lastChunk),requestOptions,EmptyTransportResponseHandler.INSTANCE_SAME).txGet();
+                  transportService.submitRequest(request.targetNode(),RecoveryTarget.Actions.FILE_CHUNK,new RecoveryFileChunkRequest(request.recoveryId(),request.shardId(),md,position,content,lastChunk,shard.translog().estimatedNumberOfOperations()),requestOptions,EmptyTransportResponseHandler.INSTANCE_SAME).txGet();
                 }
               }
 );
@@ -143,7 +143,7 @@
     cancellableThreads.execute(new Interruptable(){
       @Override public void run() throws InterruptedException {
         try {
-          transportService.submitRequest(request.targetNode(),RecoveryTarget.Actions.CLEAN_FILES,new RecoveryCleanFilesRequest(request.recoveryId(),shard.shardId(),recoverySourceMetadata),TransportRequestOptions.options().withTimeout(recoverySettings.internalActionTimeout()),EmptyTransportResponseHandler.INSTANCE_SAME).txGet();
+          transportService.submitRequest(request.targetNode(),RecoveryTarget.Actions.CLEAN_FILES,new RecoveryCleanFilesRequest(request.recoveryId(),shard.shardId(),recoverySourceMetadata,shard.translog().estimatedNumberOfOperations()),TransportRequestOptions.options().withTimeout(recoverySettings.internalActionTimeout()),EmptyTransportResponseHandler.INSTANCE_SAME).txGet();
         }
  catch (        RemoteTransportException remoteException) {
           final IOException corruptIndexException;
