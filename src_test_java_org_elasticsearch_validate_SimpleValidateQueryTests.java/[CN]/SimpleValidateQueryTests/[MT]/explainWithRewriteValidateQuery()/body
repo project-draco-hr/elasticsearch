@@ -1,0 +1,18 @@
+{
+  client().admin().indices().prepareCreate("test").addMapping("type1","field","type=string,analyzer=whitespace").setSettings(SETTING_NUMBER_OF_SHARDS,1).get();
+  client().prepareIndex("test","type1","1").setSource("field","quick lazy huge brown pidgin").get();
+  client().prepareIndex("test","type1","2").setSource("field","the quick brown fox").get();
+  client().prepareIndex("test","type1","3").setSource("field","the quick lazy huge brown fox jumps over the tree").get();
+  client().prepareIndex("test","type1","4").setSource("field","the lazy dog quacks like a duck").get();
+  refresh();
+  assertExplanation(QueryBuilders.matchPhrasePrefixQuery("field","qu"),containsString("field:quick"),true);
+  assertExplanation(QueryBuilders.matchPhrasePrefixQuery("field","ju"),containsString("field:jumps"),true);
+  assertExplanation(QueryBuilders.commonTermsQuery("field","huge brown pidgin").cutoffFrequency(1),containsString("(field:huge field:brown) +field:pidgin"),true);
+  assertExplanation(QueryBuilders.commonTermsQuery("field","the brown").analyzer("stop"),containsString("field:brown"),true);
+  assertExplanation(QueryBuilders.matchQuery("field","huge brown pidgin").cutoffFrequency(1),containsString("(field:huge field:brown) +field:pidgin"),true);
+  assertExplanation(QueryBuilders.matchQuery("field","the brown").analyzer("stop"),containsString("field:brown"),true);
+  assertExplanation(QueryBuilders.fuzzyQuery("field","the").fuzziness(Fuzziness.fromEdits(2)),containsString("field:the field:tree^0.3333333"),true);
+  assertExplanation(QueryBuilders.fuzzyQuery("field","jump"),containsString("field:jumps^0.75"),true);
+  assertExplanation(QueryBuilders.moreLikeThisQuery("field").ids("1").include(true).minTermFreq(1).minDocFreq(1).maxQueryTerms(2),containsString("field:huge field:pidgin"),true);
+  assertExplanation(QueryBuilders.moreLikeThisQuery("field").like("the huge pidgin").minTermFreq(1).minDocFreq(1).maxQueryTerms(2),containsString("field:huge field:pidgin"),true);
+}
