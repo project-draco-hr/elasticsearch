@@ -1,0 +1,31 @@
+{
+  if (lang == null) {
+    lang=defaultLang;
+  }
+  if (logger.isTraceEnabled()) {
+    logger.trace("Compiling lang: [{}] type: [{}] script: {}",lang,scriptType,script);
+  }
+  ScriptEngineService scriptEngineService=getScriptEngineServiceForLang(lang);
+  CacheKey cacheKey=newCacheKey(scriptEngineService,script);
+  if (scriptType == ScriptType.FILE) {
+    CompiledScript compiled=staticCache.get(cacheKey);
+    if (compiled == null) {
+      throw new ElasticsearchIllegalArgumentException("Unable to find on disk script " + script);
+    }
+    return compiled;
+  }
+  verifyDynamicScripting(lang,scriptEngineService);
+  if (scriptType == ScriptType.INDEXED) {
+    if (client == null) {
+      throw new ElasticsearchIllegalArgumentException("Got an indexed script with no Client registered.");
+    }
+    final IndexedScript indexedScript=new IndexedScript(lang,script);
+    script=getScriptFromIndex(client,indexedScript.lang,indexedScript.id);
+  }
+  CompiledScript compiled=cache.getIfPresent(cacheKey);
+  if (compiled == null) {
+    compiled=new CompiledScript(lang,scriptEngineService.compile(script));
+    cache.put(cacheKey,compiled);
+  }
+  return compiled;
+}

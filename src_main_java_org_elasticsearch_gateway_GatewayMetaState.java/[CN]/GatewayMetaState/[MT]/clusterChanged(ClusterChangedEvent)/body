@@ -9,7 +9,7 @@
   if (state.nodes().localNode().masterNode()) {
     if (currentMetaData == null || !MetaData.isGlobalStateEquals(currentMetaData,newMetaData)) {
       try {
-        writeGlobalState("changed",newMetaData);
+        metaStateService.writeGlobalState("changed",newMetaData);
       }
  catch (      Throwable e) {
         success=false;
@@ -20,7 +20,7 @@
       IndexMetaData currentIndexMetaData;
       if (currentMetaData == null) {
         try {
-          currentIndexMetaData=loadIndexState(indexMetaData.index());
+          currentIndexMetaData=metaStateService.loadIndexState(indexMetaData.index());
         }
  catch (        IOException ex) {
           throw new ElasticsearchException("failed to load index state",ex);
@@ -39,95 +39,14 @@
         continue;
       }
       try {
-        writeIndex(writeReason,indexMetaData,currentIndexMetaData);
+        metaStateService.writeIndex(writeReason,indexMetaData,currentIndexMetaData);
       }
  catch (      Throwable e) {
         success=false;
       }
     }
   }
-  if (nodeEnv.hasNodeFile()) {
-    if (danglingTimeout.millis() >= 0) {
-synchronized (danglingMutex) {
-        for (        String danglingIndex : danglingIndices.keySet()) {
-          if (newMetaData.hasIndex(danglingIndex)) {
-            logger.debug("[{}] no longer dangling (created), removing",danglingIndex);
-            DanglingIndex removed=danglingIndices.remove(danglingIndex);
-            FutureUtils.cancel(removed.future);
-          }
-        }
-        try {
-          for (          String indexName : nodeEnv.findAllIndices()) {
-            if (newMetaData.hasIndex(indexName)) {
-              continue;
-            }
-            if (danglingIndices.containsKey(indexName)) {
-              continue;
-            }
-            final IndexMetaData indexMetaData=loadIndexState(indexName);
-            if (indexMetaData != null) {
-              if (autoImportDangled.shouldImport()) {
-                logger.info("[{}] dangling index, exists on local file system, but not in cluster metadata, auto import to cluster state [{}]",indexName,autoImportDangled);
-                danglingIndices.put(indexName,new DanglingIndex(indexName,null));
-              }
- else               if (danglingTimeout.millis() == 0) {
-                logger.info("[{}] dangling index, exists on local file system, but not in cluster metadata, timeout set to 0, deleting now",indexName);
-                indicesService.deleteIndexStore("dangling index with timeout set to 0",indexMetaData);
-              }
- else {
-                logger.info("[{}] dangling index, exists on local file system, but not in cluster metadata, scheduling to delete in [{}], auto import to cluster state [{}]",indexName,danglingTimeout,autoImportDangled);
-                danglingIndices.put(indexName,new DanglingIndex(indexName,threadPool.schedule(danglingTimeout,ThreadPool.Names.SAME,new RemoveDanglingIndex(indexMetaData))));
-              }
-            }
-          }
-        }
- catch (        Throwable e) {
-          logger.warn("failed to find dangling indices",e);
-        }
-      }
-    }
-    if (autoImportDangled.shouldImport() && !danglingIndices.isEmpty()) {
-      final List<IndexMetaData> dangled=Lists.newArrayList();
-      for (      String indexName : danglingIndices.keySet()) {
-        IndexMetaData indexMetaData;
-        try {
-          indexMetaData=loadIndexState(indexName);
-        }
- catch (        IOException ex) {
-          throw new ElasticsearchException("failed to load index state",ex);
-        }
-        if (indexMetaData == null) {
-          logger.debug("failed to find state for dangling index [{}]",indexName);
-          continue;
-        }
-        if (!indexMetaData.index().equals(indexName)) {
-          logger.info("dangled index directory name is [{}], state name is [{}], renaming to directory name",indexName,indexMetaData.index());
-          indexMetaData=IndexMetaData.builder(indexMetaData).index(indexName).build();
-        }
-        if (autoImportDangled == AutoImportDangledState.CLOSED) {
-          indexMetaData=IndexMetaData.builder(indexMetaData).state(IndexMetaData.State.CLOSE).build();
-        }
-        if (indexMetaData != null) {
-          dangled.add(indexMetaData);
-        }
-      }
-      IndexMetaData[] dangledIndices=dangled.toArray(new IndexMetaData[dangled.size()]);
-      try {
-        allocateDangledIndices.allocateDangled(dangledIndices,new LocalAllocateDangledIndices.Listener(){
-          @Override public void onResponse(          LocalAllocateDangledIndices.AllocateDangledResponse response){
-            logger.trace("allocated dangled");
-          }
-          @Override public void onFailure(          Throwable e){
-            logger.info("failed to send allocated dangled",e);
-          }
-        }
-);
-      }
- catch (      Throwable e) {
-        logger.warn("failed to send allocate dangled",e);
-      }
-    }
-  }
+  danglingIndicesState.processDanglingIndices(newMetaData);
   if (success) {
     currentMetaData=newMetaData;
   }

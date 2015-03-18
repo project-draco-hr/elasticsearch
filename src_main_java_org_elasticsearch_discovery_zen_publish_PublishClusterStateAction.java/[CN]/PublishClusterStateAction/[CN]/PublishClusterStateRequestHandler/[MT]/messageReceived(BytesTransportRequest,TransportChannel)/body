@@ -11,23 +11,34 @@
   ClusterState clusterState=ClusterState.Builder.readFrom(in,nodesProvider.nodes().localNode());
   clusterState.status(ClusterState.ClusterStateStatus.RECEIVED);
   logger.debug("received cluster state version {}",clusterState.version());
-  listener.onNewClusterState(clusterState,new NewClusterStateListener.NewStateProcessed(){
-    @Override public void onNewClusterStateProcessed(){
-      try {
-        channel.sendResponse(TransportResponse.Empty.INSTANCE);
+  try {
+    listener.onNewClusterState(clusterState,new NewClusterStateListener.NewStateProcessed(){
+      @Override public void onNewClusterStateProcessed(){
+        try {
+          channel.sendResponse(TransportResponse.Empty.INSTANCE);
+        }
+ catch (        Throwable e) {
+          logger.debug("failed to send response on cluster state processed",e);
+        }
       }
- catch (      Throwable e) {
-        logger.debug("failed to send response on cluster state processed",e);
+      @Override public void onNewClusterStateFailed(      Throwable t){
+        try {
+          channel.sendResponse(t);
+        }
+ catch (        Throwable e) {
+          logger.debug("failed to send response on cluster state processed",e);
+        }
       }
     }
-    @Override public void onNewClusterStateFailed(    Throwable t){
-      try {
-        channel.sendResponse(t);
-      }
- catch (      Throwable e) {
-        logger.debug("failed to send response on cluster state processed",e);
-      }
+);
+  }
+ catch (  Exception e) {
+    logger.warn("unexpected error while processing cluster state version [{}]",e,clusterState.version());
+    try {
+      channel.sendResponse(e);
+    }
+ catch (    Throwable e1) {
+      logger.debug("failed to send response on cluster state processed",e1);
     }
   }
-);
 }

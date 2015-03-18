@@ -1,0 +1,33 @@
+{
+  final Set<String> indices;
+  try {
+    indices=nodeEnv.findAllIndices();
+  }
+ catch (  Throwable e) {
+    logger.warn("failed to list dangling indices",e);
+    return ImmutableMap.of();
+  }
+  Map<String,IndexMetaData> newIndices=Maps.newHashMap();
+  for (  String indexName : indices) {
+    if (metaData.hasIndex(indexName) == false && danglingIndices.containsKey(indexName) == false) {
+      try {
+        IndexMetaData indexMetaData=metaStateService.loadIndexState(indexName);
+        if (indexMetaData != null) {
+          logger.info("[{}] dangling index, exists on local file system, but not in cluster metadata, auto import to cluster state",indexName);
+          if (!indexMetaData.index().equals(indexName)) {
+            logger.info("dangled index directory name is [{}], state name is [{}], renaming to directory name",indexName,indexMetaData.index());
+            indexMetaData=IndexMetaData.builder(indexMetaData).index(indexName).build();
+          }
+          newIndices.put(indexName,indexMetaData);
+        }
+ else {
+          logger.debug("[{}] dangling index directory detected, but no state found",indexName);
+        }
+      }
+ catch (      Throwable t) {
+        logger.warn("[{}] failed to load index state for detected dangled index",t,indexName);
+      }
+    }
+  }
+  return newIndices;
+}

@@ -1,0 +1,34 @@
+{
+  final String masterNode=internalCluster().startNode(ImmutableSettings.builder().put("node.data",false));
+  final String node_1=internalCluster().startNode(ImmutableSettings.builder().put("node.master",false));
+  final String node_2=internalCluster().startNode(ImmutableSettings.builder().put("node.master",false));
+  logger.info("--> creating index [test] with one shard and on replica");
+  assertAcked(prepareCreate("test").setSettings(ImmutableSettings.builder().put(indexSettings()).put(IndexMetaData.SETTING_NUMBER_OF_SHARDS,1).put(IndexMetaData.SETTING_NUMBER_OF_REPLICAS,1)));
+  ensureGreen("test");
+  logger.info("--> making sure that shard and its replica are allocated on node_1 and node_2");
+  assertThat(Files.exists(shardDirectory(node_1,"test",0)),equalTo(true));
+  assertThat(Files.exists(indexDirectory(node_1,"test")),equalTo(true));
+  assertThat(Files.exists(shardDirectory(node_2,"test",0)),equalTo(true));
+  assertThat(Files.exists(indexDirectory(node_2,"test")),equalTo(true));
+  logger.info("--> starting node server3");
+  final String node_3=internalCluster().startNode(ImmutableSettings.builder().put("node.master",false));
+  logger.info("--> running cluster_health");
+  ClusterHealthResponse clusterHealth=client().admin().cluster().prepareHealth().setWaitForNodes("4").setWaitForRelocatingShards(0).get();
+  assertThat(clusterHealth.isTimedOut(),equalTo(false));
+  assertThat(Files.exists(shardDirectory(node_1,"test",0)),equalTo(true));
+  assertThat(Files.exists(indexDirectory(node_1,"test")),equalTo(true));
+  assertThat(Files.exists(shardDirectory(node_2,"test",0)),equalTo(true));
+  assertThat(Files.exists(indexDirectory(node_2,"test")),equalTo(true));
+  assertThat(Files.exists(shardDirectory(node_3,"test",0)),equalTo(false));
+  assertThat(Files.exists(indexDirectory(node_3,"test")),equalTo(false));
+  logger.info("--> move shard from node_1 to node_3, and wait for relocation to finish");
+  internalCluster().client().admin().cluster().prepareReroute().add(new MoveAllocationCommand(new ShardId("test",0),node_1,node_3)).get();
+  clusterHealth=client().admin().cluster().prepareHealth().setWaitForNodes("4").setWaitForRelocatingShards(0).get();
+  assertThat(clusterHealth.isTimedOut(),equalTo(false));
+  assertThat(waitForShardDeletion(node_1,"test",0),equalTo(false));
+  assertThat(waitForIndexDeletion(node_1,"test"),equalTo(false));
+  assertThat(Files.exists(shardDirectory(node_2,"test",0)),equalTo(true));
+  assertThat(Files.exists(indexDirectory(node_2,"test")),equalTo(true));
+  assertThat(Files.exists(shardDirectory(node_3,"test",0)),equalTo(true));
+  assertThat(Files.exists(indexDirectory(node_3,"test")),equalTo(true));
+}

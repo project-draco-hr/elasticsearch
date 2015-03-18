@@ -1,0 +1,52 @@
+{
+  int numIters=randomIntBetween(2,10);
+  for (int j=0; j < numIters; j++) {
+    try (Store store=createStore()){
+      final Translog translog=createTranslog();
+      final InternalEngine engine=createEngine(store,translog);
+      final CountDownLatch startGun=new CountDownLatch(1);
+      final CountDownLatch indexed=new CountDownLatch(1);
+      Thread thread=new Thread(){
+        public void run(){
+          try {
+            try {
+              startGun.await();
+            }
+ catch (            InterruptedException e) {
+              throw new RuntimeException(e);
+            }
+            int i=0;
+            while (true) {
+              int numDocs=randomIntBetween(1,20);
+              for (int j=0; j < numDocs; j++) {
+                i++;
+                ParsedDocument doc=testParsedDocument(Integer.toString(i),Integer.toString(i),"test",null,-1,-1,testDocument(),B_1,false);
+                Engine.Index index=new Engine.Index(null,newUid(Integer.toString(i)),doc);
+                engine.index(index);
+              }
+              engine.refresh("test");
+              indexed.countDown();
+              try {
+                engine.forceMerge(randomBoolean(),1,false,randomBoolean());
+              }
+ catch (              ForceMergeFailedEngineException ex) {
+                return;
+              }
+            }
+          }
+ catch (          AlreadyClosedException|EngineClosedException ex) {
+          }
+        }
+      }
+;
+      thread.start();
+      startGun.countDown();
+      int someIters=randomIntBetween(1,10);
+      for (int i=0; i < someIters; i++) {
+        engine.forceMerge(randomBoolean(),1,false,randomBoolean());
+      }
+      indexed.await();
+      IOUtils.close(engine,translog);
+    }
+   }
+}

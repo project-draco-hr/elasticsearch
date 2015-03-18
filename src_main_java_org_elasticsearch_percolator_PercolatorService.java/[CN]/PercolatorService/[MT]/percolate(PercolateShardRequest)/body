@@ -5,8 +5,10 @@
   ShardPercolateService shardPercolateService=indexShard.shardPercolateService();
   shardPercolateService.prePercolate();
   long startTime=System.nanoTime();
+  String[] filteringAliases=clusterService.state().getMetaData().filteringAliases(indexShard.shardId().index().name(),request.indices());
+  Filter aliasFilter=percolateIndexService.aliasesService().aliasFilter(filteringAliases);
   SearchShardTarget searchShardTarget=new SearchShardTarget(clusterService.localNode().id(),request.shardId().getIndex(),request.shardId().id());
-  final PercolateContext context=new PercolateContext(request,searchShardTarget,indexShard,percolateIndexService,pageCacheRecycler,bigArrays,scriptService);
+  final PercolateContext context=new PercolateContext(request,searchShardTarget,indexShard,percolateIndexService,pageCacheRecycler,bigArrays,scriptService,aliasFilter);
   try {
     ParsedDocument parsedDocument=parseRequest(percolateIndexService,request,context);
     if (context.percolateQueries().isEmpty()) {
@@ -18,7 +20,7 @@
  else     if (parsedDocument == null) {
       throw new ElasticsearchIllegalArgumentException("Nothing to percolate");
     }
-    if (context.percolateQuery() == null && (context.trackScores() || context.doSort || context.aggregations() != null)) {
+    if (context.percolateQuery() == null && (context.trackScores() || context.doSort || context.aggregations() != null) || context.aliasFilter() != null) {
       context.percolateQuery(new MatchAllDocsQuery());
     }
     if (context.doSort && !context.limit) {
