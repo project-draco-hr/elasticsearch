@@ -1,0 +1,36 @@
+{
+  createIndex();
+  final RecoveriesCollection collection=new RecoveriesCollection(logger,getInstanceFromNode(ThreadPool.class));
+  final long recoveryId=startRecovery(collection);
+  final long recoveryId2=startRecovery(collection);
+  final ArrayList<AutoCloseable> toClose=new ArrayList<>();
+  try {
+    RecoveriesCollection.StatusRef statusRef=collection.getStatus(recoveryId);
+    toClose.add(statusRef);
+    ShardId shardId=statusRef.status().shardId();
+    assertFalse("should not have cancelled recoveries",collection.cancelRecoveriesForShard(shardId,"test",Predicates.<RecoveryStatus>alwaysFalse()));
+    final Predicate<RecoveryStatus> shouldCancel=new Predicate<RecoveryStatus>(){
+      @Override public boolean apply(      RecoveryStatus status){
+        return status.recoveryId() == recoveryId;
+      }
+    }
+;
+    assertTrue("failed to cancel recoveries",collection.cancelRecoveriesForShard(shardId,"test",shouldCancel));
+    assertThat("we should still have on recovery",collection.size(),equalTo(1));
+    statusRef=collection.getStatus(recoveryId);
+    toClose.add(statusRef);
+    assertNull("recovery should have been deleted",statusRef);
+    statusRef=collection.getStatus(recoveryId2);
+    toClose.add(statusRef);
+    assertNotNull("recovery should NOT have been deleted",statusRef);
+  }
+  finally {
+    for (    AutoCloseable closeable : toClose) {
+      if (closeable != null) {
+        closeable.close();
+      }
+    }
+    collection.cancelRecovery(recoveryId,"meh");
+    collection.cancelRecovery(recoveryId2,"meh");
+  }
+}

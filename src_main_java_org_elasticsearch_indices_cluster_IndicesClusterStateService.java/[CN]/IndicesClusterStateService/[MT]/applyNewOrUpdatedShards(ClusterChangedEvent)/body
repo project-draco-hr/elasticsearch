@@ -44,14 +44,17 @@
         shardHasBeenRemoved=true;
       }
  else       if (isPeerRecovery(shardRouting)) {
-        RecoveryState recoveryState=recoveryTarget.recoveryState(indexShard);
-        if (recoveryState != null && recoveryState.getStage() != RecoveryState.Stage.DONE) {
-          DiscoveryNode sourceNode=findSourceNodeForPeerRecovery(routingTable,nodes,shardRouting);
-          if (!recoveryState.getSourceNode().equals(sourceNode)) {
-            logger.debug("[{}][{}] removing shard (recovery source changed), current [{}], global [{}])",shardRouting.index(),shardRouting.id(),currentRoutingEntry,shardRouting);
-            indexService.removeShard(shardRouting.id(),"removing shard (recovery source node changed)");
-            shardHasBeenRemoved=true;
+        final DiscoveryNode sourceNode=findSourceNodeForPeerRecovery(routingTable,nodes,shardRouting);
+        final Predicate<RecoveryStatus> shouldCancel=new Predicate<RecoveryStatus>(){
+          @Override public boolean apply(          @Nullable RecoveryStatus status){
+            return status.sourceNode().equals(sourceNode) == false;
           }
+        }
+;
+        if (recoveryTarget.cancelRecoveriesForShard(indexShard.shardId(),"recovery source node changed",shouldCancel)) {
+          logger.debug("[{}][{}] removing shard (recovery source changed), current [{}], global [{}])",shardRouting.index(),shardRouting.id(),currentRoutingEntry,shardRouting);
+          indexService.removeShard(shardRouting.id(),"removing shard (recovery source node changed)");
+          shardHasBeenRemoved=true;
         }
       }
       if (shardHasBeenRemoved == false && (shardRouting.equals(indexShard.routingEntry()) == false || shardRouting.version() > indexShard.routingEntry().version())) {
