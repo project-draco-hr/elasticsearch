@@ -50,6 +50,7 @@
     final AtomicReference<Throwable> corruptedEngine=new AtomicReference<>();
     int fileIndex=0;
     ThreadPoolExecutor pool;
+    final AtomicLong bytesSinceLastPause=new AtomicLong();
     for (    final String name : response.phase1FileNames) {
       long fileSize=response.phase1FileSizes.get(fileIndex);
       if (fileSize > recoverySettings.SMALL_FILE_CUTOFF_BYTES) {
@@ -85,11 +86,16 @@
               }
               int toRead=readCount + BUFFER_SIZE > len ? (int)(len - readCount) : BUFFER_SIZE;
               final long position=indexInput.getFilePointer();
+              RateLimiter rl=recoverySettings.rateLimiter();
               long throttleTimeInNanos=0;
-              if (recoverySettings.rateLimiter() != null) {
-                throttleTimeInNanos=recoverySettings.rateLimiter().pause(toRead);
+              if (rl != null) {
+                long bytes=bytesSinceLastPause.addAndGet(toRead);
+                if (bytes > rl.getMinPauseCheckBytes()) {
+                  bytesSinceLastPause.addAndGet(-bytes);
+                  throttleTimeInNanos=rl.pause(bytes);
+                  shard.recoveryStats().addThrottleTime(throttleTimeInNanos);
+                }
               }
-              shard.recoveryStats().addThrottleTime(throttleTimeInNanos);
               indexInput.readBytes(buf,0,toRead,false);
               final BytesArray content=new BytesArray(buf,0,toRead);
               readCount+=toRead;
