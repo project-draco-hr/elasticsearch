@@ -1,0 +1,43 @@
+{
+  ArrayList<Double> values=new ArrayList<>(numBuckets);
+  EvictingQueue<Double> lagWindow=EvictingQueue.create(lag);
+  int counter=0;
+  for (  PipelineAggregationHelperTests.MockBucket mockBucket : mockHisto) {
+    Double metricValue;
+    double[] docValues=mockBucket.docValues;
+    if (mockBucket.count == 0 && target.equals(MetricTarget.VALUE)) {
+      if (gapPolicy.equals(BucketHelpers.GapPolicy.SKIP)) {
+        metricValue=null;
+      }
+ else       if (gapPolicy.equals(BucketHelpers.GapPolicy.INSERT_ZEROS)) {
+        metricValue=0.0;
+      }
+ else {
+        metricValue=PipelineAggregationHelperTests.calculateMetric(docValues,metric);
+      }
+    }
+ else {
+      metricValue=target.equals(MetricTarget.VALUE) ? PipelineAggregationHelperTests.calculateMetric(docValues,metric) : mockBucket.count;
+    }
+    counter+=1;
+    Double lagValue;
+    if (counter <= lag) {
+      lagValue=Double.NaN;
+    }
+ else {
+      lagValue=lagWindow.peek();
+    }
+    if (metricValue == null) {
+      metricValue=Double.NaN;
+    }
+    if (!Double.isNaN(metricValue) && !Double.isNaN(lagValue)) {
+      double diff=metricValue - lagValue;
+      values.add(diff);
+    }
+ else {
+      values.add(null);
+    }
+    lagWindow.add(metricValue);
+  }
+  testValues.put(target.toString(),values);
+}
