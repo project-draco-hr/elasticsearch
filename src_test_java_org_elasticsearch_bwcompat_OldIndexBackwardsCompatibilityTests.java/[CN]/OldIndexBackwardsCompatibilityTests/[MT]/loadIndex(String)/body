@@ -1,0 +1,24 @@
+{
+  Path unzipDir=newTempDirPath();
+  Path unzipDataDir=unzipDir.resolve("data");
+  String indexName=indexFile.replace(".zip","").toLowerCase(Locale.ROOT);
+  Path backwardsIndex=Paths.get(getClass().getResource(indexFile).toURI());
+  try (InputStream stream=Files.newInputStream(backwardsIndex)){
+    TestUtil.unzip(stream,unzipDir);
+  }
+   assertTrue(Files.exists(unzipDataDir));
+  Path[] list=FileSystemUtils.files(unzipDataDir);
+  if (list.length != 1) {
+    throw new IllegalStateException("Backwards index must contain exactly one cluster");
+  }
+  Path src=list[0].resolve("nodes/0/indices/" + indexName);
+  Path dest=indicesDir.resolve(indexName);
+  assertTrue("[" + indexFile + "] missing index dir: "+ src.toString(),Files.exists(src));
+  logger.info("--> injecting index [{}] into path [{}]",indexName,dest);
+  Files.move(src,dest);
+  assertFalse(Files.exists(src));
+  assertTrue(Files.exists(dest));
+  client().admin().cluster().prepareReroute().get();
+  ensureGreen(indexName);
+  return indexName;
+}
