@@ -1,0 +1,32 @@
+{
+  clusterService.submitStateUpdateTask("test_block",passThroughPriority,new ClusterStateUpdateTask(){
+    @Override public ClusterState execute(    ClusterState currentState) throws Exception {
+      while (System.currentTimeMillis() < stopWaitingAt) {
+        for (        PendingClusterTask task : clusterService.pendingTasks()) {
+          if (task.getSource().string().equals("test_block") == false && passThroughPriority.sameOrAfter(task.getPriority())) {
+            logger.info("passing through cluster state task {}",task.getSource());
+            addBlock();
+            return currentState;
+          }
+        }
+        try {
+          logger.info("wating....");
+          if (latch.await(Math.min(100,timeout.millis()),TimeUnit.MILLISECONDS)) {
+            logger.info("unblocked");
+            return currentState;
+          }
+          logger.info("done wating....");
+        }
+ catch (        InterruptedException ex) {
+          Thread.currentThread().interrupt();
+        }
+      }
+      timedOut=true;
+      return currentState;
+    }
+    @Override public void onFailure(    String source,    Throwable t){
+      logger.warn("failed to execute [{}]",t,source);
+    }
+  }
+);
+}
