@@ -9,32 +9,40 @@
     if (indexService == null) {
       return;
     }
-    MapperService mapperService=indexService.mapperService();
-    if (indexMetaData.mappings().containsKey(MapperService.DEFAULT_MAPPING)) {
-      boolean requireRefresh=processMapping(index,mapperService,MapperService.DEFAULT_MAPPING,indexMetaData.mapping(MapperService.DEFAULT_MAPPING).source());
-      if (requireRefresh) {
-        typesToRefresh.add(MapperService.DEFAULT_MAPPING);
+    try {
+      MapperService mapperService=indexService.mapperService();
+      if (indexMetaData.mappings().containsKey(MapperService.DEFAULT_MAPPING)) {
+        boolean requireRefresh=processMapping(index,mapperService,MapperService.DEFAULT_MAPPING,indexMetaData.mapping(MapperService.DEFAULT_MAPPING).source());
+        if (requireRefresh) {
+          typesToRefresh.add(MapperService.DEFAULT_MAPPING);
+        }
+      }
+      for (      ObjectCursor<MappingMetaData> cursor : indexMetaData.mappings().values()) {
+        MappingMetaData mappingMd=cursor.value;
+        String mappingType=mappingMd.type();
+        CompressedString mappingSource=mappingMd.source();
+        if (mappingType.equals(MapperService.DEFAULT_MAPPING)) {
+          continue;
+        }
+        boolean requireRefresh=processMapping(index,mapperService,mappingType,mappingSource);
+        if (requireRefresh) {
+          typesToRefresh.add(mappingType);
+        }
+      }
+      if (!typesToRefresh.isEmpty() && sendRefreshMapping) {
+        nodeMappingRefreshAction.nodeMappingRefresh(event.state(),new NodeMappingRefreshAction.NodeMappingRefreshRequest(index,indexMetaData.uuid(),typesToRefresh.toArray(new String[typesToRefresh.size()]),event.state().nodes().localNodeId()));
+      }
+      for (      DocumentMapper documentMapper : mapperService.docMappers(true)) {
+        if (seenMappings.containsKey(new Tuple<>(index,documentMapper.type())) && !indexMetaData.mappings().containsKey(documentMapper.type())) {
+          mapperService.remove(documentMapper.type());
+          seenMappings.remove(new Tuple<>(index,documentMapper.type()));
+        }
       }
     }
-    for (    ObjectCursor<MappingMetaData> cursor : indexMetaData.mappings().values()) {
-      MappingMetaData mappingMd=cursor.value;
-      String mappingType=mappingMd.type();
-      CompressedString mappingSource=mappingMd.source();
-      if (mappingType.equals(MapperService.DEFAULT_MAPPING)) {
-        continue;
-      }
-      boolean requireRefresh=processMapping(index,mapperService,mappingType,mappingSource);
-      if (requireRefresh) {
-        typesToRefresh.add(mappingType);
-      }
-    }
-    if (!typesToRefresh.isEmpty() && sendRefreshMapping) {
-      nodeMappingRefreshAction.nodeMappingRefresh(event.state(),new NodeMappingRefreshAction.NodeMappingRefreshRequest(index,indexMetaData.uuid(),typesToRefresh.toArray(new String[typesToRefresh.size()]),event.state().nodes().localNodeId()));
-    }
-    for (    DocumentMapper documentMapper : mapperService.docMappers(true)) {
-      if (seenMappings.containsKey(new Tuple<>(index,documentMapper.type())) && !indexMetaData.mappings().containsKey(documentMapper.type())) {
-        mapperService.remove(documentMapper.type());
-        seenMappings.remove(new Tuple<>(index,documentMapper.type()));
+ catch (    Throwable t) {
+      for (      IndexShard indexShard : indexService) {
+        ShardRouting shardRouting=indexShard.routingEntry();
+        failAndRemoveShard(shardRouting,indexService,true,"failed to update mappings",t);
       }
     }
   }
