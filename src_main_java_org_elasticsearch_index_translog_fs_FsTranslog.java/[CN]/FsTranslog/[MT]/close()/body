@@ -1,12 +1,19 @@
 {
-  if (indexSettingsService != null) {
-    indexSettingsService.removeListener(applySettings);
-  }
-  rwl.writeLock().lock();
-  try {
-    IOUtils.close(this.trans,this.current);
-  }
+  if (closed.compareAndSet(false,true)) {
+    if (indexSettingsService != null) {
+      indexSettingsService.removeListener(applySettings);
+    }
+    try (ReleasableLock lock=writeLock.acquire()){
+      try {
+        IOUtils.close(this.current);
+      }
   finally {
-    rwl.writeLock().unlock();
+        IOUtils.close(uncommittedTranslogs);
+      }
+    }
+  finally {
+      FutureUtils.cancel(syncScheduler);
+      logger.debug("translog closed");
+    }
   }
 }

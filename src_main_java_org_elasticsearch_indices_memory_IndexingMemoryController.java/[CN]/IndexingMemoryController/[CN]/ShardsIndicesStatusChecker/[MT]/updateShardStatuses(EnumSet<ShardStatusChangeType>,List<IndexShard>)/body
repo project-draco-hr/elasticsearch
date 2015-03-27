@@ -5,15 +5,24 @@
       if (!CAN_UPDATE_INDEX_BUFFER_STATES.contains(indexShard.state())) {
         continue;
       }
+      if (indexShard.canIndex() == false) {
+        continue;
+      }
+      final Translog translog;
+      try {
+        translog=indexShard.translog();
+      }
+ catch (      EngineClosedException e) {
+        continue;
+      }
       final long time=threadPool.estimatedTimeInMillis();
-      Translog translog=indexShard.translog();
       ShardIndexingStatus status=shardsIndicesStatus.get(indexShard.shardId());
       if (status == null) {
         status=new ShardIndexingStatus();
         shardsIndicesStatus.put(indexShard.shardId(),status);
         changes.add(ShardStatusChangeType.ADDED);
       }
-      if (status.translogId == translog.currentId() && translog.estimatedNumberOfOperations() == 0) {
+      if (status.translogId == translog.currentId() && translog.totalOperations() == 0) {
         if (status.time == -1) {
           status.time=time;
         }
@@ -35,7 +44,7 @@
         status.time=-1;
       }
       status.translogId=translog.currentId();
-      status.translogNumberOfOperations=translog.estimatedNumberOfOperations();
+      status.translogNumberOfOperations=translog.totalOperations();
       if (status.activeIndexing) {
         activeShards++;
       }

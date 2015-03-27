@@ -25,39 +25,29 @@
       directory.setRandomIOExceptionRate(randomDouble());
       directory.setFailOnOpenInput(randomBoolean());
       directory.setAllowRandomFileNotFoundException(randomBoolean());
+      final FsTranslog translog=createTranslog();
       try {
         engine=createEngine(store,translog);
         started=true;
         break;
       }
  catch (      EngineCreationFailureException ex) {
-        try (IndexReader reader=DirectoryReader.open(directory.getDelegate())){
-          if (reader.numDocs() == numDocs) {
-            recoveredButFailed=true;
-            break;
-          }
- else {
-          }
-        }
-       }
+        translog.close();
+      }
     }
     directory.setRandomIOExceptionRateOnOpen(0.0);
     directory.setRandomIOExceptionRate(0.0);
     directory.setFailOnOpenInput(false);
     directory.setAllowRandomFileNotFoundException(false);
     if (started == false) {
-      engine=createEngine(store,translog);
+      engine=createEngine(store,createTranslog());
     }
   }
  else {
-    engine=createEngine(store,translog);
+    engine=createEngine(store,createTranslog());
   }
   try (Engine.Searcher searcher=engine.acquireSearcher("test")){
     TopDocs topDocs=searcher.searcher().search(new MatchAllDocsQuery(),randomIntBetween(numDocs,numDocs + 10));
     assertThat(topDocs.totalHits,equalTo(numDocs));
   }
-   if (recoveredButFailed == false) {
-    TranslogHandler parser=(TranslogHandler)engine.config().getTranslogRecoveryPerformer();
-    assertEquals(numDocs,parser.recoveredOps.get());
-  }
-}
+ }

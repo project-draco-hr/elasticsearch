@@ -1,0 +1,203 @@
+{
+  cancellableThreads.checkForCancel();
+  long totalSize=0;
+  long existingTotalSize=0;
+  final Store store=shard.store();
+  store.incRef();
+  try {
+    StopWatch stopWatch=new StopWatch().start();
+    final Store.MetadataSnapshot recoverySourceMetadata=store.getMetadata(snapshot);
+    for (    String name : snapshot.getFiles()) {
+      final StoreFileMetaData md=recoverySourceMetadata.get(name);
+      if (md == null) {
+        logger.info("Snapshot differs from actual index for file: {} meta: {}",name,recoverySourceMetadata.asMap());
+        throw new CorruptIndexException("Snapshot differs from actual index - maybe index was removed metadata has " + recoverySourceMetadata.asMap().size() + " files",name);
+      }
+    }
+    final Store.RecoveryDiff diff=recoverySourceMetadata.recoveryDiff(new Store.MetadataSnapshot(request.existingFiles()));
+    for (    StoreFileMetaData md : diff.identical) {
+      response.phase1ExistingFileNames.add(md.name());
+      response.phase1ExistingFileSizes.add(md.length());
+      existingTotalSize+=md.length();
+      if (logger.isTraceEnabled()) {
+        logger.trace("[{}][{}] recovery [phase1] to {}: not recovering [{}], exists in local store and has checksum [{}], size [{}]",indexName,shardId,request.targetNode(),md.name(),md.checksum(),md.length());
+      }
+      totalSize+=md.length();
+    }
+    for (    StoreFileMetaData md : Iterables.concat(diff.different,diff.missing)) {
+      if (request.existingFiles().containsKey(md.name())) {
+        logger.trace("[{}][{}] recovery [phase1] to {}: recovering [{}], exists in local store, but is different: remote [{}], local [{}]",indexName,shardId,request.targetNode(),md.name(),request.existingFiles().get(md.name()),md);
+      }
+ else {
+        logger.trace("[{}][{}] recovery [phase1] to {}: recovering [{}], does not exists in remote",indexName,shardId,request.targetNode(),md.name());
+      }
+      response.phase1FileNames.add(md.name());
+      response.phase1FileSizes.add(md.length());
+      totalSize+=md.length();
+    }
+    response.phase1TotalSize=totalSize;
+    response.phase1ExistingTotalSize=existingTotalSize;
+    logger.trace("[{}][{}] recovery [phase1] to {}: recovering_files [{}] with total_size [{}], reusing_files [{}] with total_size [{}]",indexName,shardId,request.targetNode(),response.phase1FileNames.size(),new ByteSizeValue(totalSize),response.phase1ExistingFileNames.size(),new ByteSizeValue(existingTotalSize));
+    cancellableThreads.execute(new Interruptable(){
+      @Override public void run() throws InterruptedException {
+        RecoveryFilesInfoRequest recoveryInfoFilesRequest=new RecoveryFilesInfoRequest(request.recoveryId(),request.shardId(),response.phase1FileNames,response.phase1FileSizes,response.phase1ExistingFileNames,response.phase1ExistingFileSizes,translogView.totalOperations());
+        transportService.submitRequest(request.targetNode(),RecoveryTarget.Actions.FILES_INFO,recoveryInfoFilesRequest,TransportRequestOptions.options().withTimeout(recoverySettings.internalActionTimeout()),EmptyTransportResponseHandler.INSTANCE_SAME).txGet();
+      }
+    }
+);
+    final CountDownLatch latch=new CountDownLatch(response.phase1FileNames.size());
+    final CopyOnWriteArrayList<Throwable> exceptions=new CopyOnWriteArrayList<>();
+    final AtomicReference<Throwable> corruptedEngine=new AtomicReference<>();
+    int fileIndex=0;
+    ThreadPoolExecutor pool;
+    final AtomicLong bytesSinceLastPause=new AtomicLong();
+    for (    final String name : response.phase1FileNames) {
+      long fileSize=response.phase1FileSizes.get(fileIndex);
+      if (fileSize > RecoverySettings.SMALL_FILE_CUTOFF_BYTES) {
+        pool=recoverySettings.concurrentStreamPool();
+      }
+ else {
+        pool=recoverySettings.concurrentSmallFileStreamPool();
+      }
+      pool.execute(new AbstractRunnable(){
+        @Override public void onFailure(        Throwable t){
+          logger.debug("Failed to transfer file [" + name + "] on recovery");
+        }
+        @Override public void onAfter(){
+          latch.countDown();
+        }
+        @Override protected void doRun(){
+          cancellableThreads.checkForCancel();
+          store.incRef();
+          final StoreFileMetaData md=recoverySourceMetadata.get(name);
+          try (final IndexInput indexInput=store.directory().openInput(name,IOContext.READONCE)){
+            final int BUFFER_SIZE=(int)recoverySettings.fileChunkSize().bytes();
+            final byte[] buf=new byte[BUFFER_SIZE];
+            boolean shouldCompressRequest=recoverySettings.compress();
+            if (CompressorFactory.isCompressed(indexInput)) {
+              shouldCompressRequest=false;
+            }
+            final long len=indexInput.length();
+            long readCount=0;
+            final TransportRequestOptions requestOptions=TransportRequestOptions.options().withCompress(shouldCompressRequest).withType(TransportRequestOptions.Type.RECOVERY).withTimeout(recoverySettings.internalActionTimeout());
+            while (readCount < len) {
+              if (shard.state() == IndexShardState.CLOSED) {
+                throw new IndexShardClosedException(shard.shardId());
+              }
+              int toRead=readCount + BUFFER_SIZE > len ? (int)(len - readCount) : BUFFER_SIZE;
+              final long position=indexInput.getFilePointer();
+              RateLimiter rl=recoverySettings.rateLimiter();
+              long throttleTimeInNanos=0;
+              if (rl != null) {
+                long bytes=bytesSinceLastPause.addAndGet(toRead);
+                if (bytes > rl.getMinPauseCheckBytes()) {
+                  bytesSinceLastPause.addAndGet(-bytes);
+                  throttleTimeInNanos=rl.pause(bytes);
+                  shard.recoveryStats().addThrottleTime(throttleTimeInNanos);
+                }
+              }
+              indexInput.readBytes(buf,0,toRead,false);
+              final BytesArray content=new BytesArray(buf,0,toRead);
+              readCount+=toRead;
+              final boolean lastChunk=readCount == len;
+              final RecoveryFileChunkRequest fileChunkRequest=new RecoveryFileChunkRequest(request.recoveryId(),request.shardId(),md,position,content,lastChunk,translogView.totalOperations(),throttleTimeInNanos);
+              cancellableThreads.execute(new Interruptable(){
+                @Override public void run() throws InterruptedException {
+                  transportService.submitRequest(request.targetNode(),RecoveryTarget.Actions.FILE_CHUNK,fileChunkRequest,requestOptions,EmptyTransportResponseHandler.INSTANCE_SAME).txGet();
+                }
+              }
+);
+            }
+          }
+ catch (          Throwable e) {
+            final Throwable corruptIndexException;
+            if ((corruptIndexException=ExceptionsHelper.unwrapCorruption(e)) != null) {
+              if (store.checkIntegrityNoException(md) == false) {
+                logger.warn("{} Corrupted file detected {} checksum mismatch",shard.shardId(),md);
+                if (corruptedEngine.compareAndSet(null,corruptIndexException) == false) {
+                  corruptedEngine.get().addSuppressed(e);
+                }
+              }
+ else {
+                RemoteTransportException exception=new RemoteTransportException("File corruption occurred on recovery but checksums are ok",null);
+                exception.addSuppressed(e);
+                exceptions.add(0,exception);
+                logger.warn("{} Remote file corruption on node {}, recovering {}. local checksum OK",corruptIndexException,shard.shardId(),request.targetNode(),md);
+              }
+            }
+ else {
+              exceptions.add(0,e);
+            }
+          }
+ finally {
+            store.decRef();
+          }
+        }
+      }
+);
+      fileIndex++;
+    }
+    cancellableThreads.execute(new Interruptable(){
+      @Override public void run() throws InterruptedException {
+        latch.await();
+      }
+    }
+);
+    if (corruptedEngine.get() != null) {
+      shard.engine().failEngine("recovery",corruptedEngine.get());
+      throw corruptedEngine.get();
+    }
+ else {
+      ExceptionsHelper.rethrowAndSuppress(exceptions);
+    }
+    cancellableThreads.execute(new Interruptable(){
+      @Override public void run() throws InterruptedException {
+        try {
+          transportService.submitRequest(request.targetNode(),RecoveryTarget.Actions.CLEAN_FILES,new RecoveryCleanFilesRequest(request.recoveryId(),shard.shardId(),recoverySourceMetadata,translogView.totalOperations()),TransportRequestOptions.options().withTimeout(recoverySettings.internalActionTimeout()),EmptyTransportResponseHandler.INSTANCE_SAME).txGet();
+        }
+ catch (        RemoteTransportException remoteException) {
+          final IOException corruptIndexException;
+          if ((corruptIndexException=ExceptionsHelper.unwrapCorruption(remoteException)) != null) {
+            try {
+              final Store.MetadataSnapshot recoverySourceMetadata=store.getMetadata(snapshot);
+              StoreFileMetaData[] metadata=Iterables.toArray(recoverySourceMetadata,StoreFileMetaData.class);
+              ArrayUtil.timSort(metadata,new Comparator<StoreFileMetaData>(){
+                @Override public int compare(                StoreFileMetaData o1,                StoreFileMetaData o2){
+                  return Long.compare(o1.length(),o2.length());
+                }
+              }
+);
+              for (              StoreFileMetaData md : metadata) {
+                logger.debug("{} checking integrity for file {} after remove corruption exception",shard.shardId(),md);
+                if (store.checkIntegrityNoException(md) == false) {
+                  logger.warn("{} Corrupted file detected {} checksum mismatch",shard.shardId(),md);
+                  throw corruptIndexException;
+                }
+              }
+            }
+ catch (            IOException ex) {
+              remoteException.addSuppressed(ex);
+              throw remoteException;
+            }
+            RemoteTransportException exception=new RemoteTransportException("File corruption occurred on recovery but checksums are ok",null);
+            exception.addSuppressed(remoteException);
+            logger.warn("{} Remote file corruption during finalization on node {}, recovering {}. local checksum OK",corruptIndexException,shard.shardId(),request.targetNode());
+          }
+ else {
+            throw remoteException;
+          }
+        }
+      }
+    }
+);
+    prepareTargetForTranslog(translogView);
+    logger.trace("[{}][{}] recovery [phase1] to {}: took [{}]",indexName,shardId,request.targetNode(),stopWatch.totalTime());
+    response.phase1Time=stopWatch.totalTime().millis();
+  }
+ catch (  Throwable e) {
+    throw new RecoverFilesRecoveryException(request.shardId(),response.phase1FileNames.size(),new ByteSizeValue(totalSize),e);
+  }
+ finally {
+    store.decRef();
+  }
+}

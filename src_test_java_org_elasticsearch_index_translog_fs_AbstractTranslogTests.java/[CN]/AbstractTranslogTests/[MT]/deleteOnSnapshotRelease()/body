@@ -1,0 +1,31 @@
+{
+  ArrayList<Translog.Operation> firstOps=new ArrayList<>();
+  addToTranslogAndList(translog,firstOps,new Translog.Create("test","1",new byte[]{1}));
+  Translog.Snapshot firstSnapshot=translog.newSnapshot();
+  assertThat(firstSnapshot.estimatedTotalOperations(),equalTo(1));
+  translog.newTranslog();
+  translog.markCommitted(translog.currentId());
+  assertFileIsPresent(translog,1);
+  ArrayList<Translog.Operation> secOps=new ArrayList<>();
+  addToTranslogAndList(translog,secOps,new Translog.Index("test","2",new byte[]{2}));
+  assertThat(firstSnapshot.estimatedTotalOperations(),equalTo(1));
+  assertNotLeaking();
+  Translog.Snapshot secondSnapshot=translog.newSnapshot();
+  translog.add(new Translog.Index("test","3",new byte[]{3}));
+  assertThat(secondSnapshot,SnapshotMatchers.equalsTo(secOps));
+  assertThat(secondSnapshot.estimatedTotalOperations(),equalTo(1));
+  assertFileIsPresent(translog,1);
+  assertFileIsPresent(translog,2);
+  assertNotLeaking();
+  firstSnapshot.close();
+  assertFileDeleted(translog,1);
+  assertFileIsPresent(translog,2);
+  secondSnapshot.close();
+  assertFileIsPresent(translog,2);
+  assertNotLeaking();
+  translog.newTranslog();
+  translog.markCommitted(translog.currentId());
+  assertNotLeaking();
+  assertFileIsPresent(translog,3);
+  assertFileDeleted(translog,2);
+}
