@@ -5,7 +5,8 @@
   nodeA=new DiscoveryNode("TS_A","TS_A",serviceA.boundAddress().publishAddress(),ImmutableMap.<String,String>of(),version0);
   serviceB=build(ImmutableSettings.builder().put("name","TS_B",TransportService.SETTING_TRACE_LOG_INCLUDE,"",TransportService.SETTING_TRACE_LOG_EXCLUDE,"NOTHING").build(),version1);
   nodeB=new DiscoveryNode("TS_B","TS_B",serviceB.boundAddress().publishAddress(),ImmutableMap.<String,String>of(),version1);
-  final CountDownLatch latch=new CountDownLatch(4);
+  final boolean useLocalNode=randomBoolean();
+  final CountDownLatch latch=new CountDownLatch(useLocalNode ? 2 : 4);
   TransportConnectionListener waitForConnection=new TransportConnectionListener(){
     @Override public void onNodeConnected(    DiscoveryNode node){
       latch.countDown();
@@ -17,10 +18,18 @@
 ;
   serviceA.addConnectionListener(waitForConnection);
   serviceB.addConnectionListener(waitForConnection);
+  if (useLocalNode) {
+    logger.info("--> using local node optimization");
+    serviceA.setLocalNode(nodeA);
+    serviceB.setLocalNode(nodeB);
+  }
+ else {
+    logger.info("--> actively connecting to local node");
+    serviceA.connectToNode(nodeA);
+    serviceB.connectToNode(nodeB);
+  }
   serviceA.connectToNode(nodeB);
-  serviceA.connectToNode(nodeA);
   serviceB.connectToNode(nodeA);
-  serviceB.connectToNode(nodeB);
   assertThat("failed to wait for all nodes to connect",latch.await(5,TimeUnit.SECONDS),equalTo(true));
   serviceA.removeConnectionListener(waitForConnection);
   serviceB.removeConnectionListener(waitForConnection);
