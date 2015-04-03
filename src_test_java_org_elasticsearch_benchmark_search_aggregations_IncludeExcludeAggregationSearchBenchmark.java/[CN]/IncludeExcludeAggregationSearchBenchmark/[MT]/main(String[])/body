@@ -1,0 +1,52 @@
+{
+  Settings settings=settingsBuilder().put("index.refresh_interval","-1").put(SETTING_NUMBER_OF_SHARDS,1).put(SETTING_NUMBER_OF_REPLICAS,0).build();
+  Node[] nodes=new Node[1];
+  for (int i=0; i < nodes.length; i++) {
+    nodes[i]=nodeBuilder().clusterName(CLUSTER_NAME).settings(settingsBuilder().put(settings).put("name","node" + i)).node();
+  }
+  Node clientNode=nodeBuilder().clusterName(CLUSTER_NAME).settings(settingsBuilder().put(settings).put("name","client")).client(true).node();
+  Client client=clientNode.client();
+  try {
+    client.admin().indices().create(createIndexRequest("index").settings(settings).mapping("type",jsonBuilder().startObject().startObject("type").startObject("properties").startObject("str").field("type","string").field("index","not_analyzed").endObject().endObject().endObject().endObject())).actionGet();
+    System.out.println("Indexing " + NUM_DOCS + " documents");
+    StopWatch stopWatch=new StopWatch().start();
+    for (int i=0; i < NUM_DOCS; ) {
+      BulkRequestBuilder request=client.prepareBulk();
+      for (int j=0; j < BATCH && i < NUM_DOCS; ++j) {
+        request.add(client.prepareIndex("index","type",Integer.toString(i)).setSource("str",TestUtil.randomSimpleString(R)));
+        ++i;
+      }
+      BulkResponse response=request.execute().actionGet();
+      if (response.hasFailures()) {
+        System.err.println("--> failures...");
+        System.err.println(response.buildFailureMessage());
+      }
+      if ((i % 100000) == 0) {
+        System.out.println("--> Indexed " + i + " took "+ stopWatch.stop().lastTaskTime());
+        stopWatch.start();
+      }
+    }
+    client.admin().indices().prepareRefresh("index").execute().actionGet();
+  }
+ catch (  Exception e) {
+    System.out.println("Index already exists, skipping index creation");
+  }
+  ClusterHealthResponse clusterHealthResponse=client.admin().cluster().prepareHealth().setWaitForGreenStatus().setTimeout("10m").execute().actionGet();
+  if (clusterHealthResponse.isTimedOut()) {
+    System.err.println("--> Timed out waiting for cluster health");
+  }
+  for (int i=0; i < WARM + RUNS; ++i) {
+    if (i >= WARM) {
+      System.out.println("RUN " + (i - WARM));
+    }
+    long start=System.nanoTime();
+    SearchResponse resp=null;
+    for (int j=0; j < ITERS; ++j) {
+      resp=client.prepareSearch("index").setQuery(QueryBuilders.prefixQuery("str","sf")).setSize(0).addAggregation(terms("t").field("str").include("s.*")).execute().actionGet();
+    }
+    long end=System.nanoTime();
+    if (i >= WARM) {
+      System.out.println(new TimeValue((end - start) / ITERS,TimeUnit.NANOSECONDS));
+    }
+  }
+}
