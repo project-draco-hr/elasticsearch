@@ -1,0 +1,36 @@
+{
+  final Translog translog=engineConfig.getTranslog();
+  int operationsRecovered=0;
+  try (Translog.OperationIterator in=translog.openIterator(translogId)){
+    Translog.Operation operation;
+    while ((operation=in.next()) != null) {
+      try {
+        handler.performRecoveryOperation(this,operation);
+        operationsRecovered++;
+      }
+ catch (      ElasticsearchException e) {
+        if (e.status() == RestStatus.BAD_REQUEST) {
+          logger.info("ignoring recovery of a corrupt translog entry",e);
+        }
+ else {
+          throw e;
+        }
+      }
+    }
+  }
+ catch (  FileNotFoundException ex) {
+    logger.info("no translog file found for ID: " + translogId);
+  }
+catch (  TruncatedTranslogException e) {
+    logger.trace("ignoring truncation exception, the translog is either empty or half-written",e);
+  }
+catch (  Throwable e) {
+    IOUtils.closeWhileHandlingException(translog);
+    throw new EngineException(shardId,"failed to recover from translog",e);
+  }
+  flush(true,true);
+  if (operationsRecovered > 0) {
+    refresh("translog recovery");
+  }
+  translog.clearUnreferenced();
+}

@@ -1,0 +1,22 @@
+{
+  final Path translogName=getPath(translogId);
+  Path recoveringTranslogFile=null;
+  logger.trace("try open translog file {} locations: {}",translogName,Arrays.toString(locations()));
+  OUTER:   for (  Path translogLocation : locations()) {
+    for (    Path recoveryFiles : FileSystemUtils.files(translogLocation,translogName.getFileName() + "{.recovering,}")) {
+      logger.trace("translog file found in {}",recoveryFiles);
+      recoveringTranslogFile=recoveryFiles;
+      break OUTER;
+    }
+    logger.trace("translog file NOT found in {} - continue",translogLocation);
+  }
+  final boolean translogFileExists=recoveringTranslogFile != null && Files.exists(recoveringTranslogFile);
+  if (translogFileExists) {
+    if (logger.isTraceEnabled()) {
+      logger.trace("opening iterator for translog file: {} length: {}",recoveringTranslogFile,Files.size(recoveringTranslogFile));
+    }
+    final TranslogStream translogStream=TranslogStreams.translogStreamFor(recoveringTranslogFile);
+    return new OperationIteratorImpl(logger,translogStream,translogStream.openInput(recoveringTranslogFile));
+  }
+  throw new FileNotFoundException("no translog file found for id: " + translogId);
+}
