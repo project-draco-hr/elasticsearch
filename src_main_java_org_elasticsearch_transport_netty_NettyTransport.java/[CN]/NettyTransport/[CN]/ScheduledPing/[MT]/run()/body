@@ -1,0 +1,30 @@
+{
+  if (lifecycle.stoppedOrClosed()) {
+    return;
+  }
+  for (  Map.Entry<DiscoveryNode,NodeChannels> entry : connectedNodes.entrySet()) {
+    DiscoveryNode node=entry.getKey();
+    NodeChannels channels=entry.getValue();
+    for (    Channel channel : channels.allChannels) {
+      try {
+        ChannelFuture future=channel.write(NettyHeader.pingHeader());
+        future.addListener(new ChannelFutureListener(){
+          @Override public void operationComplete(          ChannelFuture future) throws Exception {
+            successfulPings.inc();
+          }
+        }
+);
+      }
+ catch (      Throwable t) {
+        if (channel.isOpen()) {
+          logger.debug("[{}] failed to send ping transport message",t,node);
+          failedPings.inc();
+        }
+ else {
+          logger.trace("[{}] failed to send ping transport message (channel closed)",t,node);
+        }
+      }
+    }
+  }
+  threadPool.schedule(pingSchedule,ThreadPool.Names.GENERIC,this);
+}

@@ -21,22 +21,24 @@
     }
   }
   indexRandom(true,requestBuilders);
+  int size=randomIntBetween(0,numDocs);
   SearchResponse searchResponse;
   if (randomBoolean()) {
-    searchResponse=client().prepareSearch("idx").setSize(numDocs).setTypes("parent").addSort("_uid",SortOrder.ASC).addInnerHit("a",new InnerHitsBuilder.InnerHit().setType("child1").addSort("_uid",SortOrder.ASC).setSize(numDocs)).addInnerHit("b",new InnerHitsBuilder.InnerHit().setType("child2").addSort("_uid",SortOrder.ASC).setSize(numDocs)).get();
+    searchResponse=client().prepareSearch("idx").setSize(numDocs).setTypes("parent").addSort("_uid",SortOrder.ASC).addInnerHit("a",new InnerHitsBuilder.InnerHit().setType("child1").addSort("_uid",SortOrder.ASC).setSize(size)).addInnerHit("b",new InnerHitsBuilder.InnerHit().setType("child2").addSort("_uid",SortOrder.ASC).setSize(size)).get();
   }
  else {
     BoolQueryBuilder boolQuery=new BoolQueryBuilder();
     if (randomBoolean()) {
-      boolQuery.should(hasChildQuery("child1",matchAllQuery()).innerHit(new QueryInnerHitBuilder().setName("a").addSort("_uid",SortOrder.ASC).setSize(numDocs)));
-      boolQuery.should(hasChildQuery("child2",matchAllQuery()).innerHit(new QueryInnerHitBuilder().setName("b").addSort("_uid",SortOrder.ASC).setSize(numDocs)));
+      boolQuery.should(hasChildQuery("child1",matchAllQuery()).innerHit(new QueryInnerHitBuilder().setName("a").addSort("_uid",SortOrder.ASC).setSize(size)));
+      boolQuery.should(hasChildQuery("child2",matchAllQuery()).innerHit(new QueryInnerHitBuilder().setName("b").addSort("_uid",SortOrder.ASC).setSize(size)));
     }
  else {
-      boolQuery.should(constantScoreQuery(hasChildFilter("child1",matchAllQuery()).innerHit(new QueryInnerHitBuilder().setName("a").addSort("_uid",SortOrder.ASC).setSize(numDocs))));
-      boolQuery.should(constantScoreQuery(hasChildFilter("child2",matchAllQuery()).innerHit(new QueryInnerHitBuilder().setName("b").addSort("_uid",SortOrder.ASC).setSize(numDocs))));
+      boolQuery.should(constantScoreQuery(hasChildFilter("child1",matchAllQuery()).innerHit(new QueryInnerHitBuilder().setName("a").addSort("_uid",SortOrder.ASC).setSize(size))));
+      boolQuery.should(constantScoreQuery(hasChildFilter("child2",matchAllQuery()).innerHit(new QueryInnerHitBuilder().setName("b").addSort("_uid",SortOrder.ASC).setSize(size))));
     }
     searchResponse=client().prepareSearch("idx").setSize(numDocs).setTypes("parent").addSort("_uid",SortOrder.ASC).setQuery(boolQuery).get();
   }
+  assertNoFailures(searchResponse);
   assertHitCount(searchResponse,numDocs);
   assertThat(searchResponse.getHits().getHits().length,equalTo(numDocs));
   int offset1=0;
@@ -47,7 +49,7 @@
     assertThat(searchHit.getId(),equalTo(String.format(Locale.ENGLISH,"%03d",parent)));
     SearchHits inner=searchHit.getInnerHits().get("a");
     assertThat(inner.totalHits(),equalTo((long)child1InnerObjects[parent]));
-    for (int child=0; child < child1InnerObjects[parent]; child++) {
+    for (int child=0; child < child1InnerObjects[parent] && child < size; child++) {
       SearchHit innerHit=inner.getAt(child);
       assertThat(innerHit.getType(),equalTo("child1"));
       String childId=String.format(Locale.ENGLISH,"%04d",offset1 + child);
@@ -57,7 +59,7 @@
     offset1+=child1InnerObjects[parent];
     inner=searchHit.getInnerHits().get("b");
     assertThat(inner.totalHits(),equalTo((long)child2InnerObjects[parent]));
-    for (int child=0; child < child2InnerObjects[parent]; child++) {
+    for (int child=0; child < child2InnerObjects[parent] && child < size; child++) {
       SearchHit innerHit=inner.getAt(child);
       assertThat(innerHit.getType(),equalTo("child2"));
       String childId=String.format(Locale.ENGLISH,"%04d",offset2 + child);

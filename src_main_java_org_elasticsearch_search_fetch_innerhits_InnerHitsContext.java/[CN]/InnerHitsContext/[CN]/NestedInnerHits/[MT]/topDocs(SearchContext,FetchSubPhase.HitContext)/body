@@ -1,17 +1,4 @@
 {
-  TopDocsCollector topDocsCollector;
-  int topN=from() + size();
-  if (sort() != null) {
-    try {
-      topDocsCollector=TopFieldCollector.create(sort(),topN,true,trackScores(),trackScores());
-    }
- catch (    IOException e) {
-      throw ExceptionsHelper.convertToElastic(e);
-    }
-  }
- else {
-    topDocsCollector=TopScoreDocCollector.create(topN);
-  }
   Filter rawParentFilter;
   if (parentObjectMapper == null) {
     rawParentFilter=NonNestedDocsFilter.INSTANCE;
@@ -22,6 +9,26 @@
   BitDocIdSetFilter parentFilter=context.bitsetFilterCache().getBitDocIdSetFilter(rawParentFilter);
   Filter childFilter=context.filterCache().cache(childObjectMapper.nestedTypeFilter(),null,context.queryParserService().autoFilterCachePolicy());
   Query q=new FilteredQuery(query,new NestedChildrenFilter(parentFilter,childFilter,hitContext));
-  context.searcher().search(q,topDocsCollector);
-  return topDocsCollector.topDocs(from(),size());
+  if (size() == 0) {
+    TotalHitCountCollector collector=new TotalHitCountCollector();
+    context.searcher().search(q,collector);
+    return new TopDocs(collector.getTotalHits(),Lucene.EMPTY_SCORE_DOCS,0);
+  }
+ else {
+    int topN=from() + size();
+    TopDocsCollector topDocsCollector;
+    if (sort() != null) {
+      try {
+        topDocsCollector=TopFieldCollector.create(sort(),topN,true,trackScores(),trackScores());
+      }
+ catch (      IOException e) {
+        throw ExceptionsHelper.convertToElastic(e);
+      }
+    }
+ else {
+      topDocsCollector=TopScoreDocCollector.create(topN);
+    }
+    context.searcher().search(q,topDocsCollector);
+    return topDocsCollector.topDocs(from(),size());
+  }
 }

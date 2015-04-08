@@ -1,12 +1,19 @@
 {
   try {
-    logger.trace("{} loading local shard state info",request.shardId);
-    ShardStateInfo shardStateInfo=shardsState.loadShardInfo(request.shardId);
-    if (shardStateInfo != null) {
-      logger.debug("{} shard state info found: [{}]",request.shardId,shardStateInfo);
-      return new NodeGatewayStartedShards(clusterService.localNode(),shardStateInfo.version);
+    final ShardId shardId=request.getShardId();
+    final String indexUUID=request.getIndexUUID();
+    logger.trace("{} loading local shard state info",shardId);
+    final ShardStateMetaData shardStateMetaData=ShardStateMetaData.FORMAT.loadLatestState(logger,nodeEnv.shardPaths(request.shardId));
+    if (shardStateMetaData != null) {
+      if (indexUUID.equals(shardStateMetaData.indexUUID) == false && IndexMetaData.INDEX_UUID_NA_VALUE.equals(shardStateMetaData.indexUUID) == false) {
+        logger.warn("{} shard state info found but indexUUID didn't match expected [{}] actual [{}]",shardId,indexUUID,shardStateMetaData.indexUUID);
+      }
+ else {
+        logger.debug("{} shard state info found: [{}]",shardId,shardStateMetaData);
+        return new NodeGatewayStartedShards(clusterService.localNode(),shardStateMetaData.version);
+      }
     }
-    logger.trace("{} no local shard info found",request.shardId);
+    logger.trace("{} no local shard info found",shardId);
     return new NodeGatewayStartedShards(clusterService.localNode(),-1);
   }
  catch (  Exception e) {

@@ -1,6 +1,6 @@
 {
   final ToXContent.Params params=ToXContent.EMPTY_PARAMS;
-  MetaDataStateFormat<MetaData> format=MetaStateService.globalStateFormat(randomFrom(XContentType.values()),params,randomBoolean());
+  MetaDataStateFormat<MetaData> format=MetaStateService.globalStateFormat(randomFrom(XContentType.values()),params);
   final Path[] dirs=new Path[2];
   dirs[0]=newTempDirPath(LifecycleScope.TEST);
   dirs[1]=newTempDirPath(LifecycleScope.TEST);
@@ -9,7 +9,7 @@
   }
   final Path dir1=randomFrom(dirs);
   final int v1=randomInt(10);
-  format.write(randomMeta(),MetaStateService.GLOBAL_STATE_FILE_PREFIX,v1,dir1);
+  format.write(randomMeta(),v1,dir1);
   final int numLegacyFiles=randomIntBetween(1,5);
   for (int i=0; i < numLegacyFiles; ++i) {
     final Path dir2=randomFrom(dirs);
@@ -21,10 +21,18 @@
     }
    }
   try {
-    MetaDataStateFormat.loadLatestState(logger,format,MetaStateService.GLOBAL_STATE_FILE_PATTERN,"foobar",dirs);
+    format.loadLatestState(logger,dirs);
     fail("latest version can not be read");
   }
  catch (  ElasticsearchIllegalStateException ex) {
     assertThat(ex.getMessage(),startsWith("Could not find a state file to recover from among "));
   }
+  final MetaData meta=randomMeta();
+  format.write(meta,v1,dirs);
+  final MetaData metaData=format.loadLatestState(logger,dirs);
+  assertEquals(meta.uuid(),metaData.uuid());
+  final Path path=randomFrom(dirs);
+  final Path[] files=FileSystemUtils.files(path.resolve("_state"));
+  assertEquals(1,files.length);
+  assertEquals("global-" + format.findMaxStateId("global-",dirs) + ".st",files[0].getFileName().toString());
 }

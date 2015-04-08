@@ -19,29 +19,31 @@
     requestBuilders.add(client().prepareIndex("idx","type",String.format(Locale.ENGLISH,"%03d",i)).setSource(source));
   }
   indexRandom(true,requestBuilders);
+  int size=randomIntBetween(0,numDocs);
   SearchResponse searchResponse;
   if (randomBoolean()) {
-    searchResponse=client().prepareSearch("idx").setSize(numDocs).addSort("_uid",SortOrder.ASC).addInnerHit("a",new InnerHitsBuilder.InnerHit().setPath("field1").addSort("_doc",SortOrder.DESC).setSize(numDocs)).addInnerHit("b",new InnerHitsBuilder.InnerHit().setPath("field2").addSort("_doc",SortOrder.DESC).setSize(numDocs)).get();
+    searchResponse=client().prepareSearch("idx").setSize(numDocs).addSort("_uid",SortOrder.ASC).addInnerHit("a",new InnerHitsBuilder.InnerHit().setPath("field1").addSort("_doc",SortOrder.DESC).setSize(size)).addInnerHit("b",new InnerHitsBuilder.InnerHit().setPath("field2").addSort("_doc",SortOrder.DESC).setSize(size)).get();
   }
  else {
     BoolQueryBuilder boolQuery=new BoolQueryBuilder();
     if (randomBoolean()) {
-      boolQuery.should(nestedQuery("field1",matchAllQuery()).innerHit(new QueryInnerHitBuilder().setName("a").addSort("_doc",SortOrder.DESC).setSize(numDocs)));
-      boolQuery.should(nestedQuery("field2",matchAllQuery()).innerHit(new QueryInnerHitBuilder().setName("b").addSort("_doc",SortOrder.DESC).setSize(numDocs)));
+      boolQuery.should(nestedQuery("field1",matchAllQuery()).innerHit(new QueryInnerHitBuilder().setName("a").addSort("_doc",SortOrder.DESC).setSize(size)));
+      boolQuery.should(nestedQuery("field2",matchAllQuery()).innerHit(new QueryInnerHitBuilder().setName("b").addSort("_doc",SortOrder.DESC).setSize(size)));
     }
  else {
-      boolQuery.should(constantScoreQuery(nestedFilter("field1",matchAllQuery()).innerHit(new QueryInnerHitBuilder().setName("a").addSort("_doc",SortOrder.DESC).setSize(numDocs))));
-      boolQuery.should(constantScoreQuery(nestedFilter("field2",matchAllQuery()).innerHit(new QueryInnerHitBuilder().setName("b").addSort("_doc",SortOrder.DESC).setSize(numDocs))));
+      boolQuery.should(constantScoreQuery(nestedFilter("field1",matchAllQuery()).innerHit(new QueryInnerHitBuilder().setName("a").addSort("_doc",SortOrder.DESC).setSize(size))));
+      boolQuery.should(constantScoreQuery(nestedFilter("field2",matchAllQuery()).innerHit(new QueryInnerHitBuilder().setName("b").addSort("_doc",SortOrder.DESC).setSize(size))));
     }
     searchResponse=client().prepareSearch("idx").setQuery(boolQuery).setSize(numDocs).addSort("_uid",SortOrder.ASC).get();
   }
+  assertNoFailures(searchResponse);
   assertHitCount(searchResponse,numDocs);
   assertThat(searchResponse.getHits().getHits().length,equalTo(numDocs));
   for (int i=0; i < numDocs; i++) {
     SearchHit searchHit=searchResponse.getHits().getAt(i);
     SearchHits inner=searchHit.getInnerHits().get("a");
     assertThat(inner.totalHits(),equalTo((long)field1InnerObjects[i]));
-    for (int j=0; j < field1InnerObjects[i]; j++) {
+    for (int j=0; j < field1InnerObjects[i] && j < size; j++) {
       SearchHit innerHit=inner.getAt(j);
       assertThat(innerHit.getNestedIdentity().getField().string(),equalTo("field1"));
       assertThat(innerHit.getNestedIdentity().getOffset(),equalTo(j));
@@ -49,7 +51,7 @@
     }
     inner=searchHit.getInnerHits().get("b");
     assertThat(inner.totalHits(),equalTo((long)field2InnerObjects[i]));
-    for (int j=0; j < field2InnerObjects[i]; j++) {
+    for (int j=0; j < field2InnerObjects[i] && j < size; j++) {
       SearchHit innerHit=inner.getAt(j);
       assertThat(innerHit.getNestedIdentity().getField().string(),equalTo("field2"));
       assertThat(innerHit.getNestedIdentity().getOffset(),equalTo(j));

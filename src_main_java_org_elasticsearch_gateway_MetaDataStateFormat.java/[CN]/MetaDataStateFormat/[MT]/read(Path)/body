@@ -1,0 +1,20 @@
+{
+  try (Directory dir=newDirectory(file.getParent())){
+    try (final IndexInput indexInput=dir.openInput(file.getFileName().toString(),IOContext.DEFAULT)){
+      CodecUtil.checksumEntireFile(indexInput);
+      CodecUtil.checkHeader(indexInput,STATE_FILE_CODEC,STATE_FILE_VERSION,STATE_FILE_VERSION);
+      final XContentType xContentType=XContentType.values()[indexInput.readInt()];
+      indexInput.readLong();
+      long filePointer=indexInput.getFilePointer();
+      long contentSize=indexInput.length() - CodecUtil.footerLength() - filePointer;
+      try (IndexInput slice=indexInput.slice("state_xcontent",filePointer,contentSize)){
+        try (XContentParser parser=XContentFactory.xContent(xContentType).createParser(new InputStreamIndexInput(slice,contentSize))){
+          return fromXContent(parser);
+        }
+       }
+     }
+ catch (    CorruptIndexException|IndexFormatTooOldException|IndexFormatTooNewException ex) {
+      throw new CorruptStateException(ex);
+    }
+  }
+ }

@@ -1,0 +1,56 @@
+{
+  NodesStatsResponse nodeStats=client().admin().cluster().prepareNodesStats().get();
+  List<NodeStats> dataNodeStats=new ArrayList<>();
+  for (  NodeStats stat : nodeStats.getNodes()) {
+    if (stat.getNode().isDataNode()) {
+      dataNodeStats.add(stat);
+    }
+  }
+  assertThat(dataNodeStats.size(),greaterThanOrEqualTo(2));
+  Collections.shuffle(dataNodeStats,getRandom());
+  NodeStats primariesNode=dataNodeStats.get(0);
+  NodeStats unluckyNode=dataNodeStats.get(1);
+  assertAcked(prepareCreate("test").addMapping("type1","field1","type=string","the_id","type=string").setSettings(settingsBuilder().put(IndexMetaData.SETTING_NUMBER_OF_REPLICAS,0).put(IndexMetaData.SETTING_NUMBER_OF_SHARDS,numberOfShards()).put("index.routing.allocation.include._name",primariesNode.getNode().name())));
+  int numDocs=randomIntBetween(100,200);
+  List<IndexRequestBuilder> builder=new ArrayList<>();
+  for (int i=0; i < numDocs; i++) {
+    String id=Integer.toString(i);
+    builder.add(client().prepareIndex("test","type1",id).setSource("field1",English.intToEnglish(i),"the_id",id));
+  }
+  indexRandom(true,builder);
+  for (int i=0; i < numDocs; i++) {
+    String id=Integer.toString(i);
+    assertHitCount(client().prepareSearch().setQuery(QueryBuilders.termQuery("the_id",id)).get(),1);
+  }
+  ensureGreen();
+  client().admin().indices().prepareFlush().setForce(true).setWaitIfOngoing(true).get();
+  client().admin().indices().prepareOptimize().setMaxNumSegments(1).setFlush(true).get();
+  final CountDownLatch latch=new CountDownLatch(1);
+  final AtomicBoolean truncate=new AtomicBoolean(true);
+  for (  NodeStats dataNode : dataNodeStats) {
+    MockTransportService mockTransportService=((MockTransportService)internalCluster().getInstance(TransportService.class,dataNode.getNode().name()));
+    mockTransportService.addDelegate(internalCluster().getInstance(Discovery.class,unluckyNode.getNode().name()).localNode(),new MockTransportService.DelegateTransport(mockTransportService.original()){
+      @Override public void sendRequest(      DiscoveryNode node,      long requestId,      String action,      TransportRequest request,      TransportRequestOptions options) throws IOException, TransportException {
+        if (action.equals(RecoveryTarget.Actions.FILE_CHUNK)) {
+          RecoveryFileChunkRequest req=(RecoveryFileChunkRequest)request;
+          logger.debug("file chunk [" + req.toString() + "] lastChunk: "+ req.lastChunk());
+          if ((req.name().endsWith("cfs") || req.name().endsWith("fdt")) && req.lastChunk() && truncate.get()) {
+            latch.countDown();
+            throw new RuntimeException("Caused some truncated files for fun and profit");
+          }
+        }
+        super.sendRequest(node,requestId,action,request,options);
+      }
+    }
+);
+  }
+  logger.info("--> bumping replicas to 1");
+  client().admin().indices().prepareUpdateSettings("test").setSettings(settingsBuilder().put(IndexMetaData.SETTING_NUMBER_OF_REPLICAS,1).put("index.routing.allocation.include._name",primariesNode.getNode().name() + "," + unluckyNode.getNode().name())).get();
+  latch.await();
+  truncate.compareAndSet(true,false);
+  ensureGreen("test");
+  for (int i=0; i < numDocs; i++) {
+    String id=Integer.toString(i);
+    assertHitCount(client().prepareSearch().setQuery(QueryBuilders.termQuery("the_id",id)).get(),1);
+  }
+}
