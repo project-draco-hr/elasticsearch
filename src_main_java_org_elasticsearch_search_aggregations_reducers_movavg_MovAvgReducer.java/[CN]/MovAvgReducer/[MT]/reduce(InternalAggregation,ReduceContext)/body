@@ -1,0 +1,22 @@
+{
+  InternalHistogram histo=(InternalHistogram)aggregation;
+  List<? extends InternalHistogram.Bucket> buckets=histo.getBuckets();
+  InternalHistogram.Factory<? extends InternalHistogram.Bucket> factory=histo.getFactory();
+  List newBuckets=new ArrayList<>();
+  EvictingQueue<Double> values=EvictingQueue.create(this.window);
+  for (  InternalHistogram.Bucket bucket : buckets) {
+    Double thisBucketValue=resolveBucketValue(histo,bucket,bucketsPaths()[0],gapPolicy);
+    if (thisBucketValue != null) {
+      values.offer(thisBucketValue);
+      double movavg=model.next(values);
+      List<InternalAggregation> aggs=new ArrayList<>(Lists.transform(bucket.getAggregations().asList(),FUNCTION));
+      aggs.add(new InternalSimpleValue(name(),movavg,formatter,new ArrayList<Reducer>(),metaData()));
+      InternalHistogram.Bucket newBucket=factory.createBucket(bucket.getKey(),bucket.getDocCount(),new InternalAggregations(aggs),bucket.getKeyed(),bucket.getFormatter());
+      newBuckets.add(newBucket);
+    }
+ else {
+      newBuckets.add(bucket);
+    }
+  }
+  return factory.create(newBuckets,histo);
+}
