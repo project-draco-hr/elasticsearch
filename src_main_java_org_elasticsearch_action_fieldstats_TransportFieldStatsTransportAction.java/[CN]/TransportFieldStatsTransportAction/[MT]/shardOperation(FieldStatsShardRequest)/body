@@ -1,0 +1,27 @@
+{
+  ShardId shardId=request.shardId();
+  Map<String,FieldStats> fieldStats=new HashMap<>();
+  IndexService indexServices=indicesService.indexServiceSafe(shardId.getIndex());
+  MapperService mapperService=indexServices.mapperService();
+  IndexShard shard=indexServices.shardSafe(shardId.id());
+  shard.readAllowed();
+  try (Engine.Searcher searcher=shard.acquireSearcher("fieldstats")){
+    for (    String field : request.getFields()) {
+      FieldMappers fieldMappers=mapperService.fullName(field);
+      if (fieldMappers != null) {
+        IndexReader reader=searcher.reader();
+        Terms terms=MultiFields.getTerms(reader,field);
+        if (terms != null) {
+          fieldStats.put(field,fieldMappers.mapper().stats(terms,reader.maxDoc()));
+        }
+      }
+ else {
+        throw new IllegalArgumentException("field [" + field + "] doesn't exist");
+      }
+    }
+  }
+ catch (  IOException e) {
+    throw ExceptionsHelper.convertToElastic(e);
+  }
+  return new FieldStatsShardResponse(shardId,fieldStats);
+}
