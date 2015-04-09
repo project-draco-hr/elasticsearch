@@ -1,12 +1,23 @@
 {
   ListenableFuture<List<String>> replicas=internalCluster().startNodesAsync(1);
-  Path dataDir=newTempDirPath(LifecycleScope.SUITE);
-  ImmutableSettings.Builder nodeSettings=ImmutableSettings.builder().put("path.data",dataDir.toAbsolutePath()).put("node.master",false);
-  String loadingNode=internalCluster().startNode(nodeSettings.build());
-  Path[] nodePaths=internalCluster().getInstance(NodeEnvironment.class,loadingNode).nodeDataPaths();
+  Path baseTempDir=newTempDirPath(LifecycleScope.SUITE);
+  ImmutableSettings.Builder nodeSettings=ImmutableSettings.builder().put("path.data",baseTempDir.resolve("single-path").toAbsolutePath()).put("node.master",false);
+  ListenableFuture<String> singleDataPathNode=internalCluster().startNodeAsync(nodeSettings.build());
+  nodeSettings=ImmutableSettings.builder().put("path.data",baseTempDir.resolve("multi-path1").toAbsolutePath() + "," + baseTempDir.resolve("multi-path2").toAbsolutePath()).put("node.master",false);
+  ListenableFuture<String> multiDataPathNode=internalCluster().startNodeAsync(nodeSettings.build());
+  Path[] nodePaths=internalCluster().getInstance(NodeEnvironment.class,singleDataPathNode.get()).nodeDataPaths();
   assertEquals(1,nodePaths.length);
-  indicesDir=nodePaths[0].resolve(NodeEnvironment.INDICES_FOLDER);
-  assertFalse(Files.exists(indicesDir));
-  Files.createDirectories(indicesDir);
+  singleDataPath=nodePaths[0].resolve(NodeEnvironment.INDICES_FOLDER);
+  assertFalse(Files.exists(singleDataPath));
+  Files.createDirectories(singleDataPath);
+  logger.info("--> Single data path: " + singleDataPath.toString());
+  nodePaths=internalCluster().getInstance(NodeEnvironment.class,multiDataPathNode.get()).nodeDataPaths();
+  assertEquals(2,nodePaths.length);
+  multiDataPath=new Path[]{nodePaths[0].resolve(NodeEnvironment.INDICES_FOLDER),nodePaths[1].resolve(NodeEnvironment.INDICES_FOLDER)};
+  assertFalse(Files.exists(multiDataPath[0]));
+  assertFalse(Files.exists(multiDataPath[1]));
+  Files.createDirectories(multiDataPath[0]);
+  Files.createDirectories(multiDataPath[1]);
+  logger.info("--> Multi data paths: " + multiDataPath[0].toString() + ", "+ multiDataPath[1].toString());
   replicas.get();
 }
