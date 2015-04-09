@@ -1,0 +1,25 @@
+{
+  MovAvgModelBuilder model=randomModelBuilder();
+  int numPredictions=randomIntBetween(0,10);
+  SearchResponse response=client().prepareSearch("idx").addAggregation(histogram("histo").field("gap_test").interval(interval).minDocCount(0).extendedBounds(0L,(long)(interval * (numValueBuckets - 1))).subAggregation(sum("the_sum").field(GAP_FIELD)).subAggregation(movingAvg("movingAvg").window(windowSize).modelBuilder(model).gapPolicy(gapPolicy).predict(numPredictions).setBucketsPaths("the_sum"))).execute().actionGet();
+  assertSearchResponse(response);
+  InternalHistogram<Bucket> histo=response.getAggregations().get("histo");
+  assertThat(histo,notNullValue());
+  assertThat(histo.getName(),equalTo("histo"));
+  List<? extends Bucket> buckets=histo.getBuckets();
+  assertThat(buckets.size(),equalTo(numValueBuckets + numPredictions));
+  double lastValue=((SimpleValue)(buckets.get(0).getAggregations().get("movingAvg"))).value();
+  assertThat(Double.compare(lastValue,0.0d),greaterThanOrEqualTo(0));
+  double currentValue;
+  for (int i=1; i < numValueBuckets - 2; i++) {
+    currentValue=((SimpleValue)(buckets.get(i).getAggregations().get("movingAvg"))).value();
+    assertThat(Double.compare(lastValue,currentValue),greaterThanOrEqualTo(0));
+    lastValue=currentValue;
+  }
+  currentValue=((SimpleValue)(buckets.get(numValueBuckets - 1).getAggregations().get("movingAvg"))).value();
+  assertThat(Double.compare(lastValue,currentValue),equalTo(-1));
+  for (int i=numValueBuckets; i < numValueBuckets + numPredictions; i++) {
+    assertThat((buckets.get(i).getAggregations().get("movingAvg")),notNullValue());
+    assertThat((buckets.get(i).getAggregations().get("the_sum")),nullValue());
+  }
+}
