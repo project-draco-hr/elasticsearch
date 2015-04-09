@@ -1,0 +1,31 @@
+{
+  createIndex("idx");
+  final int numDocs=randomIntBetween(100,500);
+  List<IndexRequestBuilder> reqs=new ArrayList<>();
+  for (int i=0; i < numDocs; ++i) {
+    final int v1=randomInt(1 << randomInt(7));
+    final int v2=randomInt(1 << randomInt(7));
+    final int v3=randomInt(1 << randomInt(7));
+    reqs.add(client().prepareIndex("idx","type").setSource("f1",v1,"f2",v2,"f3",v3));
+  }
+  indexRandom(true,reqs);
+  final SearchResponse r1=client().prepareSearch("idx").addAggregation(terms("f1").field("f1").collectMode(SubAggCollectionMode.DEPTH_FIRST).subAggregation(terms("f2").field("f2").collectMode(SubAggCollectionMode.DEPTH_FIRST).subAggregation(terms("f3").field("f3").collectMode(SubAggCollectionMode.DEPTH_FIRST)))).get();
+  assertSearchResponse(r1);
+  final SearchResponse r2=client().prepareSearch("idx").addAggregation(terms("f1").field("f1").collectMode(SubAggCollectionMode.BREADTH_FIRST).subAggregation(terms("f2").field("f2").collectMode(SubAggCollectionMode.BREADTH_FIRST).subAggregation(terms("f3").field("f3").collectMode(SubAggCollectionMode.BREADTH_FIRST)))).get();
+  assertSearchResponse(r2);
+  final Terms t1=r1.getAggregations().get("f1");
+  final Terms t2=r2.getAggregations().get("f1");
+  assertEquals(t1,t2);
+  for (  Terms.Bucket b1 : t1.getBuckets()) {
+    final Terms.Bucket b2=t2.getBucketByKey(b1.getKeyAsString());
+    final Terms sub1=b1.getAggregations().get("f2");
+    final Terms sub2=b2.getAggregations().get("f2");
+    assertEquals(sub1,sub2);
+    for (    Terms.Bucket subB1 : sub1.getBuckets()) {
+      final Terms.Bucket subB2=sub2.getBucketByKey(subB1.getKeyAsString());
+      final Terms subSub1=subB1.getAggregations().get("f3");
+      final Terms subSub2=subB2.getAggregations().get("f3");
+      assertEquals(subSub1,subSub2);
+    }
+  }
+}
