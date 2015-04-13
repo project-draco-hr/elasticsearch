@@ -1,16 +1,16 @@
 {
   if (!enabled) {
     context.parser().skipChildren();
-    return;
+    return null;
   }
   XContentParser parser=context.parser();
   String currentFieldName=parser.currentName();
   XContentParser.Token token=parser.currentToken();
   if (token == XContentParser.Token.VALUE_NULL) {
-    return;
+    return null;
   }
   if (token.isValue() && !allowValue()) {
-    throw new MapperParsingException("object mapping for [" + name + "] tried to parse field ["+ currentFieldName+ "] as object, but found a concrete value",context.mappingsModified());
+    throw new MapperParsingException("object mapping for [" + name + "] tried to parse field ["+ currentFieldName+ "] as object, but found a concrete value");
   }
   if (nested.isNested()) {
     context=context.createNestedContext(fullPath);
@@ -30,12 +30,14 @@
   if (token == XContentParser.Token.START_OBJECT) {
     token=parser.nextToken();
   }
+  ObjectMapper update=null;
   while (token != XContentParser.Token.END_OBJECT) {
+    ObjectMapper newUpdate=null;
     if (token == XContentParser.Token.START_OBJECT) {
-      serializeObject(context,currentFieldName);
+      newUpdate=serializeObject(context,currentFieldName);
     }
  else     if (token == XContentParser.Token.START_ARRAY) {
-      serializeArray(context,currentFieldName);
+      newUpdate=serializeArray(context,currentFieldName);
     }
  else     if (token == XContentParser.Token.FIELD_NAME) {
       currentFieldName=parser.currentName();
@@ -44,12 +46,20 @@
       serializeNullValue(context,currentFieldName);
     }
  else     if (token == null) {
-      throw new MapperParsingException("object mapping for [" + name + "] tried to parse field ["+ currentFieldName+ "] as object, but got EOF, has a concrete value been provided to it?",context.mappingsModified());
+      throw new MapperParsingException("object mapping for [" + name + "] tried to parse field ["+ currentFieldName+ "] as object, but got EOF, has a concrete value been provided to it?");
     }
  else     if (token.isValue()) {
-      serializeValue(context,currentFieldName,token);
+      newUpdate=serializeValue(context,currentFieldName,token);
     }
     token=parser.nextToken();
+    if (newUpdate != null) {
+      if (update == null) {
+        update=newUpdate;
+      }
+ else {
+        MapperUtils.merge(update,newUpdate);
+      }
+    }
   }
   context.path().pathType(origPathType);
   if (nested.isNested()) {
@@ -79,4 +89,5 @@
       }
     }
   }
+  return update;
 }
