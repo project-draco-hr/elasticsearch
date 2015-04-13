@@ -1,0 +1,38 @@
+{
+  ThreadPool threadPool=new ThreadPool("testListenerIsCallableFromNetworkThreads");
+  try {
+    final PlainListenableActionFuture<Object> future=new PlainListenableActionFuture<>(threadPool);
+    final CountDownLatch listenerCalled=new CountDownLatch(1);
+    final AtomicReference<Throwable> error=new AtomicReference<>();
+    final Object response=new Object();
+    future.addListener(new ActionListener<Object>(){
+      @Override public void onResponse(      Object o){
+        listenerCalled.countDown();
+      }
+      @Override public void onFailure(      Throwable e){
+        error.set(e);
+        listenerCalled.countDown();
+      }
+    }
+);
+    Thread networkThread=new Thread(new AbstractRunnable(){
+      @Override public void onFailure(      Throwable t){
+        error.set(t);
+        listenerCalled.countDown();
+      }
+      @Override protected void doRun() throws Exception {
+        future.onResponse(response);
+      }
+    }
+,Transports.TEST_MOCK_TRANSPORT_THREAD_PREFIX + "_testListenerIsCallableFromNetworkThread");
+    networkThread.start();
+    networkThread.join();
+    listenerCalled.await();
+    if (error.get() != null) {
+      throw error.get();
+    }
+  }
+  finally {
+    ThreadPool.terminate(threadPool,10,TimeUnit.SECONDS);
+  }
+}
