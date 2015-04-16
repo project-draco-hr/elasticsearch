@@ -3,10 +3,16 @@
   Mapper mapper=mappers.get(lastFieldName);
   if (mapper != null) {
     if (mapper instanceof ArrayValueMapperParser) {
-      mapper.parse(context);
+      final Mapper subUpdate=mapper.parse(context);
+      if (subUpdate != null) {
+        return mappingUpdate(subUpdate);
+      }
+ else {
+        return null;
+      }
     }
  else {
-      serializeNonDynamicArray(context,lastFieldName,arrayFieldName);
+      return serializeNonDynamicArray(context,lastFieldName,arrayFieldName);
     }
   }
  else {
@@ -15,33 +21,26 @@
       dynamic=context.root().dynamic();
     }
     if (dynamic == Dynamic.STRICT) {
-      throw new StrictDynamicMappingException(fullPath,arrayFieldName,context.mappingsModified());
+      throw new StrictDynamicMappingException(fullPath,arrayFieldName);
     }
  else     if (dynamic == Dynamic.TRUE) {
-synchronized (mutex) {
-        mapper=mappers.get(arrayFieldName);
-        if (mapper == null) {
-          Mapper.Builder builder=context.root().findTemplateBuilder(context,arrayFieldName,"object");
-          if (builder == null) {
-            serializeNonDynamicArray(context,lastFieldName,arrayFieldName);
-            return;
-          }
-          BuilderContext builderContext=new BuilderContext(context.indexSettings(),context.path());
-          mapper=builder.build(builderContext);
-          if (mapper != null && mapper instanceof ArrayValueMapperParser) {
-            putDynamicMapper(context,arrayFieldName,mapper);
-          }
+      Mapper.Builder builder=context.root().findTemplateBuilder(context,arrayFieldName,"object");
+      if (builder == null) {
+        return serializeNonDynamicArray(context,lastFieldName,arrayFieldName);
+      }
+      BuilderContext builderContext=new BuilderContext(context.indexSettings(),context.path());
+      mapper=builder.build(builderContext);
+      if (mapper != null && mapper instanceof ArrayValueMapperParser) {
+        context.path().add(arrayFieldName);
+        mapper=MapperUtils.parseAndMergeUpdate(mapper,context);
+        return mappingUpdate(mapper);
+      }
  else {
-            serializeNonDynamicArray(context,lastFieldName,arrayFieldName);
-          }
-        }
- else {
-          serializeNonDynamicArray(context,lastFieldName,arrayFieldName);
-        }
+        return serializeNonDynamicArray(context,lastFieldName,arrayFieldName);
       }
     }
  else {
-      serializeNonDynamicArray(context,lastFieldName,arrayFieldName);
+      return serializeNonDynamicArray(context,lastFieldName,arrayFieldName);
     }
   }
 }
