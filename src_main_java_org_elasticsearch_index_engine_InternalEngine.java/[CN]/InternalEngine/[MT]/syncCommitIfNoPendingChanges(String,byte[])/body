@@ -1,0 +1,35 @@
+{
+  ensureOpen();
+  if (indexWriter.hasUncommittedChanges()) {
+    logger.trace("can't sync commit [{}]. have pending changes",syncId);
+    return false;
+  }
+  if (Arrays.equals(expectedCommitId,lastCommittedSegmentInfos.getId()) == false) {
+    logger.trace("can't sync commit [{}]. current commit id is not equal to expected.",syncId);
+    return false;
+  }
+  try (ReleasableLock lock=writeLock.acquire()){
+    ensureOpen();
+    if (indexWriter.hasUncommittedChanges()) {
+      logger.trace("can't sync commit [{}]. have pending changes",syncId);
+      return false;
+    }
+    if (Arrays.equals(expectedCommitId,lastCommittedSegmentInfos.getId()) == false) {
+      logger.trace("can't sync commit [{}]. current commit id is not equal to expected.",syncId);
+      return false;
+    }
+    logger.trace("starting sync commit [{}]",syncId);
+    long translogId=translog.currentId();
+    Map<String,String> commitData=new HashMap<>(2);
+    commitData.put(SYNC_COMMIT_ID,syncId);
+    commitData.put(Translog.TRANSLOG_ID_KEY,Long.toString(translogId));
+    indexWriter.setCommitData(commitData);
+    commitIndexWriter(indexWriter);
+    logger.debug("successfully sync committed. sync id [{}].",syncId);
+    return true;
+  }
+ catch (  IOException ex) {
+    maybeFailEngine("sync commit",ex);
+    throw new EngineException(shardId,"failed to sync commit",ex);
+  }
+}
