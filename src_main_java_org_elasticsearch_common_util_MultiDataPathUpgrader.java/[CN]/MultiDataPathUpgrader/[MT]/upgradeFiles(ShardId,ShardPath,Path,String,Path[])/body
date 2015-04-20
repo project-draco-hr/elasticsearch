@@ -1,0 +1,35 @@
+{
+  List<Path> movedFiles=new ArrayList<>();
+  for (  Path path : paths) {
+    if (path.equals(targetPath.getDataPath()) == false) {
+      final Path sourceDir=path.resolve(folderName);
+      if (Files.exists(sourceDir)) {
+        logger.info("{} upgrading [{}] from [{}] to [{}]",shard,folderName,sourceDir,targetDir);
+        try (DirectoryStream<Path> stream=Files.newDirectoryStream(sourceDir)){
+          Files.createDirectories(targetDir);
+          for (          Path file : stream) {
+            if (IndexWriter.WRITE_LOCK_NAME.equals(file.getFileName().toString()) || Files.isDirectory(file)) {
+              continue;
+            }
+            logger.info("{} move file [{}] size: [{}]",shard,file.getFileName(),Files.size(file));
+            final Path targetFile=targetDir.resolve(file.getFileName());
+            final Path targetTempFile=Files.createTempFile(targetDir,"upgrade_","_" + file.getFileName().toString());
+            Files.copy(file,targetTempFile,StandardCopyOption.COPY_ATTRIBUTES,StandardCopyOption.REPLACE_EXISTING);
+            Files.move(targetTempFile,targetFile,StandardCopyOption.ATOMIC_MOVE);
+            Files.delete(file);
+            movedFiles.add(targetFile);
+          }
+        }
+       }
+    }
+  }
+  if (movedFiles.isEmpty() == false) {
+    logger.info("{} fsync files",shard);
+    for (    Path moved : movedFiles) {
+      logger.info("{} syncing [{}]",shard,moved.getFileName());
+      IOUtils.fsync(moved,false);
+    }
+    logger.info("{} syncing directory [{}]",shard,targetDir);
+    IOUtils.fsync(targetDir,true);
+  }
+}

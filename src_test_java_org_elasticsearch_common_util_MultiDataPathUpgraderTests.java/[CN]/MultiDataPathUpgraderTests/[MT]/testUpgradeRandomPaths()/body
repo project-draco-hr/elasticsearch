@@ -1,0 +1,79 @@
+{
+  try (NodeEnvironment nodeEnvironment=newNodeEnvironment()){
+    final String uuid=Strings.base64UUID();
+    final ShardId shardId=new ShardId("foo",0);
+    final Path[] shardDataPaths=nodeEnvironment.availableShardPaths(shardId);
+    if (nodeEnvironment.nodeDataPaths().length == 1) {
+      MultiDataPathUpgrader helper=new MultiDataPathUpgrader(nodeEnvironment);
+      assertFalse(helper.needsUpgrading(shardId));
+      return;
+    }
+    int numIdxFiles=0;
+    int numTranslogFiles=0;
+    int metaStateVersion=0;
+    for (    Path shardPath : shardDataPaths) {
+      final Path translog=shardPath.resolve(ShardPath.TRANSLOG_FOLDER_NAME);
+      final Path idx=shardPath.resolve(ShardPath.INDEX_FOLDER_NAME);
+      Files.createDirectories(translog);
+      Files.createDirectories(idx);
+      int numFiles=randomIntBetween(1,10);
+      for (int i=0; i < numFiles; i++, numIdxFiles++) {
+        String filename=Integer.toString(numIdxFiles);
+        try (BufferedWriter w=Files.newBufferedWriter(idx.resolve(filename + ".tst"),Charsets.UTF_8)){
+          w.write(filename);
+        }
+       }
+      numFiles=randomIntBetween(1,10);
+      for (int i=0; i < numFiles; i++, numTranslogFiles++) {
+        String filename=Integer.toString(numTranslogFiles);
+        try (BufferedWriter w=Files.newBufferedWriter(translog.resolve(filename + ".translog"),Charsets.UTF_8)){
+          w.write(filename);
+        }
+       }
+      ++metaStateVersion;
+      ShardStateMetaData.FORMAT.write(new ShardStateMetaData(metaStateVersion,true,uuid),metaStateVersion,shardDataPaths);
+    }
+    final Path path=randomFrom(shardDataPaths);
+    ShardPath targetPath=new ShardPath(path,path,uuid,new ShardId("foo",0));
+    MultiDataPathUpgrader helper=new MultiDataPathUpgrader(nodeEnvironment);
+    helper.upgrade(shardId,targetPath);
+    assertFalse(helper.needsUpgrading(shardId));
+    if (shardDataPaths.length > 1) {
+      for (      Path shardPath : shardDataPaths) {
+        if (shardPath.equals(targetPath.getDataPath())) {
+          continue;
+        }
+        final Path translog=shardPath.resolve(ShardPath.TRANSLOG_FOLDER_NAME);
+        final Path idx=shardPath.resolve(ShardPath.INDEX_FOLDER_NAME);
+        final Path state=shardPath.resolve(MetaDataStateFormat.STATE_DIR_NAME);
+        assertFalse(Files.exists(translog));
+        assertFalse(Files.exists(idx));
+        assertFalse(Files.exists(state));
+        assertFalse(Files.exists(shardPath));
+      }
+    }
+    final ShardStateMetaData stateMetaData=ShardStateMetaData.FORMAT.loadLatestState(logger,targetPath.getShardStatePath());
+    assertEquals(metaStateVersion,stateMetaData.version);
+    assertTrue(stateMetaData.primary);
+    assertEquals(uuid,stateMetaData.indexUUID);
+    final Path translog=targetPath.getDataPath().resolve(ShardPath.TRANSLOG_FOLDER_NAME);
+    final Path idx=targetPath.getDataPath().resolve(ShardPath.INDEX_FOLDER_NAME);
+    Files.deleteIfExists(idx.resolve("write.lock"));
+    assertEquals(numTranslogFiles,FileSystemUtils.files(translog).length);
+    assertEquals(numIdxFiles,FileSystemUtils.files(idx).length);
+    final HashSet<Path> translogFiles=Sets.newHashSet(FileSystemUtils.files(translog));
+    for (int i=0; i < numTranslogFiles; i++) {
+      final String name=Integer.toString(i);
+      translogFiles.contains(translog.resolve(name + ".translog"));
+      byte[] content=Files.readAllBytes(translog.resolve(name + ".translog"));
+      assertEquals(name,new String(content,Charsets.UTF_8));
+    }
+    final HashSet<Path> idxFiles=Sets.newHashSet(FileSystemUtils.files(idx));
+    for (int i=0; i < numIdxFiles; i++) {
+      final String name=Integer.toString(i);
+      idxFiles.contains(idx.resolve(name + ".tst"));
+      byte[] content=Files.readAllBytes(idx.resolve(name + ".tst"));
+      assertEquals(name,new String(content,Charsets.UTF_8));
+    }
+  }
+ }
