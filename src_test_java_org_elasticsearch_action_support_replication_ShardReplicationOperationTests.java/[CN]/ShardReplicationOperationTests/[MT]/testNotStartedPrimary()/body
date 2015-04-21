@@ -1,0 +1,20 @@
+{
+  final String index="test";
+  final ShardId shardId=new ShardId(index,0);
+  clusterService.setState(state(index,true,randomBoolean() ? ShardRoutingState.INITIALIZING : ShardRoutingState.UNASSIGNED));
+  logger.debug("--> using initial state:\n{}",clusterService.state().prettyPrint());
+  Request request=new Request(shardId).timeout("1ms");
+  PlainActionFuture<Response> listener=new PlainActionFuture<>();
+  TransportShardReplicationOperationAction<Request,Request,Response>.PrimaryPhase primaryPhase=action.new PrimaryPhase(request,listener);
+  primaryPhase.run();
+  assertListenerThrows("unassigned primary didn't cause a timeout",listener,UnavailableShardsException.class);
+  request=new Request(shardId);
+  listener=new PlainActionFuture<>();
+  primaryPhase=action.new PrimaryPhase(request,listener);
+  primaryPhase.run();
+  assertFalse("unassigned primary didn't cause a retry",listener.isDone());
+  clusterService.setState(state(index,true,ShardRoutingState.STARTED));
+  logger.debug("--> primary assigned state:\n{}",clusterService.state().prettyPrint());
+  listener.get();
+  assertTrue("request wasn't processed on primary, despite of it being assigned",request.processedOnPrimary.get());
+}

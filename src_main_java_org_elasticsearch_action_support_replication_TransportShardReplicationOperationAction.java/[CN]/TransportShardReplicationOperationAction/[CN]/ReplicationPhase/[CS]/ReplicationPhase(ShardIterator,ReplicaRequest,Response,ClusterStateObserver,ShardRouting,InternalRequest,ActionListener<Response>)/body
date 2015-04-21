@@ -1,0 +1,67 @@
+{
+  this.replicaRequest=replicaRequest;
+  this.listener=listener;
+  this.finalResponse=finalResponse;
+  this.originalPrimaryShard=originalPrimaryShard;
+  this.observer=observer;
+  indexMetaData=observer.observedState().metaData().index(internalRequest.concreteIndex());
+  ShardRouting shard;
+  ClusterState newState=clusterService.state();
+  int numberOfUnassignedOrShadowReplicas=0;
+  int numberOfPendingShardInstances=0;
+  if (observer.observedState() != newState) {
+    observer.reset(newState);
+    shardIt=shards(newState,internalRequest);
+    while ((shard=shardIt.nextOrNull()) != null) {
+      if (shard.primary()) {
+        if (originalPrimaryShard.currentNodeId().equals(shard.currentNodeId()) == false) {
+          numberOfPendingShardInstances++;
+        }
+        if (shard.relocating()) {
+          numberOfPendingShardInstances++;
+        }
+      }
+ else       if (IndexMetaData.isIndexUsingShadowReplicas(indexMetaData.settings())) {
+        numberOfUnassignedOrShadowReplicas++;
+      }
+ else       if (shard.unassigned()) {
+        numberOfUnassignedOrShadowReplicas++;
+      }
+ else       if (shard.relocating()) {
+        numberOfPendingShardInstances+=2;
+      }
+ else {
+        numberOfPendingShardInstances++;
+      }
+    }
+    internalRequest.request().setCanHaveDuplicates();
+  }
+ else {
+    shardIt=originalShardIt;
+    shardIt.reset();
+    while ((shard=shardIt.nextOrNull()) != null) {
+      if (shard.state() != ShardRoutingState.STARTED) {
+        replicaRequest.setCanHaveDuplicates();
+      }
+      if (shard.unassigned()) {
+        numberOfUnassignedOrShadowReplicas++;
+      }
+ else       if (shard.primary()) {
+        if (shard.relocating()) {
+          numberOfPendingShardInstances+=1;
+        }
+      }
+ else       if (IndexMetaData.isIndexUsingShadowReplicas(indexMetaData.settings())) {
+        numberOfUnassignedOrShadowReplicas++;
+      }
+ else       if (shard.relocating()) {
+        numberOfPendingShardInstances+=2;
+      }
+ else {
+        numberOfPendingShardInstances++;
+      }
+    }
+  }
+  this.totalShards=1 + numberOfPendingShardInstances + numberOfUnassignedOrShadowReplicas;
+  this.pending=new AtomicInteger(numberOfPendingShardInstances);
+}
