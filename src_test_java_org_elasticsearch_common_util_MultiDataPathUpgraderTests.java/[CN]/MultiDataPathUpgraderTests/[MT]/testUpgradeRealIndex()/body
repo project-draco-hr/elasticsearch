@@ -1,0 +1,51 @@
+{
+  List<Path> indexes=new ArrayList<>();
+  Path dir=getDataPath("/" + OldIndexBackwardsCompatibilityTests.class.getPackage().getName().replace('.','/'));
+  try (DirectoryStream<Path> stream=Files.newDirectoryStream(dir,"index-*.zip")){
+    for (    Path path : stream) {
+      indexes.add(path);
+    }
+  }
+   CollectionUtil.introSort(indexes,new Comparator<Path>(){
+    @Override public int compare(    Path o1,    Path o2){
+      return o1.getFileName().compareTo(o2.getFileName());
+    }
+  }
+);
+  final ShardId shardId=new ShardId("test",0);
+  final Path path=randomFrom(indexes);
+  final Path indexFile=path;
+  final String indexName=indexFile.getFileName().toString().replace(".zip","").toLowerCase(Locale.ROOT);
+  try (NodeEnvironment nodeEnvironment=newNodeEnvironment()){
+    if (nodeEnvironment.nodeDataPaths().length == 1) {
+      MultiDataPathUpgrader helper=new MultiDataPathUpgrader(nodeEnvironment);
+      assertFalse(helper.needsUpgrading(shardId));
+      return;
+    }
+    Path unzipDir=createTempDir();
+    Path unzipDataDir=unzipDir.resolve("data");
+    try (InputStream stream=Files.newInputStream(indexFile)){
+      TestUtil.unzip(stream,unzipDir);
+    }
+     assertTrue(Files.exists(unzipDataDir));
+    Path[] list=FileSystemUtils.files(unzipDataDir);
+    if (list.length != 1) {
+      throw new IllegalStateException("Backwards index must contain exactly one cluster but was " + list.length);
+    }
+    Path src=list[0].resolve("nodes/0/indices/" + indexName);
+    assertTrue("[" + indexFile + "] missing index dir: "+ src.toString(),Files.exists(src));
+    Path[] multiDataPath=new Path[nodeEnvironment.nodeDataPaths().length];
+    int i=0;
+    for (    NodeEnvironment.NodePath nodePath : nodeEnvironment.nodePaths()) {
+      multiDataPath[i++]=nodePath.indicesPath;
+    }
+    logger.info("--> injecting index [{}] into multiple data paths",indexName);
+    OldIndexBackwardsCompatibilityTests.copyIndex(logger,src,indexName,multiDataPath);
+    final ShardPath shardPath=new ShardPath(nodeEnvironment.availableShardPaths(new ShardId(indexName,0))[0],nodeEnvironment.availableShardPaths(new ShardId(indexName,0))[0],IndexMetaData.INDEX_UUID_NA_VALUE,new ShardId(indexName,0));
+    logger.info("{}",FileSystemUtils.files(shardPath.resolveIndex()));
+    MultiDataPathUpgrader helper=new MultiDataPathUpgrader(nodeEnvironment);
+    helper.upgrade(new ShardId(indexName,0),shardPath);
+    helper.checkIndex(shardPath);
+    assertFalse(helper.needsUpgrading(new ShardId(indexName,0)));
+  }
+ }

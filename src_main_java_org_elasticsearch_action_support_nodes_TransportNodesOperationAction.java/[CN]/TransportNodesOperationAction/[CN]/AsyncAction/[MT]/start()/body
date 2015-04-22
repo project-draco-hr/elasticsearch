@@ -18,57 +18,29 @@
     final int idx=i;
     final DiscoveryNode node=clusterState.nodes().nodes().get(nodeId);
     try {
-      if (nodeId.equals("_local") || nodeId.equals(clusterState.nodes().localNodeId())) {
-        threadPool.executor(executor()).execute(new Runnable(){
-          @Override public void run(){
-            try {
-              onOperation(idx,nodeOperation(newNodeRequest(clusterState.nodes().localNodeId(),request)));
-            }
- catch (            Throwable e) {
-              onFailure(idx,clusterState.nodes().localNodeId(),e);
-            }
-          }
-        }
-);
+      if (node == null) {
+        onFailure(idx,nodeId,new NoSuchNodeException(nodeId));
       }
- else       if (nodeId.equals("_master")) {
-        threadPool.executor(executor()).execute(new Runnable(){
-          @Override public void run(){
-            try {
-              onOperation(idx,nodeOperation(newNodeRequest(clusterState.nodes().masterNodeId(),request)));
-            }
- catch (            Throwable e) {
-              onFailure(idx,clusterState.nodes().masterNodeId(),e);
-            }
-          }
-        }
-);
+ else       if (!clusterService.localNode().shouldConnectTo(node) && !clusterService.localNode().equals(node)) {
+        onFailure(idx,nodeId,new NodeShouldNotConnectException(clusterService.localNode(),node));
       }
  else {
-        if (node == null) {
-          onFailure(idx,nodeId,new NoSuchNodeException(nodeId));
-        }
- else         if (!clusterService.localNode().shouldConnectTo(node)) {
-          onFailure(idx,nodeId,new NodeShouldNotConnectException(clusterService.localNode(),node));
-        }
- else {
-          NodeRequest nodeRequest=newNodeRequest(nodeId,request);
-          transportService.sendRequest(node,transportNodeAction,nodeRequest,transportRequestOptions,new BaseTransportResponseHandler<NodeResponse>(){
-            @Override public NodeResponse newInstance(){
-              return newNodeResponse();
-            }
-            @Override public void handleResponse(            NodeResponse response){
-              onOperation(idx,response);
-            }
-            @Override public void handleException(            TransportException exp){
-              onFailure(idx,node.id(),exp);
-            }
-            @Override public String executor(){
-              return ThreadPool.Names.SAME;
-            }
+        NodeRequest nodeRequest=newNodeRequest(nodeId,request);
+        transportService.sendRequest(node,transportNodeAction,nodeRequest,transportRequestOptions,new BaseTransportResponseHandler<NodeResponse>(){
+          @Override public NodeResponse newInstance(){
+            return newNodeResponse();
           }
-);
+          @Override public void handleResponse(          NodeResponse response){
+            onOperation(idx,response);
+          }
+          @Override public void handleException(          TransportException exp){
+            onFailure(idx,node.id(),exp);
+          }
+          @Override public String executor(){
+            return ThreadPool.Names.SAME;
+          }
         }
+);
       }
     }
  catch (    Throwable t) {

@@ -4,13 +4,12 @@
     throw new MapperParsingException("Type mismatch, provide type [" + source.type() + "] but mapper is of type ["+ this.type+ "]");
   }
   source.type(this.type);
-  boolean mappingsModified=false;
   XContentParser parser=source.parser();
   try {
     if (parser == null) {
       parser=XContentHelper.createParser(source.source());
     }
-    if (sourceTransforms != null) {
+    if (mapping.sourceTransforms.length > 0) {
       parser=transform(parser);
     }
     context.reset(parser,new ParseContext.Document(),source,listener);
@@ -27,38 +26,19 @@
  else     if (token != XContentParser.Token.FIELD_NAME) {
       throw new MapperParsingException("Malformed content, after first object, either the type field or the actual properties should exist");
     }
-    for (    RootMapper rootMapper : rootMappersOrdered) {
+    for (    RootMapper rootMapper : mapping.rootMappers) {
       rootMapper.preParse(context);
     }
     if (!emptyDoc) {
-      Mapper update=rootObjectMapper.parse(context);
-      for (      RootObjectMapper mapper : context.updates()) {
-        if (update == null) {
-          update=mapper;
-        }
- else {
-          MapperUtils.merge(update,mapper);
-        }
-      }
+      Mapper update=mapping.root.parse(context);
       if (update != null) {
-synchronized (this) {
-          MergeContext mergeContext=newMmergeContext(new MergeFlags().simulate(true));
-          rootObjectMapper.merge(update,mergeContext);
-          if (mergeContext.hasConflicts()) {
-            throw new MapperParsingException("Could not apply generated dynamic mappings: " + Arrays.toString(mergeContext.buildConflicts()));
-          }
- else {
-            mappingsModified=true;
-            mergeContext=newMmergeContext(new MergeFlags().simulate(false));
-            rootObjectMapper.merge(update,mergeContext);
-          }
-        }
+        context.addDynamicMappingsUpdate((RootObjectMapper)update);
       }
     }
     for (int i=0; i < countDownTokens; i++) {
       parser.nextToken();
     }
-    for (    RootMapper rootMapper : rootMappersOrdered) {
+    for (    RootMapper rootMapper : mapping.rootMappers) {
       rootMapper.postParse(context);
     }
   }
@@ -93,7 +73,12 @@ synchronized (this) {
       }
     }
   }
-  ParsedDocument doc=new ParsedDocument(context.uid(),context.version(),context.id(),context.type(),source.routing(),source.timestamp(),source.ttl(),context.docs(),context.source(),mappingsModified).parent(source.parent());
+  Mapper rootDynamicUpdate=context.dynamicMappingsUpdate();
+  Mapping update=null;
+  if (rootDynamicUpdate != null) {
+    update=mapping.mappingUpdate(rootDynamicUpdate);
+  }
+  ParsedDocument doc=new ParsedDocument(context.uid(),context.version(),context.id(),context.type(),source.routing(),source.timestamp(),source.ttl(),context.docs(),context.source(),update).parent(source.parent());
   context.reset(null,null,null,null);
   return doc;
 }

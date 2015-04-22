@@ -1,0 +1,76 @@
+{
+  try (NodeEnvironment nodeEnvironment=newNodeEnvironment()){
+    final ShardId shard=new ShardId("foo",0);
+    final Path[] paths=nodeEnvironment.availableShardPaths(shard);
+    if (paths.length == 1) {
+      MultiDataPathUpgrader helper=new MultiDataPathUpgrader(nodeEnvironment);
+      try {
+        helper.pickShardPath(new ShardId("foo",0));
+        fail("one path needs no upgrading");
+      }
+ catch (      IllegalStateException ex) {
+      }
+    }
+ else {
+      final Map<Path,Tuple<Long,Long>> pathToSpace=new HashMap<>();
+      final Path expectedPath;
+      if (randomBoolean()) {
+        expectedPath=randomFrom(paths);
+        long[] used=new long[paths.length];
+        long sumSpaceUsed=0;
+        for (int i=0; i < used.length; i++) {
+          long spaceUsed=paths[i] == expectedPath ? randomIntBetween(101,200) : randomIntBetween(10,100);
+          sumSpaceUsed+=spaceUsed;
+          used[i]=spaceUsed;
+        }
+        for (int i=0; i < used.length; i++) {
+          long availalbe=randomIntBetween((int)(2 * sumSpaceUsed - used[i]),4 * (int)sumSpaceUsed);
+          pathToSpace.put(paths[i],new Tuple<>(availalbe,used[i]));
+        }
+      }
+ else {
+        expectedPath=randomFrom(paths);
+        long[] used=new long[paths.length];
+        long sumSpaceUsed=0;
+        for (int i=0; i < used.length; i++) {
+          long spaceUsed=randomIntBetween(10,100);
+          sumSpaceUsed+=spaceUsed;
+          used[i]=spaceUsed;
+        }
+        for (int i=0; i < used.length; i++) {
+          long availalbe=paths[i] == expectedPath ? randomIntBetween((int)(sumSpaceUsed),(int)(2 * sumSpaceUsed)) : randomIntBetween(0,(int)(sumSpaceUsed) - 1);
+          pathToSpace.put(paths[i],new Tuple<>(availalbe,used[i]));
+        }
+      }
+      MultiDataPathUpgrader helper=new MultiDataPathUpgrader(nodeEnvironment){
+        @Override protected long getUsabelSpace(        NodeEnvironment.NodePath path) throws IOException {
+          return pathToSpace.get(path.resolve(shard)).v1();
+        }
+        @Override protected long getSpaceUsedByShard(        Path path) throws IOException {
+          return pathToSpace.get(path).v2();
+        }
+      }
+;
+      String uuid=Strings.randomBase64UUID();
+      ShardStateMetaData.FORMAT.write(new ShardStateMetaData(1,true,uuid),1,paths);
+      final ShardPath shardPath=helper.pickShardPath(new ShardId("foo",0));
+      assertEquals(expectedPath,shardPath.getDataPath());
+      assertEquals(expectedPath,shardPath.getShardStatePath());
+    }
+    MultiDataPathUpgrader helper=new MultiDataPathUpgrader(nodeEnvironment){
+      @Override protected long getUsabelSpace(      NodeEnvironment.NodePath path) throws IOException {
+        return randomIntBetween(0,10);
+      }
+      @Override protected long getSpaceUsedByShard(      Path path) throws IOException {
+        return randomIntBetween(11,20);
+      }
+    }
+;
+    try {
+      helper.pickShardPath(new ShardId("foo",0));
+      fail("not enough space");
+    }
+ catch (    IllegalStateException ex) {
+    }
+  }
+ }

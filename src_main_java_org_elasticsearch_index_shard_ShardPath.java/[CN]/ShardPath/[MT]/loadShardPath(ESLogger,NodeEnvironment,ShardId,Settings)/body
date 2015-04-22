@@ -1,0 +1,34 @@
+{
+  final String indexUUID=indexSettings.get(IndexMetaData.SETTING_UUID,IndexMetaData.INDEX_UUID_NA_VALUE);
+  final Path[] paths=env.availableShardPaths(shardId);
+  Path loadedPath=null;
+  for (  Path path : paths) {
+    ShardStateMetaData load=ShardStateMetaData.FORMAT.loadLatestState(logger,path);
+    if (load != null) {
+      if ((load.indexUUID.equals(indexUUID) || IndexMetaData.INDEX_UUID_NA_VALUE.equals(load.indexUUID)) == false) {
+        throw new ElasticsearchIllegalStateException(shardId + " index UUID in shard state was: " + load.indexUUID+ " excepted: "+ indexUUID+ " on shard path: "+ path);
+      }
+      if (loadedPath == null) {
+        loadedPath=path;
+      }
+ else {
+        throw new ElasticsearchIllegalStateException(shardId + " more than one shard state found");
+      }
+    }
+  }
+  if (loadedPath == null) {
+    return null;
+  }
+ else {
+    final Path dataPath;
+    final Path statePath=loadedPath;
+    if (NodeEnvironment.hasCustomDataPath(indexSettings)) {
+      dataPath=env.resolveCustomLocation(indexSettings,shardId);
+    }
+ else {
+      dataPath=statePath;
+    }
+    logger.debug("{} loaded  data path [{}], state path [{}]",shardId,dataPath,statePath);
+    return new ShardPath(dataPath,statePath,indexUUID,shardId);
+  }
+}

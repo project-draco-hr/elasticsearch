@@ -1,12 +1,7 @@
 {
   String text=request.param("text");
-  if (text == null && request.hasContent()) {
-    text=request.content().toUtf8();
-  }
-  if (text == null) {
-    throw new ElasticsearchIllegalArgumentException("text is missing");
-  }
-  AnalyzeRequest analyzeRequest=new AnalyzeRequest(request.param("index"),text);
+  AnalyzeRequest analyzeRequest=new AnalyzeRequest(request.param("index"));
+  analyzeRequest.text(text);
   analyzeRequest.listenerThreaded(false);
   analyzeRequest.preferLocal(request.paramAsBoolean("prefer_local",analyzeRequest.preferLocalShard()));
   analyzeRequest.analyzer(request.param("analyzer"));
@@ -14,5 +9,17 @@
   analyzeRequest.tokenizer(request.param("tokenizer"));
   analyzeRequest.tokenFilters(request.paramAsStringArray("token_filters",request.paramAsStringArray("filters",analyzeRequest.tokenFilters())));
   analyzeRequest.charFilters(request.paramAsStringArray("char_filters",analyzeRequest.charFilters()));
+  if (request.hasContent()) {
+    XContentType type=XContentFactory.xContentType(request.content());
+    if (type == null) {
+      if (text == null) {
+        text=request.content().toUtf8();
+        analyzeRequest.text(text);
+      }
+    }
+ else {
+      buildFromContent(request.content(),analyzeRequest);
+    }
+  }
   client.admin().indices().analyze(analyzeRequest,new RestToXContentListener<AnalyzeResponse>(channel));
 }
