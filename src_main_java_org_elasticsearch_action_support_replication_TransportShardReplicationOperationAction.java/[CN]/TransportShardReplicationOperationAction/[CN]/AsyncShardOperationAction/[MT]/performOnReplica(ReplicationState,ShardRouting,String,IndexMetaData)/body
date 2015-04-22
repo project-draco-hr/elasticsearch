@@ -3,16 +3,19 @@
     state.onReplicaFailure(nodeId,null);
     return;
   }
-  final ReplicaOperationRequest shardRequest=new ReplicaOperationRequest(shardIt.shardId(),state.replicaRequest());
+  final ReplicaOperationRequest shardRequest=new ReplicaOperationRequest(shardIt.shardId(),state.replicaRequest(),shard.currentNodeId());
   if (IndexMetaData.isIndexUsingShadowReplicas(indexMetaData.settings())) {
-    state.onReplicaSuccess();
+    state.onReplicaSuccess(newReplicaResponseInstance());
     return;
   }
   if (!nodeId.equals(observer.observedState().nodes().localNodeId())) {
     final DiscoveryNode node=observer.observedState().nodes().get(nodeId);
-    transportService.sendRequest(node,transportReplicaAction,shardRequest,transportOptions,new EmptyTransportResponseHandler(ThreadPool.Names.SAME){
-      @Override public void handleResponse(      TransportResponse.Empty vResponse){
-        state.onReplicaSuccess();
+    transportService.sendRequest(node,transportReplicaAction,shardRequest,transportOptions,new TransportResponseHandler<ReplicaResponse>(){
+      @Override public ReplicaResponse newInstance(){
+        return newReplicaResponseInstance();
+      }
+      @Override public void handleResponse(      ReplicaResponse vResponse){
+        state.onReplicaSuccess(vResponse);
       }
       @Override public void handleException(      TransportException exp){
         state.onReplicaFailure(nodeId,exp);
@@ -21,6 +24,9 @@
           logger.warn("Failed to perform " + actionName + " on remote replica "+ node+ shardIt.shardId(),exp);
           shardStateAction.shardFailed(shard,indexMetaData.getUUID(),"Failed to perform [" + actionName + "] on replica, message ["+ ExceptionsHelper.detailedMessage(exp)+ "]");
         }
+      }
+      @Override public String executor(){
+        return ThreadPool.Names.SAME;
       }
     }
 );
@@ -31,8 +37,8 @@
         threadPool.executor(executor).execute(new AbstractRunnable(){
           @Override protected void doRun(){
             try {
-              shardOperationOnReplica(shardRequest);
-              state.onReplicaSuccess();
+              ReplicaResponse response=shardOperationOnReplica(shardRequest);
+              state.onReplicaSuccess(response);
             }
  catch (            Throwable e) {
               state.onReplicaFailure(nodeId,e);
@@ -55,8 +61,8 @@
     }
  else {
       try {
-        shardOperationOnReplica(shardRequest);
-        state.onReplicaSuccess();
+        ReplicaResponse response=shardOperationOnReplica(shardRequest);
+        state.onReplicaSuccess(response);
       }
  catch (      Throwable e) {
         failReplicaIfNeeded(shard.index(),shard.id(),e);
