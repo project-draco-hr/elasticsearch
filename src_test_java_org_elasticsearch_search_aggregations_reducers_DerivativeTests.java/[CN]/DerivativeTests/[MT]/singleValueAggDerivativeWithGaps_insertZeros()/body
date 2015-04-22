@@ -1,5 +1,5 @@
 {
-  SearchResponse searchResponse=client().prepareSearch("empty_bucket_idx").setQuery(matchAllQuery()).addAggregation(histogram("histo").field(SINGLE_VALUED_FIELD_NAME).interval(1).minDocCount(0).subAggregation(sum("sum").field(SINGLE_VALUED_FIELD_NAME)).subAggregation(derivative("deriv").setBucketsPaths("sum"))).execute().actionGet();
+  SearchResponse searchResponse=client().prepareSearch("empty_bucket_idx").setQuery(matchAllQuery()).addAggregation(histogram("histo").field(SINGLE_VALUED_FIELD_NAME).interval(1).minDocCount(0).subAggregation(sum("sum").field(SINGLE_VALUED_FIELD_NAME)).subAggregation(derivative("deriv").setBucketsPaths("sum").gapPolicy(GapPolicy.INSERT_ZEROS))).execute().actionGet();
   assertThat(searchResponse.getHits().getTotalHits(),equalTo(numDocsEmptyIdx));
   InternalHistogram<Bucket> deriv=searchResponse.getAggregations().get("histo");
   assertThat(deriv,Matchers.notNullValue());
@@ -13,7 +13,7 @@
     Sum sum=bucket.getAggregations().get("sum");
     double thisSumValue=sum.value();
     if (bucket.getDocCount() == 0) {
-      thisSumValue=Double.NaN;
+      thisSumValue=0;
     }
     SimpleValue sumDeriv=bucket.getAggregations().get("deriv");
     if (i == 0) {
@@ -21,12 +21,7 @@
     }
  else {
       double expectedDerivative=thisSumValue - lastSumValue;
-      if (Double.isNaN(expectedDerivative)) {
-        assertThat(sumDeriv.value(),equalTo(expectedDerivative));
-      }
- else {
-        assertThat(sumDeriv.value(),closeTo(expectedDerivative,0.00001));
-      }
+      assertThat(sumDeriv.value(),closeTo(expectedDerivative,0.00001));
     }
     lastSumValue=thisSumValue;
   }
