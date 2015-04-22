@@ -144,8 +144,8 @@
   MultiValueMode sortMode=MultiValueMode.MIN;
   IndexSearcher searcher=new IndexSearcher(DirectoryReader.open(writer,false));
   PagedBytesIndexFieldData indexFieldData=getForField("field2");
-  Filter parentFilter=new TermFilter(new Term("__type","parent"));
-  Filter childFilter=new NotFilter(parentFilter);
+  Filter parentFilter=Queries.wrap(new TermQuery(new Term("__type","parent")));
+  Filter childFilter=Queries.wrap(Queries.not(parentFilter));
   BytesRefFieldComparatorSource nestedComparatorSource=new BytesRefFieldComparatorSource(indexFieldData,null,sortMode,createNested(parentFilter,childFilter));
   ToParentBlockJoinQuery query=new ToParentBlockJoinQuery(new FilteredQuery(new MatchAllDocsQuery(),childFilter),new BitDocIdSetCachingWrapperFilter(parentFilter),ScoreMode.None);
   Sort sort=new Sort(new SortField("field2",nestedComparatorSource));
@@ -178,7 +178,10 @@
   assertThat(((BytesRef)((FieldDoc)topDocs.scoreDocs[3]).fields[0]).utf8ToString(),equalTo("i"));
   assertThat(topDocs.scoreDocs[4].doc,equalTo(11));
   assertThat(((BytesRef)((FieldDoc)topDocs.scoreDocs[4]).fields[0]).utf8ToString(),equalTo("g"));
-  childFilter=new AndFilter(Arrays.asList(new NotFilter(parentFilter),new TermFilter(new Term("filter_1","T"))));
+  BooleanQuery bq=new BooleanQuery();
+  bq.add(parentFilter,Occur.MUST_NOT);
+  bq.add(new TermQuery(new Term("filter_1","T")),Occur.MUST);
+  childFilter=Queries.wrap(bq);
   nestedComparatorSource=new BytesRefFieldComparatorSource(indexFieldData,null,sortMode,createNested(parentFilter,childFilter));
   query=new ToParentBlockJoinQuery(new FilteredQuery(new MatchAllDocsQuery(),childFilter),new BitDocIdSetCachingWrapperFilter(parentFilter),ScoreMode.None);
   sort=new Sort(new SortField("field2",nestedComparatorSource,true));

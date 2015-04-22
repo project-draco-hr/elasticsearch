@@ -1,5 +1,5 @@
 {
-  final FieldMappers fieldNamesMappers=parseContext.mapperService().indexName(FieldNamesFieldMapper.NAME);
+  final FieldMappers fieldNamesMappers=parseContext.mapperService().fullName(FieldNamesFieldMapper.NAME);
   final FieldNamesFieldMapper fieldNamesMapper=(FieldNamesFieldMapper)fieldNamesMappers.mapper();
   MapperService.SmartNameObjectMapper smartNameObjectMapper=parseContext.smartObjectMapper(fieldPattern);
   if (smartNameObjectMapper != null && smartNameObjectMapper.hasMapper()) {
@@ -7,16 +7,12 @@
   }
   List<String> fields=parseContext.simpleMatchToIndexNames(fieldPattern);
   if (fields.isEmpty()) {
-    return Queries.MATCH_NO_FILTER;
+    return Queries.newMatchNoDocsFilter();
   }
-  MapperService.SmartNameFieldMappers nonNullFieldMappers=null;
-  XBooleanFilter boolFilter=new XBooleanFilter();
+  BooleanQuery boolFilter=new BooleanQuery();
   for (  String field : fields) {
     MapperService.SmartNameFieldMappers smartNameFieldMappers=parseContext.smartFieldMappers(field);
-    if (smartNameFieldMappers != null) {
-      nonNullFieldMappers=smartNameFieldMappers;
-    }
-    Filter filter=null;
+    Query filter=null;
     if (fieldNamesMapper != null && fieldNamesMapper.enabled()) {
       final String f;
       if (smartNameFieldMappers != null && smartNameFieldMappers.hasMapper()) {
@@ -31,11 +27,12 @@
       filter=smartNameFieldMappers.mapper().rangeFilter(null,null,true,true,parseContext);
     }
     if (filter == null) {
-      filter=new TermRangeFilter(field,null,null,true,true);
+      filter=new TermRangeQuery(field,null,null,true,true);
     }
     boolFilter.add(filter,BooleanClause.Occur.SHOULD);
   }
-  Filter filter=parseContext.cacheFilter(boolFilter,new HashedBytesRef("$exists$" + fieldPattern),parseContext.autoFilterCachePolicy());
+  Filter filter=Queries.wrap(boolFilter);
+  filter=parseContext.cacheFilter(filter,new HashedBytesRef("$exists$" + fieldPattern),parseContext.autoFilterCachePolicy());
   if (filterName != null) {
     parseContext.addNamedFilter(filterName,filter);
   }

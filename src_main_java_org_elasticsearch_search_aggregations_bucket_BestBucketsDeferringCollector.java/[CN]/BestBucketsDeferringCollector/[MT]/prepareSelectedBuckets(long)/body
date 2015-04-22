@@ -1,0 +1,33 @@
+{
+  if (!finished) {
+    throw new ElasticsearchIllegalStateException("Cannot replay yet, collection is not finished: postCollect() has not been called");
+  }
+  if (this.selectedBuckets != null) {
+    throw new ElasticsearchIllegalStateException("Already been replayed");
+  }
+  final LongHash hash=new LongHash(selectedBuckets.length,BigArrays.NON_RECYCLING_INSTANCE);
+  for (  long bucket : selectedBuckets) {
+    hash.add(bucket);
+  }
+  this.selectedBuckets=hash;
+  collector.preCollection();
+  if (collector.needsScores()) {
+    throw new ElasticsearchIllegalStateException("Cannot defer if scores are needed");
+  }
+  for (  Entry entry : entries) {
+    final LeafBucketCollector leafCollector=collector.getLeafCollector(entry.context);
+    leafCollector.setScorer(Lucene.illegalScorer("A limitation of the " + SubAggCollectionMode.BREADTH_FIRST + " collection mode is that scores cannot be buffered along with document IDs"));
+    final PackedLongValues.Iterator docDeltaIterator=entry.docDeltas.iterator();
+    final PackedLongValues.Iterator buckets=entry.buckets.iterator();
+    int doc=0;
+    for (long i=0, end=entry.docDeltas.size(); i < end; ++i) {
+      doc+=docDeltaIterator.next();
+      final long bucket=buckets.next();
+      final long rebasedBucket=hash.find(bucket);
+      if (rebasedBucket != -1) {
+        leafCollector.collect(doc,rebasedBucket);
+      }
+    }
+  }
+  collector.postCollection();
+}

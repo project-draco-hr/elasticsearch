@@ -20,12 +20,15 @@
       term=(String)fieldsVisitor.fields().get(ParentFieldMapper.NAME).get(0);
     }
   }
-  Filter filter=new TermFilter(new Term(field,term));
+  Filter filter=Queries.wrap(new TermQuery(new Term(field,term)));
   Filter typeFilter=documentMapper.typeFilter();
+  BooleanQuery filteredQuery=new BooleanQuery();
+  filteredQuery.add(query,Occur.MUST);
+  filteredQuery.add(filter,Occur.FILTER);
+  filteredQuery.add(typeFilter,Occur.FILTER);
   if (size() == 0) {
-    TotalHitCountCollector collector=new TotalHitCountCollector();
-    context.searcher().search(new FilteredQuery(query,new AndFilter(Arrays.asList(filter,typeFilter))),collector);
-    return new TopDocs(collector.getTotalHits(),Lucene.EMPTY_SCORE_DOCS,0);
+    final int count=context.searcher().count(filteredQuery);
+    return new TopDocs(count,Lucene.EMPTY_SCORE_DOCS,0);
   }
  else {
     int topN=from() + size();
@@ -36,7 +39,7 @@
  else {
       topDocsCollector=TopScoreDocCollector.create(topN);
     }
-    context.searcher().search(new FilteredQuery(query,new AndFilter(Arrays.asList(filter,typeFilter))),topDocsCollector);
+    context.searcher().search(filteredQuery,topDocsCollector);
     return topDocsCollector.topDocs(from(),size());
   }
 }
