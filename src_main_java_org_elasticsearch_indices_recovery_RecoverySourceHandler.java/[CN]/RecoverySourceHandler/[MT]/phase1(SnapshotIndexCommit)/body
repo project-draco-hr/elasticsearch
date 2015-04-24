@@ -14,26 +14,42 @@
         throw new CorruptIndexException("Snapshot differs from actual index - maybe index was removed metadata has " + recoverySourceMetadata.asMap().size() + " files",name);
       }
     }
-    final Store.RecoveryDiff diff=recoverySourceMetadata.recoveryDiff(new Store.MetadataSnapshot(request.existingFiles()));
-    for (    StoreFileMetaData md : diff.identical) {
-      response.phase1ExistingFileNames.add(md.name());
-      response.phase1ExistingFileSizes.add(md.length());
-      existingTotalSize+=md.length();
-      if (logger.isTraceEnabled()) {
-        logger.trace("[{}][{}] recovery [phase1] to {}: not recovering [{}], exists in local store and has checksum [{}], size [{}]",indexName,shardId,request.targetNode(),md.name(),md.checksum(),md.length());
+    String recoverySourceSyncId=recoverySourceMetadata.getSyncId();
+    String recoveryTargetSyncId=request.metadataSnapshot().getSyncId();
+    final boolean recoverWithSyncId=recoverySourceSyncId != null && recoverySourceSyncId.equals(recoveryTargetSyncId);
+    if (recoverWithSyncId) {
+      for (      StoreFileMetaData md : request.metadataSnapshot()) {
+        response.phase1ExistingFileNames.add(md.name());
+        response.phase1ExistingFileSizes.add(md.length());
+        existingTotalSize+=md.length();
+        if (logger.isTraceEnabled()) {
+          logger.trace("[{}][{}] recovery [phase1] to {}: not recovering [{}], checksum [{}], size [{}], sync ids {} coincide, will skip file copy",indexName,shardId,request.targetNode(),md.name(),md.checksum(),md.length(),recoverySourceMetadata.getCommitUserData().get(Engine.SYNC_COMMIT_ID));
+        }
+        totalSize+=md.length();
       }
-      totalSize+=md.length();
     }
-    for (    StoreFileMetaData md : Iterables.concat(diff.different,diff.missing)) {
-      if (request.existingFiles().containsKey(md.name())) {
-        logger.trace("[{}][{}] recovery [phase1] to {}: recovering [{}], exists in local store, but is different: remote [{}], local [{}]",indexName,shardId,request.targetNode(),md.name(),request.existingFiles().get(md.name()),md);
-      }
  else {
-        logger.trace("[{}][{}] recovery [phase1] to {}: recovering [{}], does not exists in remote",indexName,shardId,request.targetNode(),md.name());
+      final Store.RecoveryDiff diff=recoverySourceMetadata.recoveryDiff(request.metadataSnapshot());
+      for (      StoreFileMetaData md : diff.identical) {
+        response.phase1ExistingFileNames.add(md.name());
+        response.phase1ExistingFileSizes.add(md.length());
+        existingTotalSize+=md.length();
+        if (logger.isTraceEnabled()) {
+          logger.trace("[{}][{}] recovery [phase1] to {}: not recovering [{}], exists in local store and has checksum [{}], size [{}]",indexName,shardId,request.targetNode(),md.name(),md.checksum(),md.length());
+        }
+        totalSize+=md.length();
       }
-      response.phase1FileNames.add(md.name());
-      response.phase1FileSizes.add(md.length());
-      totalSize+=md.length();
+      for (      StoreFileMetaData md : Iterables.concat(diff.different,diff.missing)) {
+        if (request.metadataSnapshot().asMap().containsKey(md.name())) {
+          logger.trace("[{}][{}] recovery [phase1] to {}: recovering [{}], exists in local store, but is different: remote [{}], local [{}]",indexName,shardId,request.targetNode(),md.name(),request.metadataSnapshot().asMap().get(md.name()),md);
+        }
+ else {
+          logger.trace("[{}][{}] recovery [phase1] to {}: recovering [{}], does not exists in remote",indexName,shardId,request.targetNode(),md.name());
+        }
+        response.phase1FileNames.add(md.name());
+        response.phase1FileSizes.add(md.length());
+        totalSize+=md.length();
+      }
     }
     response.phase1TotalSize=totalSize;
     response.phase1ExistingTotalSize=existingTotalSize;
@@ -152,7 +168,8 @@
     cancellableThreads.execute(new Interruptable(){
       @Override public void run() throws InterruptedException {
         try {
-          transportService.submitRequest(request.targetNode(),RecoveryTarget.Actions.CLEAN_FILES,new RecoveryCleanFilesRequest(request.recoveryId(),shard.shardId(),recoverySourceMetadata,shard.translog().estimatedNumberOfOperations()),TransportRequestOptions.options().withTimeout(recoverySettings.internalActionTimeout()),EmptyTransportResponseHandler.INSTANCE_SAME).txGet();
+          final Store.MetadataSnapshot remainingFilesAfterCleanup=recoverWithSyncId ? request.metadataSnapshot() : recoverySourceMetadata;
+          transportService.submitRequest(request.targetNode(),RecoveryTarget.Actions.CLEAN_FILES,new RecoveryCleanFilesRequest(request.recoveryId(),shard.shardId(),remainingFilesAfterCleanup,shard.translog().estimatedNumberOfOperations()),TransportRequestOptions.options().withTimeout(recoverySettings.internalActionTimeout()),EmptyTransportResponseHandler.INSTANCE_SAME).txGet();
         }
  catch (        RemoteTransportException remoteException) {
           final IOException corruptIndexException;
