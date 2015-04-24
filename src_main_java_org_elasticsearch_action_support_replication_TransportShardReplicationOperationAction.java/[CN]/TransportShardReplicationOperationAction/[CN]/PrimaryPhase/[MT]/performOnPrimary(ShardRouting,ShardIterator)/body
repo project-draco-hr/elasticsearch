@@ -6,15 +6,18 @@
   }
   final ReplicationPhase replicationPhase;
   try {
+    indexShardReference=getIndexShardOperationsCounter(primary.shardId());
     PrimaryOperationRequest por=new PrimaryOperationRequest(primary.id(),internalRequest.concreteIndex(),internalRequest.request());
     Tuple<Response,ReplicaRequest> primaryResponse=shardOperationOnPrimary(observer.observedState(),por);
     logger.trace("operation completed on primary [{}]",primary);
-    replicationPhase=new ReplicationPhase(shardsIt,primaryResponse.v2(),primaryResponse.v1(),observer,primary,internalRequest,listener);
+    replicationPhase=new ReplicationPhase(shardsIt,primaryResponse.v2(),primaryResponse.v1(),observer,primary,internalRequest,listener,indexShardReference);
   }
  catch (  Throwable e) {
     internalRequest.request.setCanHaveDuplicates();
     if (retryPrimaryException(e)) {
       logger.trace("had an error while performing operation on primary ({}), scheduling a retry.",e.getMessage());
+      Releasables.close(indexShardReference);
+      indexShardReference=null;
       retry(e);
       return;
     }
