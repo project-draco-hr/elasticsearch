@@ -1,0 +1,39 @@
+{
+  final ShardRouting primaryShard=shardRoutingTable.primaryShard();
+  final DiscoveryNode primaryNode=state.nodes().get(primaryShard.currentNodeId());
+  if (primaryNode == null) {
+    logger.trace("{} failed to resolve node for primary shard {}, skipping sync",shardId,primaryShard);
+    return -1;
+  }
+  final AtomicInteger result=new AtomicInteger(-1);
+  final CountDownLatch latch=new CountDownLatch(1);
+  transportService.sendRequest(primaryNode,IN_FLIGHT_OPS_ACTION_NAME,new InFlightOpsRequest(shardId),new BaseTransportResponseHandler<InFlightOpsResponse>(){
+    @Override public InFlightOpsResponse newInstance(){
+      return new InFlightOpsResponse();
+    }
+    @Override public void handleResponse(    InFlightOpsResponse response){
+      result.set(response.opCount());
+      latch.countDown();
+    }
+    @Override public void handleException(    TransportException exp){
+      logger.debug("{} unexpected error while retrieving inflight op count",shardId);
+      result.set(-1);
+      latch.countDown();
+    }
+    @Override public String executor(){
+      return ThreadPool.Names.SAME;
+    }
+  }
+);
+  try {
+    if (latch.await(inflightOpsTimeout.millis(),TimeUnit.MILLISECONDS) == false) {
+      logger.debug("{} in flight operation check timed out after [{}]",shardId,syncTimeout);
+    }
+  }
+ catch (  InterruptedException e) {
+    logger.debug("{} interrupted while waiting for in flight operation check",shardId);
+  }
+  final int count=result.get();
+  logger.trace("{} in flight operation count [{}]",shardId,count);
+  return count;
+}

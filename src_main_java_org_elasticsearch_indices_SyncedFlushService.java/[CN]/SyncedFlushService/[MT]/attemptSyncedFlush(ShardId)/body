@@ -1,0 +1,23 @@
+{
+  final ClusterState state=clusterService.state();
+  final IndexRoutingTable indexRoutingTable=state.routingTable().index(shardId.index().name());
+  if (indexRoutingTable == null) {
+    throw new IndexMissingException(shardId.index());
+  }
+  final IndexShardRoutingTable shardRoutingTable=indexRoutingTable.shard(shardId.id());
+  if (shardRoutingTable == null) {
+    throw new IndexShardMissingException(shardId);
+  }
+  final List<ShardRouting> activeShards=shardRoutingTable.activeShards();
+  Map<String,byte[]> commitIds=sendPreSyncRequests(activeShards,state,shardId);
+  if (commitIds.isEmpty()) {
+    return new SyncedFlushResult("all shards failed to commit on pre-sync");
+  }
+  int inflight=getInflightOpsCount(shardId,state,shardRoutingTable);
+  if (inflight < 0 || inflight > 0) {
+    return new SyncedFlushResult("operation counter on primary is non zero [" + inflight + "]");
+  }
+  String syncId=Strings.base64UUID();
+  Map<ShardRouting,SyncedFlushResponse> results=sendSyncRequests(syncId,activeShards,state,commitIds,shardId);
+  return new SyncedFlushResult(syncId,results);
+}

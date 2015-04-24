@@ -6,13 +6,14 @@
   for (  ShardStats shardStats : indexStats.getShards()) {
     assertNull(shardStats.getCommitStats().getUserData().get(Engine.SYNC_COMMIT_ID));
   }
-  ClusterStateResponse state=client().admin().cluster().prepareState().get();
-  String nodeId=state.getState().getRoutingTable().index("test").shard(0).getShards().get(0).currentNodeId();
-  SyncedFlushResponse syncedFlushResponse=internalCluster().getInstance(SyncedFlushService.class).attemptSyncedFlush(new ShardId("test",0));
-  assertTrue(syncedFlushResponse.success());
+  SyncedFlushService.SyncedFlushResult result=internalCluster().getInstance(SyncedFlushService.class).attemptSyncedFlush(new ShardId("test",0));
+  assertTrue(result.success());
+  assertThat(result.totalShards(),equalTo(indexStats.getShards().length));
+  assertThat(result.successfulShards(),equalTo(indexStats.getShards().length));
   indexStats=client().admin().indices().prepareStats("test").get().getIndex("test");
-  assertThat(indexStats.getShards().length,equalTo(client().admin().indices().prepareGetIndex().get().getSettings().get("test").getAsInt(IndexMetaData.SETTING_NUMBER_OF_REPLICAS,-1) + 1));
+  String syncId=result.syncId();
   for (  ShardStats shardStats : indexStats.getShards()) {
-    assertThat(shardStats.getCommitStats().getUserData().get(Engine.SYNC_COMMIT_ID),equalTo(syncedFlushResponse.getSyncId()));
+    final String shardSyncId=shardStats.getCommitStats().getUserData().get(Engine.SYNC_COMMIT_ID);
+    assertThat(shardSyncId,equalTo(syncId));
   }
 }
