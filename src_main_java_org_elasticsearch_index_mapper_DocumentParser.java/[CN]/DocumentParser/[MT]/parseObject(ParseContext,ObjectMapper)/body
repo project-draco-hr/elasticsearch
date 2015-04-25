@@ -1,0 +1,94 @@
+{
+  if (mapper.isEnabled() == false) {
+    context.parser().skipChildren();
+    return null;
+  }
+  XContentParser parser=context.parser();
+  String currentFieldName=parser.currentName();
+  XContentParser.Token token=parser.currentToken();
+  if (token == XContentParser.Token.VALUE_NULL) {
+    return null;
+  }
+  if (token.isValue()) {
+    throw new MapperParsingException("object mapping for [" + mapper.name() + "] tried to parse field ["+ currentFieldName+ "] as object, but found a concrete value");
+  }
+  ObjectMapper.Nested nested=mapper.nested();
+  if (nested.isNested()) {
+    context=context.createNestedContext(mapper.fullPath());
+    ParseContext.Document nestedDoc=context.doc();
+    ParseContext.Document parentDoc=nestedDoc.getParent();
+    IndexableField uidField=parentDoc.getField(UidFieldMapper.NAME);
+    if (uidField != null) {
+      nestedDoc.add(new Field(UidFieldMapper.NAME,uidField.stringValue(),UidFieldMapper.Defaults.NESTED_FIELD_TYPE));
+    }
+    nestedDoc.add(new Field(TypeFieldMapper.NAME,mapper.nestedTypePathAsString(),TypeFieldMapper.Defaults.FIELD_TYPE));
+  }
+  ContentPath.Type origPathType=context.path().pathType();
+  context.path().pathType(mapper.pathType());
+  if (token == XContentParser.Token.END_OBJECT) {
+    token=parser.nextToken();
+  }
+  if (token == XContentParser.Token.START_OBJECT) {
+    token=parser.nextToken();
+  }
+  ObjectMapper update=null;
+  while (token != XContentParser.Token.END_OBJECT) {
+    ObjectMapper newUpdate=null;
+    if (token == XContentParser.Token.START_OBJECT) {
+      newUpdate=parseObject(context,mapper,currentFieldName);
+    }
+ else     if (token == XContentParser.Token.START_ARRAY) {
+      newUpdate=parseArray(context,mapper,currentFieldName);
+    }
+ else     if (token == XContentParser.Token.FIELD_NAME) {
+      currentFieldName=parser.currentName();
+    }
+ else     if (token == XContentParser.Token.VALUE_NULL) {
+      parseNullValue(context,mapper,currentFieldName);
+    }
+ else     if (token == null) {
+      throw new MapperParsingException("object mapping for [" + mapper.name() + "] tried to parse field ["+ currentFieldName+ "] as object, but got EOF, has a concrete value been provided to it?");
+    }
+ else     if (token.isValue()) {
+      newUpdate=parseValue(context,mapper,currentFieldName,token);
+    }
+    token=parser.nextToken();
+    if (newUpdate != null) {
+      if (update == null) {
+        update=newUpdate;
+      }
+ else {
+        MapperUtils.merge(update,newUpdate);
+      }
+    }
+  }
+  context.path().pathType(origPathType);
+  if (nested.isNested()) {
+    ParseContext.Document nestedDoc=context.doc();
+    ParseContext.Document parentDoc=nestedDoc.getParent();
+    if (nested.isIncludeInParent()) {
+      for (      IndexableField field : nestedDoc.getFields()) {
+        if (field.name().equals(UidFieldMapper.NAME) || field.name().equals(TypeFieldMapper.NAME)) {
+          continue;
+        }
+ else {
+          parentDoc.add(field);
+        }
+      }
+    }
+    if (nested.isIncludeInRoot()) {
+      ParseContext.Document rootDoc=context.rootDoc();
+      if (!nested.isIncludeInParent() || parentDoc != rootDoc) {
+        for (        IndexableField field : nestedDoc.getFields()) {
+          if (field.name().equals(UidFieldMapper.NAME) || field.name().equals(TypeFieldMapper.NAME)) {
+            continue;
+          }
+ else {
+            rootDoc.add(field);
+          }
+        }
+      }
+    }
+  }
+  return update;
+}
