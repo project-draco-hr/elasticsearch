@@ -1,0 +1,28 @@
+{
+  try {
+    TransportRequestOptions options=TransportRequestOptions.options().withType(TransportRequestOptions.Type.STATE).withCompress(false);
+    transportService.sendRequest(node,ACTION_NAME,new BytesTransportRequest(bytes,node.version()),options,new EmptyTransportResponseHandler(ThreadPool.Names.SAME){
+      @Override public void handleResponse(      TransportResponse.Empty response){
+        if (timedOutWaitingForNodes.get()) {
+          logger.debug("node {} responded for cluster state [{}] (took longer than [{}])",node,clusterState.version(),publishTimeout);
+        }
+        publishResponseHandler.onResponse(node);
+      }
+      @Override public void handleException(      TransportException exp){
+        if (sendDiffs && exp.unwrapCause() instanceof IncompatibleClusterStateVersionException) {
+          logger.debug("resending full cluster state to node {} reason {}",node,exp.getDetailedMessage());
+          sendFullClusterState(clusterState,null,node,timedOutWaitingForNodes,publishTimeout,publishResponseHandler);
+        }
+ else {
+          logger.debug("failed to send cluster state to {}",exp,node);
+          publishResponseHandler.onFailure(node,exp);
+        }
+      }
+    }
+);
+  }
+ catch (  Throwable t) {
+    logger.warn("error sending cluster state to {}",t,node);
+    publishResponseHandler.onFailure(node,t);
+  }
+}

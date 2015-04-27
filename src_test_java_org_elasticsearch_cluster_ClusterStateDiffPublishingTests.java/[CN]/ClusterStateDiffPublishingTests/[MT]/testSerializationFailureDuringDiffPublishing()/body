@@ -1,0 +1,46 @@
+{
+  MockNode nodeA=createMockNode("nodeA",ImmutableSettings.EMPTY,Version.CURRENT,new PublishClusterStateAction.NewClusterStateListener(){
+    @Override public void onNewClusterState(    ClusterState clusterState,    NewStateProcessed newStateProcessed){
+      fail("Shouldn't send cluster state to myself");
+    }
+  }
+);
+  MockNewClusterStateListener mockListenerB=new MockNewClusterStateListener();
+  MockNode nodeB=createMockNode("nodeB",ImmutableSettings.EMPTY,Version.CURRENT,mockListenerB);
+  DiscoveryNodes discoveryNodes=DiscoveryNodes.builder().put(nodeA.discoveryNode).put(nodeB.discoveryNode).localNodeId(nodeA.discoveryNode.id()).build();
+  ClusterState previousClusterState=ClusterState.builder(new ClusterName("test")).nodes(discoveryNodes).build();
+  ClusterState clusterState=ClusterState.builder(previousClusterState).incrementVersion().build();
+  mockListenerB.add(new NewClusterStateExpectation(){
+    @Override public void check(    ClusterState clusterState,    PublishClusterStateAction.NewClusterStateListener.NewStateProcessed newStateProcessed){
+      assertFalse(clusterState.wasReadFromDiff());
+    }
+  }
+);
+  publishStateDiffAndWait(nodeA.action,clusterState,previousClusterState);
+  previousClusterState=clusterState;
+  clusterState=ClusterState.builder(clusterState).blocks(ClusterBlocks.builder().addGlobalBlock(MetaData.CLUSTER_READ_ONLY_BLOCK)).incrementVersion().build();
+  mockListenerB.add(new NewClusterStateExpectation(){
+    @Override public void check(    ClusterState clusterState,    PublishClusterStateAction.NewClusterStateListener.NewStateProcessed newStateProcessed){
+      assertTrue(clusterState.wasReadFromDiff());
+    }
+  }
+);
+  ClusterState unserializableClusterState=new ClusterState(clusterState.version(),clusterState.uuid(),clusterState){
+    @Override public Diff<ClusterState> diff(    ClusterState previousState){
+      return new Diff<ClusterState>(){
+        @Override public ClusterState apply(        ClusterState part){
+          fail("this diff shouldn't be applied");
+          return part;
+        }
+        @Override public void writeTo(        StreamOutput out) throws IOException {
+          throw new IOException("Simulated failure of diff serialization");
+        }
+      }
+;
+    }
+  }
+;
+  List<Tuple<DiscoveryNode,Throwable>> errors=publishStateDiff(nodeA.action,unserializableClusterState,previousClusterState).awaitErrors(1,TimeUnit.SECONDS);
+  assertThat(errors.size(),equalTo(1));
+  assertThat(errors.get(0).v2().getMessage(),containsString("Simulated failure of diff serialization"));
+}
