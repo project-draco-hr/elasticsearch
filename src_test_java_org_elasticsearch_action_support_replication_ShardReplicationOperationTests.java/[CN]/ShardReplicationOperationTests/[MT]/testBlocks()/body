@@ -1,0 +1,22 @@
+{
+  Request request=new Request();
+  PlainActionFuture<Response> listener=new PlainActionFuture<>();
+  ClusterBlocks.Builder block=ClusterBlocks.builder().addGlobalBlock(new ClusterBlock(1,"non retryable",false,true,RestStatus.SERVICE_UNAVAILABLE,ClusterBlockLevel.ALL));
+  clusterService.setState(ClusterState.builder(clusterService.state()).blocks(block));
+  TransportShardReplicationOperationAction<Request,Request,Response>.PrimaryPhase primaryPhase=action.new PrimaryPhase(request,listener);
+  assertFalse("primary phase should stop execution",primaryPhase.checkBlocks());
+  assertListenerThrows("primary phase should fail operation",listener,ClusterBlockException.class);
+  block=ClusterBlocks.builder().addGlobalBlock(new ClusterBlock(1,"retryable",true,true,RestStatus.SERVICE_UNAVAILABLE,ClusterBlockLevel.ALL));
+  clusterService.setState(ClusterState.builder(clusterService.state()).blocks(block));
+  listener=new PlainActionFuture<>();
+  primaryPhase=action.new PrimaryPhase(new Request().timeout("5ms"),listener);
+  assertFalse("primary phase should stop execution on retryable block",primaryPhase.checkBlocks());
+  assertListenerThrows("failed to timeout on retryable block",listener,ClusterBlockException.class);
+  listener=new PlainActionFuture<>();
+  primaryPhase=action.new PrimaryPhase(new Request(),listener);
+  assertFalse("primary phase should stop execution on retryable block",primaryPhase.checkBlocks());
+  assertFalse("primary phase should wait on retryable block",listener.isDone());
+  block=ClusterBlocks.builder().addGlobalBlock(new ClusterBlock(1,"non retryable",false,true,RestStatus.SERVICE_UNAVAILABLE,ClusterBlockLevel.ALL));
+  clusterService.setState(ClusterState.builder(clusterService.state()).blocks(block));
+  assertListenerThrows("primary phase should fail operation when moving from a retryable block a non-retryable one",listener,ClusterBlockException.class);
+}

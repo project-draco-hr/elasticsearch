@@ -1,0 +1,38 @@
+{
+{
+    ElasticsearchException exception=new ElasticsearchException("foo",new ElasticsearchException("bar",new ElasticsearchIllegalArgumentException("index is closed",new RuntimeException("foobar"))));
+    ElasticsearchException[] rootCauses=exception.guessRootCauses();
+    assertEquals(rootCauses.length,1);
+    assertEquals(ElasticsearchException.getExceptionName(rootCauses[0]),"illegal_argument_exception");
+    assertEquals(rootCauses[0].getMessage(),"index is closed");
+    ShardSearchFailure failure=new ShardSearchFailure(new QueryParsingException(new Index("foo"),"foobar"),new SearchShardTarget("node_1","foo",1));
+    ShardSearchFailure failure1=new ShardSearchFailure(new QueryParsingException(new Index("foo"),"foobar"),new SearchShardTarget("node_1","foo",2));
+    SearchPhaseExecutionException ex=new SearchPhaseExecutionException("search","all shards failed",new ShardSearchFailure[]{failure,failure1});
+    if (randomBoolean()) {
+      rootCauses=(randomBoolean() ? new RemoteTransportException("remoteboom",ex) : ex).guessRootCauses();
+    }
+ else {
+      rootCauses=ElasticsearchException.guessRootCauses(randomBoolean() ? new RemoteTransportException("remoteboom",ex) : ex);
+    }
+    assertEquals(ElasticsearchException.getExceptionName(rootCauses[0]),"query_parsing_exception");
+    assertEquals(rootCauses[0].getMessage(),"foobar");
+    ElasticsearchException oneLevel=new ElasticsearchException("foo",new RuntimeException("foobar"));
+    rootCauses=oneLevel.guessRootCauses();
+    assertEquals(ElasticsearchException.getExceptionName(rootCauses[0]),"exception");
+    assertEquals(rootCauses[0].getMessage(),"foo");
+  }
+{
+    ShardSearchFailure failure=new ShardSearchFailure(new QueryParsingException(new Index("foo"),"foobar"),new SearchShardTarget("node_1","foo",1));
+    ShardSearchFailure failure1=new ShardSearchFailure(new QueryParsingException(new Index("foo1"),"foobar"),new SearchShardTarget("node_1","foo1",1));
+    ShardSearchFailure failure2=new ShardSearchFailure(new QueryParsingException(new Index("foo1"),"foobar"),new SearchShardTarget("node_1","foo1",2));
+    SearchPhaseExecutionException ex=new SearchPhaseExecutionException("search","all shards failed",new ShardSearchFailure[]{failure,failure1,failure2});
+    final ElasticsearchException[] rootCauses=ex.guessRootCauses();
+    assertEquals(rootCauses.length,2);
+    assertEquals(ElasticsearchException.getExceptionName(rootCauses[0]),"query_parsing_exception");
+    assertEquals(rootCauses[0].getMessage(),"foobar");
+    assertEquals(((QueryParsingException)rootCauses[0]).index().name(),"foo");
+    assertEquals(ElasticsearchException.getExceptionName(rootCauses[1]),"query_parsing_exception");
+    assertEquals(rootCauses[1].getMessage(),"foobar");
+    assertEquals(((QueryParsingException)rootCauses[1]).index().name(),"foo1");
+  }
+}

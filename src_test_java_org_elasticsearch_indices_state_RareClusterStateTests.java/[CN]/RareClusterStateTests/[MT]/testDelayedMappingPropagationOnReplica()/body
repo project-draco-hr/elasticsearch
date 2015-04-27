@@ -1,0 +1,85 @@
+{
+  final List<String> nodeNames=internalCluster().startNodesAsync(2).get();
+  assertFalse(client().admin().cluster().prepareHealth().setWaitForNodes("2").get().isTimedOut());
+  final String master=internalCluster().getMasterName();
+  assertThat(nodeNames,hasItem(master));
+  String otherNode=null;
+  for (  String node : nodeNames) {
+    if (node.equals(master) == false) {
+      otherNode=node;
+      break;
+    }
+  }
+  assertNotNull(otherNode);
+  assertAcked(prepareCreate("index").setSettings(ImmutableSettings.builder().put(IndexMetaData.SETTING_NUMBER_OF_SHARDS,1).put(IndexMetaData.SETTING_NUMBER_OF_REPLICAS,1).put("index.routing.allocation.include._name",master)).get());
+  assertAcked(client().admin().indices().prepareUpdateSettings("index").setSettings(ImmutableSettings.builder().put("index.routing.allocation.include._name","")).get());
+  ensureGreen();
+  ClusterState state=client().admin().cluster().prepareState().get().getState();
+  assertEquals(master,state.nodes().masterNode().name());
+  List<ShardRouting> shards=state.routingTable().allShards("index");
+  assertThat(shards,hasSize(2));
+  for (  ShardRouting shard : shards) {
+    if (shard.primary()) {
+      assertEquals(state.nodes().masterNodeId(),shard.currentNodeId());
+    }
+ else {
+      assertTrue(shard.active());
+    }
+  }
+  BlockClusterStateProcessing disruption=new BlockClusterStateProcessing(otherNode,getRandom());
+  internalCluster().setDisruptionScheme(disruption);
+  disruption.startDisrupting();
+  final AtomicReference<Object> putMappingResponse=new AtomicReference<>();
+  client().admin().indices().preparePutMapping("index").setType("type").setSource("field","type=long").execute(new ActionListener<PutMappingResponse>(){
+    @Override public void onResponse(    PutMappingResponse response){
+      putMappingResponse.set(response);
+    }
+    @Override public void onFailure(    Throwable e){
+      putMappingResponse.set(e);
+    }
+  }
+);
+  assertBusy(new Runnable(){
+    @Override public void run(){
+      final IndicesService indicesService=internalCluster().getInstance(IndicesService.class,master);
+      final IndexService indexService=indicesService.indexServiceSafe("index");
+      assertNotNull(indexService);
+      final MapperService mapperService=indexService.mapperService();
+      DocumentMapper mapper=mapperService.documentMapper("type");
+      assertNotNull(mapper);
+      assertNotNull(mapper.mappers().getMapper("field"));
+    }
+  }
+);
+  final AtomicReference<Object> docIndexResponse=new AtomicReference<>();
+  client().prepareIndex("index","type","1").setSource("field",42).execute(new ActionListener<IndexResponse>(){
+    @Override public void onResponse(    IndexResponse response){
+      docIndexResponse.set(response);
+    }
+    @Override public void onFailure(    Throwable e){
+      docIndexResponse.set(e);
+    }
+  }
+);
+  assertBusy(new Runnable(){
+    @Override public void run(){
+      assertTrue(client().prepareGet("index","type","1").setPreference("_primary").get().isExists());
+    }
+  }
+);
+  Thread.sleep(100);
+  assertThat(putMappingResponse.get(),equalTo(null));
+  assertThat(docIndexResponse.get(),equalTo(null));
+  disruption.stopDisrupting();
+  assertBusy(new Runnable(){
+    @Override public void run(){
+      assertThat(putMappingResponse.get(),instanceOf(PutMappingResponse.class));
+      PutMappingResponse resp=(PutMappingResponse)putMappingResponse.get();
+      assertTrue(resp.isAcknowledged());
+      assertThat(docIndexResponse.get(),instanceOf(IndexResponse.class));
+      IndexResponse docResp=(IndexResponse)docIndexResponse.get();
+      assertEquals(Arrays.toString(docResp.getShardInfo().getFailures()),2,docResp.getShardInfo().getTotal());
+    }
+  }
+);
+}

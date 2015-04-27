@@ -1,0 +1,35 @@
+{
+  final String writeConsistencyFailure=checkWriteConsistency(primary);
+  if (writeConsistencyFailure != null) {
+    retryBecauseUnavailable(primary.shardId(),writeConsistencyFailure);
+    return;
+  }
+  final ReplicationPhase replicationPhase;
+  try {
+    PrimaryOperationRequest por=new PrimaryOperationRequest(primary.id(),internalRequest.concreteIndex(),internalRequest.request());
+    Tuple<Response,ReplicaRequest> primaryResponse=shardOperationOnPrimary(observer.observedState(),por);
+    logger.trace("operation completed on primary [{}]",primary);
+    replicationPhase=new ReplicationPhase(shardsIt,primaryResponse.v2(),primaryResponse.v1(),observer,primary,internalRequest,listener);
+  }
+ catch (  Throwable e) {
+    internalRequest.request.setCanHaveDuplicates();
+    if (retryPrimaryException(e)) {
+      logger.trace("had an error while performing operation on primary ({}), scheduling a retry.",e.getMessage());
+      retry(e);
+      return;
+    }
+    if (ExceptionsHelper.status(e) == RestStatus.CONFLICT) {
+      if (logger.isTraceEnabled()) {
+        logger.trace(primary.shortSummary() + ": Failed to execute [" + internalRequest.request()+ "]",e);
+      }
+    }
+ else {
+      if (logger.isDebugEnabled()) {
+        logger.debug(primary.shortSummary() + ": Failed to execute [" + internalRequest.request()+ "]",e);
+      }
+    }
+    finishAsFailed(e);
+    return;
+  }
+  finishAndMoveToReplication(replicationPhase);
+}
