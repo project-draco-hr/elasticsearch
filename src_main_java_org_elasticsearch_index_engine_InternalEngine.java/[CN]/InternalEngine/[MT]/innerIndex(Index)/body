@@ -17,16 +17,17 @@ synchronized (dirtyLock(index.uid())) {
     long expectedVersion=index.version();
     if (index.versionType().isVersionConflictForWrites(currentVersion,expectedVersion)) {
       if (index.origin() == Operation.Origin.RECOVERY) {
-        return;
+        return false;
       }
  else {
         throw new VersionConflictEngineException(shardId,index.type(),index.id(),currentVersion,expectedVersion);
       }
     }
     updatedVersion=index.versionType().updateVersion(currentVersion,expectedVersion);
+    final boolean created;
     index.updateVersion(updatedVersion);
     if (currentVersion == Versions.NOT_FOUND) {
-      index.created(true);
+      created=true;
       if (index.docs().size() > 1) {
         indexWriter.addDocuments(index.docs());
       }
@@ -36,7 +37,10 @@ synchronized (dirtyLock(index.uid())) {
     }
  else {
       if (versionValue != null) {
-        index.created(versionValue.delete());
+        created=versionValue.delete();
+      }
+ else {
+        created=false;
       }
       if (index.docs().size() > 1) {
         indexWriter.updateDocuments(index.uid(),index.docs());
@@ -48,5 +52,6 @@ synchronized (dirtyLock(index.uid())) {
     Translog.Location translogLocation=translog.add(new Translog.Index(index));
     versionMap.putUnderLock(index.uid().bytes(),new VersionValue(updatedVersion,translogLocation));
     indexingService.postIndexUnderLock(index);
+    return created;
   }
 }
