@@ -1,0 +1,40 @@
+{
+  int numberOfNodes=randomIntBetween(2,10);
+  int numberOfIterations=randomIntBetween(50,200);
+  Settings settings=ImmutableSettings.builder().put(DiscoverySettings.PUBLISH_TIMEOUT,"100ms").put(DiscoverySettings.PUBLISH_DIFF_ENABLE,true).build();
+  MockNode[] nodes=new MockNode[numberOfNodes];
+  DiscoveryNodes.Builder discoveryNodesBuilder=DiscoveryNodes.builder();
+  for (int i=0; i < nodes.length; i++) {
+    final String name="node" + i;
+    nodes[i]=createMockNode(name,settings,Version.CURRENT,new PublishClusterStateAction.NewClusterStateListener(){
+      @Override public synchronized void onNewClusterState(      ClusterState clusterState,      NewStateProcessed newStateProcessed){
+        assertProperMetaDataForVersion(clusterState.metaData(),clusterState.version());
+        if (randomInt(10) < 2) {
+          try {
+            Thread.sleep(randomInt(110));
+          }
+ catch (          InterruptedException ex) {
+            Thread.currentThread().interrupt();
+          }
+        }
+        newStateProcessed.onNewClusterStateProcessed();
+      }
+    }
+);
+    discoveryNodesBuilder.put(nodes[i].discoveryNode);
+  }
+  AssertingAckListener[] listeners=new AssertingAckListener[numberOfIterations];
+  DiscoveryNodes discoveryNodes=discoveryNodesBuilder.build();
+  MetaData metaData=MetaData.EMPTY_META_DATA;
+  ClusterState clusterState=ClusterState.builder(new ClusterName("test")).metaData(metaData).build();
+  ClusterState previousState;
+  for (int i=0; i < numberOfIterations; i++) {
+    previousState=clusterState;
+    metaData=buildMetaDataForVersion(metaData,i + 1);
+    clusterState=ClusterState.builder(clusterState).incrementVersion().metaData(metaData).nodes(discoveryNodes).build();
+    listeners[i]=publishStateDiff(nodes[0].action,clusterState,previousState);
+  }
+  for (int i=0; i < numberOfIterations; i++) {
+    listeners[i].await(1,TimeUnit.SECONDS);
+  }
+}
