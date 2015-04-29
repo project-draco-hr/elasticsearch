@@ -21,17 +21,29 @@
       }
     }
  else {
+      String fieldname=null;
+      String methodname=null;
       VariableContext[] parts=VariableContext.parse(variable);
       if (parts[0].text.equals("doc") == false) {
         throw new ExpressionScriptCompilationException("Unknown variable [" + parts[0].text + "] in expression");
       }
       if (parts.length < 2 || parts[1].type != VariableContext.Type.STR_INDEX) {
-        throw new ExpressionScriptCompilationException("Variable 'doc' in expression must be used with a specific field like: doc['myfield'].value");
+        throw new ExpressionScriptCompilationException("Variable 'doc' in expression must be used with a specific field like: doc['myfield']");
       }
-      if (parts.length < 3 || parts[2].type != VariableContext.Type.MEMBER || parts[2].text.equals("value") == false) {
-        throw new ExpressionScriptCompilationException("Invalid member for field data in expression.  Only '.value' is currently supported.");
+ else {
+        fieldname=parts[1].text;
       }
-      String fieldname=parts[1].text;
+      if (parts.length == 3) {
+        if (parts[2].type == VariableContext.Type.METHOD) {
+          methodname=parts[2].text;
+        }
+ else         if (parts[2].type != VariableContext.Type.MEMBER || !"value".equals(parts[2].text)) {
+          throw new ExpressionScriptCompilationException("Only the member variable [value] or member methods may be accessed on a field when not accessing the field directly");
+        }
+      }
+      if (parts.length > 3) {
+        throw new ExpressionScriptCompilationException("Variable [" + variable + "] does not follow an allowed format of either doc['field'] or doc['field'].method()");
+      }
       FieldMapper<?> field=mapper.smartNameFieldMapper(fieldname);
       if (field == null) {
         throw new ExpressionScriptCompilationException("Field [" + fieldname + "] used in expression does not exist in mappings");
@@ -40,7 +52,12 @@
         throw new ExpressionScriptCompilationException("Field [" + fieldname + "] used in expression must be numeric");
       }
       IndexFieldData<?> fieldData=lookup.doc().fieldDataService().getForField((NumberFieldMapper)field);
-      bindings.add(variable,new FieldDataValueSource(fieldData));
+      if (methodname == null) {
+        bindings.add(variable,new FieldDataValueSource(fieldData));
+      }
+ else {
+        bindings.add(variable,getMethodValueSource(field,fieldData,fieldname,methodname));
+      }
     }
   }
   return new ExpressionScript((Expression)compiledScript,bindings,specialValue);
