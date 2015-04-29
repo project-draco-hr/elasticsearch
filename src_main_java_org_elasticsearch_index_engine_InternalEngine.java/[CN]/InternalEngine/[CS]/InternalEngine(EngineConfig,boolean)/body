@@ -1,0 +1,65 @@
+{
+  super(engineConfig);
+  this.versionMap=new LiveVersionMap();
+  store.incRef();
+  IndexWriter writer=null;
+  SearcherManager manager=null;
+  boolean success=false;
+  try {
+    this.onGoingRecoveries=new FlushingRecoveryCounter(this,store,logger);
+    this.lastDeleteVersionPruneTimeMSec=engineConfig.getThreadPool().estimatedTimeInMillis();
+    this.indexingService=engineConfig.getIndexingService();
+    this.warmer=engineConfig.getWarmer();
+    this.translog=engineConfig.getTranslog();
+    this.mergePolicyProvider=engineConfig.getMergePolicyProvider();
+    this.mergeScheduler=engineConfig.getMergeScheduler();
+    this.dirtyLocks=new Object[engineConfig.getIndexConcurrency() * 50];
+    for (int i=0; i < dirtyLocks.length; i++) {
+      dirtyLocks[i]=new Object();
+    }
+    throttle=new IndexThrottle();
+    this.searcherFactory=new SearchFactory(engineConfig);
+    final Tuple<Long,Long> translogId;
+    try {
+      writer=createWriter();
+      indexWriter=writer;
+      translogId=loadTranslogIds(writer,translog);
+    }
+ catch (    IOException e) {
+      throw new EngineCreationFailureException(shardId,"failed to create engine",e);
+    }
+    manager=createSearcherManager();
+    this.searcherManager=manager;
+    this.versionMap.setManager(searcherManager);
+    this.mergeSchedulerFailureListener=new FailEngineOnMergeFailure();
+    this.mergeSchedulerListener=new MergeSchedulerListener();
+    this.mergeScheduler.addListener(mergeSchedulerListener);
+    this.mergeScheduler.addFailureListener(mergeSchedulerFailureListener);
+    final TranslogRecoveryPerformer transformer=engineConfig.getTranslogRecoveryPerformer();
+    try {
+      long nextTranslogID=translogId.v2();
+      translog.newTranslog(nextTranslogID);
+      translogIdGenerator.set(nextTranslogID);
+      if (translogId.v1() != null && skipInitialTranslogRecovery == false) {
+        recoverFromTranslog(translogId.v1(),transformer);
+      }
+ else {
+        flush(true,true);
+      }
+    }
+ catch (    IOException|EngineException ex) {
+      throw new EngineCreationFailureException(shardId,"failed to recover from translog",ex);
+    }
+    success=true;
+  }
+  finally {
+    if (success == false) {
+      IOUtils.closeWhileHandlingException(writer,manager);
+      versionMap.clear();
+      if (isClosed.get() == false) {
+        store.decRef();
+      }
+    }
+  }
+  logger.trace("created new InternalEngine");
+}

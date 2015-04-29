@@ -30,11 +30,25 @@
           if (entry.snapshotId().equals(snapshot.snapshotId())) {
             ImmutableMap<ShardId,SnapshotMetaData.ShardSnapshotStatus> shards=shards(currentState,entry.indices());
             if (!partial) {
-              Set<String> indicesWithMissingShards=indicesWithMissingShards(shards);
-              if (indicesWithMissingShards != null) {
+              Tuple<Set<String>,Set<String>> indicesWithMissingShards=indicesWithMissingShards(shards,currentState.metaData());
+              Set<String> missing=indicesWithMissingShards.v1();
+              Set<String> closed=indicesWithMissingShards.v2();
+              if (missing.isEmpty() == false || closed.isEmpty() == false) {
+                StringBuilder failureMessage=new StringBuilder();
                 updatedSnapshot=new SnapshotMetaData.Entry(entry,State.FAILED,shards);
                 entries.add(updatedSnapshot);
-                failure="Indices don't have primary shards +[" + indicesWithMissingShards + "]";
+                if (missing.isEmpty() == false) {
+                  failureMessage.append("Indices don't have primary shards ");
+                  failureMessage.append(missing);
+                }
+                if (closed.isEmpty() == false) {
+                  if (failureMessage.length() > 0) {
+                    failureMessage.append("; ");
+                  }
+                  failureMessage.append("Indices are closed ");
+                  failureMessage.append(closed);
+                }
+                failure=failureMessage.toString();
                 continue;
               }
             }

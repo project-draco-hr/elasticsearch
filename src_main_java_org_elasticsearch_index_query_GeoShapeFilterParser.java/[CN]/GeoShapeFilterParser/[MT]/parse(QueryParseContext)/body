@@ -4,7 +4,7 @@
   ShapeRelation shapeRelation=ShapeRelation.INTERSECTS;
   String strategyName=null;
   ShapeBuilder shape=null;
-  FilterCachingPolicy cache=parseContext.autoFilterCachePolicy();
+  QueryCachingPolicy cache=parseContext.autoFilterCachePolicy();
   HashedBytesRef cacheKey=null;
   String filterName=null;
   String id=null;
@@ -29,7 +29,7 @@
  else           if ("relation".equals(currentFieldName)) {
             shapeRelation=ShapeRelation.getRelationByName(parser.text());
             if (shapeRelation == null) {
-              throw new QueryParsingException(parseContext.index(),"Unknown shape operation [" + parser.text() + "]");
+              throw new QueryParsingException(parseContext,"Unknown shape operation [" + parser.text() + "]");
             }
           }
  else           if ("strategy".equals(currentFieldName)) {
@@ -56,15 +56,15 @@
               }
             }
             if (id == null) {
-              throw new QueryParsingException(parseContext.index(),"ID for indexed shape not provided");
+              throw new QueryParsingException(parseContext,"ID for indexed shape not provided");
             }
  else             if (type == null) {
-              throw new QueryParsingException(parseContext.index(),"Type for indexed shape not provided");
+              throw new QueryParsingException(parseContext,"Type for indexed shape not provided");
             }
             shape=fetchService.fetch(id,type,index,shapePath);
           }
  else {
-            throw new QueryParsingException(parseContext.index(),"[geo_shape] filter does not support [" + currentFieldName + "]");
+            throw new QueryParsingException(parseContext,"[geo_shape] filter does not support [" + currentFieldName + "]");
           }
         }
       }
@@ -80,23 +80,23 @@
         cacheKey=new HashedBytesRef(parser.text());
       }
  else {
-        throw new QueryParsingException(parseContext.index(),"[geo_shape] filter does not support [" + currentFieldName + "]");
+        throw new QueryParsingException(parseContext,"[geo_shape] filter does not support [" + currentFieldName + "]");
       }
     }
   }
   if (shape == null) {
-    throw new QueryParsingException(parseContext.index(),"No Shape defined");
+    throw new QueryParsingException(parseContext,"No Shape defined");
   }
  else   if (shapeRelation == null) {
-    throw new QueryParsingException(parseContext.index(),"No Shape Relation defined");
+    throw new QueryParsingException(parseContext,"No Shape Relation defined");
   }
   MapperService.SmartNameFieldMappers smartNameFieldMappers=parseContext.smartFieldMappers(fieldName);
   if (smartNameFieldMappers == null || !smartNameFieldMappers.hasMapper()) {
-    throw new QueryParsingException(parseContext.index(),"Failed to find geo_shape field [" + fieldName + "]");
+    throw new QueryParsingException(parseContext,"Failed to find geo_shape field [" + fieldName + "]");
   }
   FieldMapper fieldMapper=smartNameFieldMappers.mapper();
   if (!(fieldMapper instanceof GeoShapeFieldMapper)) {
-    throw new QueryParsingException(parseContext.index(),"Field [" + fieldName + "] is not a geo_shape");
+    throw new QueryParsingException(parseContext,"Field [" + fieldName + "] is not a geo_shape");
   }
   GeoShapeFieldMapper shapeFieldMapper=(GeoShapeFieldMapper)fieldMapper;
   PrefixTreeStrategy strategy=shapeFieldMapper.defaultStrategy();
@@ -105,12 +105,12 @@
   }
   Filter filter;
   if (strategy instanceof RecursivePrefixTreeStrategy && shapeRelation == ShapeRelation.DISJOINT) {
-    XBooleanFilter bool=new XBooleanFilter();
+    BooleanQuery bool=new BooleanQuery();
     Filter exists=ExistsFilterParser.newFilter(parseContext,fieldName,null);
     Filter intersects=strategy.makeFilter(GeoShapeQueryParser.getArgs(shape,ShapeRelation.INTERSECTS));
     bool.add(exists,BooleanClause.Occur.MUST);
     bool.add(intersects,BooleanClause.Occur.MUST_NOT);
-    filter=bool;
+    filter=Queries.wrap(bool);
   }
  else {
     filter=strategy.makeFilter(GeoShapeQueryParser.getArgs(shape,shapeRelation));

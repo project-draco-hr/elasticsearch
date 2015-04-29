@@ -1,8 +1,7 @@
 {
   indexShard.prepareForIndexRecovery();
   long version=-1;
-  long translogId=-1;
-  final Set<String> typesToUpdate=Sets.newHashSet();
+  final Map<String,Mapping> typesToUpdate;
   SegmentInfos si=null;
   indexShard.store().incRef();
   try {
@@ -26,18 +25,12 @@
       if (si != null) {
         if (indexShouldExists) {
           version=si.getVersion();
-          if (si.getUserData().containsKey(Translog.TRANSLOG_ID_KEY)) {
-            translogId=Long.parseLong(si.getUserData().get(Translog.TRANSLOG_ID_KEY));
-          }
- else {
-            translogId=version;
-          }
-          logger.trace("using existing shard data, translog id [{}]",translogId);
         }
  else {
           logger.trace("cleaning existing shard, shouldn't exists");
           IndexWriter writer=new IndexWriter(indexShard.store().directory(),new IndexWriterConfig(Lucene.STANDARD_ANALYZER).setOpenMode(IndexWriterConfig.OpenMode.CREATE));
           writer.close();
+          recoveryState.getTranslog().totalOperations(0);
         }
       }
     }
@@ -58,137 +51,21 @@
  catch (    IOException e) {
       logger.debug("failed to list file details",e);
     }
-    Path recoveringTranslogFile=null;
-    if (translogId == -1) {
-      logger.trace("no translog id set (indexShouldExist [{}])",indexShouldExists);
-    }
- else {
-      final Translog translog=indexShard.translog();
-      final Path translogName=translog.getPath(translogId);
-      logger.trace("try recover from translog file {} locations: {}",translogName,Arrays.toString(translog.locations()));
-      OUTER:       for (      Path translogLocation : translog.locations()) {
-        for (        Path recoveryFiles : FileSystemUtils.files(translogLocation,translogName.getFileName() + "{.recovering,}")) {
-          logger.trace("Translog file found in {}",recoveryFiles);
-          recoveringTranslogFile=recoveryFiles;
-          break OUTER;
-        }
-        logger.trace("Translog file NOT found in {} - continue",translogLocation);
-      }
-    }
-    indexShard.prepareForTranslogRecovery();
-    if (recoveringTranslogFile == null || Files.exists(recoveringTranslogFile) == false) {
+    if (indexShouldExists == false) {
       recoveryState.getTranslog().totalOperations(0);
       recoveryState.getTranslog().totalOperationsOnStart(0);
-      indexShard.finalizeRecovery();
-      indexShard.postRecovery("post recovery from gateway, no translog");
-      return;
     }
-    StreamInput in=null;
-    try {
-      if (logger.isTraceEnabled()) {
-        logger.trace("recovering translog file: {} length: {}",recoveringTranslogFile,Files.size(recoveringTranslogFile));
-      }
-      TranslogStream stream=TranslogStreams.translogStreamFor(recoveringTranslogFile);
-      try {
-        in=stream.openInput(recoveringTranslogFile);
-      }
- catch (      TruncatedTranslogException e) {
-        logger.trace("ignoring truncation exception, the translog is either empty or half-written",e);
-      }
-      while (true) {
-        if (in == null) {
-          break;
-        }
-        Translog.Operation operation;
-        try {
-          if (stream instanceof LegacyTranslogStream) {
-            in.readInt();
-          }
-          operation=stream.read(in);
-        }
- catch (        TruncatedTranslogException|EOFException e) {
-          logger.trace("ignoring translog EOF exception, the last operation was not properly written",e);
-          break;
-        }
-catch (        IOException e) {
-          logger.trace("ignoring translog IO exception, the last operation was not properly written",e);
-          break;
-        }
-        try {
-          Engine.IndexingOperation potentialIndexOperation=indexShard.performRecoveryOperation(operation);
-          if (potentialIndexOperation != null && potentialIndexOperation.parsedDoc().mappingsModified()) {
-            if (!typesToUpdate.contains(potentialIndexOperation.docMapper().type())) {
-              typesToUpdate.add(potentialIndexOperation.docMapper().type());
-            }
-          }
-          recoveryState.getTranslog().incrementRecoveredOperations();
-        }
- catch (        ElasticsearchException e) {
-          if (e.status() == RestStatus.BAD_REQUEST) {
-            logger.info("ignoring recovery of a corrupt translog entry",e);
-          }
- else {
-            throw e;
-          }
-        }
-      }
-    }
- catch (    Throwable e) {
-      IOUtils.closeWhileHandlingException(indexShard.translog());
-      throw new IndexShardGatewayRecoveryException(shardId,"failed to recover shard",e);
-    }
- finally {
-      IOUtils.closeWhileHandlingException(in);
-    }
-    try {
-      FlushRequest flushRequest=new FlushRequest();
-      flushRequest.force(false);
-      flushRequest.waitIfOngoing(false);
-      indexShard.flush(flushRequest);
-    }
- catch (    FlushNotAllowedEngineException e) {
-      logger.debug("skipping flush at end of recovery (not allowed)",e);
-    }
+    typesToUpdate=indexShard.performTranslogRecovery();
     indexShard.finalizeRecovery();
+    for (    Map.Entry<String,Mapping> entry : typesToUpdate.entrySet()) {
+      validateMappingUpdate(entry.getKey(),entry.getValue());
+    }
     indexShard.postRecovery("post recovery from gateway");
-    try {
-      Files.deleteIfExists(recoveringTranslogFile);
-    }
- catch (    Exception ex) {
-      logger.debug("Failed to delete recovering translog file {}",ex,recoveringTranslogFile);
-    }
   }
- catch (  IOException e) {
+ catch (  EngineException e) {
     throw new IndexShardGatewayRecoveryException(shardId,"failed to recovery from gateway",e);
   }
  finally {
     indexShard.store().decRef();
-  }
-  for (  final String type : typesToUpdate) {
-    final CountDownLatch latch=new CountDownLatch(1);
-    mappingUpdatedAction.updateMappingOnMaster(indexService.index().name(),indexService.mapperService().documentMapper(type),indexService.indexUUID(),new MappingUpdatedAction.MappingUpdateListener(){
-      @Override public void onMappingUpdate(){
-        latch.countDown();
-      }
-      @Override public void onFailure(      Throwable t){
-        latch.countDown();
-        logger.debug("failed to send mapping update post recovery to master for [{}]",t,type);
-      }
-    }
-);
-    cancellableThreads.execute(new CancellableThreads.Interruptable(){
-      @Override public void run() throws InterruptedException {
-        try {
-          if (latch.await(waitForMappingUpdatePostRecovery.millis(),TimeUnit.MILLISECONDS) == false) {
-            logger.debug("waited for mapping update on master for [{}], yet timed out",type);
-          }
-        }
- catch (        InterruptedException e) {
-          logger.debug("interrupted while waiting for mapping update");
-          throw e;
-        }
-      }
-    }
-);
   }
 }

@@ -1,7 +1,7 @@
 {
   Client client=client();
   logger.info("-->  creating repository");
-  assertAcked(client.admin().cluster().preparePutRepository("test-repo").setType("fs").setSettings(ImmutableSettings.settingsBuilder().put("location",newTempDirPath()).put("compress",randomBoolean()).put("chunk_size",randomIntBetween(100,1000))));
+  assertAcked(client.admin().cluster().preparePutRepository("test-repo").setType("fs").setSettings(ImmutableSettings.settingsBuilder().put("location",createTempDir()).put("compress",randomBoolean()).put("chunk_size",randomIntBetween(100,1000))));
   logger.info("--> create test index with synonyms search analyzer");
   ImmutableSettings.Builder indexSettings=ImmutableSettings.builder().put(indexSettings()).put(SETTING_NUMBER_OF_REPLICAS,between(0,1)).put(INDEX_REFRESH_INTERVAL,"10s").put("index.analysis.analyzer.my_analyzer.type","custom").put("index.analysis.analyzer.my_analyzer.tokenizer","standard").putArray("index.analysis.analyzer.my_analyzer.filter","lowercase","my_synonym").put("index.analysis.filter.my_synonym.type","synonym").put("index.analysis.filter.my_synonym.synonyms","foo => bar");
   assertAcked(prepareCreate("test-idx",2,indexSettings));
@@ -26,6 +26,9 @@
   Settings newIncorrectIndexSettings=ImmutableSettings.builder().put(newIndexSettings).put(SETTING_NUMBER_OF_SHARDS,numberOfShards + 100).build();
   logger.info("--> try restoring while changing the number of shards - should fail");
   assertThrows(client.admin().cluster().prepareRestoreSnapshot("test-repo","test-snap").setIgnoreIndexSettings("index.analysis.*").setIndexSettings(newIncorrectIndexSettings).setWaitForCompletion(true),SnapshotRestoreException.class);
+  logger.info("--> try restoring while changing the number of replicas to a negative number - should fail");
+  Settings newIncorrectReplicasIndexSettings=ImmutableSettings.builder().put(newIndexSettings).put(SETTING_NUMBER_OF_REPLICAS.substring(IndexMetaData.INDEX_SETTING_PREFIX.length()),randomIntBetween(-10,-1)).build();
+  assertThrows(client.admin().cluster().prepareRestoreSnapshot("test-repo","test-snap").setIgnoreIndexSettings("index.analysis.*").setIndexSettings(newIncorrectReplicasIndexSettings).setWaitForCompletion(true),IllegalArgumentException.class);
   logger.info("--> restore index with correct settings from the snapshot");
   RestoreSnapshotResponse restoreSnapshotResponse=client.admin().cluster().prepareRestoreSnapshot("test-repo","test-snap").setIgnoreIndexSettings("index.analysis.*").setIndexSettings(newIndexSettings).setWaitForCompletion(true).execute().actionGet();
   assertThat(restoreSnapshotResponse.getRestoreInfo().totalShards(),greaterThan(0));

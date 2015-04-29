@@ -1,7 +1,7 @@
 {
   XContentParser parser=parseContext.parser();
   MapperService.SmartNameFieldMappers smartNameFieldMappers;
-  FilterCachingPolicy cache=parseContext.autoFilterCachePolicy();
+  QueryCachingPolicy cache=parseContext.autoFilterCachePolicy();
   String filterName=null;
   String currentFieldName=null;
   String lookupIndex=parseContext.index().name();
@@ -11,7 +11,6 @@
   String lookupRouting=null;
   HashedBytesRef cacheKey=null;
   XContentParser.Token token;
-  String execution=EXECUTION_VALUE_PLAIN;
   List<Object> terms=Lists.newArrayList();
   String fieldName=null;
   while ((token=parser.nextToken()) != XContentParser.Token.END_OBJECT) {
@@ -20,13 +19,13 @@
     }
  else     if (token == XContentParser.Token.START_ARRAY) {
       if (fieldName != null) {
-        throw new QueryParsingException(parseContext.index(),"[terms] filter does not support multiple fields");
+        throw new QueryParsingException(parseContext,"[terms] filter does not support multiple fields");
       }
       fieldName=currentFieldName;
       while ((token=parser.nextToken()) != XContentParser.Token.END_ARRAY) {
         Object value=parser.objectBytes();
         if (value == null) {
-          throw new QueryParsingException(parseContext.index(),"No value specified for terms filter");
+          throw new QueryParsingException(parseContext,"No value specified for terms filter");
         }
         terms.add(value);
       }
@@ -54,23 +53,22 @@
             lookupRouting=parser.textOrNull();
           }
  else {
-            throw new QueryParsingException(parseContext.index(),"[terms] filter does not support [" + currentFieldName + "] within lookup element");
+            throw new QueryParsingException(parseContext,"[terms] filter does not support [" + currentFieldName + "] within lookup element");
           }
         }
       }
       if (lookupType == null) {
-        throw new QueryParsingException(parseContext.index(),"[terms] filter lookup element requires specifying the type");
+        throw new QueryParsingException(parseContext,"[terms] filter lookup element requires specifying the type");
       }
       if (lookupId == null) {
-        throw new QueryParsingException(parseContext.index(),"[terms] filter lookup element requires specifying the id");
+        throw new QueryParsingException(parseContext,"[terms] filter lookup element requires specifying the id");
       }
       if (lookupPath == null) {
-        throw new QueryParsingException(parseContext.index(),"[terms] filter lookup element requires specifying the path");
+        throw new QueryParsingException(parseContext,"[terms] filter lookup element requires specifying the path");
       }
     }
  else     if (token.isValue()) {
       if (EXECUTION_KEY.equals(currentFieldName)) {
-        execution=parser.text();
       }
  else       if ("_name".equals(currentFieldName)) {
         filterName=parser.text();
@@ -82,12 +80,12 @@
         cacheKey=new HashedBytesRef(parser.text());
       }
  else {
-        throw new QueryParsingException(parseContext.index(),"[terms] filter does not support [" + currentFieldName + "]");
+        throw new QueryParsingException(parseContext,"[terms] filter does not support [" + currentFieldName + "]");
       }
     }
   }
   if (fieldName == null) {
-    throw new QueryParsingException(parseContext.index(),"terms filter requires a field name, followed by array of terms");
+    throw new QueryParsingException(parseContext,"terms filter requires a field name, followed by array of terms");
   }
   FieldMapper<?> fieldMapper=null;
   smartNameFieldMappers=parseContext.smartFieldMappers(fieldName);
@@ -106,113 +104,18 @@
     }
   }
   if (terms.isEmpty()) {
-    return Queries.MATCH_NO_FILTER;
+    return Queries.newMatchNoDocsFilter();
   }
   Filter filter;
-  if (EXECUTION_VALUE_PLAIN.equals(execution)) {
-    if (fieldMapper != null) {
-      filter=fieldMapper.termsFilter(terms,parseContext);
-    }
- else {
-      BytesRef[] filterValues=new BytesRef[terms.size()];
-      for (int i=0; i < filterValues.length; i++) {
-        filterValues[i]=BytesRefs.toBytesRef(terms.get(i));
-      }
-      filter=new TermsFilter(fieldName,filterValues);
-    }
-  }
- else   if (EXECUTION_VALUE_FIELDDATA.equals(execution)) {
-    if (fieldMapper == null) {
-      return Queries.MATCH_NO_FILTER;
-    }
-    filter=fieldMapper.fieldDataTermsFilter(terms,parseContext);
-  }
- else   if (EXECUTION_VALUE_BOOL.equals(execution)) {
-    XBooleanFilter boolFiler=new XBooleanFilter();
-    if (fieldMapper != null) {
-      for (      Object term : terms) {
-        boolFiler.add(parseContext.cacheFilter(fieldMapper.termFilter(term,parseContext),null,parseContext.autoFilterCachePolicy()),BooleanClause.Occur.SHOULD);
-      }
-    }
- else {
-      for (      Object term : terms) {
-        boolFiler.add(parseContext.cacheFilter(new TermFilter(new Term(fieldName,BytesRefs.toBytesRef(term))),null,parseContext.autoFilterCachePolicy()),BooleanClause.Occur.SHOULD);
-      }
-    }
-    filter=boolFiler;
-  }
- else   if (EXECUTION_VALUE_BOOL_NOCACHE.equals(execution)) {
-    XBooleanFilter boolFiler=new XBooleanFilter();
-    if (fieldMapper != null) {
-      for (      Object term : terms) {
-        boolFiler.add(fieldMapper.termFilter(term,parseContext),BooleanClause.Occur.SHOULD);
-      }
-    }
- else {
-      for (      Object term : terms) {
-        boolFiler.add(new TermFilter(new Term(fieldName,BytesRefs.toBytesRef(term))),BooleanClause.Occur.SHOULD);
-      }
-    }
-    filter=boolFiler;
-  }
- else   if (EXECUTION_VALUE_AND.equals(execution)) {
-    List<Filter> filters=Lists.newArrayList();
-    if (fieldMapper != null) {
-      for (      Object term : terms) {
-        filters.add(parseContext.cacheFilter(fieldMapper.termFilter(term,parseContext),null,parseContext.autoFilterCachePolicy()));
-      }
-    }
- else {
-      for (      Object term : terms) {
-        filters.add(parseContext.cacheFilter(new TermFilter(new Term(fieldName,BytesRefs.toBytesRef(term))),null,parseContext.autoFilterCachePolicy()));
-      }
-    }
-    filter=new AndFilter(filters);
-  }
- else   if (EXECUTION_VALUE_AND_NOCACHE.equals(execution)) {
-    List<Filter> filters=Lists.newArrayList();
-    if (fieldMapper != null) {
-      for (      Object term : terms) {
-        filters.add(fieldMapper.termFilter(term,parseContext));
-      }
-    }
- else {
-      for (      Object term : terms) {
-        filters.add(new TermFilter(new Term(fieldName,BytesRefs.toBytesRef(term))));
-      }
-    }
-    filter=new AndFilter(filters);
-  }
- else   if (EXECUTION_VALUE_OR.equals(execution)) {
-    List<Filter> filters=Lists.newArrayList();
-    if (fieldMapper != null) {
-      for (      Object term : terms) {
-        filters.add(parseContext.cacheFilter(fieldMapper.termFilter(term,parseContext),null,parseContext.autoFilterCachePolicy()));
-      }
-    }
- else {
-      for (      Object term : terms) {
-        filters.add(parseContext.cacheFilter(new TermFilter(new Term(fieldName,BytesRefs.toBytesRef(term))),null,parseContext.autoFilterCachePolicy()));
-      }
-    }
-    filter=new OrFilter(filters);
-  }
- else   if (EXECUTION_VALUE_OR_NOCACHE.equals(execution)) {
-    List<Filter> filters=Lists.newArrayList();
-    if (fieldMapper != null) {
-      for (      Object term : terms) {
-        filters.add(fieldMapper.termFilter(term,parseContext));
-      }
-    }
- else {
-      for (      Object term : terms) {
-        filters.add(new TermFilter(new Term(fieldName,BytesRefs.toBytesRef(term))));
-      }
-    }
-    filter=new OrFilter(filters);
+  if (fieldMapper != null) {
+    filter=fieldMapper.termsFilter(terms,parseContext);
   }
  else {
-    throw new QueryParsingException(parseContext.index(),"terms filter execution value [" + execution + "] not supported");
+    BytesRef[] filterValues=new BytesRef[terms.size()];
+    for (int i=0; i < filterValues.length; i++) {
+      filterValues[i]=BytesRefs.toBytesRef(terms.get(i));
+    }
+    filter=Queries.wrap(new TermsQuery(fieldName,filterValues));
   }
   if (cache != null) {
     filter=parseContext.cacheFilter(filter,cacheKey,cache);

@@ -1,0 +1,45 @@
+{
+  createIndex("test");
+  ensureGreen("test");
+  int docs=between(10,100);
+  for (int i=0; i < docs; i++) {
+    client().prepareIndex("test","type","" + i).setSource("test","init").execute().actionGet();
+  }
+  for (  String blockSetting : Arrays.asList(SETTING_BLOCKS_READ,SETTING_BLOCKS_WRITE)) {
+    try {
+      enableIndexBlock("test",blockSetting);
+      CloseIndexResponse closeIndexResponse=client().admin().indices().prepareClose("test").execute().actionGet();
+      assertAcked(closeIndexResponse);
+      assertIndexIsClosed("test");
+      OpenIndexResponse openIndexResponse=client().admin().indices().prepareOpen("test").execute().actionGet();
+      assertAcked(openIndexResponse);
+      assertIndexIsOpened("test");
+    }
+  finally {
+      disableIndexBlock("test",blockSetting);
+    }
+  }
+  for (  String blockSetting : Arrays.asList(SETTING_READ_ONLY,SETTING_BLOCKS_METADATA)) {
+    try {
+      enableIndexBlock("test",blockSetting);
+      assertBlocked(client().admin().indices().prepareClose("test"));
+      assertIndexIsOpened("test");
+    }
+  finally {
+      disableIndexBlock("test",blockSetting);
+    }
+  }
+  CloseIndexResponse closeIndexResponse=client().admin().indices().prepareClose("test").execute().actionGet();
+  assertAcked(closeIndexResponse);
+  assertIndexIsClosed("test");
+  for (  String blockSetting : Arrays.asList(SETTING_READ_ONLY,SETTING_BLOCKS_METADATA)) {
+    try {
+      enableIndexBlock("test",blockSetting);
+      assertBlocked(client().admin().indices().prepareOpen("test"));
+      assertIndexIsClosed("test");
+    }
+  finally {
+      disableIndexBlock("test",blockSetting);
+    }
+  }
+}

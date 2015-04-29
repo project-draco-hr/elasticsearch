@@ -1,0 +1,70 @@
+{
+  int numFieldsWritten=0;
+  PostingsEnum docsAndPosEnum=null;
+  PostingsEnum docsEnum=null;
+  boolean hasScores=termVectorsFilter != null;
+  for (  String field : termVectorsByField) {
+    if ((selectedFields != null) && (!selectedFields.contains(field))) {
+      continue;
+    }
+    Terms fieldTermVector=termVectorsByField.terms(field);
+    Terms topLevelTerms=topLevelFields.terms(field);
+    if (topLevelTerms == null) {
+      topLevelTerms=fieldTermVector;
+    }
+    TermsEnum topLevelIterator=topLevelTerms.iterator();
+    boolean positions=flags.contains(Flag.Positions) && fieldTermVector.hasPositions();
+    boolean offsets=flags.contains(Flag.Offsets) && fieldTermVector.hasOffsets();
+    boolean payloads=flags.contains(Flag.Payloads) && fieldTermVector.hasPayloads();
+    long termsSize=fieldTermVector.size();
+    if (hasScores) {
+      termsSize=Math.min(termsSize,termVectorsFilter.size(field));
+    }
+    startField(field,termsSize,positions,offsets,payloads);
+    if (flags.contains(Flag.FieldStatistics)) {
+      if (dfs != null) {
+        writeFieldStatistics(dfs.fieldStatistics().get(field));
+      }
+ else {
+        writeFieldStatistics(topLevelTerms);
+      }
+    }
+    TermsEnum iterator=fieldTermVector.iterator();
+    final boolean useDocsAndPos=positions || offsets || payloads;
+    while (iterator.next() != null) {
+      BytesRef termBytesRef=iterator.term();
+      boolean foundTerm=topLevelIterator.seekExact(termBytesRef);
+      Term term=new Term(field,termBytesRef);
+      if (hasScores && !termVectorsFilter.hasScoreTerm(term)) {
+        continue;
+      }
+      startTerm(termBytesRef);
+      if (flags.contains(Flag.TermStatistics)) {
+        if (dfs != null) {
+          final TermStatistics statistics=dfs.termStatistics().get(term);
+          writeTermStatistics(statistics == null ? new TermStatistics(termBytesRef,0,0) : statistics);
+        }
+ else {
+          if (foundTerm) {
+            writeTermStatistics(topLevelIterator);
+          }
+ else {
+            writeTermStatistics(new TermStatistics(termBytesRef,0,0));
+          }
+        }
+      }
+      if (useDocsAndPos) {
+        docsAndPosEnum=writeTermWithDocsAndPos(iterator,docsAndPosEnum,positions,offsets,payloads);
+      }
+ else {
+        docsEnum=writeTermWithDocsOnly(iterator,docsEnum);
+      }
+      if (hasScores) {
+        writeScoreTerm(termVectorsFilter.getScoreTerm(term));
+      }
+    }
+    numFieldsWritten++;
+  }
+  response.setTermVectorsField(output);
+  response.setHeader(writeHeader(numFieldsWritten,flags.contains(Flag.TermStatistics),flags.contains(Flag.FieldStatistics),hasScores));
+}

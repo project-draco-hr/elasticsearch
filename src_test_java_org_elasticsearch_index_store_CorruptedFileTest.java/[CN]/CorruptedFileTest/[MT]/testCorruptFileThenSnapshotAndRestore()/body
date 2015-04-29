@@ -1,6 +1,6 @@
 {
   int numDocs=scaledRandomIntBetween(100,1000);
-  assertThat(cluster().numDataNodes(),greaterThanOrEqualTo(2));
+  internalCluster().ensureAtLeastNumDataNodes(2);
   assertAcked(prepareCreate("test").setSettings(ImmutableSettings.builder().put(IndexMetaData.SETTING_NUMBER_OF_REPLICAS,"0").put(MergePolicyModule.MERGE_POLICY_TYPE_KEY,NoMergePolicyProvider.class).put(MockFSDirectoryService.CHECK_INDEX_ON_CLOSE,false).put(TranslogService.INDEX_TRANSLOG_DISABLE_FLUSH,true).put("indices.recovery.concurrent_streams",10)));
   ensureGreen();
   IndexRequestBuilder[] builders=new IndexRequestBuilder[numDocs];
@@ -12,9 +12,9 @@
   assertAllSuccessful(client().admin().indices().prepareFlush().setForce(true).setWaitIfOngoing(true).execute().actionGet());
   CountResponse countResponse=client().prepareCount().get();
   assertHitCount(countResponse,numDocs);
-  ShardRouting shardRouting=corruptRandomFile(false);
+  ShardRouting shardRouting=corruptRandomPrimaryFile(false);
   logger.info("-->  creating repository");
-  assertAcked(client().admin().cluster().preparePutRepository("test-repo").setType("fs").setSettings(settingsBuilder().put("location",newTempDirPath(LifecycleScope.SUITE).toAbsolutePath()).put("compress",randomBoolean()).put("chunk_size",randomIntBetween(100,1000))));
+  assertAcked(client().admin().cluster().preparePutRepository("test-repo").setType("fs").setSettings(settingsBuilder().put("location",createTempDir().toAbsolutePath()).put("compress",randomBoolean()).put("chunk_size",randomIntBetween(100,1000))));
   logger.info("--> snapshot");
   CreateSnapshotResponse createSnapshotResponse=client().admin().cluster().prepareCreateSnapshot("test-repo","test-snap").setWaitForCompletion(true).setIndices("test").get();
   assertThat(createSnapshotResponse.getSnapshotInfo().state(),equalTo(SnapshotState.PARTIAL));

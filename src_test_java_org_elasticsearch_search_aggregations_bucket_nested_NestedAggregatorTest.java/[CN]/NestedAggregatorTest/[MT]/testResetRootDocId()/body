@@ -51,13 +51,16 @@
   SearchContext searchContext=createSearchContext(indexService);
   AggregationContext context=new AggregationContext(searchContext);
   AggregatorFactories.Builder builder=AggregatorFactories.builder();
-  builder.addAggregator(new NestedAggregator.Factory("test","nested_field",FilterCachingPolicy.ALWAYS_CACHE));
+  builder.addAggregator(new NestedAggregator.Factory("test","nested_field",QueryCachingPolicy.ALWAYS_CACHE));
   AggregatorFactories factories=builder.build();
   searchContext.aggregations(new SearchContextAggregations(factories));
   Aggregator[] aggs=factories.createTopLevelAggregators(context);
   BucketCollector collector=BucketCollector.wrap(Arrays.asList(aggs));
   collector.preCollection();
-  searcher.search(new ConstantScoreQuery(new AndFilter(Arrays.asList(NonNestedDocsFilter.INSTANCE,new NotFilter(new TermFilter(new Term(UidFieldMapper.NAME,"type#2")))))),collector);
+  BooleanQuery bq=new BooleanQuery();
+  bq.add(Queries.newNonNestedFilter(),Occur.MUST);
+  bq.add(new TermQuery(new Term(UidFieldMapper.NAME,"type#2")),Occur.MUST_NOT);
+  searcher.search(new ConstantScoreQuery(bq),collector);
   collector.postCollection();
   Nested nested=(Nested)aggs[0].buildAggregation(0);
   assertThat(nested.getDocCount(),equalTo(4l));

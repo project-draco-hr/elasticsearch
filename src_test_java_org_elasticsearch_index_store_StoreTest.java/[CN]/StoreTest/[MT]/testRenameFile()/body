@@ -1,7 +1,7 @@
 {
   final ShardId shardId=new ShardId(new Index("index"),1);
   DirectoryService directoryService=new LuceneManagedDirectoryService(random(),false);
-  Store store=new Store(shardId,ImmutableSettings.EMPTY,directoryService,randomDistributor(directoryService),new DummyShardLock(shardId));
+  Store store=new Store(shardId,ImmutableSettings.EMPTY,directoryService,new DummyShardLock(shardId));
 {
     IndexOutput output=store.directory().createOutput("foo.bar",IOContext.DEFAULT);
     int iters=scaledRandomIntBetween(10,100);
@@ -13,7 +13,7 @@
     output.close();
   }
   store.renameFile("foo.bar","bar.foo");
-  assertThat(store.directory().listAll().length,is(1));
+  assertThat(numNonExtraFiles(store),is(1));
   final long lastChecksum;
   try (IndexInput input=store.directory().openInput("bar.foo",IOContext.DEFAULT)){
     lastChecksum=CodecUtil.checksumEntireFile(input);
@@ -34,25 +34,8 @@
     CodecUtil.writeFooter(output);
     output.close();
   }
-  DistributorDirectory distributorDirectory=DirectoryUtils.getLeaf(store.directory(),DistributorDirectory.class);
-  if (distributorDirectory != null && distributorDirectory.getDirectory("foo.bar") != distributorDirectory.getDirectory("bar.foo")) {
-    try {
-      store.renameFile("foo.bar","bar.foo");
-      fail("target file already exists in a different directory");
-    }
- catch (    IOException ex) {
-    }
-    try (IndexInput input=store.directory().openInput("bar.foo",IOContext.DEFAULT)){
-      assertThat(lastChecksum,equalTo(CodecUtil.checksumEntireFile(input)));
-    }
-     assertThat(store.directory().listAll().length,is(2));
-    assertDeleteContent(store,directoryService);
-    IOUtils.close(store);
-  }
- else {
-    store.renameFile("foo.bar","bar.foo");
-    assertThat(store.directory().listAll().length,is(1));
-    assertDeleteContent(store,directoryService);
-    IOUtils.close(store);
-  }
+  store.renameFile("foo.bar","bar.foo");
+  assertThat(numNonExtraFiles(store),is(1));
+  assertDeleteContent(store,directoryService);
+  IOUtils.close(store);
 }

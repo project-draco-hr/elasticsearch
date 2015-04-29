@@ -1,7 +1,7 @@
 {
   XContentParser parser=parseContext.parser();
-  XBooleanFilter boolFilter=new XBooleanFilter();
-  FilterCachingPolicy cache=parseContext.autoFilterCachePolicy();
+  BooleanQuery boolFilter=new BooleanQuery();
+  QueryCachingPolicy cache=parseContext.autoFilterCachePolicy();
   HashedBytesRef cacheKey=null;
   String filterName=null;
   String currentFieldName=null;
@@ -16,25 +16,26 @@
         hasAnyFilter=true;
         Filter filter=parseContext.parseInnerFilter();
         if (filter != null) {
-          boolFilter.add(new FilterClause(filter,BooleanClause.Occur.MUST));
+          boolFilter.add(new BooleanClause(filter,BooleanClause.Occur.FILTER));
         }
       }
  else       if ("must_not".equals(currentFieldName) || "mustNot".equals(currentFieldName)) {
         hasAnyFilter=true;
         Filter filter=parseContext.parseInnerFilter();
         if (filter != null) {
-          boolFilter.add(new FilterClause(filter,BooleanClause.Occur.MUST_NOT));
+          boolFilter.add(new BooleanClause(filter,BooleanClause.Occur.MUST_NOT));
         }
       }
  else       if ("should".equals(currentFieldName)) {
         hasAnyFilter=true;
         Filter filter=parseContext.parseInnerFilter();
         if (filter != null) {
-          boolFilter.add(new FilterClause(filter,BooleanClause.Occur.SHOULD));
+          boolFilter.setMinimumNumberShouldMatch(1);
+          boolFilter.add(new BooleanClause(filter,BooleanClause.Occur.SHOULD));
         }
       }
  else {
-        throw new QueryParsingException(parseContext.index(),"[bool] filter does not support [" + currentFieldName + "]");
+        throw new QueryParsingException(parseContext,"[bool] filter does not support [" + currentFieldName + "]");
       }
     }
  else     if (token == XContentParser.Token.START_ARRAY) {
@@ -43,7 +44,7 @@
         while ((token=parser.nextToken()) != XContentParser.Token.END_ARRAY) {
           Filter filter=parseContext.parseInnerFilter();
           if (filter != null) {
-            boolFilter.add(new FilterClause(filter,BooleanClause.Occur.MUST));
+            boolFilter.add(new BooleanClause(filter,BooleanClause.Occur.MUST));
           }
         }
       }
@@ -52,7 +53,7 @@
         while ((token=parser.nextToken()) != XContentParser.Token.END_ARRAY) {
           Filter filter=parseContext.parseInnerFilter();
           if (filter != null) {
-            boolFilter.add(new FilterClause(filter,BooleanClause.Occur.MUST_NOT));
+            boolFilter.add(new BooleanClause(filter,BooleanClause.Occur.MUST_NOT));
           }
         }
       }
@@ -61,12 +62,13 @@
         while ((token=parser.nextToken()) != XContentParser.Token.END_ARRAY) {
           Filter filter=parseContext.parseInnerFilter();
           if (filter != null) {
-            boolFilter.add(new FilterClause(filter,BooleanClause.Occur.SHOULD));
+            boolFilter.setMinimumNumberShouldMatch(1);
+            boolFilter.add(new BooleanClause(filter,BooleanClause.Occur.SHOULD));
           }
         }
       }
  else {
-        throw new QueryParsingException(parseContext.index(),"[bool] filter does not support [" + currentFieldName + "]");
+        throw new QueryParsingException(parseContext,"[bool] filter does not support [" + currentFieldName + "]");
       }
     }
  else     if (token.isValue()) {
@@ -80,17 +82,17 @@
         cacheKey=new HashedBytesRef(parser.text());
       }
  else {
-        throw new QueryParsingException(parseContext.index(),"[bool] filter does not support [" + currentFieldName + "]");
+        throw new QueryParsingException(parseContext,"[bool] filter does not support [" + currentFieldName + "]");
       }
     }
   }
   if (!hasAnyFilter) {
-    throw new QueryParsingException(parseContext.index(),"[bool] filter has no inner should/must/must_not elements");
+    throw new QueryParsingException(parseContext,"[bool] filter has no inner should/must/must_not elements");
   }
   if (boolFilter.clauses().isEmpty()) {
     return null;
   }
-  Filter filter=boolFilter;
+  Filter filter=Queries.wrap(boolFilter);
   if (cache != null) {
     filter=parseContext.cacheFilter(filter,cacheKey,cache);
   }

@@ -1,0 +1,70 @@
+{
+  ClusterState state=client().admin().cluster().prepareState().get().getState();
+  GroupShardsIterator shardIterators=state.getRoutingNodes().getRoutingTable().activePrimaryShardsGrouped(new String[]{"test"},false);
+  List<ShardIterator> iterators=Lists.newArrayList(shardIterators);
+  ShardIterator shardIterator=RandomPicks.randomFrom(getRandom(),iterators);
+  ShardRouting shardRouting=shardIterator.nextOrNull();
+  assertNotNull(shardRouting);
+  assertTrue(shardRouting.primary());
+  assertTrue(shardRouting.assignedToNode());
+  String nodeId=shardRouting.currentNodeId();
+  NodesStatsResponse nodeStatses=client().admin().cluster().prepareNodesStats(nodeId).setFs(true).get();
+  Set<Path> files=new TreeSet<>();
+  for (  FsStats.Info info : nodeStatses.getNodes()[0].getFs()) {
+    String path=info.getPath();
+    final String relativeDataLocationPath="indices/test/" + Integer.toString(shardRouting.getId()) + "/index";
+    Path file=PathUtils.get(path).resolve(relativeDataLocationPath);
+    if (Files.exists(file)) {
+      try (DirectoryStream<Path> stream=Files.newDirectoryStream(file)){
+        for (        Path item : stream) {
+          if (Files.isRegularFile(item) && "write.lock".equals(item.getFileName().toString()) == false) {
+            if (includePerCommitFiles || isPerSegmentFile(item.getFileName().toString())) {
+              files.add(item);
+            }
+          }
+        }
+      }
+     }
+  }
+  pruneOldDeleteGenerations(files);
+  Path fileToCorrupt=null;
+  if (!files.isEmpty()) {
+    fileToCorrupt=RandomPicks.randomFrom(getRandom(),files);
+    try (Directory dir=FSDirectory.open(fileToCorrupt.toAbsolutePath().getParent())){
+      long checksumBeforeCorruption;
+      try (IndexInput input=dir.openInput(fileToCorrupt.getFileName().toString(),IOContext.DEFAULT)){
+        checksumBeforeCorruption=CodecUtil.retrieveChecksum(input);
+      }
+       try (FileChannel raf=FileChannel.open(fileToCorrupt,StandardOpenOption.READ,StandardOpenOption.WRITE)){
+        raf.position(randomIntBetween(0,(int)Math.min(Integer.MAX_VALUE,raf.size() - 1)));
+        long filePointer=raf.position();
+        ByteBuffer bb=ByteBuffer.wrap(new byte[1]);
+        raf.read(bb);
+        bb.flip();
+        byte oldValue=bb.get(0);
+        byte newValue=(byte)(oldValue + 1);
+        bb.put(0,newValue);
+        raf.position(filePointer);
+        raf.write(bb);
+        logger.info("Corrupting file for shard {} --  flipping at position {} from {} to {} file: {}",shardRouting,filePointer,Integer.toHexString(oldValue),Integer.toHexString(newValue),fileToCorrupt.getFileName());
+      }
+       long checksumAfterCorruption;
+      long actualChecksumAfterCorruption;
+      try (ChecksumIndexInput input=dir.openChecksumInput(fileToCorrupt.getFileName().toString(),IOContext.DEFAULT)){
+        assertThat(input.getFilePointer(),is(0l));
+        input.seek(input.length() - 8);
+        checksumAfterCorruption=input.getChecksum();
+        actualChecksumAfterCorruption=input.readLong();
+      }
+       StringBuilder msg=new StringBuilder();
+      msg.append("Checksum before: [").append(checksumBeforeCorruption).append("]");
+      msg.append(" after: [").append(checksumAfterCorruption).append("]");
+      msg.append(" checksum value after corruption: ").append(actualChecksumAfterCorruption).append("]");
+      msg.append(" file: ").append(fileToCorrupt.getFileName()).append(" length: ").append(dir.fileLength(fileToCorrupt.getFileName().toString()));
+      logger.info(msg.toString());
+      assumeTrue("Checksum collision - " + msg.toString(),checksumAfterCorruption != checksumBeforeCorruption || actualChecksumAfterCorruption != checksumBeforeCorruption);
+    }
+   }
+  assertThat("no file corrupted",fileToCorrupt,notNullValue());
+  return shardRouting;
+}

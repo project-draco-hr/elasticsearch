@@ -15,7 +15,7 @@ import urllib.request
 import subprocess
 from http.client import HTTPConnection
 from http.client import HTTPSConnection
-" \n This tool builds a release from the a given elasticsearch branch.\n In order to execute it go in the top level directory and run:\n   $ python3 dev_tools/build_release.py --branch 0.90 --publish --remote origin\n\n By default this script runs in 'dry' mode which essentially simulates a release. If the\n '--publish' option is set the actual release is done. The script takes over almost all\n steps necessary for a release from a high level point of view it does the following things:\n\n  - run prerequisit checks ie. check for Java 1.7 being presend or S3 credentials available as env variables\n  - detect the version to release from the specified branch (--branch) or the current branch\n  - creates a release branch & updates pom.xml and Version.java to point to a release version rather than a snapshot\n  - builds the artifacts and runs smoke-tests on the build zip & tar.gz files\n  - commits the new version and merges the release branch into the source branch\n  - creates a tag and pushes the commit to the specified origin (--remote)\n  - publishes the releases to Sonatype and S3\n\nOnce it's done it will print all the remaining steps.\n\n Prerequisites:\n    - Python 3k for script execution\n    - Boto for S3 Upload ($ apt-get install python-boto)\n    - RPM for RPM building ($ apt-get install rpm)\n    - S3 keys exported via ENV Variables (AWS_ACCESS_KEY_ID,  AWS_SECRET_ACCESS_KEY)\n"
+" \n This tool builds a release from the a given elasticsearch branch.\n In order to execute it go in the top level directory and run:\n   $ python3 dev_tools/build_release.py --branch 0.90 --publish --remote origin\n\n By default this script runs in 'dry' mode which essentially simulates a release. If the\n '--publish' option is set the actual release is done. The script takes over almost all\n steps necessary for a release from a high level point of view it does the following things:\n\n  - run prerequisit checks ie. check for Java 1.7 being presend or S3 credentials available as env variables\n  - detect the version to release from the specified branch (--branch) or the current branch\n  - creates a release branch & updates pom.xml and Version.java to point to a release version rather than a snapshot\n  - builds the artifacts and runs smoke-tests on the build zip & tar.gz files\n  - commits the new version and merges the release branch into the source branch\n  - creates a tag and pushes the commit to the specified origin (--remote)\n  - publishes the releases to Sonatype and S3\n\nOnce it's done it will print all the remaining steps.\n\n Prerequisites:\n    - Python 3k for script execution\n    - Boto for S3 Upload ($ apt-get install python-boto)\n    - RPM for RPM building ($ apt-get install rpm)\n    - S3 keys exported via ENV variables (AWS_ACCESS_KEY_ID,  AWS_SECRET_ACCESS_KEY)\n    - GPG data exported via ENV variables (GPG_KEY_ID, GPG_PASSPHRASE, optionally GPG_KEYRING)\n    - S3 target repository via ENV variables (S3_BUCKET_SYNC_TO, optionally S3_BUCKET_SYNC_FROM)\n"
 env = os.environ
 PLUGINS = [('license', 'elasticsearch/license/latest'), ('bigdesk', 'lukas-vlcek/bigdesk'), ('paramedic', 'karmi/elasticsearch-paramedic'), ('segmentspy', 'polyfractal/elasticsearch-segmentspy'), ('inquisitor', 'polyfractal/elasticsearch-inquisitor'), ('head', 'mobz/elasticsearch-head')]
 LOG = env.get('ES_RELEASE_LOG', '/tmp/elasticsearch_release.log')
@@ -60,8 +60,14 @@ if (__name__ == '__main__'):
     smoke_test_version = args.smoke
     if os.path.exists(LOG):
         raise RuntimeError(('please remove old release log %s first' % LOG))
+    check_gpg_credentials()
+    check_command_exists('gpg', 'gpg --version')
+    check_command_exists('expect', 'expect -v')
     if (not dry_run):
         check_s3_credentials()
+        check_command_exists('createrepo', 'createrepo --version')
+        check_command_exists('s3cmd', 's3cmd --version')
+        check_command_exists('apt-ftparchive', 'apt-ftparchive --version')
         print 'WARNING: dryrun is set to "false" - this will push and publish the release'
         input('Press Enter to continue...')
     print ''.join(['-' for _ in range(80)])
@@ -116,6 +122,8 @@ if (__name__ == '__main__'):
             merge_tag_push(remote, src_branch, release_version, dry_run)
             print ('  publish artifacts to S3 -- dry_run: %s' % dry_run)
             publish_artifacts(artifacts_and_checksum, dry_run=dry_run)
+            print ('  Updating package repositories -- dry_run: %s' % dry_run)
+            publish_repositories(src_branch, dry_run=dry_run)
             cherry_pick_command = '.'
             if version_head_hash:
                 cherry_pick_command = (" and cherry-pick the documentation changes: 'git cherry-pick %s' to the development branch" % version_head_hash)

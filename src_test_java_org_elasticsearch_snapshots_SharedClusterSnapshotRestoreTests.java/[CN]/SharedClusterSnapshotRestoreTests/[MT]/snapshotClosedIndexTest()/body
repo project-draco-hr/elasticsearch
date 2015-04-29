@@ -1,7 +1,7 @@
 {
   Client client=client();
   logger.info("-->  creating repository");
-  assertAcked(client.admin().cluster().preparePutRepository("test-repo").setType("fs").setSettings(ImmutableSettings.settingsBuilder().put("location",newTempDirPath())));
+  assertAcked(client.admin().cluster().preparePutRepository("test-repo").setType("fs").setSettings(ImmutableSettings.settingsBuilder().put("location",createTempDir())));
   createIndex("test-idx","test-idx-closed");
   ensureGreen();
   logger.info("-->  closing index test-idx-closed");
@@ -13,6 +13,16 @@
   CreateSnapshotResponse createSnapshotResponse=client.admin().cluster().prepareCreateSnapshot("test-repo","test-snap").setWaitForCompletion(true).setIndices("test-idx*").get();
   assertThat(createSnapshotResponse.getSnapshotInfo().indices().size(),equalTo(1));
   assertThat(createSnapshotResponse.getSnapshotInfo().shardFailures().size(),equalTo(0));
+  logger.info("-->  deleting snapshot");
+  client.admin().cluster().prepareDeleteSnapshot("test-repo","test-snap").get();
+  logger.info("--> snapshot with closed index");
+  createSnapshotResponse=client.admin().cluster().prepareCreateSnapshot("test-repo","test-snap").setWaitForCompletion(true).setIndices("test-idx","test-idx-closed").get();
+  assertThat(createSnapshotResponse.getSnapshotInfo().indices().size(),equalTo(2));
+  assertThat(createSnapshotResponse.getSnapshotInfo().state(),equalTo(SnapshotState.FAILED));
+  assertThat(createSnapshotResponse.getSnapshotInfo().reason(),containsString("Indices are closed [test-idx-closed]"));
+  for (  SnapshotShardFailure failure : createSnapshotResponse.getSnapshotInfo().shardFailures()) {
+    assertThat(failure.reason(),containsString("index is closed"));
+  }
   logger.info("-->  deleting snapshot");
   client.admin().cluster().prepareDeleteSnapshot("test-repo","test-snap").get();
 }

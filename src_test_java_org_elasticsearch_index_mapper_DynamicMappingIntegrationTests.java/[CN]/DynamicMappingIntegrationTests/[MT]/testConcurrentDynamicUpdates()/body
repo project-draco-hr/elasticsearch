@@ -1,0 +1,37 @@
+{
+  createIndex("index");
+  final Thread[] indexThreads=new Thread[32];
+  final CountDownLatch startLatch=new CountDownLatch(1);
+  final AtomicReference<Throwable> error=new AtomicReference<>();
+  for (int i=0; i < indexThreads.length; ++i) {
+    final String id=Integer.toString(i);
+    indexThreads[i]=new Thread(new Runnable(){
+      @Override public void run(){
+        try {
+          startLatch.await();
+          assertTrue(client().prepareIndex("index","type",id).setSource("field" + id,"bar").get().isCreated());
+        }
+ catch (        Throwable t) {
+          error.compareAndSet(null,t);
+        }
+      }
+    }
+);
+    indexThreads[i].start();
+  }
+  startLatch.countDown();
+  for (  Thread thread : indexThreads) {
+    thread.join();
+  }
+  if (error.get() != null) {
+    throw error.get();
+  }
+  Thread.sleep(2000);
+  GetMappingsResponse mappings=client().admin().indices().prepareGetMappings("index").setTypes("type").get();
+  for (int i=0; i < indexThreads.length; ++i) {
+    assertMappingsHaveField(mappings,"index","type","field" + i);
+  }
+  for (int i=0; i < indexThreads.length; ++i) {
+    assertTrue(client().prepareGet("index","type",Integer.toString(i)).get().isExists());
+  }
+}

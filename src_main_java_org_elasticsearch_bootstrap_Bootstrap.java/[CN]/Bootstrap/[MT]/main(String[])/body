@@ -4,12 +4,11 @@
   final String pidFile=System.getProperty("es.pidfile",System.getProperty("es-pidfile"));
   if (pidFile != null) {
     try {
-      PidFile.create(Paths.get(pidFile),true);
+      PidFile.create(PathUtils.get(pidFile),true);
     }
  catch (    Exception e) {
       String errorMessage=buildErrorMessage("pid",e);
-      System.err.println(errorMessage);
-      System.err.flush();
+      sysError(errorMessage,true);
       System.exit(3);
     }
   }
@@ -17,22 +16,24 @@
   if (System.getProperty("wrapper.service","XXX").equalsIgnoreCase("true")) {
     foreground=false;
   }
-  Tuple<Settings,Environment> tuple=null;
+  Settings settings=null;
+  Environment environment=null;
   try {
-    tuple=initialSettings();
-    setupLogging(tuple);
+    Tuple<Settings,Environment> tuple=initialSettings();
+    settings=tuple.v1();
+    environment=tuple.v2();
+    setupLogging(settings,environment);
   }
  catch (  Exception e) {
     String errorMessage=buildErrorMessage("Setup",e);
-    System.err.println(errorMessage);
-    System.err.flush();
+    sysError(errorMessage,true);
     System.exit(3);
   }
   if (System.getProperty("es.max-open-files","false").equals("true")) {
     ESLogger logger=Loggers.getLogger(Bootstrap.class);
     logger.info("max_open_files [{}]",JmxProcessProbe.getMaxFileDescriptorCount());
   }
-  if (JvmInfo.jvmInfo().vmName().toLowerCase(Locale.ROOT).contains("client")) {
+  if (JvmInfo.jvmInfo().getVmName().toLowerCase(Locale.ROOT).contains("client")) {
     ESLogger logger=Loggers.getLogger(Bootstrap.class);
     logger.warn("jvm uses the client vm, make sure to run `java` with the server vm for best performance by adding `-server` to the command line");
   }
@@ -40,14 +41,14 @@
   try {
     if (!foreground) {
       Loggers.disableConsoleLogging();
-      System.out.close();
+      closeSystOut();
     }
     JVMCheck.check();
-    bootstrap.setup(true,tuple);
+    bootstrap.setup(true,settings,environment);
     stage="Startup";
     bootstrap.start();
     if (!foreground) {
-      System.err.close();
+      closeSysError();
     }
     keepAliveLatch=new CountDownLatch(1);
     Runtime.getRuntime().addShutdownHook(new Thread(){
@@ -76,8 +77,7 @@
     }
     String errorMessage=buildErrorMessage(stage,e);
     if (foreground) {
-      System.err.println(errorMessage);
-      System.err.flush();
+      sysError(errorMessage,true);
       Loggers.disableConsoleLogging();
     }
     logger.error("Exception",e);

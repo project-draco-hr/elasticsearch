@@ -1,0 +1,40 @@
+{
+  assertAcked(prepareCreate("test1").addMapping("test","value","type=long"));
+  assertAcked(prepareCreate("test2").addMapping("test","value","type=long"));
+  assertAcked(prepareCreate("test3").addMapping("test","value","type=long"));
+  ensureGreen("test1","test2","test3");
+  indexRange("test1",-10,100);
+  indexRange("test2",101,200);
+  indexRange("test3",201,300);
+  FieldStatsResponse response=client().prepareFieldStats().setFields("value").get();
+  assertAllSuccessful(response);
+  assertThat(response.getAllFieldStats().get("value").getMinValue(),equalTo(Long.toString(-10)));
+  assertThat(response.getAllFieldStats().get("value").getMaxValue(),equalTo(Long.toString(300)));
+  assertThat(response.getIndicesMergedFieldStats().size(),equalTo(1));
+  assertThat(response.getIndicesMergedFieldStats().get("_all").get("value").getMinValue(),equalTo(Long.toString(-10)));
+  assertThat(response.getIndicesMergedFieldStats().get("_all").get("value").getMaxValue(),equalTo(Long.toString(300)));
+  response=client().prepareFieldStats().setFields("value").setLevel("cluster").get();
+  assertAllSuccessful(response);
+  assertThat(response.getAllFieldStats().get("value").getMinValue(),equalTo(Long.toString(-10)));
+  assertThat(response.getAllFieldStats().get("value").getMaxValue(),equalTo(Long.toString(300)));
+  assertThat(response.getIndicesMergedFieldStats().size(),equalTo(1));
+  assertThat(response.getIndicesMergedFieldStats().get("_all").get("value").getMinValue(),equalTo(Long.toString(-10)));
+  assertThat(response.getIndicesMergedFieldStats().get("_all").get("value").getMaxValue(),equalTo(Long.toString(300)));
+  response=client().prepareFieldStats().setFields("value").setLevel("indices").get();
+  assertAllSuccessful(response);
+  assertThat(response.getAllFieldStats(),nullValue());
+  assertThat(response.getIndicesMergedFieldStats().size(),equalTo(3));
+  assertThat(response.getIndicesMergedFieldStats().get("test1").get("value").getMinValue(),equalTo(Long.toString(-10)));
+  assertThat(response.getIndicesMergedFieldStats().get("test1").get("value").getMaxValue(),equalTo(Long.toString(100)));
+  assertThat(response.getIndicesMergedFieldStats().get("test2").get("value").getMinValue(),equalTo(Long.toString(101)));
+  assertThat(response.getIndicesMergedFieldStats().get("test2").get("value").getMaxValue(),equalTo(Long.toString(200)));
+  assertThat(response.getIndicesMergedFieldStats().get("test3").get("value").getMinValue(),equalTo(Long.toString(201)));
+  assertThat(response.getIndicesMergedFieldStats().get("test3").get("value").getMaxValue(),equalTo(Long.toString(300)));
+  try {
+    client().prepareFieldStats().setFields("value").setLevel("illegal").get();
+    fail();
+  }
+ catch (  ActionRequestValidationException e) {
+    assertThat(e.getMessage(),equalTo("Validation Failed: 1: invalid level option [illegal];"));
+  }
+}

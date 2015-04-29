@@ -1,0 +1,26 @@
+{
+  logger.info("Setting up the index ...");
+  ImmutableSettings.Builder settings=settingsBuilder().put(indexSettings()).put("index.analysis.analyzer","keyword");
+  assertAcked(prepareCreate("test").setSettings(settings).addMapping("type1","tags","type=string"));
+  ensureYellow();
+  int numTerms=scaledRandomIntBetween(10,50);
+  logger.info("Indexing one document with tags of increasing length ...");
+  List<String> tags=new ArrayList<>();
+  for (int i=0; i < numTerms; i++) {
+    String tag="a";
+    for (int j=0; j < i; j++) {
+      tag+="a";
+    }
+    tags.add(tag);
+  }
+  indexRandom(true,client().prepareIndex("test","type1","1").setSource("tags",tags));
+  logger.info("Checking best tags by longest to shortest size ...");
+  TermVectorsRequest.FilterSettings filterSettings=new TermVectorsRequest.FilterSettings();
+  filterSettings.maxNumTerms=numTerms;
+  TermVectorsResponse response;
+  for (int i=0; i < numTerms; i++) {
+    filterSettings.minWordLength=numTerms - i;
+    response=client().prepareTermVectors("test","type1","1").setSelectedFields("tags").setFieldStatistics(true).setTermStatistics(true).setFilterSettings(filterSettings).get();
+    checkBestTerms(response.getFields().terms("tags"),tags.subList((numTerms - i - 1),numTerms));
+  }
+}

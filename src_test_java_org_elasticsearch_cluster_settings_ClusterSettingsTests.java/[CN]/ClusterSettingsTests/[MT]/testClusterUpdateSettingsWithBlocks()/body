@@ -1,0 +1,22 @@
+{
+  String key1="cluster.routing.allocation.enable";
+  Settings transientSettings=ImmutableSettings.builder().put(key1,false).build();
+  String key2="cluster.routing.allocation.node_concurrent_recoveries";
+  Settings persistentSettings=ImmutableSettings.builder().put(key2,"5").build();
+  ClusterUpdateSettingsRequestBuilder request=client().admin().cluster().prepareUpdateSettings().setTransientSettings(transientSettings).setPersistentSettings(persistentSettings);
+  try {
+    setClusterReadOnly(true);
+    assertBlocked(request,MetaData.CLUSTER_READ_ONLY_BLOCK);
+    Settings settings=settingsBuilder().put(MetaData.SETTING_READ_ONLY,false).build();
+    assertAcked(client().admin().cluster().prepareUpdateSettings().setTransientSettings(settings).get());
+  }
+  finally {
+    setClusterReadOnly(false);
+  }
+  ClusterUpdateSettingsResponse response=request.execute().actionGet();
+  assertAcked(response);
+  assertThat(response.getTransientSettings().get(key1),notNullValue());
+  assertThat(response.getTransientSettings().get(key2),nullValue());
+  assertThat(response.getPersistentSettings().get(key1),nullValue());
+  assertThat(response.getPersistentSettings().get(key2),notNullValue());
+}

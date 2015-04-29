@@ -3,8 +3,17 @@
   long size=0;
   int totalOperations=0;
   final List<Translog.Operation> operations=Lists.newArrayList();
-  Translog.Operation operation=snapshot.next();
+  Translog.Operation operation;
+  try {
+    operation=snapshot.next();
+  }
+ catch (  IOException ex) {
+    throw new ElasticsearchException("failed to get next operation from translog",ex);
+  }
   final TransportRequestOptions recoveryOptions=TransportRequestOptions.options().withCompress(recoverySettings.compress()).withType(TransportRequestOptions.Type.RECOVERY).withTimeout(recoverySettings.internalActionLongTimeout());
+  if (operation == null) {
+    logger.trace("[{}][{}] no translog operations to send to {}",indexName,shardId,request.targetNode());
+  }
   while (operation != null) {
     if (shard.state() == IndexShardState.CLOSED) {
       throw new IndexShardClosedException(request.shardId());
@@ -22,11 +31,19 @@
         }
       }
 );
+      if (logger.isTraceEnabled()) {
+        logger.trace("[{}][{}] sent batch of [{}][{}] (total: [{}]) translog operations to {}",indexName,shardId,ops,new ByteSizeValue(size),shard.translog().estimatedNumberOfOperations(),request.targetNode());
+      }
       ops=0;
       size=0;
       operations.clear();
     }
-    operation=snapshot.next();
+    try {
+      operation=snapshot.next();
+    }
+ catch (    IOException ex) {
+      throw new ElasticsearchException("failed to get next operation from translog",ex);
+    }
   }
   if (!operations.isEmpty()) {
     cancellableThreads.execute(new Interruptable(){
@@ -36,6 +53,9 @@
       }
     }
 );
+  }
+  if (logger.isTraceEnabled()) {
+    logger.trace("[{}][{}] sent final batch of [{}][{}] (total: [{}]) translog operations to {}",indexName,shardId,ops,new ByteSizeValue(size),shard.translog().estimatedNumberOfOperations(),request.targetNode());
   }
   return totalOperations;
 }
