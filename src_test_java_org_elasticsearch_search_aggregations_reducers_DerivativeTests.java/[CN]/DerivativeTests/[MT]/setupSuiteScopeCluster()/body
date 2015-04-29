@@ -1,0 +1,65 @@
+{
+  createIndex("idx");
+  createIndex("idx_unmapped");
+  interval=5;
+  numValueBuckets=randomIntBetween(6,80);
+  valueCounts=new long[numValueBuckets];
+  for (int i=0; i < numValueBuckets; i++) {
+    valueCounts[i]=randomIntBetween(1,20);
+  }
+  numFirstDerivValueBuckets=numValueBuckets - 1;
+  firstDerivValueCounts=new long[numFirstDerivValueBuckets];
+  Long lastValueCount=null;
+  for (int i=0; i < numValueBuckets; i++) {
+    long thisValue=valueCounts[i];
+    if (lastValueCount != null) {
+      long diff=thisValue - lastValueCount;
+      firstDerivValueCounts[i - 1]=diff;
+    }
+    lastValueCount=thisValue;
+  }
+  numSecondDerivValueBuckets=numFirstDerivValueBuckets - 1;
+  secondDerivValueCounts=new long[numSecondDerivValueBuckets];
+  Long lastFirstDerivativeValueCount=null;
+  for (int i=0; i < numFirstDerivValueBuckets; i++) {
+    long thisFirstDerivativeValue=firstDerivValueCounts[i];
+    if (lastFirstDerivativeValueCount != null) {
+      long diff=thisFirstDerivativeValue - lastFirstDerivativeValueCount;
+      secondDerivValueCounts[i - 1]=diff;
+    }
+    lastFirstDerivativeValueCount=thisFirstDerivativeValue;
+  }
+  List<IndexRequestBuilder> builders=new ArrayList<>();
+  for (int i=0; i < numValueBuckets; i++) {
+    for (int docs=0; docs < valueCounts[i]; docs++) {
+      builders.add(client().prepareIndex("idx","type").setSource(newDocBuilder(i * interval)));
+    }
+  }
+  valueCounts_empty=new Long[]{1l,1l,2l,0l,2l,2l,0l,0l,0l,3l,2l,1l};
+  firstDerivValueCounts_empty=new Double[]{null,0d,1d,-2d,2d,0d,-2d,0d,0d,3d,-1d,-1d};
+  assertAcked(prepareCreate("empty_bucket_idx").addMapping("type",SINGLE_VALUED_FIELD_NAME,"type=integer"));
+  for (int i=0; i < valueCounts_empty.length; i++) {
+    for (int docs=0; docs < valueCounts_empty[i]; docs++) {
+      builders.add(client().prepareIndex("empty_bucket_idx","type").setSource(newDocBuilder(i)));
+      numDocsEmptyIdx++;
+    }
+  }
+  numBuckets_empty_rnd=randomIntBetween(20,100);
+  valueCounts_empty_rnd=new Long[numBuckets_empty_rnd];
+  firstDerivValueCounts_empty_rnd=new Double[numBuckets_empty_rnd];
+  firstDerivValueCounts_empty_rnd[0]=null;
+  assertAcked(prepareCreate("empty_bucket_idx_rnd").addMapping("type",SINGLE_VALUED_FIELD_NAME,"type=integer"));
+  for (int i=0; i < numBuckets_empty_rnd; i++) {
+    valueCounts_empty_rnd[i]=(long)randomIntBetween(1,10);
+    if (randomBoolean())     valueCounts_empty_rnd[i]=0l;
+    for (int docs=0; docs < valueCounts_empty_rnd[i]; docs++) {
+      builders.add(client().prepareIndex("empty_bucket_idx_rnd","type").setSource(newDocBuilder(i)));
+      numDocsEmptyIdx_rnd++;
+    }
+    if (i > 0) {
+      firstDerivValueCounts_empty_rnd[i]=(double)valueCounts_empty_rnd[i] - valueCounts_empty_rnd[i - 1];
+    }
+  }
+  indexRandom(true,builders);
+  ensureSearchable();
+}
