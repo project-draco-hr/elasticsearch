@@ -1,46 +1,45 @@
 {
-  Set<String> relevantIndices=new HashSet<>();
   final ClusterState state=event.state();
   if (state.blocks().disableStatePersistence()) {
-    this.previousMetaData=null;
-    previouslyWrittenIndices=ImmutableSet.of();
+    this.currentMetaData=null;
     return;
   }
   MetaData newMetaData=state.metaData();
   boolean success=true;
-  if (state.nodes().localNode().masterNode() || state.nodes().localNode().dataNode()) {
-    if (previousMetaData == null || !MetaData.isGlobalStateEquals(previousMetaData,newMetaData)) {
+  if (state.nodes().localNode().masterNode()) {
+    if (currentMetaData == null || !MetaData.isGlobalStateEquals(currentMetaData,newMetaData)) {
       try {
         metaStateService.writeGlobalState("changed",newMetaData);
-        if (isDataOnlyNode(state)) {
-          ImmutableSet.Builder<String> previouslyWrittenIndicesBuilder=ImmutableSet.builder();
-          for (          IndexMetaData indexMetaData : newMetaData) {
-            IndexMetaData indexMetaDataOnDisk=null;
-            if (indexMetaData.state().equals(IndexMetaData.State.CLOSE)) {
-              try {
-                indexMetaDataOnDisk=metaStateService.loadIndexState(indexMetaData.index());
-              }
- catch (              IOException ex) {
-                throw new ElasticsearchException("failed to load index state",ex);
-              }
-            }
-            if (indexMetaDataOnDisk != null) {
-              previouslyWrittenIndicesBuilder.add(indexMetaDataOnDisk.index());
-            }
-          }
-          previouslyWrittenIndices=previouslyWrittenIndicesBuilder.addAll(previouslyWrittenIndices).build();
-        }
       }
  catch (      Throwable e) {
         success=false;
       }
     }
-    Iterable<IndexMetaWriteInfo> writeInfo;
-    relevantIndices=getRelevantIndices(event.state(),previouslyWrittenIndices);
-    writeInfo=resolveStatesToBeWritten(previouslyWrittenIndices,relevantIndices,previousMetaData,event.state().metaData());
-    for (    IndexMetaWriteInfo indexMetaWrite : writeInfo) {
+    for (    IndexMetaData indexMetaData : newMetaData) {
+      String writeReason=null;
+      IndexMetaData currentIndexMetaData;
+      if (currentMetaData == null) {
+        try {
+          currentIndexMetaData=metaStateService.loadIndexState(indexMetaData.index());
+        }
+ catch (        IOException ex) {
+          throw new ElasticsearchException("failed to load index state",ex);
+        }
+      }
+ else {
+        currentIndexMetaData=currentMetaData.index(indexMetaData.index());
+      }
+      if (currentIndexMetaData == null) {
+        writeReason="freshly created";
+      }
+ else       if (currentIndexMetaData.version() != indexMetaData.version()) {
+        writeReason="version changed from [" + currentIndexMetaData.version() + "] to ["+ indexMetaData.version()+ "]";
+      }
+      if (writeReason == null) {
+        continue;
+      }
       try {
-        metaStateService.writeIndex(indexMetaWrite.reason,indexMetaWrite.newMetaData,indexMetaWrite.previousMetaData);
+        metaStateService.writeIndex(writeReason,indexMetaData,currentIndexMetaData);
       }
  catch (      Throwable e) {
         success=false;
@@ -49,8 +48,6 @@
   }
   danglingIndicesState.processDanglingIndices(newMetaData);
   if (success) {
-    previousMetaData=newMetaData;
-    ImmutableSet.Builder<String> builder=ImmutableSet.builder();
-    previouslyWrittenIndices=builder.addAll(relevantIndices).build();
+    currentMetaData=newMetaData;
   }
 }
