@@ -1,0 +1,42 @@
+{
+  if (currentFieldName == null) {
+    throw new MapperParsingException("object mapping [" + mapper.name() + "] trying to serialize an object with no field associated with it, current value ["+ context.parser().textOrNull()+ "]");
+  }
+  context.path().add(currentFieldName);
+  ObjectMapper update=null;
+  Mapper objectMapper=mapper.getMapper(currentFieldName);
+  if (objectMapper != null) {
+    final Mapper subUpdate=parseObjectOrField(context,objectMapper);
+    if (subUpdate != null) {
+      update=mapper.mappingUpdate(subUpdate);
+    }
+  }
+ else {
+    ObjectMapper.Dynamic dynamic=mapper.dynamic();
+    if (dynamic == null) {
+      dynamic=dynamicOrDefault(context.root().dynamic());
+    }
+    if (dynamic == ObjectMapper.Dynamic.STRICT) {
+      throw new StrictDynamicMappingException(mapper.fullPath(),currentFieldName);
+    }
+ else     if (dynamic == ObjectMapper.Dynamic.TRUE) {
+      context.path().remove();
+      Mapper.Builder builder=context.root().findTemplateBuilder(context,currentFieldName,"object");
+      if (builder == null) {
+        builder=MapperBuilders.object(currentFieldName).enabled(true).pathType(mapper.pathType());
+        if (!(mapper instanceof RootObjectMapper) && mapper.dynamic() != ObjectMapper.Defaults.DYNAMIC) {
+          ((ObjectMapper.Builder)builder).dynamic(mapper.dynamic());
+        }
+      }
+      Mapper.BuilderContext builderContext=new Mapper.BuilderContext(context.indexSettings(),context.path());
+      objectMapper=builder.build(builderContext);
+      context.path().add(currentFieldName);
+      update=mapper.mappingUpdate(parseAndMergeUpdate(objectMapper,context));
+    }
+ else {
+      context.parser().skipChildren();
+    }
+  }
+  context.path().remove();
+  return update;
+}
