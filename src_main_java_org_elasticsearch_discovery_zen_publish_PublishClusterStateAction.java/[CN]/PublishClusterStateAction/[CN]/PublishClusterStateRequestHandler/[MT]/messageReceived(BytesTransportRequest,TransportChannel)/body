@@ -8,11 +8,24 @@
     in=request.bytes().streamInput();
   }
   in.setVersion(request.version());
-  ClusterState clusterState=ClusterState.Builder.readFrom(in,nodesProvider.nodes().localNode());
-  clusterState.status(ClusterState.ClusterStateStatus.RECEIVED);
-  logger.debug("received cluster state version {}",clusterState.version());
+synchronized (this) {
+    if (in.readBoolean()) {
+      lastSeenClusterState=ClusterState.Builder.readFrom(in,nodesProvider.nodes().localNode());
+      logger.debug("received full cluster state version {} with size {}",lastSeenClusterState.version(),request.bytes().length());
+    }
+ else     if (lastSeenClusterState != null) {
+      Diff<ClusterState> diff=lastSeenClusterState.readDiffFrom(in);
+      lastSeenClusterState=diff.apply(lastSeenClusterState);
+      logger.debug("received diff cluster state version {} with uuid {}, diff size {}",lastSeenClusterState.version(),lastSeenClusterState.uuid(),request.bytes().length());
+    }
+ else {
+      logger.debug("received diff for but don't have any local cluster state - requesting full state");
+      throw new IncompatibleClusterStateVersionException("have no local cluster state");
+    }
+    lastSeenClusterState.status(ClusterState.ClusterStateStatus.RECEIVED);
+  }
   try {
-    listener.onNewClusterState(clusterState,new NewClusterStateListener.NewStateProcessed(){
+    listener.onNewClusterState(lastSeenClusterState,new NewClusterStateListener.NewStateProcessed(){
       @Override public void onNewClusterStateProcessed(){
         try {
           channel.sendResponse(TransportResponse.Empty.INSTANCE);
@@ -33,7 +46,7 @@
 );
   }
  catch (  Exception e) {
-    logger.warn("unexpected error while processing cluster state version [{}]",e,clusterState.version());
+    logger.warn("unexpected error while processing cluster state version [{}]",e,lastSeenClusterState.version());
     try {
       channel.sendResponse(e);
     }

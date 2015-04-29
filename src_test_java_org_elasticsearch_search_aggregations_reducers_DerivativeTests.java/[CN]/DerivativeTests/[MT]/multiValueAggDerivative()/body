@@ -1,0 +1,35 @@
+{
+  SearchResponse response=client().prepareSearch("idx").addAggregation(histogram("histo").field(SINGLE_VALUED_FIELD_NAME).interval(interval).minDocCount(0).subAggregation(stats("stats").field(SINGLE_VALUED_FIELD_NAME)).subAggregation(derivative("deriv").setBucketsPaths("stats.sum"))).execute().actionGet();
+  assertSearchResponse(response);
+  InternalHistogram<Bucket> deriv=response.getAggregations().get("histo");
+  assertThat(deriv,notNullValue());
+  assertThat(deriv.getName(),equalTo("histo"));
+  assertThat(deriv.getBuckets().size(),equalTo(numValueBuckets));
+  Object[] propertiesKeys=(Object[])deriv.getProperty("_key");
+  Object[] propertiesDocCounts=(Object[])deriv.getProperty("_count");
+  Object[] propertiesSumCounts=(Object[])deriv.getProperty("stats.sum");
+  List<Bucket> buckets=new ArrayList<Bucket>(deriv.getBuckets());
+  Long expectedSumPreviousBucket=Long.MIN_VALUE;
+  for (int i=0; i < numValueBuckets; ++i) {
+    Histogram.Bucket bucket=buckets.get(i);
+    checkBucketKeyAndDocCount("Bucket " + i,bucket,i * interval,valueCounts[i]);
+    Stats stats=bucket.getAggregations().get("stats");
+    assertThat(stats,notNullValue());
+    long expectedSum=valueCounts[i] * (i * interval);
+    assertThat(stats.getSum(),equalTo((double)expectedSum));
+    SimpleValue sumDeriv=bucket.getAggregations().get("deriv");
+    if (i > 0) {
+      assertThat(sumDeriv,notNullValue());
+      long sumDerivValue=expectedSum - expectedSumPreviousBucket;
+      assertThat(sumDeriv.value(),equalTo((double)sumDerivValue));
+      assertThat((double)bucket.getProperty("histo",AggregationPath.parse("deriv.value").getPathElementsAsStringList()),equalTo((double)sumDerivValue));
+    }
+ else {
+      assertThat(sumDeriv,nullValue());
+    }
+    expectedSumPreviousBucket=expectedSum;
+    assertThat((long)propertiesKeys[i],equalTo((long)i * interval));
+    assertThat((long)propertiesDocCounts[i],equalTo(valueCounts[i]));
+    assertThat((double)propertiesSumCounts[i],equalTo((double)expectedSum));
+  }
+}

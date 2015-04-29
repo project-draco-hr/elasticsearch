@@ -1,0 +1,20 @@
+{
+  SearchResponse searchResponse=client().prepareSearch("empty_bucket_idx").setQuery(matchAllQuery()).addAggregation(histogram("histo").field(SINGLE_VALUED_FIELD_NAME).interval(1).minDocCount(0).subAggregation(derivative("deriv").setBucketsPaths("_count").gapPolicy(GapPolicy.INSERT_ZEROS))).execute().actionGet();
+  assertThat(searchResponse.getHits().getTotalHits(),equalTo(numDocsEmptyIdx));
+  InternalHistogram<Bucket> deriv=searchResponse.getAggregations().get("histo");
+  assertThat(deriv,Matchers.notNullValue());
+  assertThat(deriv.getName(),equalTo("histo"));
+  List<Bucket> buckets=deriv.getBuckets();
+  assertThat(buckets.size(),equalTo(valueCounts_empty.length));
+  for (int i=0; i < valueCounts_empty.length; i++) {
+    Histogram.Bucket bucket=buckets.get(i);
+    checkBucketKeyAndDocCount("Bucket " + i + ": ",bucket,i,valueCounts_empty[i]);
+    SimpleValue docCountDeriv=bucket.getAggregations().get("deriv");
+    if (firstDerivValueCounts_empty[i] == null) {
+      assertThat(docCountDeriv,nullValue());
+    }
+ else {
+      assertThat(docCountDeriv.value(),equalTo(firstDerivValueCounts_empty[i]));
+    }
+  }
+}
