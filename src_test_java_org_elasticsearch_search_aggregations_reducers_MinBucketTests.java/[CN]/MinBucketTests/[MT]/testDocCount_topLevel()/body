@@ -1,0 +1,30 @@
+{
+  SearchResponse response=client().prepareSearch("idx").addAggregation(histogram("histo").field(SINGLE_VALUED_FIELD_NAME).interval(interval).minDocCount(0).extendedBounds((long)minRandomValue,(long)maxRandomValue)).addAggregation(minBucket("min_bucket").setBucketsPaths("histo>_count")).execute().actionGet();
+  assertSearchResponse(response);
+  Histogram histo=response.getAggregations().get("histo");
+  assertThat(histo,notNullValue());
+  assertThat(histo.getName(),equalTo("histo"));
+  List<? extends Bucket> buckets=histo.getBuckets();
+  assertThat(buckets.size(),equalTo(numValueBuckets));
+  List<String> minKeys=new ArrayList<>();
+  double minValue=Double.POSITIVE_INFINITY;
+  for (int i=0; i < numValueBuckets; ++i) {
+    Histogram.Bucket bucket=buckets.get(i);
+    assertThat(bucket,notNullValue());
+    assertThat(((Number)bucket.getKey()).longValue(),equalTo((long)i * interval));
+    assertThat(bucket.getDocCount(),equalTo(valueCounts[i]));
+    if (bucket.getDocCount() < minValue) {
+      minValue=bucket.getDocCount();
+      minKeys=new ArrayList<>();
+      minKeys.add(bucket.getKeyAsString());
+    }
+ else     if (bucket.getDocCount() == minValue) {
+      minKeys.add(bucket.getKeyAsString());
+    }
+  }
+  InternalBucketMetricValue minBucketValue=response.getAggregations().get("min_bucket");
+  assertThat(minBucketValue,notNullValue());
+  assertThat(minBucketValue.getName(),equalTo("min_bucket"));
+  assertThat(minBucketValue.value(),equalTo(minValue));
+  assertThat(minBucketValue.keys(),equalTo(minKeys.toArray(new String[minKeys.size()])));
+}

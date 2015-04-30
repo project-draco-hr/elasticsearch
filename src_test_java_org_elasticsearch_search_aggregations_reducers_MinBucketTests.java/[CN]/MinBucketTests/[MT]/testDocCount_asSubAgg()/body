@@ -1,0 +1,38 @@
+{
+  SearchResponse response=client().prepareSearch("idx").addAggregation(terms("terms").field("tag").order(Order.term(true)).subAggregation(histogram("histo").field(SINGLE_VALUED_FIELD_NAME).interval(interval).minDocCount(0).extendedBounds((long)minRandomValue,(long)maxRandomValue)).subAggregation(minBucket("min_bucket").setBucketsPaths("histo>_count"))).execute().actionGet();
+  assertSearchResponse(response);
+  Terms terms=response.getAggregations().get("terms");
+  assertThat(terms,notNullValue());
+  assertThat(terms.getName(),equalTo("terms"));
+  List<Terms.Bucket> termsBuckets=terms.getBuckets();
+  assertThat(termsBuckets.size(),equalTo(interval));
+  for (int i=0; i < interval; ++i) {
+    Terms.Bucket termsBucket=termsBuckets.get(i);
+    assertThat(termsBucket,notNullValue());
+    assertThat((String)termsBucket.getKey(),equalTo("tag" + (i % interval)));
+    Histogram histo=termsBucket.getAggregations().get("histo");
+    assertThat(histo,notNullValue());
+    assertThat(histo.getName(),equalTo("histo"));
+    List<? extends Bucket> buckets=histo.getBuckets();
+    List<String> minKeys=new ArrayList<>();
+    double minValue=Double.POSITIVE_INFINITY;
+    for (int j=0; j < numValueBuckets; ++j) {
+      Histogram.Bucket bucket=buckets.get(j);
+      assertThat(bucket,notNullValue());
+      assertThat(((Number)bucket.getKey()).longValue(),equalTo((long)j * interval));
+      if (bucket.getDocCount() < minValue) {
+        minValue=bucket.getDocCount();
+        minKeys=new ArrayList<>();
+        minKeys.add(bucket.getKeyAsString());
+      }
+ else       if (bucket.getDocCount() == minValue) {
+        minKeys.add(bucket.getKeyAsString());
+      }
+    }
+    InternalBucketMetricValue minBucketValue=termsBucket.getAggregations().get("min_bucket");
+    assertThat(minBucketValue,notNullValue());
+    assertThat(minBucketValue.getName(),equalTo("min_bucket"));
+    assertThat(minBucketValue.value(),equalTo(minValue));
+    assertThat(minBucketValue.keys(),equalTo(minKeys.toArray(new String[minKeys.size()])));
+  }
+}
