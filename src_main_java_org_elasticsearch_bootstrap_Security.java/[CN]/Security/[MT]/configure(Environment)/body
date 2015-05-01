@@ -1,4 +1,5 @@
 {
+  ESLogger log=Loggers.getLogger(Security.class);
   StringHelper.randomId();
   InputStream config=Security.class.getResourceAsStream(POLICY_RESOURCE);
   if (config == null) {
@@ -6,17 +7,23 @@
   }
   Path newConfig=processTemplate(config,environment);
   System.setProperty("java.security.policy",newConfig.toString());
+  Policy policy=null;
   try {
-    Policy policy=Policy.getInstance("JavaPolicy",new URIParameter(newConfig.toUri()));
-    System.out.println(policy.getPermissions(Security.class.getProtectionDomain()));
+    policy=Policy.getInstance("JavaPolicy",new URIParameter(newConfig.toUri()));
   }
- catch (  NoSuchAlgorithmException e) {
-    throw new RuntimeException();
+ catch (  NoSuchAlgorithmException impossible) {
+    throw new RuntimeException(impossible);
   }
+  PermissionCollection permissions=policy.getPermissions(Security.class.getProtectionDomain());
+  log.trace("generated permissions: {}",permissions);
   System.setSecurityManager(new SecurityManager());
   try {
     Files.delete(newConfig);
   }
- catch (  IOException ignore) {
+ catch (  SecurityException broken) {
+    log.error("unable to properly access temporary files, permissions: {}",permissions);
+    throw broken;
+  }
+catch (  IOException ignore) {
   }
 }
