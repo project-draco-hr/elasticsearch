@@ -1,0 +1,30 @@
+{
+  final CountDownLatch latch=new CountDownLatch(1);
+  final AtomicReference<Throwable> failure=new AtomicReference<>();
+  final AtomicReference<String> threadName=new AtomicReference<>();
+  Client client=client();
+  IndexRequest request=new IndexRequest("test","type","1");
+  if (randomBoolean()) {
+    request.source("field1","value1");
+  }
+  client.index(request,new ActionListener<IndexResponse>(){
+    @Override public void onResponse(    IndexResponse indexResponse){
+      threadName.set(Thread.currentThread().getName());
+      latch.countDown();
+    }
+    @Override public void onFailure(    Throwable e){
+      threadName.set(Thread.currentThread().getName());
+      failure.set(e);
+      latch.countDown();
+    }
+  }
+);
+  latch.await();
+  boolean shouldBeThreaded=DiscoveryNode.clientNode(client.settings()) || TransportClient.CLIENT_TYPE.equals(client.settings().get(Client.CLIENT_TYPE_SETTING));
+  if (shouldBeThreaded) {
+    assertTrue(threadName.get().contains("listener"));
+  }
+ else {
+    assertFalse(threadName.get().contains("listener"));
+  }
+}
