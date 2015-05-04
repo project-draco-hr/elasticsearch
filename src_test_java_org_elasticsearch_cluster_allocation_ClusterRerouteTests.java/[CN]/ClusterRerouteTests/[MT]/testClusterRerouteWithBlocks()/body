@@ -1,0 +1,35 @@
+{
+  List<String> nodesIds=internalCluster().startNodesAsync(2).get();
+  logger.info("--> create an index with 1 shard and 0 replicas");
+  assertAcked(prepareCreate("test-blocks").setSettings(settingsBuilder().put("index.number_of_shards",1).put("index.number_of_replicas",0)));
+  ensureGreen("test-blocks");
+  logger.info("--> check that the index has 1 shard");
+  ClusterState state=client().admin().cluster().prepareState().execute().actionGet().getState();
+  List<ShardRouting> shards=state.routingTable().allShards("test-blocks");
+  assertThat(shards,hasSize(1));
+  logger.info("--> check that the shard is allocated");
+  ShardRouting shard=shards.get(0);
+  assertThat(shard.assignedToNode(),equalTo(true));
+  logger.info("--> retrieve the node where the shard is allocated");
+  DiscoveryNode node=state.nodes().resolveNode(shard.currentNodeId());
+  assertNotNull(node);
+  int toggle=nodesIds.indexOf(node.getName());
+  for (  String blockSetting : Arrays.asList(SETTING_BLOCKS_READ,SETTING_BLOCKS_WRITE,SETTING_READ_ONLY,SETTING_BLOCKS_METADATA)) {
+    try {
+      enableIndexBlock("test-blocks",blockSetting);
+      assertAcked(client().admin().cluster().prepareReroute().add(new MoveAllocationCommand(new ShardId("test-blocks",0),nodesIds.get(toggle % 2),nodesIds.get(++toggle % 2))));
+      ClusterHealthResponse healthResponse=client().admin().cluster().prepareHealth().setWaitForYellowStatus().setWaitForRelocatingShards(0).execute().actionGet();
+      assertThat(healthResponse.isTimedOut(),equalTo(false));
+    }
+  finally {
+      disableIndexBlock("test-blocks",blockSetting);
+    }
+  }
+  try {
+    setClusterReadOnly(true);
+    assertBlocked(client().admin().cluster().prepareReroute().add(new MoveAllocationCommand(new ShardId("test-blocks",1),nodesIds.get(toggle % 2),nodesIds.get(++toggle % 2))));
+  }
+  finally {
+    setClusterReadOnly(false);
+  }
+}

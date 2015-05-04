@@ -14,6 +14,7 @@
     assertThat(topDocs.totalHits,equalTo(numDocs));
   }
    engine.close();
+  boolean recoveredButFailed=false;
   final MockDirectoryWrapper directory=DirectoryUtils.getLeaf(store.directory(),MockDirectoryWrapper.class);
   if (directory != null) {
     directory.setPreventDoubleWrite(false);
@@ -30,7 +31,15 @@
         break;
       }
  catch (      EngineCreationFailureException ex) {
-      }
+        try (IndexReader reader=DirectoryReader.open(directory.getDelegate())){
+          if (reader.numDocs() == numDocs) {
+            recoveredButFailed=true;
+            break;
+          }
+ else {
+          }
+        }
+       }
     }
     directory.setRandomIOExceptionRateOnOpen(0.0);
     directory.setRandomIOExceptionRate(0.0);
@@ -47,6 +56,8 @@
     TopDocs topDocs=searcher.searcher().search(new MatchAllDocsQuery(),randomIntBetween(numDocs,numDocs + 10));
     assertThat(topDocs.totalHits,equalTo(numDocs));
   }
-   TranslogHandler parser=(TranslogHandler)engine.config().getTranslogRecoveryPerformer();
-  assertEquals(numDocs,parser.recoveredOps.get());
+   if (recoveredButFailed == false) {
+    TranslogHandler parser=(TranslogHandler)engine.config().getTranslogRecoveryPerformer();
+    assertEquals(numDocs,parser.recoveredOps.get());
+  }
 }

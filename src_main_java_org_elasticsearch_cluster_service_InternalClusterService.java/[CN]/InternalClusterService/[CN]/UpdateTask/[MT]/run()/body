@@ -11,34 +11,39 @@
     return;
   }
   ClusterState newClusterState;
+  long startTime=System.currentTimeMillis();
   try {
     newClusterState=updateTask.execute(previousClusterState);
   }
  catch (  Throwable e) {
+    TimeValue executionTime=TimeValue.timeValueMillis(Math.max(0,System.currentTimeMillis() - startTime));
     if (logger.isTraceEnabled()) {
-      StringBuilder sb=new StringBuilder("failed to execute cluster state update, state:\nversion [").append(previousClusterState.version()).append("], source [").append(source).append("]\n");
+      StringBuilder sb=new StringBuilder("failed to execute cluster state update in ").append(executionTime).append(", state:\nversion [").append(previousClusterState.version()).append("], source [").append(source).append("]\n");
       sb.append(previousClusterState.nodes().prettyPrint());
       sb.append(previousClusterState.routingTable().prettyPrint());
       sb.append(previousClusterState.readOnlyRoutingNodes().prettyPrint());
       logger.trace(sb.toString(),e);
     }
+    warnAboutSlowTaskIfNeeded(executionTime,source);
     updateTask.onFailure(source,e);
     return;
   }
   if (previousClusterState == newClusterState) {
-    logger.debug("processing [{}]: no change in cluster_state",source);
     if (updateTask instanceof AckedClusterStateUpdateTask) {
       ((AckedClusterStateUpdateTask)updateTask).onAllNodesAcked(null);
     }
     if (updateTask instanceof ProcessedClusterStateUpdateTask) {
       ((ProcessedClusterStateUpdateTask)updateTask).clusterStateProcessed(source,previousClusterState,newClusterState);
     }
+    TimeValue executionTime=TimeValue.timeValueMillis(Math.max(0,System.currentTimeMillis() - startTime));
+    logger.debug("processing [{}]: took {} no change in cluster_state",source,executionTime);
+    warnAboutSlowTaskIfNeeded(executionTime,source);
     return;
   }
   try {
     Discovery.AckListener ackListener=new NoOpAckListener();
     if (newClusterState.nodes().localNodeMaster()) {
-      Builder builder=ClusterState.builder(newClusterState).version(newClusterState.version() + 1);
+      Builder builder=ClusterState.builder(newClusterState).incrementVersion();
       if (previousClusterState.routingTable() != newClusterState.routingTable()) {
         builder.routingTable(RoutingTable.builder(newClusterState.routingTable()).version(newClusterState.routingTable().version() + 1));
       }
@@ -94,7 +99,7 @@
     }
     if (newClusterState.nodes().localNodeMaster()) {
       logger.debug("publishing cluster state version {}",newClusterState.version());
-      discoveryService.publish(newClusterState,ackListener);
+      discoveryService.publish(clusterChangedEvent,ackListener);
     }
     clusterState=newClusterState;
     logger.debug("set local cluster state to version {}",newClusterState.version());
@@ -134,10 +139,13 @@
     if (updateTask instanceof ProcessedClusterStateUpdateTask) {
       ((ProcessedClusterStateUpdateTask)updateTask).clusterStateProcessed(source,previousClusterState,newClusterState);
     }
-    logger.debug("processing [{}]: done applying updated cluster_state (version: {})",source,newClusterState.version());
+    TimeValue executionTime=TimeValue.timeValueMillis(Math.max(0,System.currentTimeMillis() - startTime));
+    logger.debug("processing [{}]: took {} done applying updated cluster_state (version: {}, uuid: {})",source,executionTime,newClusterState.version(),newClusterState.uuid());
+    warnAboutSlowTaskIfNeeded(executionTime,source);
   }
  catch (  Throwable t) {
-    StringBuilder sb=new StringBuilder("failed to apply updated cluster state:\nversion [").append(newClusterState.version()).append("], source [").append(source).append("]\n");
+    TimeValue executionTime=TimeValue.timeValueMillis(Math.max(0,System.currentTimeMillis() - startTime));
+    StringBuilder sb=new StringBuilder("failed to apply updated cluster state in ").append(executionTime).append(":\nversion [").append(newClusterState.version()).append("], uuid [").append(newClusterState.uuid()).append("], source [").append(source).append("]\n");
     sb.append(newClusterState.nodes().prettyPrint());
     sb.append(newClusterState.routingTable().prettyPrint());
     sb.append(newClusterState.readOnlyRoutingNodes().prettyPrint());

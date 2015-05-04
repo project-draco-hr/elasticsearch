@@ -1,5 +1,4 @@
 {
-  ensureNotDeleteByQuery(NAME,parseContext);
   XContentParser parser=parseContext.parser();
   boolean queryFound=false;
   boolean filterFound=false;
@@ -17,6 +16,8 @@
     if (token == XContentParser.Token.FIELD_NAME) {
       currentFieldName=parser.currentName();
     }
+ else     if (parseContext.isDeprecatedSetting(currentFieldName)) {
+    }
  else     if (token == XContentParser.Token.START_OBJECT) {
       if ("query".equals(currentFieldName)) {
         innerQuery=new XContentStructure.InnerQuery(parseContext,childType == null ? null : new String[]{childType});
@@ -30,7 +31,7 @@
         innerHits=innerHitsQueryParserHelper.parse(parseContext);
       }
  else {
-        throw new QueryParsingException(parseContext.index(),"[has_child] filter does not support [" + currentFieldName + "]");
+        throw new QueryParsingException(parseContext,"[has_child] filter does not support [" + currentFieldName + "]");
       }
     }
  else     if (token.isValue()) {
@@ -39,10 +40,6 @@
       }
  else       if ("_name".equals(currentFieldName)) {
         filterName=parser.text();
-      }
- else       if ("_cache".equals(currentFieldName)) {
-      }
- else       if ("_cache_key".equals(currentFieldName) || "_cacheKey".equals(currentFieldName)) {
       }
  else       if ("short_circuit_cutoff".equals(currentFieldName)) {
         shortCircuitParentDocSet=parser.intValue();
@@ -54,15 +51,15 @@
         maxChildren=parser.intValue(true);
       }
  else {
-        throw new QueryParsingException(parseContext.index(),"[has_child] filter does not support [" + currentFieldName + "]");
+        throw new QueryParsingException(parseContext,"[has_child] filter does not support [" + currentFieldName + "]");
       }
     }
   }
   if (!queryFound && !filterFound) {
-    throw new QueryParsingException(parseContext.index(),"[has_child] filter requires 'query' or 'filter' field");
+    throw new QueryParsingException(parseContext,"[has_child] filter requires 'query' or 'filter' field");
   }
   if (childType == null) {
-    throw new QueryParsingException(parseContext.index(),"[has_child] filter requires 'type' field");
+    throw new QueryParsingException(parseContext,"[has_child] filter requires 'type' field");
   }
   Query query;
   if (queryFound) {
@@ -76,7 +73,7 @@
   }
   DocumentMapper childDocMapper=parseContext.mapperService().documentMapper(childType);
   if (childDocMapper == null) {
-    throw new QueryParsingException(parseContext.index(),"No mapping for for type [" + childType + "]");
+    throw new QueryParsingException(parseContext,"No mapping for for type [" + childType + "]");
   }
   if (innerHits != null) {
     InnerHitsContext.ParentChildInnerHits parentChildInnerHits=new InnerHitsContext.ParentChildInnerHits(innerHits.v2(),query,null,childDocMapper);
@@ -85,22 +82,22 @@
   }
   ParentFieldMapper parentFieldMapper=childDocMapper.parentFieldMapper();
   if (!parentFieldMapper.active()) {
-    throw new QueryParsingException(parseContext.index(),"Type [" + childType + "] does not have parent mapping");
+    throw new QueryParsingException(parseContext,"Type [" + childType + "] does not have parent mapping");
   }
   String parentType=parentFieldMapper.type();
-  query=new FilteredQuery(query,parseContext.cacheFilter(childDocMapper.typeFilter(),null,parseContext.autoFilterCachePolicy()));
+  query=new FilteredQuery(query,childDocMapper.typeFilter());
   DocumentMapper parentDocMapper=parseContext.mapperService().documentMapper(parentType);
   if (parentDocMapper == null) {
-    throw new QueryParsingException(parseContext.index(),"[has_child]  Type [" + childType + "] points to a non existent parent type ["+ parentType+ "]");
+    throw new QueryParsingException(parseContext,"[has_child]  Type [" + childType + "] points to a non existent parent type ["+ parentType+ "]");
   }
   if (maxChildren > 0 && maxChildren < minChildren) {
-    throw new QueryParsingException(parseContext.index(),"[has_child] 'max_children' is less than 'min_children'");
+    throw new QueryParsingException(parseContext,"[has_child] 'max_children' is less than 'min_children'");
   }
   BitDocIdSetFilter nonNestedDocsFilter=null;
   if (parentDocMapper.hasNestedObjects()) {
-    nonNestedDocsFilter=parseContext.bitsetFilter(NonNestedDocsFilter.INSTANCE);
+    nonNestedDocsFilter=parseContext.bitsetFilter(Queries.newNonNestedFilter());
   }
-  Filter parentFilter=parseContext.cacheFilter(parentDocMapper.typeFilter(),null,parseContext.autoFilterCachePolicy());
+  Filter parentFilter=parentDocMapper.typeFilter();
   ParentChildIndexFieldData parentChildIndexFieldData=parseContext.getForField(parentFieldMapper);
   Query childrenQuery;
   if (minChildren > 1 || maxChildren > 0) {
@@ -110,7 +107,7 @@
     childrenQuery=new ChildrenConstantScoreQuery(parentChildIndexFieldData,query,parentType,childType,parentFilter,shortCircuitParentDocSet,nonNestedDocsFilter);
   }
   if (filterName != null) {
-    parseContext.addNamedFilter(filterName,new CustomQueryWrappingFilter(childrenQuery));
+    parseContext.addNamedFilter(filterName,new QueryWrapperFilter(childrenQuery));
   }
-  return new CustomQueryWrappingFilter(childrenQuery);
+  return new QueryWrapperFilter(childrenQuery);
 }

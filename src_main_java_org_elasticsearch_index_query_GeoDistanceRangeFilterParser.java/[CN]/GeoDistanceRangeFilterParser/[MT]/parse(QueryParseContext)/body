@@ -1,8 +1,6 @@
 {
   XContentParser parser=parseContext.parser();
   XContentParser.Token token;
-  QueryCachingPolicy cache=parseContext.autoFilterCachePolicy();
-  HashedBytesRef cacheKey=null;
   String filterName=null;
   String currentFieldName=null;
   GeoPoint point=new GeoPoint();
@@ -19,6 +17,8 @@
   while ((token=parser.nextToken()) != XContentParser.Token.END_OBJECT) {
     if (token == XContentParser.Token.FIELD_NAME) {
       currentFieldName=parser.currentName();
+    }
+ else     if (parseContext.isDeprecatedSetting(currentFieldName)) {
     }
  else     if (token == XContentParser.Token.START_ARRAY) {
       GeoUtils.parseGeoPoint(parser,point);
@@ -120,12 +120,6 @@
  else       if ("_name".equals(currentFieldName)) {
         filterName=parser.text();
       }
- else       if ("_cache".equals(currentFieldName)) {
-        cache=parseContext.parseFilterCachePolicy();
-      }
- else       if ("_cache_key".equals(currentFieldName) || "_cacheKey".equals(currentFieldName)) {
-        cacheKey=new HashedBytesRef(parser.text());
-      }
  else       if ("optimize_bbox".equals(currentFieldName) || "optimizeBbox".equals(currentFieldName)) {
         optimizeBbox=parser.textOrNull();
       }
@@ -164,18 +158,15 @@
   }
   MapperService.SmartNameFieldMappers smartMappers=parseContext.smartFieldMappers(fieldName);
   if (smartMappers == null || !smartMappers.hasMapper()) {
-    throw new QueryParsingException(parseContext.index(),"failed to find geo_point field [" + fieldName + "]");
+    throw new QueryParsingException(parseContext,"failed to find geo_point field [" + fieldName + "]");
   }
   FieldMapper<?> mapper=smartMappers.mapper();
   if (!(mapper instanceof GeoPointFieldMapper)) {
-    throw new QueryParsingException(parseContext.index(),"field [" + fieldName + "] is not a geo_point field");
+    throw new QueryParsingException(parseContext,"field [" + fieldName + "] is not a geo_point field");
   }
   GeoPointFieldMapper geoMapper=((GeoPointFieldMapper)mapper);
   IndexGeoPointFieldData indexFieldData=parseContext.getForField(mapper);
   Filter filter=new GeoDistanceRangeFilter(point,from,to,includeLower,includeUpper,geoDistance,geoMapper,indexFieldData,optimizeBbox);
-  if (cache != null) {
-    filter=parseContext.cacheFilter(filter,cacheKey,cache);
-  }
   if (filterName != null) {
     parseContext.addNamedFilter(filterName,filter);
   }

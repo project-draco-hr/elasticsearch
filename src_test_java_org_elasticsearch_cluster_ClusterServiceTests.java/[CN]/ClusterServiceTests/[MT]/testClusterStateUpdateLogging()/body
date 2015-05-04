@@ -1,0 +1,67 @@
+{
+  Settings settings=settingsBuilder().put("discovery.type","local").build();
+  internalCluster().startNode(settings);
+  ClusterService clusterService1=internalCluster().getInstance(ClusterService.class);
+  MockLogAppender mockAppender=new MockLogAppender();
+  mockAppender.addExpectation(new MockLogAppender.SeenEventExpectation("test1","cluster.service",Level.DEBUG,"*processing [test1]: took * no change in cluster_state"));
+  mockAppender.addExpectation(new MockLogAppender.SeenEventExpectation("test2","cluster.service",Level.TRACE,"*failed to execute cluster state update in *"));
+  mockAppender.addExpectation(new MockLogAppender.SeenEventExpectation("test3","cluster.service",Level.DEBUG,"*processing [test3]: took * done applying updated cluster_state (version: *, uuid: *)"));
+  Logger rootLogger=Logger.getRootLogger();
+  rootLogger.addAppender(mockAppender);
+  try {
+    final CountDownLatch latch=new CountDownLatch(4);
+    clusterService1.submitStateUpdateTask("test1",new ProcessedClusterStateUpdateTask(){
+      @Override public ClusterState execute(      ClusterState currentState) throws Exception {
+        return currentState;
+      }
+      @Override public void clusterStateProcessed(      String source,      ClusterState oldState,      ClusterState newState){
+        latch.countDown();
+      }
+      @Override public void onFailure(      String source,      Throwable t){
+        fail();
+      }
+    }
+);
+    clusterService1.submitStateUpdateTask("test2",new ProcessedClusterStateUpdateTask(){
+      @Override public ClusterState execute(      ClusterState currentState){
+        throw new IllegalArgumentException("Testing handling of exceptions in the cluster state task");
+      }
+      @Override public void clusterStateProcessed(      String source,      ClusterState oldState,      ClusterState newState){
+        fail();
+      }
+      @Override public void onFailure(      String source,      Throwable t){
+        latch.countDown();
+      }
+    }
+);
+    clusterService1.submitStateUpdateTask("test3",new ProcessedClusterStateUpdateTask(){
+      @Override public ClusterState execute(      ClusterState currentState){
+        return ClusterState.builder(currentState).incrementVersion().build();
+      }
+      @Override public void clusterStateProcessed(      String source,      ClusterState oldState,      ClusterState newState){
+        latch.countDown();
+      }
+      @Override public void onFailure(      String source,      Throwable t){
+        fail();
+      }
+    }
+);
+    clusterService1.submitStateUpdateTask("test4",new ProcessedClusterStateUpdateTask(){
+      @Override public ClusterState execute(      ClusterState currentState){
+        return currentState;
+      }
+      @Override public void clusterStateProcessed(      String source,      ClusterState oldState,      ClusterState newState){
+        latch.countDown();
+      }
+      @Override public void onFailure(      String source,      Throwable t){
+        fail();
+      }
+    }
+);
+    assertThat(latch.await(1,TimeUnit.SECONDS),equalTo(true));
+  }
+  finally {
+    rootLogger.removeAppender(mockAppender);
+  }
+  mockAppender.assertAllExpectationsMatched();
+}

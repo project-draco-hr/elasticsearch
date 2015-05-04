@@ -4,8 +4,6 @@
   String geohash=null;
   int levels=-1;
   boolean neighbors=false;
-  QueryCachingPolicy cache=parseContext.autoFilterCachePolicy();
-  HashedBytesRef cacheKey=null;
   XContentParser.Token token;
   if ((token=parser.currentToken()) != Token.START_OBJECT) {
     throw new ElasticsearchParseException(NAME + " must be an object");
@@ -13,7 +11,9 @@
   while ((token=parser.nextToken()) != Token.END_OBJECT) {
     if (token == Token.FIELD_NAME) {
       String field=parser.text();
-      if (PRECISION.equals(field)) {
+      if (parseContext.isDeprecatedSetting(field)) {
+      }
+ else       if (PRECISION.equals(field)) {
         token=parser.nextToken();
         if (token == Token.VALUE_NUMBER) {
           levels=parser.intValue();
@@ -26,14 +26,6 @@
  else       if (NEIGHBORS.equals(field)) {
         parser.nextToken();
         neighbors=parser.booleanValue();
-      }
- else       if (CACHE.equals(field)) {
-        parser.nextToken();
-        cache=parseContext.parseFilterCachePolicy();
-      }
- else       if (CACHE_KEY.equals(field)) {
-        parser.nextToken();
-        cacheKey=new HashedBytesRef(parser.text());
       }
  else {
         fieldName=field;
@@ -57,19 +49,19 @@
     }
   }
   if (geohash == null) {
-    throw new QueryParsingException(parseContext.index(),"no geohash value provided to geohash_cell filter");
+    throw new QueryParsingException(parseContext,"no geohash value provided to geohash_cell filter");
   }
   MapperService.SmartNameFieldMappers smartMappers=parseContext.smartFieldMappers(fieldName);
   if (smartMappers == null || !smartMappers.hasMapper()) {
-    throw new QueryParsingException(parseContext.index(),"failed to find geo_point field [" + fieldName + "]");
+    throw new QueryParsingException(parseContext,"failed to find geo_point field [" + fieldName + "]");
   }
   FieldMapper<?> mapper=smartMappers.mapper();
   if (!(mapper instanceof GeoPointFieldMapper)) {
-    throw new QueryParsingException(parseContext.index(),"field [" + fieldName + "] is not a geo_point field");
+    throw new QueryParsingException(parseContext,"field [" + fieldName + "] is not a geo_point field");
   }
   GeoPointFieldMapper geoMapper=((GeoPointFieldMapper)mapper);
   if (!geoMapper.isEnableGeohashPrefix()) {
-    throw new QueryParsingException(parseContext.index(),"can't execute geohash_cell on field [" + fieldName + "], geohash_prefix is not enabled");
+    throw new QueryParsingException(parseContext,"can't execute geohash_cell on field [" + fieldName + "], geohash_prefix is not enabled");
   }
   if (levels > 0) {
     int len=Math.min(levels,geohash.length());
@@ -81,9 +73,6 @@
   }
  else {
     filter=create(parseContext,geoMapper,geohash,null);
-  }
-  if (cache != null) {
-    filter=parseContext.cacheFilter(filter,cacheKey,cache);
   }
   return filter;
 }

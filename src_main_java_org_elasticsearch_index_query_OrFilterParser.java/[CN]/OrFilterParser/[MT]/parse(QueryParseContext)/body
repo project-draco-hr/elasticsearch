@@ -2,8 +2,6 @@
   XContentParser parser=parseContext.parser();
   ArrayList<Filter> filters=newArrayList();
   boolean filtersFound=false;
-  QueryCachingPolicy cache=parseContext.autoFilterCachePolicy();
-  HashedBytesRef cacheKey=null;
   String filterName=null;
   String currentFieldName=null;
   XContentParser.Token token=parser.currentToken();
@@ -42,23 +40,17 @@
         }
       }
  else       if (token.isValue()) {
-        if ("_cache".equals(currentFieldName)) {
-          cache=parseContext.parseFilterCachePolicy();
-        }
- else         if ("_name".equals(currentFieldName)) {
+        if ("_name".equals(currentFieldName)) {
           filterName=parser.text();
         }
- else         if ("_cache_key".equals(currentFieldName) || "_cacheKey".equals(currentFieldName)) {
-          cacheKey=new HashedBytesRef(parser.text());
-        }
  else {
-          throw new QueryParsingException(parseContext.index(),"[or] filter does not support [" + currentFieldName + "]");
+          throw new QueryParsingException(parseContext,"[or] filter does not support [" + currentFieldName + "]");
         }
       }
     }
   }
   if (!filtersFound) {
-    throw new QueryParsingException(parseContext.index(),"[or] filter requires 'filters' to be set on it'");
+    throw new QueryParsingException(parseContext,"[or] filter requires 'filters' to be set on it'");
   }
   if (filters.isEmpty()) {
     return null;
@@ -67,10 +59,7 @@
   for (  Filter filter : filters) {
     boolQuery.add(filter,Occur.SHOULD);
   }
-  Filter filter=Queries.wrap(boolQuery);
-  if (cache != null) {
-    filter=parseContext.cacheFilter(filter,cacheKey,cache);
-  }
+  Filter filter=new QueryWrapperFilter(boolQuery);
   if (filterName != null) {
     parseContext.addNamedFilter(filterName,filter);
   }

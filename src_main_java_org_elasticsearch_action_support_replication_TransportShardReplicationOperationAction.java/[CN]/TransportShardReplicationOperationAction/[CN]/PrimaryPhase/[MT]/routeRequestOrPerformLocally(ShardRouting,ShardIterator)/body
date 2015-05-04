@@ -1,0 +1,53 @@
+{
+  if (primary.currentNodeId().equals(observer.observedState().nodes().localNodeId())) {
+    try {
+      if (internalRequest.request().operationThreaded()) {
+        threadPool.executor(executor).execute(new AbstractRunnable(){
+          @Override public void onFailure(          Throwable t){
+            finishAsFailed(t);
+          }
+          @Override protected void doRun() throws Exception {
+            performOnPrimary(primary,shardsIt);
+          }
+        }
+);
+      }
+ else {
+        performOnPrimary(primary,shardsIt);
+      }
+    }
+ catch (    Throwable t) {
+      finishAsFailed(t);
+    }
+  }
+ else {
+    DiscoveryNode node=observer.observedState().nodes().get(primary.currentNodeId());
+    transportService.sendRequest(node,actionName,internalRequest.request(),transportOptions,new BaseTransportResponseHandler<Response>(){
+      @Override public Response newInstance(){
+        return newResponseInstance();
+      }
+      @Override public String executor(){
+        return ThreadPool.Names.SAME;
+      }
+      @Override public void handleResponse(      Response response){
+        finishOnRemoteSuccess(response);
+      }
+      @Override public void handleException(      TransportException exp){
+        try {
+          if (exp.unwrapCause() instanceof ConnectTransportException || exp.unwrapCause() instanceof NodeClosedException || retryPrimaryException(exp)) {
+            internalRequest.request().setCanHaveDuplicates();
+            logger.trace("received an error from node the primary was assigned to ({}), scheduling a retry",exp.getMessage());
+            retry(exp);
+          }
+ else {
+            finishAsFailed(exp);
+          }
+        }
+ catch (        Throwable t) {
+          finishWithUnexpectedFailure(t);
+        }
+      }
+    }
+);
+  }
+}

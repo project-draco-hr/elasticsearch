@@ -1,0 +1,27 @@
+{
+  int numPredictions=randomIntBetween(1,10);
+  SearchResponse response=client().prepareSearch("idx").setTypes("gap_type").addAggregation(filter("filtered").filter(new RangeFilterBuilder(INTERVAL_FIELD).from(1)).subAggregation(histogram("histo").field(INTERVAL_FIELD).interval(1).extendedBounds(0L,49L).subAggregation(randomMetric("the_metric",GAP_FIELD)).subAggregation(movingAvg("movavg_values").window(windowSize).modelBuilder(randomModelBuilder()).gapPolicy(gapPolicy).setBucketsPaths("the_metric").predict(numPredictions)))).execute().actionGet();
+  assertSearchResponse(response);
+  InternalFilter filtered=response.getAggregations().get("filtered");
+  assertThat(filtered,notNullValue());
+  assertThat(filtered.getName(),equalTo("filtered"));
+  InternalHistogram<Bucket> histo=filtered.getAggregations().get("histo");
+  assertThat(histo,notNullValue());
+  assertThat(histo.getName(),equalTo("histo"));
+  List<? extends Bucket> buckets=histo.getBuckets();
+  assertThat("Size of buckets array is not correct.",buckets.size(),equalTo(50 + numPredictions));
+  double lastValue=0;
+  double currentValue;
+  for (int i=0; i < 50; i++) {
+    SimpleValue current=buckets.get(i).getAggregations().get("movavg_values");
+    if (current != null) {
+      currentValue=current.value();
+      assertThat(Double.compare(lastValue,currentValue),lessThanOrEqualTo(0));
+      lastValue=currentValue;
+    }
+  }
+  for (int i=50; i < 50 + numPredictions; i++) {
+    assertThat((buckets.get(i).getAggregations().get("movavg_values")),notNullValue());
+    assertThat((buckets.get(i).getAggregations().get("the_metric")),nullValue());
+  }
+}

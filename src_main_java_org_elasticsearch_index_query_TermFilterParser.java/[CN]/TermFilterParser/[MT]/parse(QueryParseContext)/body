@@ -1,7 +1,5 @@
 {
   XContentParser parser=parseContext.parser();
-  QueryCachingPolicy cache=parseContext.autoFilterCachePolicy();
-  HashedBytesRef cacheKey=null;
   String fieldName=null;
   Object value=null;
   String filterName=null;
@@ -10,6 +8,8 @@
   while ((token=parser.nextToken()) != XContentParser.Token.END_OBJECT) {
     if (token == XContentParser.Token.FIELD_NAME) {
       currentFieldName=parser.currentName();
+    }
+ else     if (parseContext.isDeprecatedSetting(currentFieldName)) {
     }
  else     if (token == XContentParser.Token.START_OBJECT) {
       fieldName=currentFieldName;
@@ -27,14 +27,8 @@
  else           if ("_name".equals(currentFieldName)) {
             filterName=parser.text();
           }
- else           if ("_cache".equals(currentFieldName)) {
-            cache=parseContext.parseFilterCachePolicy();
-          }
- else           if ("_cache_key".equals(currentFieldName) || "_cacheKey".equals(currentFieldName)) {
-            cacheKey=new HashedBytesRef(parser.text());
-          }
  else {
-            throw new QueryParsingException(parseContext.index(),"[term] filter does not support [" + currentFieldName + "]");
+            throw new QueryParsingException(parseContext,"[term] filter does not support [" + currentFieldName + "]");
           }
         }
       }
@@ -43,12 +37,6 @@
       if ("_name".equals(currentFieldName)) {
         filterName=parser.text();
       }
- else       if ("_cache".equals(currentFieldName)) {
-        cache=parseContext.parseFilterCachePolicy();
-      }
- else       if ("_cache_key".equals(currentFieldName) || "_cacheKey".equals(currentFieldName)) {
-        cacheKey=new HashedBytesRef(parser.text());
-      }
  else {
         fieldName=currentFieldName;
         value=parser.objectBytes();
@@ -56,10 +44,10 @@
     }
   }
   if (fieldName == null) {
-    throw new QueryParsingException(parseContext.index(),"No field specified for term filter");
+    throw new QueryParsingException(parseContext,"No field specified for term filter");
   }
   if (value == null) {
-    throw new QueryParsingException(parseContext.index(),"No value specified for term filter");
+    throw new QueryParsingException(parseContext,"No value specified for term filter");
   }
   Filter filter=null;
   MapperService.SmartNameFieldMappers smartNameFieldMappers=parseContext.smartFieldMappers(fieldName);
@@ -67,10 +55,7 @@
     filter=smartNameFieldMappers.mapper().termFilter(value,parseContext);
   }
   if (filter == null) {
-    filter=Queries.wrap(new TermQuery(new Term(fieldName,BytesRefs.toBytesRef(value))));
-  }
-  if (cache != null) {
-    filter=parseContext.cacheFilter(filter,cacheKey,cache);
+    filter=new QueryWrapperFilter(new TermQuery(new Term(fieldName,BytesRefs.toBytesRef(value))));
   }
   if (filterName != null) {
     parseContext.addNamedFilter(filterName,filter);

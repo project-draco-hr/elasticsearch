@@ -2,8 +2,6 @@
   XContentParser parser=parseContext.parser();
   ScriptParameterParser scriptParameterParser=new ScriptParameterParser();
   XContentParser.Token token;
-  QueryCachingPolicy cache=parseContext.autoFilterCachePolicy();
-  HashedBytesRef cacheKey=null;
   String script=null;
   String scriptLang;
   Map<String,Object> params=null;
@@ -14,26 +12,22 @@
     if (token == XContentParser.Token.FIELD_NAME) {
       currentFieldName=parser.currentName();
     }
+ else     if (parseContext.isDeprecatedSetting(currentFieldName)) {
+    }
  else     if (token == XContentParser.Token.START_OBJECT) {
       if ("params".equals(currentFieldName)) {
         params=parser.map();
       }
  else {
-        throw new QueryParsingException(parseContext.index(),"[script] filter does not support [" + currentFieldName + "]");
+        throw new QueryParsingException(parseContext,"[script] filter does not support [" + currentFieldName + "]");
       }
     }
  else     if (token.isValue()) {
       if ("_name".equals(currentFieldName)) {
         filterName=parser.text();
       }
- else       if ("_cache".equals(currentFieldName)) {
-        cache=parseContext.parseFilterCachePolicy();
-      }
- else       if ("_cache_key".equals(currentFieldName) || "_cacheKey".equals(currentFieldName)) {
-        cacheKey=new HashedBytesRef(parser.text());
-      }
  else       if (!scriptParameterParser.token(currentFieldName,token,parser)) {
-        throw new QueryParsingException(parseContext.index(),"[script] filter does not support [" + currentFieldName + "]");
+        throw new QueryParsingException(parseContext,"[script] filter does not support [" + currentFieldName + "]");
       }
     }
   }
@@ -44,15 +38,12 @@
   }
   scriptLang=scriptParameterParser.lang();
   if (script == null) {
-    throw new QueryParsingException(parseContext.index(),"script must be provided with a [script] filter");
+    throw new QueryParsingException(parseContext,"script must be provided with a [script] filter");
   }
   if (params == null) {
     params=newHashMap();
   }
   Filter filter=new ScriptFilter(scriptLang,script,scriptType,params,parseContext.scriptService(),parseContext.lookup());
-  if (cache != null) {
-    filter=parseContext.cacheFilter(filter,cacheKey,cache);
-  }
   if (filterName != null) {
     parseContext.addNamedFilter(filterName,filter);
   }
