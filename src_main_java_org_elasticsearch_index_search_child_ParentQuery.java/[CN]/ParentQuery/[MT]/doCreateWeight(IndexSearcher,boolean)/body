@@ -1,0 +1,29 @@
+{
+  SearchContext sc=SearchContext.current();
+  ChildWeight childWeight;
+  boolean releaseCollectorResource=true;
+  ParentOrdAndScoreCollector collector=null;
+  IndexParentChildFieldData globalIfd=parentChildIndexFieldData.loadGlobal(searcher.getIndexReader());
+  if (globalIfd == null) {
+    return new BooleanQuery().createWeight(searcher,needsScores);
+  }
+  try {
+    collector=new ParentOrdAndScoreCollector(sc,globalIfd,parentType);
+    IndexSearcher indexSearcher=new IndexSearcher(sc.searcher().getIndexReader());
+    indexSearcher.setSimilarity(searcher.getSimilarity());
+    indexSearcher.setQueryCache(null);
+    indexSearcher.search(parentQuery,collector);
+    if (collector.parentCount() == 0) {
+      return new BooleanQuery().createWeight(searcher,needsScores);
+    }
+    childWeight=new ChildWeight(this,parentQuery.createWeight(searcher,needsScores),childrenFilter,collector,globalIfd);
+    releaseCollectorResource=false;
+  }
+  finally {
+    if (releaseCollectorResource) {
+      Releasables.close(collector);
+    }
+  }
+  sc.addReleasable(collector,Lifetime.COLLECTION);
+  return childWeight;
+}
