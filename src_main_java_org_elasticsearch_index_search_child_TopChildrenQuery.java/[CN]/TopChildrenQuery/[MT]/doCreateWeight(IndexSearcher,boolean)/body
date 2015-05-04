@@ -1,0 +1,36 @@
+{
+  ObjectObjectOpenHashMap<Object,ParentDoc[]> parentDocs=new ObjectObjectOpenHashMap<>();
+  SearchContext searchContext=SearchContext.current();
+  int parentHitsResolved;
+  int requestedDocs=(searchContext.from() + searchContext.size());
+  if (requestedDocs <= 0) {
+    requestedDocs=1;
+  }
+  int numChildDocs=requestedDocs * factor;
+  IndexSearcher indexSearcher=new IndexSearcher(searcher.getIndexReader());
+  indexSearcher.setSimilarity(searcher.getSimilarity());
+  indexSearcher.setQueryCache(null);
+  while (true) {
+    parentDocs.clear();
+    TopDocs topChildDocs=indexSearcher.search(childQuery,numChildDocs);
+    try {
+      parentHitsResolved=resolveParentDocuments(topChildDocs,searchContext,parentDocs);
+    }
+ catch (    Exception e) {
+      throw new IOException(e);
+    }
+    if (parentHitsResolved >= requestedDocs) {
+      break;
+    }
+    if (topChildDocs.totalHits <= numChildDocs) {
+      break;
+    }
+    numChildDocs*=incrementalFactor;
+    if (numChildDocs > topChildDocs.totalHits) {
+      numChildDocs=topChildDocs.totalHits;
+    }
+  }
+  ParentWeight parentWeight=new ParentWeight(this,childQuery.createWeight(searcher,needsScores),parentDocs);
+  searchContext.addReleasable(parentWeight,Lifetime.COLLECTION);
+  return parentWeight;
+}

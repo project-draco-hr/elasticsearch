@@ -1,0 +1,51 @@
+{
+  if (scorer == null) {
+    return new Bits.MatchNoBits(maxDoc);
+  }
+  final TwoPhaseIterator twoPhase=scorer.asTwoPhaseIterator();
+  final DocIdSetIterator iterator;
+  if (twoPhase == null) {
+    iterator=scorer;
+  }
+ else {
+    iterator=twoPhase.approximation();
+  }
+  return new Bits(){
+    int previous=-1;
+    boolean previousMatched=false;
+    @Override public boolean get(    int index){
+      if (index < 0 || index >= maxDoc) {
+        throw new IndexOutOfBoundsException(index + " is out of bounds: [" + 0+ "-"+ maxDoc+ "[");
+      }
+      if (index < previous) {
+        throw new IllegalArgumentException("This Bits instance can only be consumed in order. " + "Got called on [" + index + "] while previously called on ["+ previous+ "]");
+      }
+      if (index == previous) {
+        return previousMatched;
+      }
+      previous=index;
+      int doc=iterator.docID();
+      if (doc < index) {
+        try {
+          doc=iterator.advance(index);
+        }
+ catch (        IOException e) {
+          throw new IllegalStateException("Cannot advance iterator",e);
+        }
+      }
+      if (index == doc) {
+        try {
+          return previousMatched=twoPhase == null || twoPhase.matches();
+        }
+ catch (        IOException e) {
+          throw new IllegalStateException("Cannot validate match",e);
+        }
+      }
+      return previousMatched=false;
+    }
+    @Override public int length(){
+      return maxDoc;
+    }
+  }
+;
+}
