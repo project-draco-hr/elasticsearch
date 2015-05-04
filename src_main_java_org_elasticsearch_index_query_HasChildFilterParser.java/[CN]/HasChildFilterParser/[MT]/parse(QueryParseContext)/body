@@ -16,6 +16,8 @@
     if (token == XContentParser.Token.FIELD_NAME) {
       currentFieldName=parser.currentName();
     }
+ else     if (parseContext.isDeprecatedSetting(currentFieldName)) {
+    }
  else     if (token == XContentParser.Token.START_OBJECT) {
       if ("query".equals(currentFieldName)) {
         innerQuery=new XContentStructure.InnerQuery(parseContext,childType == null ? null : new String[]{childType});
@@ -38,10 +40,6 @@
       }
  else       if ("_name".equals(currentFieldName)) {
         filterName=parser.text();
-      }
- else       if ("_cache".equals(currentFieldName)) {
-      }
- else       if ("_cache_key".equals(currentFieldName) || "_cacheKey".equals(currentFieldName)) {
       }
  else       if ("short_circuit_cutoff".equals(currentFieldName)) {
         shortCircuitParentDocSet=parser.intValue();
@@ -87,7 +85,7 @@
     throw new QueryParsingException(parseContext,"Type [" + childType + "] does not have parent mapping");
   }
   String parentType=parentFieldMapper.type();
-  query=new FilteredQuery(query,parseContext.cacheFilter(childDocMapper.typeFilter(),null,parseContext.autoFilterCachePolicy()));
+  query=new FilteredQuery(query,childDocMapper.typeFilter());
   DocumentMapper parentDocMapper=parseContext.mapperService().documentMapper(parentType);
   if (parentDocMapper == null) {
     throw new QueryParsingException(parseContext,"[has_child]  Type [" + childType + "] points to a non existent parent type ["+ parentType+ "]");
@@ -99,7 +97,7 @@
   if (parentDocMapper.hasNestedObjects()) {
     nonNestedDocsFilter=parseContext.bitsetFilter(Queries.newNonNestedFilter());
   }
-  Filter parentFilter=parseContext.cacheFilter(parentDocMapper.typeFilter(),null,parseContext.autoFilterCachePolicy());
+  Filter parentFilter=parentDocMapper.typeFilter();
   ParentChildIndexFieldData parentChildIndexFieldData=parseContext.getForField(parentFieldMapper);
   Query childrenQuery;
   if (minChildren > 1 || maxChildren > 0) {
@@ -109,7 +107,7 @@
     childrenQuery=new ChildrenConstantScoreQuery(parentChildIndexFieldData,query,parentType,childType,parentFilter,shortCircuitParentDocSet,nonNestedDocsFilter);
   }
   if (filterName != null) {
-    parseContext.addNamedFilter(filterName,new CustomQueryWrappingFilter(childrenQuery));
+    parseContext.addNamedFilter(filterName,new QueryWrapperFilter(childrenQuery));
   }
-  return new CustomQueryWrappingFilter(childrenQuery);
+  return new QueryWrapperFilter(childrenQuery);
 }

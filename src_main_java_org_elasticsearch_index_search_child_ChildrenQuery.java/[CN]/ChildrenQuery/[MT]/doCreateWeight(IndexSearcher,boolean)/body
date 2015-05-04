@@ -1,0 +1,67 @@
+{
+  SearchContext sc=SearchContext.current();
+  IndexParentChildFieldData globalIfd=ifd.loadGlobal(searcher.getIndexReader());
+  if (globalIfd == null) {
+    return new BooleanQuery().createWeight(searcher,needsScores);
+  }
+  IndexSearcher indexSearcher=new IndexSearcher(searcher.getIndexReader());
+  indexSearcher.setSimilarity(searcher.getSimilarity());
+  indexSearcher.setQueryCache(null);
+  boolean abort=true;
+  long numFoundParents;
+  ParentCollector collector=null;
+  try {
+    if (minChildren == 0 && maxChildren == 0 && scoreType != ScoreType.NONE) {
+switch (scoreType) {
+case MIN:
+        collector=new MinCollector(globalIfd,sc,parentType);
+      break;
+case MAX:
+    collector=new MaxCollector(globalIfd,sc,parentType);
+  break;
+case SUM:
+collector=new SumCollector(globalIfd,sc,parentType);
+break;
+}
+}
+if (collector == null) {
+switch (scoreType) {
+case MIN:
+collector=new MinCountCollector(globalIfd,sc,parentType);
+break;
+case MAX:
+collector=new MaxCountCollector(globalIfd,sc,parentType);
+break;
+case SUM:
+case AVG:
+collector=new SumCountAndAvgCollector(globalIfd,sc,parentType);
+break;
+case NONE:
+collector=new CountCollector(globalIfd,sc,parentType);
+break;
+default :
+throw new RuntimeException("Are we missing a score type here? -- " + scoreType);
+}
+}
+indexSearcher.search(childQuery,collector);
+numFoundParents=collector.foundParents();
+if (numFoundParents == 0) {
+return new BooleanQuery().createWeight(searcher,needsScores);
+}
+abort=false;
+}
+  finally {
+if (abort) {
+Releasables.close(collector);
+}
+}
+sc.addReleasable(collector,Lifetime.COLLECTION);
+final Filter parentFilter;
+if (numFoundParents <= shortCircuitParentDocSet) {
+parentFilter=ParentIdsFilter.createShortCircuitFilter(nonNestedDocsFilter,sc,parentType,collector.values,collector.parentIdxs,numFoundParents);
+}
+ else {
+parentFilter=this.parentFilter;
+}
+return new ParentWeight(this,childQuery.createWeight(searcher,needsScores),parentFilter,numFoundParents,collector,minChildren,maxChildren);
+}
