@@ -1,19 +1,20 @@
 {
-  rwl.readLock().lock();
-  try {
-    FsTranslogFile translog=translogForLocation(location);
-    if (translog != null) {
-      byte[] data=translog.read(location);
-      try (BytesStreamInput in=new BytesStreamInput(data)){
-        return translog.getStream().read(in);
+  try (ReleasableLock lock=readLock.acquire()){
+    FsChannelReader reader=null;
+    if (current.translogId() == location.translogId) {
+      reader=current;
+    }
+ else {
+      for (      FsChannelReader translog : uncommittedTranslogs) {
+        if (translog.translogId() == location.translogId) {
+          reader=translog;
+          break;
+        }
       }
-     }
-    return null;
+    }
+    return reader == null ? null : reader.read(location);
   }
  catch (  IOException e) {
     throw new ElasticsearchException("failed to read source from translog location " + location,e);
-  }
- finally {
-    rwl.readLock().unlock();
   }
 }

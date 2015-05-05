@@ -1,0 +1,53 @@
+{
+  SearchResponse response=client().prepareSearch("idx").addAggregation(terms("terms").field("tag").order(Order.term(true)).subAggregation(histogram("histo").field(SINGLE_VALUED_FIELD_NAME).interval(interval).extendedBounds((long)minRandomValue,(long)maxRandomValue)).subAggregation(minBucket("min_histo_bucket").setBucketsPaths("histo>_count"))).addAggregation(minBucket("min_terms_bucket").setBucketsPaths("terms>min_histo_bucket")).execute().actionGet();
+  assertSearchResponse(response);
+  Terms terms=response.getAggregations().get("terms");
+  assertThat(terms,notNullValue());
+  assertThat(terms.getName(),equalTo("terms"));
+  List<Terms.Bucket> termsBuckets=terms.getBuckets();
+  assertThat(termsBuckets.size(),equalTo(interval));
+  List<String> minTermsKeys=new ArrayList<>();
+  double minTermsValue=Double.POSITIVE_INFINITY;
+  for (int i=0; i < interval; ++i) {
+    Terms.Bucket termsBucket=termsBuckets.get(i);
+    assertThat(termsBucket,notNullValue());
+    assertThat((String)termsBucket.getKey(),equalTo("tag" + (i % interval)));
+    Histogram histo=termsBucket.getAggregations().get("histo");
+    assertThat(histo,notNullValue());
+    assertThat(histo.getName(),equalTo("histo"));
+    List<? extends Bucket> buckets=histo.getBuckets();
+    List<String> minHistoKeys=new ArrayList<>();
+    double minHistoValue=Double.POSITIVE_INFINITY;
+    for (int j=0; j < numValueBuckets; ++j) {
+      Histogram.Bucket bucket=buckets.get(j);
+      assertThat(bucket,notNullValue());
+      assertThat(((Number)bucket.getKey()).longValue(),equalTo((long)j * interval));
+      if (bucket.getDocCount() < minHistoValue) {
+        minHistoValue=bucket.getDocCount();
+        minHistoKeys=new ArrayList<>();
+        minHistoKeys.add(bucket.getKeyAsString());
+      }
+ else       if (bucket.getDocCount() == minHistoValue) {
+        minHistoKeys.add(bucket.getKeyAsString());
+      }
+    }
+    InternalBucketMetricValue minBucketValue=termsBucket.getAggregations().get("min_histo_bucket");
+    assertThat(minBucketValue,notNullValue());
+    assertThat(minBucketValue.getName(),equalTo("min_histo_bucket"));
+    assertThat(minBucketValue.value(),equalTo(minHistoValue));
+    assertThat(minBucketValue.keys(),equalTo(minHistoKeys.toArray(new String[minHistoKeys.size()])));
+    if (minHistoValue < minTermsValue) {
+      minTermsValue=minHistoValue;
+      minTermsKeys=new ArrayList<>();
+      minTermsKeys.add(termsBucket.getKeyAsString());
+    }
+ else     if (minHistoValue == minTermsValue) {
+      minTermsKeys.add(termsBucket.getKeyAsString());
+    }
+  }
+  InternalBucketMetricValue minBucketValue=response.getAggregations().get("min_terms_bucket");
+  assertThat(minBucketValue,notNullValue());
+  assertThat(minBucketValue.getName(),equalTo("min_terms_bucket"));
+  assertThat(minBucketValue.value(),equalTo(minTermsValue));
+  assertThat(minBucketValue.keys(),equalTo(minTermsKeys.toArray(new String[minTermsKeys.size()])));
+}

@@ -1,16 +1,11 @@
 {
   ensureOpen();
-  if (commitTranslog) {
-    if (onGoingRecoveries.get() > 0) {
-      throw new FlushNotAllowedEngineException(shardId,"recovery is in progress, flush with committing translog is not allowed");
-    }
-  }
   try (ReleasableLock lock=readLock.acquire()){
     ensureOpen();
     updateIndexWriterSettings();
     if (flushLock.tryLock() == false) {
       if (waitIfOngoing) {
-        logger.trace("waiting fore in-flight flush to finish");
+        logger.trace("waiting for in-flight flush to finish");
         flushLock.lock();
         logger.trace("acquired flush lock after blocking");
       }
@@ -23,38 +18,26 @@
     }
     try {
       if (commitTranslog) {
-        if (onGoingRecoveries.get() > 0) {
-          throw new FlushNotAllowedEngineException(shardId,"Recovery is in progress, flush is not allowed");
-        }
         if (flushNeeded || force) {
           flushNeeded=false;
+          final long translogId;
           try {
-            long translogId=translogIdGenerator.incrementAndGet();
-            translog.newTransientTranslog(translogId);
-            indexWriter.setCommitData(Collections.singletonMap(Translog.TRANSLOG_ID_KEY,Long.toString(translogId)));
+            translogId=translog.newTranslog();
             logger.trace("starting commit for flush; commitTranslog=true");
-            commitIndexWriter(indexWriter);
+            commitIndexWriter(indexWriter,translogId);
             logger.trace("finished commit for flush");
             refresh("version_table_flush");
-            translog.makeTransientCurrent();
+            translog.markCommitted(translogId);
           }
  catch (          Throwable e) {
-            try {
-              translog.revertTransient();
-            }
- catch (            IOException ex) {
-              e.addSuppressed(ex);
-            }
             throw new FlushFailedEngineException(shardId,e);
           }
         }
       }
  else {
         try {
-          long translogId=translog.currentId();
-          indexWriter.setCommitData(Collections.singletonMap(Translog.TRANSLOG_ID_KEY,Long.toString(translogId)));
           logger.trace("starting commit for flush; commitTranslog=false");
-          commitIndexWriter(indexWriter);
+          commitIndexWriter(indexWriter,translog.currentId());
           logger.trace("finished commit for flush");
         }
  catch (        Throwable e) {

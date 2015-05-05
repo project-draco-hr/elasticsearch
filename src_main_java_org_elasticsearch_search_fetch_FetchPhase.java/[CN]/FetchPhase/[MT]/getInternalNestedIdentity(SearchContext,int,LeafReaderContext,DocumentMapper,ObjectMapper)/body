@@ -1,37 +1,53 @@
 {
   int currentParent=nestedSubDocId;
   ObjectMapper nestedParentObjectMapper;
+  StringBuilder field=new StringBuilder();
+  ObjectMapper current=nestedObjectMapper;
   InternalSearchHit.InternalNestedIdentity nestedIdentity=null;
   do {
-    String field;
     Filter parentFilter;
-    nestedParentObjectMapper=documentMapper.findParentObjectMapper(nestedObjectMapper);
+    nestedParentObjectMapper=documentMapper.findParentObjectMapper(current);
+    if (field.length() != 0) {
+      field.insert(0,'.');
+    }
+    field.insert(0,current.name());
     if (nestedParentObjectMapper != null) {
-      field=nestedObjectMapper.name();
-      if (!nestedParentObjectMapper.nested().isNested()) {
-        nestedObjectMapper=nestedParentObjectMapper;
-        nestedIdentity=new InternalSearchHit.InternalNestedIdentity(field,0,nestedIdentity);
+      if (nestedParentObjectMapper.nested().isNested() == false) {
+        current=nestedParentObjectMapper;
         continue;
       }
       parentFilter=nestedParentObjectMapper.nestedTypeFilter();
     }
  else {
-      field=nestedObjectMapper.fullPath();
       parentFilter=Queries.newNonNestedFilter();
+    }
+    Filter childFilter=nestedObjectMapper.nestedTypeFilter();
+    if (childFilter == null) {
+      current=nestedParentObjectMapper;
+      continue;
+    }
+    DocIdSet childDocSet=childFilter.getDocIdSet(subReaderContext,null);
+    if (childDocSet == null) {
+      current=nestedParentObjectMapper;
+      continue;
+    }
+    DocIdSetIterator childIter=childDocSet.iterator();
+    if (childIter == null) {
+      current=nestedParentObjectMapper;
+      continue;
     }
     BitDocIdSet parentBitSet=context.bitsetFilterCache().getBitDocIdSetFilter(parentFilter).getDocIdSet(subReaderContext);
     BitSet parentBits=parentBitSet.bits();
     int offset=0;
-    BitDocIdSet nestedDocsBitSet=context.bitsetFilterCache().getBitDocIdSetFilter(nestedObjectMapper.nestedTypeFilter()).getDocIdSet(subReaderContext);
-    BitSet nestedBits=nestedDocsBitSet.bits();
     int nextParent=parentBits.nextSetBit(currentParent);
-    for (int docId=nestedBits.nextSetBit(currentParent + 1); docId < nextParent && docId != DocIdSetIterator.NO_MORE_DOCS; docId=nestedBits.nextSetBit(docId + 1)) {
+    for (int docId=childIter.advance(currentParent + 1); docId < nextParent && docId != DocIdSetIterator.NO_MORE_DOCS; docId=childIter.nextDoc()) {
       offset++;
     }
     currentParent=nextParent;
-    nestedObjectMapper=nestedParentObjectMapper;
-    nestedIdentity=new InternalSearchHit.InternalNestedIdentity(field,offset,nestedIdentity);
+    current=nestedObjectMapper=nestedParentObjectMapper;
+    nestedIdentity=new InternalSearchHit.InternalNestedIdentity(field.toString(),offset,nestedIdentity);
+    field=new StringBuilder();
   }
- while (nestedParentObjectMapper != null);
+ while (current != null);
   return nestedIdentity;
 }
