@@ -1,0 +1,23 @@
+{
+  if (shard.state() == IndexShardState.CLOSED) {
+    throw new IndexShardClosedException(request.shardId());
+  }
+  cancellableThreads.checkForCancel();
+  StopWatch stopWatch=new StopWatch().start();
+  logger.trace("[{}][{}] finalizing recovery to {}",indexName,shardId,request.targetNode());
+  cancellableThreads.execute(new Interruptable(){
+    @Override public void run() throws InterruptedException {
+      transportService.submitRequest(request.targetNode(),RecoveryTarget.Actions.FINALIZE,new RecoveryFinalizeRecoveryRequest(request.recoveryId(),request.shardId()),TransportRequestOptions.options().withTimeout(recoverySettings.internalActionLongTimeout()),EmptyTransportResponseHandler.INSTANCE_SAME).txGet();
+    }
+  }
+);
+  if (request.markAsRelocated()) {
+    try {
+      shard.relocated("to " + request.targetNode());
+    }
+ catch (    IllegalIndexShardStateException e) {
+    }
+  }
+  stopWatch.stop();
+  logger.trace("[{}][{}] finalizing recovery to {}: took [{}]",indexName,shardId,request.targetNode(),stopWatch.totalTime());
+}

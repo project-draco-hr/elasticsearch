@@ -1,0 +1,147 @@
+{
+  final Thread[] writers=new Thread[randomIntBetween(1,10)];
+  final Thread[] readers=new Thread[randomIntBetween(1,10)];
+  final int flushEveryOps=randomIntBetween(5,100);
+  final AtomicReference<CountDownLatch> writtenOpsLatch=new AtomicReference<>(new CountDownLatch(0));
+  final AtomicLong idGenerator=new AtomicLong();
+  final CyclicBarrier barrier=new CyclicBarrier(writers.length + readers.length + 1);
+  final Map<Translog.Operation,Translog.Location> writtenOps=ConcurrentCollections.newConcurrentMap();
+  final AtomicBoolean run=new AtomicBoolean(true);
+  final List<Throwable> errors=new CopyOnWriteArrayList<>();
+  logger.debug("using [{}] readers. [{}] writers. flushing every ~[{}] ops.",readers.length,writers.length,flushEveryOps);
+  for (int i=0; i < writers.length; i++) {
+    final String threadId="writer_" + i;
+    writers[i]=new Thread(new AbstractRunnable(){
+      @Override public void doRun() throws BrokenBarrierException, InterruptedException {
+        barrier.await();
+        int counter=0;
+        while (run.get()) {
+          long id=idGenerator.incrementAndGet();
+          final Translog.Operation op;
+switch (Translog.Operation.Type.values()[((int)(id % Translog.Operation.Type.values().length))]) {
+case CREATE:
+            op=new Translog.Create("type","" + id,new byte[]{(byte)id});
+          break;
+case SAVE:
+        op=new Translog.Index("type","" + id,new byte[]{(byte)id});
+      break;
+case DELETE:
+    op=new Translog.Delete(newUid("" + id));
+  break;
+case DELETE_BY_QUERY:
+continue;
+default :
+throw new ElasticsearchException("unknown type");
+}
+Translog.Location location=translog.add(op);
+Translog.Location existing=writtenOps.put(op,location);
+if (existing != null) {
+fail("duplicate op [" + op + "], old entry at "+ location);
+}
+writtenOpsLatch.get().countDown();
+counter++;
+}
+logger.debug("--> [{}] done. wrote [{}] ops.",threadId,counter);
+}
+@Override public void onFailure(Throwable t){
+logger.error("--> writer [{}] had an error",t,threadId);
+errors.add(t);
+}
+}
+,threadId);
+writers[i].start();
+}
+for (int i=0; i < readers.length; i++) {
+final String threadId="reader_" + i;
+readers[i]=new Thread(new AbstractRunnable(){
+Translog.View view=null;
+Set<Translog.Operation> writtenOpsAtView;
+@Override public void onFailure(Throwable t){
+logger.error("--> reader [{}] had an error",t,threadId);
+errors.add(t);
+closeView();
+}
+void closeView(){
+if (view != null) {
+view.close();
+}
+}
+void newView(){
+closeView();
+view=translog.newView();
+writtenOpsAtView=new HashSet<>(writtenOps.keySet());
+logger.debug("--> [{}] opened view from [{}]",threadId,view.minTranslogId());
+}
+@Override protected void doRun() throws Exception {
+barrier.await();
+int iter=0;
+while (run.get()) {
+if (iter++ % 10 == 0) {
+newView();
+}
+Set<Translog.Operation> expectedOps=new HashSet<>(writtenOps.keySet());
+expectedOps.removeAll(writtenOpsAtView);
+try (Translog.Snapshot snapshot=view.snapshot()){
+Translog.Operation op;
+while ((op=snapshot.next()) != null) {
+expectedOps.remove(op);
+}
+}
+ if (expectedOps.isEmpty() == false) {
+StringBuilder missed=new StringBuilder("missed ").append(expectedOps.size()).append(" operations");
+boolean failed=false;
+for (Translog.Operation op : expectedOps) {
+final Translog.Location loc=writtenOps.get(op);
+if (loc.translogId < view.minTranslogId()) {
+continue;
+}
+failed=true;
+missed.append("\n --> [").append(op).append("] written at ").append(loc);
+}
+if (failed) {
+fail(missed.toString());
+}
+}
+writtenOpsLatch.get().await(200,TimeUnit.MILLISECONDS);
+}
+closeView();
+logger.debug("--> [{}] done. tested [{}] snapshots",threadId,iter);
+}
+}
+,threadId);
+readers[i].start();
+}
+barrier.await();
+try {
+long previousId=translog.currentId();
+for (int iterations=scaledRandomIntBetween(10,200); iterations > 0 && errors.isEmpty(); iterations--) {
+writtenOpsLatch.set(new CountDownLatch(flushEveryOps));
+while (writtenOpsLatch.get().await(200,TimeUnit.MILLISECONDS) == false) {
+if (errors.size() > 0) {
+break;
+}
+}
+long newId=translog.newTranslog();
+translog.markCommitted(previousId);
+previousId=newId;
+}
+}
+  finally {
+run.set(false);
+logger.debug("--> waiting for threads to stop");
+for (Thread thread : writers) {
+thread.join();
+}
+for (Thread thread : readers) {
+thread.join();
+}
+if (errors.size() > 0) {
+Throwable e=errors.get(0);
+for (Throwable suppress : errors.subList(1,errors.size())) {
+e.addSuppressed(suppress);
+}
+throw e;
+}
+logger.info("--> test done. total ops written [{}]",writtenOps.size());
+}
+}

@@ -1,0 +1,30 @@
+{
+  boolean engineClosed=false;
+  try {
+    logger.trace("{} recovery [phase1] to {}: skipping phase 1 for shared filesystem",request.shardId(),request.targetNode());
+    if (isPrimaryRelocation()) {
+      logger.debug("[phase1] closing engine on primary for shared filesystem recovery");
+      try {
+        engineClosed=true;
+        shard.engine().flushAndClose();
+      }
+ catch (      IOException e) {
+        logger.warn("close engine failed",e);
+        shard.failShard("failed to close engine (phase1)",e);
+      }
+    }
+    prepareTargetForTranslog(EMPTY_VIEW);
+    finalizeRecovery();
+    return response;
+  }
+ catch (  Throwable t) {
+    if (engineClosed) {
+      logger.info("recovery failed for primary shadow shard, failing shard");
+      shard.failShard("primary relocation failed on shared filesystem",t);
+    }
+ else {
+      logger.info("recovery failed on shared filesystem",t);
+    }
+    throw t;
+  }
+}
