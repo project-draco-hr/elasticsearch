@@ -1,0 +1,19 @@
+{
+  Settings nodeSettings=ImmutableSettings.builder().put("node.add_id_to_custom_path",false).put("node.enable_custom_paths",true).build();
+  internalCluster().startNode(nodeSettings);
+  Path dataPath=createTempDir();
+  String IDX="test";
+  Settings idxSettings=ImmutableSettings.builder().put(IndexMetaData.SETTING_NUMBER_OF_SHARDS,5).put(IndexMetaData.SETTING_NUMBER_OF_REPLICAS,0).put(IndexMetaData.SETTING_DATA_PATH,dataPath.toAbsolutePath().toString()).put(IndexMetaData.SETTING_SHARED_FILESYSTEM,true).put(IndexMetaData.SETTING_SHARED_FS_ALLOW_RECOVERY_ON_ANY_NODE,true).build();
+  prepareCreate(IDX).setSettings(idxSettings).addMapping("doc","foo","type=string,index=not_analyzed").get();
+  ensureGreen(IDX);
+  client().prepareIndex(IDX,"doc","1").setSource("foo","foo").get();
+  client().prepareIndex(IDX,"doc","2").setSource("foo","bar").get();
+  client().prepareIndex(IDX,"doc","3").setSource("foo","baz").get();
+  client().prepareIndex(IDX,"doc","4").setSource("foo","eggplant").get();
+  internalCluster().startNode(nodeSettings);
+  internalCluster().stopCurrentMasterNode();
+  ensureGreen(IDX);
+  refresh();
+  SearchResponse resp=client().prepareSearch(IDX).setQuery(matchAllQuery()).addFieldDataField("foo").addSort("foo",SortOrder.ASC).get();
+  assertHitCount(resp,4);
+}
