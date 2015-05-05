@@ -1,0 +1,62 @@
+{
+  super(engineConfig);
+  this.versionMap=new LiveVersionMap();
+  store.incRef();
+  IndexWriter writer=null;
+  FsTranslog translog=null;
+  SearcherManager manager=null;
+  boolean success=false;
+  try {
+    this.lastDeleteVersionPruneTimeMSec=engineConfig.getThreadPool().estimatedTimeInMillis();
+    this.indexingService=engineConfig.getIndexingService();
+    this.warmer=engineConfig.getWarmer();
+    this.mergePolicyProvider=engineConfig.getMergePolicyProvider();
+    this.mergeScheduler=engineConfig.getMergeScheduler();
+    this.dirtyLocks=new Object[engineConfig.getIndexConcurrency() * 50];
+    for (int i=0; i < dirtyLocks.length; i++) {
+      dirtyLocks[i]=new Object();
+    }
+    throttle=new IndexThrottle();
+    this.searcherFactory=new SearchFactory(engineConfig);
+    final Long committedTranslogId;
+    try {
+      writer=createWriter();
+      indexWriter=writer;
+      translog=new FsTranslog(engineConfig.getShardId(),engineConfig.getIndesSettingService(),engineConfig.getBigArrays(),engineConfig.getTranslogPath(),engineConfig.getThreadPool());
+      committedTranslogId=loadCommittedTranslogId(writer,translog);
+    }
+ catch (    IOException e) {
+      throw new EngineCreationFailureException(shardId,"failed to create engine",e);
+    }
+    this.translog=translog;
+    manager=createSearcherManager();
+    this.searcherManager=manager;
+    this.versionMap.setManager(searcherManager);
+    this.mergeSchedulerFailureListener=new FailEngineOnMergeFailure();
+    this.mergeSchedulerListener=new MergeSchedulerListener();
+    this.mergeScheduler.addListener(mergeSchedulerListener);
+    this.mergeScheduler.addFailureListener(mergeSchedulerFailureListener);
+    try {
+      if (skipInitialTranslogRecovery) {
+        commitIndexWriter(writer,translog.currentId());
+      }
+ else {
+        recoverFromTranslog(engineConfig,committedTranslogId);
+      }
+    }
+ catch (    IOException|EngineException ex) {
+      throw new EngineCreationFailureException(shardId,"failed to recover from translog",ex);
+    }
+    success=true;
+  }
+  finally {
+    if (success == false) {
+      IOUtils.closeWhileHandlingException(writer,translog,manager);
+      versionMap.clear();
+      if (isClosed.get() == false) {
+        store.decRef();
+      }
+    }
+  }
+  logger.trace("created new InternalEngine");
+}
