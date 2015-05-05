@@ -16,4 +16,27 @@
     final String shardSyncId=shardStats.getCommitStats().getUserData().get(Engine.SYNC_COMMIT_ID);
     assertThat(shardSyncId,equalTo(syncId));
   }
+  String newNodeName=internalCluster().startNode();
+  ClusterState clusterState=client().admin().cluster().prepareState().get().getState();
+  ShardRouting shardRouting=clusterState.getRoutingTable().index("test").shard(0).iterator().next();
+  String currentNodeName=clusterState.nodes().resolveNode(shardRouting.currentNodeId()).name();
+  assertFalse(currentNodeName.equals(newNodeName));
+  internalCluster().client().admin().cluster().prepareReroute().add(new MoveAllocationCommand(new ShardId("test",0),currentNodeName,newNodeName)).get();
+  client().admin().cluster().prepareHealth().setWaitForRelocatingShards(0).get();
+  indexStats=client().admin().indices().prepareStats("test").get().getIndex("test");
+  for (  ShardStats shardStats : indexStats.getShards()) {
+    assertNotNull(shardStats.getCommitStats().getUserData().get(Engine.SYNC_COMMIT_ID));
+  }
+  client().admin().indices().prepareUpdateSettings("test").setSettings(ImmutableSettings.builder().put(IndexMetaData.SETTING_NUMBER_OF_REPLICAS,0).build()).get();
+  ensureGreen("test");
+  indexStats=client().admin().indices().prepareStats("test").get().getIndex("test");
+  for (  ShardStats shardStats : indexStats.getShards()) {
+    assertNotNull(shardStats.getCommitStats().getUserData().get(Engine.SYNC_COMMIT_ID));
+  }
+  client().admin().indices().prepareUpdateSettings("test").setSettings(ImmutableSettings.builder().put(IndexMetaData.SETTING_NUMBER_OF_REPLICAS,internalCluster().numDataNodes() - 1).build()).get();
+  ensureGreen("test");
+  indexStats=client().admin().indices().prepareStats("test").get().getIndex("test");
+  for (  ShardStats shardStats : indexStats.getShards()) {
+    assertNotNull(shardStats.getCommitStats().getUserData().get(Engine.SYNC_COMMIT_ID));
+  }
 }

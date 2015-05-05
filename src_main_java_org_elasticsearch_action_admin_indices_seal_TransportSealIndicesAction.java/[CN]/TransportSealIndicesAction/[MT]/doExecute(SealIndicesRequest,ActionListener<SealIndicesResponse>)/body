@@ -1,0 +1,26 @@
+{
+  ClusterState state=clusterService.state();
+  String[] concreteIndices=state.metaData().concreteIndices(request.indicesOptions(),request.indices());
+  GroupShardsIterator primaries=state.routingTable().activePrimaryShardsGrouped(concreteIndices,false);
+  final CountDown countDown=new CountDown(primaries.size());
+  final Set<SyncedFlushService.SyncedFlushResult> results=ConcurrentCollections.newConcurrentSet();
+  for (  final ShardIterator shard : primaries) {
+    final ShardId shardId=shard.shardId();
+    syncedFlushService.attemptSyncedFlush(shardId,new ActionListener<SyncedFlushService.SyncedFlushResult>(){
+      @Override public void onResponse(      SyncedFlushService.SyncedFlushResult syncedFlushResult){
+        results.add(syncedFlushResult);
+        if (countDown.countDown()) {
+          listener.onResponse(new SealIndicesResponse(results));
+        }
+      }
+      @Override public void onFailure(      Throwable e){
+        logger.debug("{} unexpected error while executing synced flush",shardId);
+        results.add(new SyncedFlushService.SyncedFlushResult(shardId,e.getMessage()));
+        if (countDown.countDown()) {
+          listener.onResponse(new SealIndicesResponse(results));
+        }
+      }
+    }
+);
+  }
+}
