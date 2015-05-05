@@ -1,0 +1,51 @@
+{
+  XContentParser parser=parseContext.parser();
+  ScriptParameterParser scriptParameterParser=new ScriptParameterParser();
+  XContentParser.Token token;
+  String script=null;
+  String scriptLang;
+  Map<String,Object> params=null;
+  String queryName=null;
+  String currentFieldName=null;
+  ScriptService.ScriptType scriptType=null;
+  while ((token=parser.nextToken()) != XContentParser.Token.END_OBJECT) {
+    if (token == XContentParser.Token.FIELD_NAME) {
+      currentFieldName=parser.currentName();
+    }
+ else     if (parseContext.isDeprecatedSetting(currentFieldName)) {
+    }
+ else     if (token == XContentParser.Token.START_OBJECT) {
+      if ("params".equals(currentFieldName)) {
+        params=parser.map();
+      }
+ else {
+        throw new QueryParsingException(parseContext,"[script] query does not support [" + currentFieldName + "]");
+      }
+    }
+ else     if (token.isValue()) {
+      if ("_name".equals(currentFieldName)) {
+        queryName=parser.text();
+      }
+ else       if (!scriptParameterParser.token(currentFieldName,token,parser)) {
+        throw new QueryParsingException(parseContext,"[script] query does not support [" + currentFieldName + "]");
+      }
+    }
+  }
+  ScriptParameterValue scriptValue=scriptParameterParser.getDefaultScriptParameterValue();
+  if (scriptValue != null) {
+    script=scriptValue.script();
+    scriptType=scriptValue.scriptType();
+  }
+  scriptLang=scriptParameterParser.lang();
+  if (script == null) {
+    throw new QueryParsingException(parseContext,"script must be provided with a [script] filter");
+  }
+  if (params == null) {
+    params=newHashMap();
+  }
+  Query query=new ScriptFilter(scriptLang,script,scriptType,params,parseContext.scriptService(),parseContext.lookup());
+  if (queryName != null) {
+    parseContext.addNamedQuery(queryName,query);
+  }
+  return query;
+}
