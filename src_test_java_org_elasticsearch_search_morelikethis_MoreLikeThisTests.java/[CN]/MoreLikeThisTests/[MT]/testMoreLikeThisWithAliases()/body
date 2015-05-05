@@ -1,0 +1,30 @@
+{
+  logger.info("Creating index test");
+  assertAcked(prepareCreate("test").addMapping("type1",jsonBuilder().startObject().startObject("type1").startObject("properties").startObject("text").field("type","string").endObject().endObject().endObject().endObject()));
+  logger.info("Creating aliases alias release");
+  client().admin().indices().aliases(indexAliasesRequest().addAlias("release",termFilter("text","release"),"test")).actionGet();
+  client().admin().indices().aliases(indexAliasesRequest().addAlias("beta",termFilter("text","beta"),"test")).actionGet();
+  logger.info("Running Cluster Health");
+  assertThat(ensureGreen(),equalTo(ClusterHealthStatus.GREEN));
+  logger.info("Indexing...");
+  client().index(indexRequest("test").type("type1").id("1").source(jsonBuilder().startObject().field("text","lucene beta").endObject())).actionGet();
+  client().index(indexRequest("test").type("type1").id("2").source(jsonBuilder().startObject().field("text","lucene release").endObject())).actionGet();
+  client().index(indexRequest("test").type("type1").id("3").source(jsonBuilder().startObject().field("text","elasticsearch beta").endObject())).actionGet();
+  client().index(indexRequest("test").type("type1").id("4").source(jsonBuilder().startObject().field("text","elasticsearch release").endObject())).actionGet();
+  client().admin().indices().refresh(refreshRequest()).actionGet();
+  logger.info("Running moreLikeThis on index");
+  SearchResponse response=client().prepareSearch().setQuery(new MoreLikeThisQueryBuilder().addItem(new Item("test","type1","1")).minTermFreq(1).minDocFreq(1)).get();
+  assertHitCount(response,2l);
+  logger.info("Running moreLikeThis on beta shard");
+  response=client().prepareSearch("beta").setQuery(new MoreLikeThisQueryBuilder().addItem(new Item("test","type1","1")).minTermFreq(1).minDocFreq(1)).get();
+  assertHitCount(response,1l);
+  assertThat(response.getHits().getAt(0).id(),equalTo("3"));
+  logger.info("Running moreLikeThis on release shard");
+  response=client().prepareSearch("release").setQuery(new MoreLikeThisQueryBuilder().addItem(new Item("test","type1","1")).minTermFreq(1).minDocFreq(1)).get();
+  assertHitCount(response,1l);
+  assertThat(response.getHits().getAt(0).id(),equalTo("2"));
+  logger.info("Running moreLikeThis on alias with node client");
+  response=internalCluster().clientNodeClient().prepareSearch("beta").setQuery(new MoreLikeThisQueryBuilder().addItem(new Item("test","type1","1")).minTermFreq(1).minDocFreq(1)).get();
+  assertHitCount(response,1l);
+  assertThat(response.getHits().getAt(0).id(),equalTo("3"));
+}
