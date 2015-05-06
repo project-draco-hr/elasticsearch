@@ -1,0 +1,51 @@
+{
+  double alpha=randomDouble();
+  double beta=randomDouble();
+  double gamma=randomDouble();
+  int period=randomIntBetween(1,10);
+  MovAvgModel model=new HoltWintersModel(alpha,beta,gamma,period,HoltWintersModel.SeasonalityType.MULTIPLICATIVE,true);
+  int windowSize=randomIntBetween(period * 2,50);
+  EvictingQueue<Double> window=EvictingQueue.create(windowSize);
+  for (int i=0; i < windowSize; i++) {
+    window.offer(randomDouble());
+  }
+  double s=0;
+  double last_s=0;
+  double b=0;
+  double last_b=0;
+  double[] seasonal=new double[windowSize];
+  int counter=0;
+  double[] vs=new double[windowSize];
+  for (  double v : window) {
+    vs[counter]=v + 0.0000000001;
+    counter+=1;
+  }
+  for (int i=0; i < period; i++) {
+    s+=vs[i];
+    b+=(vs[i] - vs[i + period]) / 2;
+  }
+  s/=(double)period;
+  b/=(double)period;
+  last_s=s;
+  last_b=b;
+  if (Double.compare(s,0.0) == 0 || Double.compare(s,-0.0) == 0) {
+    Arrays.fill(seasonal,0.0);
+  }
+ else {
+    for (int i=0; i < period; i++) {
+      seasonal[i]=vs[i] / s;
+    }
+  }
+  for (int i=period; i < vs.length; i++) {
+    s=alpha * (vs[i] / seasonal[i - period]) + (1.0d - alpha) * (last_s + last_b);
+    b=beta * (s - last_s) + (1 - beta) * last_b;
+    seasonal[i]=gamma * (vs[i] / (last_s + last_b)) + (1 - gamma) * seasonal[i - period];
+    last_s=s;
+    last_b=b;
+  }
+  int seasonCounter=(windowSize - 1) - period;
+  double expected=s + (0 * b) * seasonal[seasonCounter % windowSize];
+  ;
+  double actual=model.next(window);
+  assertThat(Double.compare(expected,actual),equalTo(0));
+}
