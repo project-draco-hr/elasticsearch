@@ -1,0 +1,26 @@
+{
+  SearchResponse response=client().prepareSearch("idx").addAggregation(terms("terms").field("tag").subAggregation(sum("sum").field(SINGLE_VALUED_FIELD_NAME))).addAggregation(avgBucket("avg_bucket").setBucketsPaths("terms>sum")).execute().actionGet();
+  assertSearchResponse(response);
+  Terms terms=response.getAggregations().get("terms");
+  assertThat(terms,notNullValue());
+  assertThat(terms.getName(),equalTo("terms"));
+  List<Terms.Bucket> buckets=terms.getBuckets();
+  assertThat(buckets.size(),equalTo(interval));
+  double bucketSum=0;
+  int count=0;
+  for (int i=0; i < interval; ++i) {
+    Terms.Bucket bucket=buckets.get(i);
+    assertThat(bucket,notNullValue());
+    assertThat((String)bucket.getKey(),equalTo("tag" + (i % interval)));
+    assertThat(bucket.getDocCount(),greaterThan(0l));
+    Sum sum=bucket.getAggregations().get("sum");
+    assertThat(sum,notNullValue());
+    count++;
+    bucketSum+=sum.value();
+  }
+  double avgValue=count == 0 ? Double.NaN : (bucketSum / count);
+  InternalSimpleValue avgBucketValue=response.getAggregations().get("avg_bucket");
+  assertThat(avgBucketValue,notNullValue());
+  assertThat(avgBucketValue.getName(),equalTo("avg_bucket"));
+  assertThat(avgBucketValue.value(),equalTo(avgValue));
+}
