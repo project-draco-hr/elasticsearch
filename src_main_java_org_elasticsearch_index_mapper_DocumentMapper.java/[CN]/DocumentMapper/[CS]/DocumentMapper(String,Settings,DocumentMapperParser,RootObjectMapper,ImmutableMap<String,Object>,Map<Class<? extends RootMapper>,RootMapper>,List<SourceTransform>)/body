@@ -7,23 +7,22 @@
   if (rootMapper(ParentFieldMapper.class).active()) {
     rootMapper(RoutingFieldMapper.class).markAsRequired();
   }
-  FieldMapperListener.Aggregator fieldMappersAgg=new FieldMapperListener.Aggregator();
-  for (  RootMapper rootMapper : this.mapping.rootMappers) {
+  List<ObjectMapper> newObjectMappers=new ArrayList<>();
+  List<FieldMapper<?>> newFieldMappers=new ArrayList<>();
+  for (  RootMapper rootMapper : this.mapping.rootMappersNotIncludedInObject) {
     if (rootMapper instanceof FieldMapper) {
-      fieldMappersAgg.mappers.add((FieldMapper)rootMapper);
+      newFieldMappers.add((FieldMapper)rootMapper);
     }
   }
-  rootObjectMapper.traverse(fieldMappersAgg);
-  this.fieldMappers=new DocumentFieldMappers(docMapperParser.analysisService).copyAndAllAll(fieldMappersAgg.mappers);
-  final Map<String,ObjectMapper> objectMappers=Maps.newHashMap();
-  rootObjectMapper.traverse(new ObjectMapperListener(){
-    @Override public void objectMapper(    ObjectMapper objectMapper){
-      objectMappers.put(objectMapper.fullPath(),objectMapper);
+  MapperUtils.collect(this.mapping.root,newObjectMappers,newFieldMappers);
+  this.fieldMappers=new DocumentFieldMappers(docMapperParser.analysisService).copyAndAllAll(newFieldMappers);
+  this.objectMappers=Maps.uniqueIndex(newObjectMappers,new Function<ObjectMapper,String>(){
+    @Override public String apply(    ObjectMapper mapper){
+      return mapper.fullPath();
     }
   }
 );
-  this.objectMappers=ImmutableMap.copyOf(objectMappers);
-  for (  ObjectMapper objectMapper : objectMappers.values()) {
+  for (  ObjectMapper objectMapper : newObjectMappers) {
     if (objectMapper.nested().isNested()) {
       hasNestedObjects=true;
     }
