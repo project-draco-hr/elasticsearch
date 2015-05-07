@@ -1,0 +1,64 @@
+{
+  final int numDocs=TestUtil.nextInt(random(),1,100);
+  final int numOrds=TestUtil.nextInt(random(),1,10);
+  final Set<BytesRef> valueSet=new HashSet<>();
+  while (valueSet.size() < numOrds) {
+    valueSet.add(new BytesRef(RandomStrings.randomAsciiOfLength(random(),5)));
+  }
+  final BytesRef[] values=valueSet.toArray(new BytesRef[numOrds]);
+  Arrays.sort(values);
+  final int[][] ords=new int[numDocs][];
+  for (int i=0; i < numDocs; ++i) {
+    ords[i]=new int[random().nextInt(numOrds)];
+    for (int j=0; j < ords[i].length; ++j) {
+      ords[i][j]=j;
+    }
+    for (int j=ords[i].length - 1; j >= 0; --j) {
+      final int maxOrd=j == ords[i].length - 1 ? numOrds : ords[i][j + 1];
+      ords[i][j]=TestUtil.nextInt(random(),ords[i][j],maxOrd - 1);
+    }
+  }
+  RandomAccessOrds asRandomAccessOrds=new AbstractRandomAccessOrds(){
+    int i=-1;
+    @Override public void doSetDocument(    int docID){
+      i=docID;
+    }
+    @Override public BytesRef lookupOrd(    long ord){
+      return values[(int)ord];
+    }
+    @Override public long getValueCount(){
+      return values.length;
+    }
+    @Override public long ordAt(    int index){
+      return ords[i][index];
+    }
+    @Override public int cardinality(){
+      return ords[i].length;
+    }
+  }
+;
+  final BytesRef existingMissing=RandomPicks.randomFrom(random(),values);
+  final BytesRef missingMissing=new BytesRef(RandomStrings.randomAsciiOfLength(random(),5));
+  for (  BytesRef missing : Arrays.asList(existingMissing,missingMissing)) {
+    RandomAccessOrds withMissingReplaced=MissingValues.replaceMissing(asRandomAccessOrds,missing);
+    if (valueSet.contains(missing)) {
+      assertEquals(values.length,withMissingReplaced.getValueCount());
+    }
+ else {
+      assertEquals(values.length + 1,withMissingReplaced.getValueCount());
+    }
+    for (int i=0; i < numDocs; ++i) {
+      withMissingReplaced.setDocument(i);
+      if (ords[i].length > 0) {
+        assertEquals(ords[i].length,withMissingReplaced.cardinality());
+        for (int j=0; j < ords[i].length; ++j) {
+          assertEquals(values[ords[i][j]],withMissingReplaced.lookupOrd(withMissingReplaced.ordAt(j)));
+        }
+      }
+ else {
+        assertEquals(1,withMissingReplaced.cardinality());
+        assertEquals(missing,withMissingReplaced.lookupOrd(withMissingReplaced.ordAt(0)));
+      }
+    }
+  }
+}
