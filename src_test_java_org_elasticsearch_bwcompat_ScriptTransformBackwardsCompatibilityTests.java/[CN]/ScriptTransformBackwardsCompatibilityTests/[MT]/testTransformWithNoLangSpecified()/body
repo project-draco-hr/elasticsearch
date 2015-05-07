@@ -1,0 +1,33 @@
+{
+  XContentBuilder builder=XContentFactory.jsonBuilder().startObject();
+  builder.field("transform");
+  if (getRandom().nextBoolean()) {
+    builder.startObject();
+    buildTransformScript(builder);
+    builder.endObject();
+  }
+ else {
+    int total=between(1,10);
+    int actual=between(0,total - 1);
+    builder.startArray();
+    for (int s=0; s < total; s++) {
+      builder.startObject();
+      if (s == actual) {
+        buildTransformScript(builder);
+      }
+ else {
+        builder.field("script","true");
+      }
+      builder.endObject();
+    }
+    builder.endArray();
+  }
+  assertAcked(client().admin().indices().prepareCreate("test").addMapping("test",builder));
+  indexRandom(getRandom().nextBoolean(),client().prepareIndex("test","test","notitle").setSource("content","findme"),client().prepareIndex("test","test","badtitle").setSource("content","findme","title","cat"),client().prepareIndex("test","test","righttitle").setSource("content","findme","title","table"));
+  GetResponse response=client().prepareGet("test","test","righttitle").get();
+  assertExists(response);
+  assertThat(response.getSource(),both(hasEntry("content",(Object)"findme")).and(not(hasKey("destination"))));
+  response=client().prepareGet("test","test","righttitle").setTransformSource(true).get();
+  assertExists(response);
+  assertThat(response.getSource(),both(hasEntry("destination",(Object)"findme")).and(not(hasKey("content"))));
+}
