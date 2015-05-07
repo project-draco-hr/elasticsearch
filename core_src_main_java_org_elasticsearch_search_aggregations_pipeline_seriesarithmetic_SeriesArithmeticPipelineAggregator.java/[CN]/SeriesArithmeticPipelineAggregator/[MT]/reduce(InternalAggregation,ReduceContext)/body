@@ -1,0 +1,33 @@
+{
+  InternalMultiBucketAggregation<InternalMultiBucketAggregation,InternalMultiBucketAggregation.InternalBucket> originalAgg=(InternalMultiBucketAggregation<InternalMultiBucketAggregation,InternalMultiBucketAggregation.InternalBucket>)aggregation;
+  List<? extends Bucket> buckets=originalAgg.getBuckets();
+  CompiledScript compiledScript=reduceContext.scriptService().compile(script,ScriptContext.Standard.AGGS);
+  List newBuckets=new ArrayList<>();
+  for (  Bucket bucket : buckets) {
+    Map<String,Object> vars=new HashMap<>();
+    if (script.getParams() != null) {
+      vars.putAll(script.getParams());
+    }
+    for (    Map.Entry<String,String> entry : bucketsPathsMap.entrySet()) {
+      String varName=entry.getKey();
+      String bucketsPath=entry.getValue();
+      Double value=resolveBucketValue(originalAgg,bucket,bucketsPath,gapPolicy);
+      vars.put(varName,value);
+    }
+    ExecutableScript executableScript=reduceContext.scriptService().executable(compiledScript,vars);
+    Object returned=executableScript.run();
+    if (returned == null) {
+      newBuckets.add(bucket);
+    }
+ else {
+      if (!(returned instanceof Number)) {
+        throw new AggregationExecutionException("series_arithmetic script for reducer [" + name() + "] must return a Number");
+      }
+      List<InternalAggregation> aggs=new ArrayList<>(Lists.transform(bucket.getAggregations().asList(),FUNCTION));
+      aggs.add(new InternalSimpleValue(name(),((Number)returned).doubleValue(),formatter,new ArrayList<PipelineAggregator>(),metaData()));
+      InternalMultiBucketAggregation.InternalBucket newBucket=originalAgg.createBucket(new InternalAggregations(aggs),(InternalMultiBucketAggregation.InternalBucket)bucket);
+      newBuckets.add(newBucket);
+    }
+  }
+  return originalAgg.create(newBuckets);
+}
