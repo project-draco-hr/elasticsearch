@@ -1,2 +1,17 @@
 {
+  final IndexRequest request=shardRequest.request;
+  IndexMetaData indexMetaData=clusterState.metaData().index(shardRequest.shardId.getIndex());
+  MappingMetaData mappingMd=indexMetaData.mappingOrDefault(request.type());
+  if (mappingMd != null && mappingMd.routing().required()) {
+    if (request.routing() == null) {
+      throw new RoutingMissingException(shardRequest.shardId.getIndex(),request.type(),request.id());
+    }
+  }
+  IndexService indexService=indicesService.indexServiceSafe(shardRequest.shardId.getIndex());
+  IndexShard indexShard=indexService.shardSafe(shardRequest.shardId.id());
+  final WriteResult<IndexResponse> result=executeIndexRequestOnPrimary(null,request,indexShard);
+  final IndexResponse response=result.response;
+  final Translog.Location location=result.location;
+  processAfter(request,indexShard,location);
+  return new Tuple<>(response,shardRequest.request);
 }

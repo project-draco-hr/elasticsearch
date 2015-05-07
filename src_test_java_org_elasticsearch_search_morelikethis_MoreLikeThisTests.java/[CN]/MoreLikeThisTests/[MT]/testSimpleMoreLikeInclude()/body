@@ -1,0 +1,18 @@
+{
+  logger.info("Creating index test");
+  assertAcked(prepareCreate("test").addMapping("type1",jsonBuilder().startObject().startObject("type1").startObject("properties").startObject("text").field("type","string").endObject().endObject().endObject().endObject()));
+  logger.info("Running Cluster Health");
+  assertThat(ensureGreen(),equalTo(ClusterHealthStatus.GREEN));
+  logger.info("Indexing...");
+  client().index(indexRequest("test").type("type1").id("1").source(jsonBuilder().startObject().field("text","Apache Lucene is a free/open source information retrieval software library").endObject())).actionGet();
+  client().index(indexRequest("test").type("type1").id("2").source(jsonBuilder().startObject().field("text","Lucene has been ported to other programming languages").endObject())).actionGet();
+  client().admin().indices().refresh(refreshRequest()).actionGet();
+  logger.info("Running More Like This with include true");
+  SearchResponse response=client().prepareSearch().setQuery(new MoreLikeThisQueryBuilder().addItem(new Item("test","type1","1")).minTermFreq(1).minDocFreq(1).include(true).percentTermsToMatch(0)).get();
+  assertOrderedSearchHits(response,"1","2");
+  response=client().prepareSearch().setQuery(new MoreLikeThisQueryBuilder().addItem(new Item("test","type1","2")).minTermFreq(1).minDocFreq(1).include(true).percentTermsToMatch(0)).get();
+  assertOrderedSearchHits(response,"2","1");
+  logger.info("Running More Like This with include false");
+  response=client().prepareSearch().setQuery(new MoreLikeThisQueryBuilder().addItem(new Item("test","type1","1")).minTermFreq(1).minDocFreq(1).percentTermsToMatch(0)).get();
+  assertSearchHits(response,"2");
+}

@@ -3,6 +3,7 @@
   String currentFieldName=null;
   String[] bucketsPaths=null;
   String format=null;
+  String units=null;
   GapPolicy gapPolicy=GapPolicy.SKIP;
   while ((token=parser.nextToken()) != XContentParser.Token.END_OBJECT) {
     if (token == XContentParser.Token.FIELD_NAME) {
@@ -17,6 +18,9 @@
       }
  else       if (GAP_POLICY.match(currentFieldName)) {
         gapPolicy=GapPolicy.parse(context,parser.text(),parser.getTokenLocation());
+      }
+ else       if (UNIT.match(currentFieldName)) {
+        units=parser.text();
       }
  else {
         throw new SearchParseException(context,"Unknown key for a " + token + " in ["+ reducerName+ "]: ["+ currentFieldName+ "].",parser.getTokenLocation());
@@ -46,5 +50,18 @@
   if (format != null) {
     formatter=ValueFormat.Patternable.Number.format(format).formatter();
   }
-  return new DerivativeReducer.Factory(reducerName,bucketsPaths,formatter,gapPolicy);
+  Long xAxisUnits=null;
+  if (units != null) {
+    DateTimeUnit dateTimeUnit=DateHistogramParser.DATE_FIELD_UNITS.get(units);
+    if (dateTimeUnit != null) {
+      xAxisUnits=dateTimeUnit.field().getDurationField().getUnitMillis();
+    }
+ else {
+      TimeValue timeValue=TimeValue.parseTimeValue(units,null);
+      if (timeValue != null) {
+        xAxisUnits=timeValue.getMillis();
+      }
+    }
+  }
+  return new DerivativeReducer.Factory(reducerName,bucketsPaths,formatter,gapPolicy,xAxisUnits);
 }

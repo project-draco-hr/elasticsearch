@@ -1,0 +1,23 @@
+{
+  createIndex("idx");
+  createIndex("idx_unmapped");
+  numDocs=randomIntBetween(6,20);
+  interval=randomIntBetween(2,5);
+  minRandomValue=0;
+  maxRandomValue=20;
+  numValueBuckets=((maxRandomValue - minRandomValue) / interval) + 1;
+  valueCounts=new long[numValueBuckets];
+  List<IndexRequestBuilder> builders=new ArrayList<>();
+  for (int i=0; i < numDocs; i++) {
+    int fieldValue=randomIntBetween(minRandomValue,maxRandomValue);
+    builders.add(client().prepareIndex("idx","type").setSource(jsonBuilder().startObject().field(SINGLE_VALUED_FIELD_NAME,fieldValue).field("tag","tag" + (i % interval)).endObject()));
+    final int bucket=(fieldValue / interval);
+    valueCounts[bucket]++;
+  }
+  assertAcked(prepareCreate("empty_bucket_idx").addMapping("type",SINGLE_VALUED_FIELD_NAME,"type=integer"));
+  for (int i=0; i < 2; i++) {
+    builders.add(client().prepareIndex("empty_bucket_idx","type","" + i).setSource(jsonBuilder().startObject().field(SINGLE_VALUED_FIELD_NAME,i * 2).endObject()));
+  }
+  indexRandom(true,builders);
+  ensureSearchable();
+}

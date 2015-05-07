@@ -1,0 +1,86 @@
+{
+  Settings settings=ImmutableSettings.builder().put(DiscoverySettings.PUBLISH_TIMEOUT,"0ms").build();
+  final List<String> nodeNames=internalCluster().startNodesAsync(2,settings).get();
+  assertFalse(client().admin().cluster().prepareHealth().setWaitForNodes("2").get().isTimedOut());
+  final String master=internalCluster().getMasterName();
+  assertThat(nodeNames,hasItem(master));
+  String otherNode=null;
+  for (  String node : nodeNames) {
+    if (node.equals(master) == false) {
+      otherNode=node;
+      break;
+    }
+  }
+  assertNotNull(otherNode);
+  assertAcked(prepareCreate("index").setSettings(ImmutableSettings.builder().put(IndexMetaData.SETTING_NUMBER_OF_SHARDS,1).put(IndexMetaData.SETTING_NUMBER_OF_REPLICAS,0).put("index.routing.allocation.exclude._name",master)).get());
+  ensureGreen();
+  ClusterState state=client().admin().cluster().prepareState().get().getState();
+  assertEquals(master,state.nodes().masterNode().name());
+  List<ShardRouting> shards=state.routingTable().allShards("index");
+  assertThat(shards,hasSize(1));
+  for (  ShardRouting shard : shards) {
+    if (shard.primary()) {
+      assertFalse(state.nodes().masterNodeId().equals(shard.currentNodeId()));
+    }
+ else {
+      fail();
+    }
+  }
+  BlockClusterStateProcessing disruption=new BlockClusterStateProcessing(otherNode,getRandom());
+  internalCluster().setDisruptionScheme(disruption);
+  disruption.startDisrupting();
+  final AtomicReference<Object> putMappingResponse=new AtomicReference<>();
+  client().admin().indices().preparePutMapping("index").setType("type").setSource("field","type=long").execute(new ActionListener<PutMappingResponse>(){
+    @Override public void onResponse(    PutMappingResponse response){
+      putMappingResponse.set(response);
+    }
+    @Override public void onFailure(    Throwable e){
+      putMappingResponse.set(e);
+    }
+  }
+);
+  assertBusy(new Runnable(){
+    @Override public void run(){
+      ImmutableOpenMap<String,MappingMetaData> indexMappings=client().admin().indices().prepareGetMappings("index").get().getMappings().get("index");
+      assertNotNull(indexMappings);
+      MappingMetaData typeMappings=indexMappings.get("type");
+      assertNotNull(typeMappings);
+      Object properties;
+      try {
+        properties=typeMappings.getSourceAsMap().get("properties");
+      }
+ catch (      IOException e) {
+        throw new AssertionError(e);
+      }
+      assertNotNull(properties);
+      Object fieldMapping=((Map<String,Object>)properties).get("field");
+      assertNotNull(fieldMapping);
+    }
+  }
+);
+  final AtomicReference<Object> docIndexResponse=new AtomicReference<>();
+  client().prepareIndex("index","type","1").setSource("field",42).execute(new ActionListener<IndexResponse>(){
+    @Override public void onResponse(    IndexResponse response){
+      docIndexResponse.set(response);
+    }
+    @Override public void onFailure(    Throwable e){
+      docIndexResponse.set(e);
+    }
+  }
+);
+  Thread.sleep(100);
+  assertThat(putMappingResponse.get(),equalTo(null));
+  assertThat(docIndexResponse.get(),equalTo(null));
+  disruption.stopDisrupting();
+  assertBusy(new Runnable(){
+    @Override public void run(){
+      assertThat(putMappingResponse.get(),instanceOf(PutMappingResponse.class));
+      PutMappingResponse resp=(PutMappingResponse)putMappingResponse.get();
+      assertTrue(resp.isAcknowledged());
+      assertThat(docIndexResponse.get(),instanceOf(IndexResponse.class));
+      IndexResponse docResp=(IndexResponse)docIndexResponse.get();
+      assertEquals(Arrays.toString(docResp.getShardInfo().getFailures()),1,docResp.getShardInfo().getTotal());
+    }
+  }
+);
+}

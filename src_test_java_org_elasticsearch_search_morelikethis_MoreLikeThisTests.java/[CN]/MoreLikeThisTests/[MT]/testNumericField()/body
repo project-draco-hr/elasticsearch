@@ -1,0 +1,23 @@
+{
+  final String[] numericTypes=new String[]{"byte","short","integer","long"};
+  prepareCreate("test").addMapping("type",jsonBuilder().startObject().startObject("type").startObject("properties").startObject("int_value").field("type",randomFrom(numericTypes)).endObject().startObject("string_value").field("type","string").endObject().endObject().endObject().endObject()).execute().actionGet();
+  ensureGreen();
+  client().prepareIndex("test","type","1").setSource(jsonBuilder().startObject().field("string_value","lucene index").field("int_value",1).endObject()).execute().actionGet();
+  client().prepareIndex("test","type","2").setSource(jsonBuilder().startObject().field("string_value","elasticsearch index").field("int_value",42).endObject()).execute().actionGet();
+  refresh();
+  SearchResponse searchResponse=client().prepareSearch().setQuery(new MoreLikeThisQueryBuilder().addItem(new Item("test","type","1")).minTermFreq(1).minDocFreq(1)).get();
+  assertHitCount(searchResponse,1l);
+  assertThrows(client().prepareSearch().setQuery(new MoreLikeThisQueryBuilder("string_value","int_value").addItem(new Item("test","type","1")).minTermFreq(1).minDocFreq(1)),SearchPhaseExecutionException.class);
+  searchResponse=client().prepareSearch().setQuery(moreLikeThisQuery().likeText("index").minTermFreq(1).minDocFreq(1)).execute().actionGet();
+  assertHitCount(searchResponse,2l);
+  searchResponse=client().prepareSearch().setQuery(moreLikeThisQuery("string_value").likeText("index").minTermFreq(1).minDocFreq(1)).execute().actionGet();
+  assertHitCount(searchResponse,2l);
+  assertThrows(client().prepareSearch().setQuery(moreLikeThisQuery("string_value","int_value").likeText("index")),SearchPhaseExecutionException.class);
+  assertThrows(client().prepareSearch().setQuery(moreLikeThisQuery("string_value","int_value").likeText("index").failOnUnsupportedField(true)),SearchPhaseExecutionException.class);
+  searchResponse=client().prepareSearch().setQuery(moreLikeThisQuery("string_value","int_value").likeText("index").minTermFreq(1).minDocFreq(1).failOnUnsupportedField(false)).get();
+  assertHitCount(searchResponse,2l);
+  assertThrows(client().prepareSearch().setQuery(moreLikeThisQuery("int_value").likeText("42").minTermFreq(1).minDocFreq(1)),SearchPhaseExecutionException.class);
+  assertThrows(client().prepareSearch().setQuery(moreLikeThisQuery("int_value").likeText("42").minTermFreq(1).minDocFreq(1).failOnUnsupportedField(true)),SearchPhaseExecutionException.class);
+  searchResponse=client().prepareSearch().setQuery(moreLikeThisQuery("int_value").likeText("42").minTermFreq(1).minDocFreq(1).failOnUnsupportedField(false)).execute().actionGet();
+  assertHitCount(searchResponse,0l);
+}
