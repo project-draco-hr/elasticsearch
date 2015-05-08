@@ -6,20 +6,31 @@
   this.settings=pluginsService.updatedSettings();
   Version version=Version.CURRENT;
   CompressorFactory.configure(this.settings);
-  ModulesBuilder modules=new ModulesBuilder();
-  modules.add(new Version.Module(version));
-  modules.add(new PluginsModule(this.settings,pluginsService));
-  modules.add(new EnvironmentModule(environment));
-  modules.add(new SettingsModule(this.settings));
-  modules.add(new NetworkModule());
-  modules.add(new ClusterNameModule(this.settings));
-  modules.add(new ThreadPoolModule(this.settings));
-  modules.add(new TransportSearchModule());
-  modules.add(new TransportModule(this.settings));
-  modules.add(new ActionModule(true));
-  modules.add(new ClientTransportModule());
-  modules.add(new CircuitBreakerModule(this.settings));
-  Injector injector=modules.createInjector();
-  injector.getInstance(TransportService.class).start();
-  return new TransportClient(injector);
+  final ThreadPool threadPool=new ThreadPool(settings);
+  boolean success=false;
+  try {
+    ModulesBuilder modules=new ModulesBuilder();
+    modules.add(new Version.Module(version));
+    modules.add(new PluginsModule(this.settings,pluginsService));
+    modules.add(new EnvironmentModule(environment));
+    modules.add(new SettingsModule(this.settings));
+    modules.add(new NetworkModule());
+    modules.add(new ClusterNameModule(this.settings));
+    modules.add(new ThreadPoolModule(threadPool));
+    modules.add(new TransportSearchModule());
+    modules.add(new TransportModule(this.settings));
+    modules.add(new ActionModule(true));
+    modules.add(new ClientTransportModule());
+    modules.add(new CircuitBreakerModule(this.settings));
+    Injector injector=modules.createInjector();
+    injector.getInstance(TransportService.class).start();
+    TransportClient transportClient=new TransportClient(injector);
+    success=true;
+    return transportClient;
+  }
+  finally {
+    if (!success) {
+      ThreadPool.terminate(threadPool,10,TimeUnit.SECONDS);
+    }
+  }
 }
