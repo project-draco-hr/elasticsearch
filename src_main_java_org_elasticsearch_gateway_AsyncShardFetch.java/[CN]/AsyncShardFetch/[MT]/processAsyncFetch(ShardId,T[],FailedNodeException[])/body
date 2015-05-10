@@ -1,0 +1,29 @@
+{
+  if (closed) {
+    return;
+  }
+  if (responses != null) {
+    for (    T response : responses) {
+      NodeEntry<T> nodeEntry=cache.get(response.getNode().getId());
+      if (nodeEntry != null && nodeEntry.isFailed() == false) {
+        nodeEntry.doneFetching(response);
+      }
+    }
+  }
+  if (failures != null) {
+    for (    FailedNodeException failure : failures) {
+      NodeEntry<T> nodeEntry=cache.get(failure.nodeId());
+      if (nodeEntry != null && nodeEntry.isFailed() == false) {
+        Throwable unwrappedCause=ExceptionsHelper.unwrapCause(failure.getCause());
+        if (unwrappedCause instanceof EsRejectedExecutionException || unwrappedCause instanceof ReceiveTimeoutTransportException || unwrappedCause instanceof ElasticsearchTimeoutException) {
+          nodeEntry.restartFetching();
+        }
+ else {
+          logger.warn("{}: failed to list shard for {} on node [{}]",failure,shardId,getClass().getSimpleName(),failure.nodeId());
+          nodeEntry.doneFetching(failure.getCause());
+        }
+      }
+    }
+  }
+  reroute(shardId,"post_response");
+}

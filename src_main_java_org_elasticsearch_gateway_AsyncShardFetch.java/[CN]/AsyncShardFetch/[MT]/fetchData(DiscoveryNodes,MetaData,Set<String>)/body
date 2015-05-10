@@ -1,0 +1,49 @@
+{
+  if (closed) {
+    throw new IllegalStateException(shardId + ": can't fetch data on closed async fetch");
+  }
+  nodesToIgnore.addAll(ignoreNodes);
+  fillShardCacheWithDataNodes(cache,nodes);
+  Set<NodeEntry<T>> nodesToFetch=findNodesToFetch(cache);
+  if (nodesToFetch.isEmpty() == false) {
+    for (    NodeEntry<T> nodeEntry : nodesToFetch) {
+      nodeEntry.markAsFetching();
+    }
+    String[] nodesIds=new String[nodesToFetch.size()];
+    int index=0;
+    for (    NodeEntry<T> nodeEntry : nodesToFetch) {
+      nodesIds[index++]=nodeEntry.getNodeId();
+    }
+    asyncFetch(shardId,nodesIds,metaData);
+  }
+  if (hasAnyNodeFetching(cache) == true) {
+    return new FetchResult<>(shardId,null,ImmutableSet.<String>of(),ImmutableSet.<String>of());
+  }
+ else {
+    Map<DiscoveryNode,T> fetchData=new HashMap<>();
+    Set<String> failedNodes=new HashSet<>();
+    for (Iterator<Map.Entry<String,NodeEntry<T>>> it=cache.entrySet().iterator(); it.hasNext(); ) {
+      Map.Entry<String,NodeEntry<T>> entry=it.next();
+      String nodeId=entry.getKey();
+      NodeEntry<T> nodeEntry=entry.getValue();
+      DiscoveryNode node=nodes.get(nodeId);
+      if (node != null) {
+        if (nodeEntry.isFailed() == true) {
+          it.remove();
+          failedNodes.add(nodeEntry.getNodeId());
+        }
+ else {
+          if (nodeEntry.getValue() != null) {
+            fetchData.put(node,nodeEntry.getValue());
+          }
+        }
+      }
+    }
+    Set<String> allIgnoreNodes=ImmutableSet.copyOf(nodesToIgnore);
+    nodesToIgnore.clear();
+    if (failedNodes.isEmpty() == false || allIgnoreNodes.isEmpty() == false) {
+      reroute(shardId,"at_least_one_node_failed");
+    }
+    return new FetchResult<>(shardId,fetchData,failedNodes,allIgnoreNodes);
+  }
+}
