@@ -1,0 +1,46 @@
+{
+  if ((docsEnumFlag != PostingsEnum.FREQS) && (docsEnumFlag != PostingsEnum.NONE)) {
+    throw new IllegalArgumentException("invalid docsEnumFlag of " + docsEnumFlag);
+  }
+  this.docsEnumFlag=docsEnumFlag;
+  if (filter == null) {
+    numDocs=reader.maxDoc();
+  }
+  List<LeafReaderContext> leaves=reader.leaves();
+  List<Holder> enums=Lists.newArrayListWithExpectedSize(leaves.size());
+  final Weight weight;
+  if (filter == null) {
+    weight=null;
+  }
+ else {
+    final IndexSearcher searcher=new IndexSearcher(reader);
+    searcher.setQueryCache(null);
+    weight=searcher.createNormalizedWeight(filter,false);
+  }
+  for (  LeafReaderContext context : leaves) {
+    Terms terms=context.reader().terms(field);
+    if (terms == null) {
+      continue;
+    }
+    TermsEnum termsEnum=terms.iterator();
+    if (termsEnum == null) {
+      continue;
+    }
+    Bits bits=null;
+    if (weight != null) {
+      Scorer docs=weight.scorer(context,context.reader().getLiveDocs());
+      if (docs == null) {
+        continue;
+      }
+      BitDocIdSet.Builder builder=new BitDocIdSet.Builder(context.reader().maxDoc());
+      builder.or(docs);
+      bits=builder.build().bits();
+      docs=weight.scorer(context,context.reader().getLiveDocs());
+      while (docs.nextDoc() != DocIdSetIterator.NO_MORE_DOCS) {
+        numDocs++;
+      }
+    }
+    enums.add(new Holder(termsEnum,bits));
+  }
+  this.enums=enums.toArray(new Holder[enums.size()]);
+}
