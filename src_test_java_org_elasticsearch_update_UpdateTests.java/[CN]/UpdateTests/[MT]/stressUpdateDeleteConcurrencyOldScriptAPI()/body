@@ -1,0 +1,169 @@
+{
+  assertAcked(prepareCreate("test").addMapping("type1",XContentFactory.jsonBuilder().startObject().startObject("type1").startObject("_timestamp").field("enabled",true).field("store","yes").endObject().startObject("_ttl").field("enabled",true).endObject().endObject().endObject()).setSettings(Settings.builder().put(MergePolicyModule.MERGE_POLICY_TYPE_KEY,NoMergePolicyProvider.class)));
+  ensureGreen();
+  final int numberOfThreads=scaledRandomIntBetween(3,5);
+  final int numberOfIdsPerThread=scaledRandomIntBetween(3,10);
+  final int numberOfUpdatesPerId=scaledRandomIntBetween(10,100);
+  final int retryOnConflict=randomIntBetween(0,1);
+  final CountDownLatch latch=new CountDownLatch(numberOfThreads);
+  final CountDownLatch startLatch=new CountDownLatch(1);
+  final List<Throwable> failures=new CopyOnWriteArrayList<>();
+final class UpdateThread extends Thread {
+    final Map<Integer,Integer> failedMap=new HashMap<>();
+    final int numberOfIds;
+    final int updatesPerId;
+    final int maxUpdateRequests=numberOfIdsPerThread * numberOfUpdatesPerId;
+    final int maxDeleteRequests=numberOfIdsPerThread * numberOfUpdatesPerId;
+    private final Semaphore updateRequestsOutstanding=new Semaphore(maxUpdateRequests);
+    private final Semaphore deleteRequestsOutstanding=new Semaphore(maxDeleteRequests);
+    public UpdateThread(    int numberOfIds,    int updatesPerId){
+      this.numberOfIds=numberOfIds;
+      this.updatesPerId=updatesPerId;
+    }
+final class UpdateListener implements ActionListener<UpdateResponse> {
+      int id;
+      public UpdateListener(      int id){
+        this.id=id;
+      }
+      @Override public void onResponse(      UpdateResponse updateResponse){
+        updateRequestsOutstanding.release(1);
+      }
+      @Override public void onFailure(      Throwable e){
+synchronized (failedMap) {
+          incrementMapValue(id,failedMap);
+        }
+        updateRequestsOutstanding.release(1);
+      }
+    }
+final class DeleteListener implements ActionListener<DeleteResponse> {
+      int id;
+      public DeleteListener(      int id){
+        this.id=id;
+      }
+      @Override public void onResponse(      DeleteResponse deleteResponse){
+        deleteRequestsOutstanding.release(1);
+      }
+      @Override public void onFailure(      Throwable e){
+synchronized (failedMap) {
+          incrementMapValue(id,failedMap);
+        }
+        deleteRequestsOutstanding.release(1);
+      }
+    }
+    @Override public void run(){
+      try {
+        startLatch.await();
+        boolean hasWaitedForNoNode=false;
+        for (int j=0; j < numberOfIds; j++) {
+          for (int k=0; k < numberOfUpdatesPerId; ++k) {
+            updateRequestsOutstanding.acquire();
+            try {
+              UpdateRequest ur=client().prepareUpdate("test","type1",Integer.toString(j)).setScript("ctx._source.field += 1",ScriptService.ScriptType.INLINE).setRetryOnConflict(retryOnConflict).setUpsert(jsonBuilder().startObject().field("field",1).endObject()).request();
+              client().update(ur,new UpdateListener(j));
+            }
+ catch (            NoNodeAvailableException nne) {
+              updateRequestsOutstanding.release();
+synchronized (failedMap) {
+                incrementMapValue(j,failedMap);
+              }
+              if (hasWaitedForNoNode) {
+                throw nne;
+              }
+              logger.warn("Got NoNodeException waiting for 1 second for things to recover.");
+              hasWaitedForNoNode=true;
+              Thread.sleep(1000);
+            }
+            try {
+              deleteRequestsOutstanding.acquire();
+              DeleteRequest dr=client().prepareDelete("test","type1",Integer.toString(j)).request();
+              client().delete(dr,new DeleteListener(j));
+            }
+ catch (            NoNodeAvailableException nne) {
+              deleteRequestsOutstanding.release();
+synchronized (failedMap) {
+                incrementMapValue(j,failedMap);
+              }
+              if (hasWaitedForNoNode) {
+                throw nne;
+              }
+              logger.warn("Got NoNodeException waiting for 1 second for things to recover.");
+              hasWaitedForNoNode=true;
+              Thread.sleep(1000);
+            }
+          }
+        }
+      }
+ catch (      Throwable e) {
+        logger.error("Something went wrong",e);
+        failures.add(e);
+      }
+ finally {
+        try {
+          waitForOutstandingRequests(TimeValue.timeValueSeconds(60),updateRequestsOutstanding,maxUpdateRequests,"Update");
+          waitForOutstandingRequests(TimeValue.timeValueSeconds(60),deleteRequestsOutstanding,maxDeleteRequests,"Delete");
+        }
+ catch (        ElasticsearchTimeoutException ete) {
+          failures.add(ete);
+        }
+        latch.countDown();
+      }
+    }
+    private void incrementMapValue(    int j,    Map<Integer,Integer> map){
+      if (!map.containsKey(j)) {
+        map.put(j,0);
+      }
+      map.put(j,map.get(j) + 1);
+    }
+    private void waitForOutstandingRequests(    TimeValue timeOut,    Semaphore requestsOutstanding,    int maxRequests,    String name){
+      long start=System.currentTimeMillis();
+      do {
+        long msRemaining=timeOut.getMillis() - (System.currentTimeMillis() - start);
+        logger.info("[{}] going to try and acquire [{}] in [{}]ms [{}] available to acquire right now",name,maxRequests,msRemaining,requestsOutstanding.availablePermits());
+        try {
+          requestsOutstanding.tryAcquire(maxRequests,msRemaining,TimeUnit.MILLISECONDS);
+          return;
+        }
+ catch (        InterruptedException ie) {
+        }
+      }
+ while ((System.currentTimeMillis() - start) < timeOut.getMillis());
+      throw new ElasticsearchTimeoutException("Requests were still outstanding after the timeout [" + timeOut + "] for type ["+ name+ "]");
+    }
+  }
+  final List<UpdateThread> threads=new ArrayList<>();
+  for (int i=0; i < numberOfThreads; i++) {
+    UpdateThread ut=new UpdateThread(numberOfIdsPerThread,numberOfUpdatesPerId);
+    ut.start();
+    threads.add(ut);
+  }
+  startLatch.countDown();
+  latch.await();
+  for (  UpdateThread ut : threads) {
+    ut.join();
+  }
+  for (  Throwable throwable : failures) {
+    logger.info("Captured failure on concurrent update:",throwable);
+  }
+  assertThat(failures.size(),equalTo(0));
+  for (int i=0; i < numberOfIdsPerThread; ++i) {
+    UpdateResponse ur=client().prepareUpdate("test","type1",Integer.toString(i)).setScript("ctx._source.field += 1",ScriptService.ScriptType.INLINE).setRetryOnConflict(Integer.MAX_VALUE).setUpsert(jsonBuilder().startObject().field("field",1).endObject()).execute().actionGet();
+  }
+  refresh();
+  for (int i=0; i < numberOfIdsPerThread; ++i) {
+    int totalFailures=0;
+    GetResponse response=client().prepareGet("test","type1",Integer.toString(i)).execute().actionGet();
+    if (response.isExists()) {
+      assertThat(response.getId(),equalTo(Integer.toString(i)));
+      int expectedVersion=(numberOfThreads * numberOfUpdatesPerId * 2) + 1;
+      for (      UpdateThread ut : threads) {
+        if (ut.failedMap.containsKey(i)) {
+          totalFailures+=ut.failedMap.get(i);
+        }
+      }
+      expectedVersion-=totalFailures;
+      logger.error("Actual version [{}] Expected version [{}] Total failures [{}]",response.getVersion(),expectedVersion,totalFailures);
+      assertThat(response.getVersion(),equalTo((long)expectedVersion));
+      assertThat(response.getVersion() + totalFailures,equalTo((long)((numberOfUpdatesPerId * numberOfThreads * 2) + 1)));
+    }
+  }
+}

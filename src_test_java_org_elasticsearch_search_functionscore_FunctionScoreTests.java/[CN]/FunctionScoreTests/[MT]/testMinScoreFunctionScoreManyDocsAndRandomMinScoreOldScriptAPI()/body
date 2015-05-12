@@ -1,0 +1,23 @@
+{
+  List<IndexRequestBuilder> docs=new ArrayList<>();
+  int numDocs=randomIntBetween(1,100);
+  int scoreOffset=randomIntBetween(-2 * numDocs,2 * numDocs);
+  int minScore=randomIntBetween(-2 * numDocs,2 * numDocs);
+  for (int i=0; i < numDocs; i++) {
+    docs.add(client().prepareIndex(INDEX,TYPE,Integer.toString(i)).setSource("num",i + scoreOffset));
+  }
+  indexRandom(true,docs);
+  ensureYellow();
+  String script="return (doc['num'].value)";
+  int numMatchingDocs=numDocs + scoreOffset - minScore;
+  if (numMatchingDocs < 0) {
+    numMatchingDocs=0;
+  }
+  if (numMatchingDocs > numDocs) {
+    numMatchingDocs=numDocs;
+  }
+  SearchResponse searchResponse=client().search(searchRequest().source(searchSource().query(functionScoreQuery().add(scriptFunction(script)).setMinScore(minScore)).size(numDocs))).actionGet();
+  assertMinScoreSearchResponses(numDocs,searchResponse,numMatchingDocs);
+  searchResponse=client().search(searchRequest().source(searchSource().query(functionScoreQuery().add(scriptFunction(script)).add(scriptFunction(script)).scoreMode("avg").setMinScore(minScore)).size(numDocs))).actionGet();
+  assertMinScoreSearchResponses(numDocs,searchResponse,numMatchingDocs);
+}

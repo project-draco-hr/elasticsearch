@@ -1,0 +1,15 @@
+{
+  assertAcked(prepareCreate(INDEX).addMapping(TYPE,MAPPING_WITH_DOUBLE_AND_GEO_POINT_AND_TEXT_FIELD));
+  ensureYellow();
+  XContentBuilder doc=jsonBuilder().startObject().field(TEXT_FIELD,"value").startObject(GEO_POINT_FIELD).field("lat",12).field("lon",21).endObject().field(DOUBLE_FIELD,10).endObject();
+  index(INDEX,TYPE,"1",doc);
+  refresh();
+  ScoreFunctionBuilder[] scoreFunctionBuilders=getScoreFunctionBuildersOldScriptAPI();
+  ScoreFunctionBuilder scoreFunctionBuilder=scoreFunctionBuilders[randomInt(3)];
+  float[] weights=createRandomWeights(1);
+  float[] scores=getScores(scoreFunctionBuilder);
+  FunctionScoreQueryBuilder withWeights=functionScoreQuery(constantScoreQuery(termQuery(TEXT_FIELD,"value")));
+  withWeights.add(scoreFunctionBuilder.setWeight(weights[0]));
+  SearchResponse responseWithWeights=client().search(searchRequest().source(searchSource().query(withWeights))).actionGet();
+  assertThat((double)scores[0] * weights[0] / responseWithWeights.getHits().getAt(0).getScore(),closeTo(1.0,1.e-6));
+}

@@ -1,0 +1,26 @@
+{
+  SearchResponse response=client().prepareSearch("idx").setTypes("type").addAggregation(terms("terms").field(MULTI_VALUED_FIELD_NAME).collectMode(randomFrom(SubAggCollectionMode.values())).script("_value + 1").subAggregation(sum("sum"))).execute().actionGet();
+  assertSearchResponse(response);
+  Terms terms=response.getAggregations().get("terms");
+  assertThat(terms,notNullValue());
+  assertThat(terms.getName(),equalTo("terms"));
+  assertThat(terms.getBuckets().size(),equalTo(6));
+  for (int i=0; i < 6; i++) {
+    Terms.Bucket bucket=terms.getBucketByKey("" + (i + 1d));
+    assertThat(bucket,notNullValue());
+    assertThat(key(bucket),equalTo("" + (i + 1d)));
+    assertThat(bucket.getKeyAsNumber().doubleValue(),equalTo(i + 1d));
+    final long count=i == 0 || i == 5 ? 1 : 2;
+    double s=0;
+    for (int j=0; j < NUM_DOCS; ++j) {
+      if (i == j || i == j + 1) {
+        s+=j + 1;
+        s+=j + 1 + 1;
+      }
+    }
+    assertThat(bucket.getDocCount(),equalTo(count));
+    Sum sum=bucket.getAggregations().get("sum");
+    assertThat(sum,notNullValue());
+    assertThat(sum.getValue(),equalTo(s));
+  }
+}
