@@ -1,0 +1,27 @@
+{
+  int opSize=in.readInt();
+  Translog.Operation operation;
+  try {
+    in.resetDigest();
+    if (in.markSupported()) {
+      in.mark(opSize);
+      if (opSize < 4) {
+        throw new TranslogCorruptedException("operation size must be at least 4 but was: " + opSize);
+      }
+      in.skip(opSize - 4);
+      verifyChecksum(in);
+      in.reset();
+    }
+    Translog.Operation.Type type=Translog.Operation.Type.fromId(in.readByte());
+    operation=newOperationFromType(type);
+    operation.readFrom(in);
+    verifyChecksum(in);
+  }
+ catch (  EOFException e) {
+    throw new TruncatedTranslogException("reached premature end of file, translog is truncated",e);
+  }
+catch (  AssertionError|Exception e) {
+    throw new TranslogCorruptedException("translog corruption while reading from stream",e);
+  }
+  return operation;
+}

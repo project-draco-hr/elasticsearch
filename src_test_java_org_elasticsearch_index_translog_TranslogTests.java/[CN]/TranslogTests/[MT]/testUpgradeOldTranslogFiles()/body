@@ -1,0 +1,81 @@
+{
+  List<Path> indexes=new ArrayList<>();
+  Path dir=getDataPath("/" + OldIndexBackwardsCompatibilityTests.class.getPackage().getName().replace('.','/'));
+  try (DirectoryStream<Path> stream=Files.newDirectoryStream(dir,"index-*.zip")){
+    for (    Path path : stream) {
+      indexes.add(path);
+    }
+  }
+   TranslogConfig config=this.translog.getConfig();
+  Translog.TranslogGeneration gen=translog.getGeneration();
+  this.translog.close();
+  try {
+    Translog.upgradeLegacyTranslog(logger,translog.getConfig());
+    fail("no generation set");
+  }
+ catch (  IllegalArgumentException ex) {
+  }
+  translog.getConfig().setTranslogGeneration(gen);
+  try {
+    Translog.upgradeLegacyTranslog(logger,translog.getConfig());
+    fail("already upgraded generation set");
+  }
+ catch (  IllegalArgumentException ex) {
+  }
+  for (  Path indexFile : indexes) {
+    final String indexName=indexFile.getFileName().toString().replace(".zip","").toLowerCase(Locale.ROOT);
+    Version version=Version.fromString(indexName.replace("index-",""));
+    if (version.onOrAfter(Version.V_2_0_0)) {
+      continue;
+    }
+    Path unzipDir=createTempDir();
+    Path unzipDataDir=unzipDir.resolve("data");
+    try (InputStream stream=Files.newInputStream(indexFile)){
+      TestUtil.unzip(stream,unzipDir);
+    }
+     assertTrue(Files.exists(unzipDataDir));
+    Path[] list=FileSystemUtils.files(unzipDataDir);
+    if (list.length != 1) {
+      throw new IllegalStateException("Backwards index must contain exactly one cluster but was " + list.length);
+    }
+    Path src=list[0].resolve("nodes/0/indices/" + indexName);
+    Path translog=list[0].resolve("nodes/0/indices/" + indexName).resolve("0").resolve("translog");
+    assertTrue("[" + indexFile + "] missing index dir: "+ src.toString(),Files.exists(src));
+    assertTrue("[" + indexFile + "] missing translog dir: "+ translog.toString(),Files.exists(translog));
+    Path[] tlogFiles=FileSystemUtils.files(translog);
+    assertEquals(tlogFiles.length,1);
+    final long size=Files.size(tlogFiles[0]);
+    final long generation=Translog.parseIdFromFileName(tlogFiles[0]);
+    assertTrue(generation >= 1);
+    logger.debug("upgrading index {} file: {} size: {}",indexName,tlogFiles[0].getFileName(),size);
+    TranslogConfig upgradeConfig=new TranslogConfig(config.getShardId(),translog,config.getIndexSettings(),config.getDurabilty(),config.getBigArrays(),config.getThreadPool());
+    upgradeConfig.setTranslogGeneration(new Translog.TranslogGeneration(null,generation));
+    Translog.upgradeLegacyTranslog(logger,upgradeConfig);
+    try (Translog upgraded=new Translog(upgradeConfig)){
+      assertEquals(generation + 1,upgraded.getGeneration().translogFileGeneration);
+      assertEquals(upgraded.getRecoveredReaders().size(),1);
+      final long headerSize;
+      if (version.before(Version.V_1_4_0)) {
+        assertTrue(upgraded.getRecoveredReaders().get(0).getClass().toString(),upgraded.getRecoveredReaders().get(0).getClass() == LegacyTranslogReader.class);
+        headerSize=0;
+      }
+ else {
+        assertTrue(upgraded.getRecoveredReaders().get(0).getClass().toString(),upgraded.getRecoveredReaders().get(0).getClass() == LegacyTranslogReaderBase.class);
+        headerSize=CodecUtil.headerLength(TranslogWriter.TRANSLOG_CODEC);
+      }
+      List<Translog.Operation> operations=new ArrayList<>();
+      try (Translog.Snapshot snapshot=upgraded.newSnapshot()){
+        Translog.Operation op=null;
+        while ((op=snapshot.next()) != null) {
+          operations.add(op);
+        }
+      }
+       if (size > headerSize) {
+        assertFalse(operations.toString(),operations.isEmpty());
+      }
+ else {
+        assertTrue(operations.toString(),operations.isEmpty());
+      }
+    }
+   }
+}
