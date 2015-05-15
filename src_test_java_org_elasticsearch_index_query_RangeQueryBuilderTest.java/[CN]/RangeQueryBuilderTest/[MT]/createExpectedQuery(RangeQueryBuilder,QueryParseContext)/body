@@ -1,0 +1,35 @@
+{
+  Query expectedQuery;
+  if (getCurrentTypes().length == 0 || (queryBuilder.fieldName().equals(DATE_FIELD_NAME) == false && queryBuilder.fieldName().equals(INT_FIELD_NAME) == false)) {
+    expectedQuery=new TermRangeQuery(queryBuilder.fieldName(),BytesRefs.toBytesRef(queryBuilder.from()),BytesRefs.toBytesRef(queryBuilder.to()),queryBuilder.includeLower(),queryBuilder.includeUpper());
+  }
+ else   if (queryBuilder.fieldName().equals(DATE_FIELD_NAME)) {
+    DateFieldMapper.Builder fieldMapperBuilder=new DateFieldMapper.Builder(queryBuilder.fieldName());
+    DateFieldMapper fieldMapper=fieldMapperBuilder.build(new Mapper.BuilderContext(ImmutableSettings.builder().put(IndexMetaData.SETTING_VERSION_CREATED,Version.CURRENT).build(),new ContentPath()));
+    DateMathParser dateMathParser=null;
+    if (queryBuilder.format() != null) {
+      dateMathParser=new DateMathParser(Joda.forPattern(queryBuilder.format()),DateFieldMapper.Defaults.TIME_UNIT);
+    }
+    DateTimeZone timeZone=null;
+    if (queryBuilder.timeZone() != null) {
+      timeZone=DateTimeZone.forID(queryBuilder.timeZone());
+    }
+    Long from=null;
+    if (queryBuilder.from() != null) {
+      from=fieldMapper.parseToMilliseconds(queryBuilder.from(),queryBuilder.includeLower(),timeZone,dateMathParser);
+    }
+    Long to=null;
+    if (queryBuilder.to() != null) {
+      to=fieldMapper.parseToMilliseconds(queryBuilder.to(),queryBuilder.includeLower(),timeZone,dateMathParser);
+    }
+    expectedQuery=fieldMapper.rangeQuery(from,to,queryBuilder.includeLower(),queryBuilder.includeUpper(),timeZone,dateMathParser,context);
+  }
+ else   if (queryBuilder.fieldName().equals(INT_FIELD_NAME)) {
+    expectedQuery=NumericRangeQuery.newIntRange(INT_FIELD_NAME,(Integer)queryBuilder.from(),(Integer)queryBuilder.to(),queryBuilder.includeLower(),queryBuilder.includeUpper());
+  }
+ else {
+    throw new UnsupportedOperationException();
+  }
+  expectedQuery.setBoost(queryBuilder.boost());
+  return expectedQuery;
+}
