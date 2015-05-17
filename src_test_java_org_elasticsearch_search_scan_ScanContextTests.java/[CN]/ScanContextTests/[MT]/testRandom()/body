@@ -1,0 +1,41 @@
+{
+  final int numDocs=randomIntBetween(10,200);
+  final Document doc1=new Document();
+  doc1.add(new StringField("foo","bar",Store.NO));
+  final Document doc2=new Document();
+  final Directory dir=newDirectory();
+  final RandomIndexWriter w=new RandomIndexWriter(getRandom(),dir);
+  for (int i=0; i < numDocs; ++i) {
+    w.addDocument(randomBoolean() ? doc1 : doc2);
+  }
+  final IndexReader reader=w.getReader();
+  final IndexSearcher searcher=newSearcher(reader);
+  final boolean trackScores=randomBoolean();
+  final int pageSize=randomIntBetween(1,numDocs / 2);
+  Query query=new TermQuery(new Term("foo","bar"));
+  if (trackScores == false) {
+    query.setBoost(0f);
+  }
+  final ScoreDoc[] expected=searcher.search(query,numDocs,Sort.INDEXORDER,true,true).scoreDocs;
+  final List<ScoreDoc> actual=new ArrayList<>();
+  ScanContext context=new ScanContext();
+  while (true) {
+    final ScoreDoc[] page=context.execute(searcher,query,pageSize,trackScores).scoreDocs;
+    assertTrue(page.length <= pageSize);
+    if (page.length == 0) {
+      assertEquals(0,context.execute(searcher,query,pageSize,trackScores).scoreDocs.length);
+      break;
+    }
+    actual.addAll(Arrays.asList(page));
+  }
+  assertEquals(expected.length,actual.size());
+  for (int i=0; i < expected.length; ++i) {
+    ScoreDoc sd1=expected[i];
+    ScoreDoc sd2=actual.get(i);
+    assertEquals(sd1.doc,sd2.doc);
+    assertEquals(sd1.score,sd2.score,0.001f);
+  }
+  w.close();
+  reader.close();
+  dir.close();
+}
