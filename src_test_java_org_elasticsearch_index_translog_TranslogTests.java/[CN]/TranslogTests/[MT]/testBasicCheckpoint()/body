@@ -1,0 +1,41 @@
+{
+  List<Translog.Location> locations=newArrayList();
+  int translogOperations=randomIntBetween(10,100);
+  int lastSynced=-1;
+  for (int op=0; op < translogOperations; op++) {
+    locations.add(translog.add(new Translog.Create("test","" + op,Integer.toString(op).getBytes(Charset.forName("UTF-8")))));
+    if (frequently()) {
+      translog.sync();
+      lastSynced=op;
+    }
+  }
+  assertEquals(translogOperations,translog.totalOperations());
+  final Translog.Location lastLocation=translog.add(new Translog.Create("test","" + translogOperations,Integer.toString(translogOperations).getBytes(Charset.forName("UTF-8"))));
+  final Checkpoint checkpoint=Checkpoint.read(translog.location().resolve(Translog.CHECKPOINT_FILE_NAME));
+  try (final ImmutableTranslogReader reader=translog.openReader(translog.location().resolve(translog.getFilename(translog.currentFileGeneration())),checkpoint)){
+    assertEquals(lastSynced + 1,reader.totalOperations());
+    for (int op=0; op < translogOperations; op++) {
+      Translog.Location location=locations.get(op);
+      if (op <= lastSynced) {
+        final Translog.Operation read=reader.read(location);
+        assertEquals(Integer.toString(op),read.getSource().source.toUtf8());
+      }
+ else {
+        try {
+          reader.read(location);
+          fail("read past checkpoint");
+        }
+ catch (        EOFException ex) {
+        }
+      }
+    }
+    try {
+      reader.read(lastLocation);
+      fail("read past checkpoint");
+    }
+ catch (    EOFException ex) {
+    }
+  }
+   assertEquals(translogOperations + 1,translog.totalOperations());
+  translog.close();
+}

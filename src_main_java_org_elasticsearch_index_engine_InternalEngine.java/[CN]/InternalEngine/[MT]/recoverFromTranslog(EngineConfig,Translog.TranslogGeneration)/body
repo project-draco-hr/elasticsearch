@@ -1,0 +1,28 @@
+{
+  int opsRecovered=0;
+  final TranslogRecoveryPerformer handler=engineConfig.getTranslogRecoveryPerformer();
+  try (Translog.Snapshot snapshot=translog.newSnapshot()){
+    Translog.Operation operation;
+    while ((operation=snapshot.next()) != null) {
+      try {
+        handler.performRecoveryOperation(this,operation);
+        opsRecovered++;
+      }
+ catch (      ElasticsearchException e) {
+        if (e.status() == RestStatus.BAD_REQUEST) {
+          logger.info("ignoring recovery of a corrupt translog entry",e);
+        }
+ else {
+          throw e;
+        }
+      }
+    }
+  }
+ catch (  Throwable e) {
+    throw new EngineException(shardId,"failed to recover from translog",e);
+  }
+  if (opsRecovered > 0 || translog.isCurrent(translogGeneration) == false) {
+    logger.trace("flushing post recovery from translog. ops recovered [{}]. committed translog id [{}]. current id [{}]",opsRecovered,translogGeneration == null ? null : translogGeneration.translogFileGeneration,translog.currentFileGeneration());
+    flush(true,true);
+  }
+}

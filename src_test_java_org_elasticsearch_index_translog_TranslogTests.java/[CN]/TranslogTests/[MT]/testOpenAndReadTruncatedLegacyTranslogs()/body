@@ -1,0 +1,38 @@
+{
+  Path zip=getDataPath("/org/elasticsearch/index/translog/legacy_translogs.zip");
+  Path unzipDir=createTempDir();
+  try (InputStream stream=Files.newInputStream(zip)){
+    TestUtil.unzip(stream,unzipDir);
+  }
+   TranslogConfig config=this.translog.getConfig();
+  int count=0;
+  try (DirectoryStream<Path> stream=Files.newDirectoryStream(unzipDir)){
+    for (    Path legacyTranslog : stream) {
+      logger.debug("upgrading {} ",legacyTranslog.getFileName());
+      Path directory=legacyTranslog.resolveSibling("translog_" + count++);
+      Files.createDirectories(directory);
+      Files.copy(legacyTranslog,directory.resolve(legacyTranslog.getFileName()));
+      TranslogConfig upgradeConfig=new TranslogConfig(config.getShardId(),directory,config.getIndexSettings(),config.getDurabilty(),config.getBigArrays(),config.getThreadPool());
+      try {
+        Translog.upgradeLegacyTranslog(logger,upgradeConfig);
+        fail("no generation set");
+      }
+ catch (      IllegalArgumentException ex) {
+      }
+      long generation=Translog.parseIdFromFileName(legacyTranslog);
+      upgradeConfig.setTranslogGeneration(new Translog.TranslogGeneration(null,generation));
+      Translog.upgradeLegacyTranslog(logger,upgradeConfig);
+      try (Translog tlog=new Translog(upgradeConfig)){
+        List<Translog.Operation> operations=new ArrayList<>();
+        try (Translog.Snapshot snapshot=tlog.newSnapshot()){
+          Translog.Operation op=null;
+          while ((op=snapshot.next()) != null) {
+            operations.add(op);
+          }
+        }
+         logger.debug("num ops recovered: {} for file {} ",operations.size(),legacyTranslog.getFileName());
+        assertFalse(operations.isEmpty());
+      }
+     }
+  }
+ }

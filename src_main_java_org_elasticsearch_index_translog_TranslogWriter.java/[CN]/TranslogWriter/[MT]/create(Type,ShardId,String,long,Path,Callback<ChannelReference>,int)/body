@@ -1,0 +1,25 @@
+{
+  final BytesRef ref=new BytesRef(translogUUID);
+  final int headerLength=CodecUtil.headerLength(TRANSLOG_CODEC) + ref.length + RamUsageEstimator.NUM_BYTES_INT;
+  final FileChannel channel=FileChannel.open(file,StandardOpenOption.WRITE,StandardOpenOption.READ,StandardOpenOption.CREATE_NEW);
+  try {
+    final OutputStreamDataOutput out=new OutputStreamDataOutput(java.nio.channels.Channels.newOutputStream(channel));
+    CodecUtil.writeHeader(out,TRANSLOG_CODEC,VERSION);
+    out.writeInt(ref.length);
+    out.writeBytes(ref.bytes,ref.offset,ref.length);
+    channel.force(false);
+    writeCheckpoint(headerLength,0,file.getParent(),fileGeneration,StandardOpenOption.WRITE);
+    final TranslogWriter writer=type.create(shardId,fileGeneration,new ChannelReference(file,fileGeneration,channel,onClose),bufferSize);
+    return writer;
+  }
+ catch (  Throwable throwable) {
+    IOUtils.closeWhileHandlingException(channel);
+    try {
+      Files.delete(file);
+    }
+ catch (    IOException ex) {
+      throwable.addSuppressed(ex);
+    }
+    throw throwable;
+  }
+}

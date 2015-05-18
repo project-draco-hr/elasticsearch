@@ -1,18 +1,16 @@
 {
   try (ReleasableLock lock=readLock.acquire()){
-    ChannelReader reader=null;
-    if (current.translogId() == location.translogId) {
+    final TranslogReader reader;
+    if (current.getGeneration() == location.generation) {
       reader=current;
     }
- else {
-      for (      ChannelReader translog : uncommittedTranslogs) {
-        if (translog.translogId() == location.translogId) {
-          reader=translog;
-          break;
-        }
-      }
+ else     if (currentCommittingTranslog != null && currentCommittingTranslog.getGeneration() == location.generation) {
+      reader=currentCommittingTranslog;
     }
-    return reader == null ? null : reader.read(location);
+ else {
+      throw new IllegalStateException("Can't read from translog location" + location);
+    }
+    return reader.read(location);
   }
  catch (  IOException e) {
     throw new ElasticsearchException("failed to read source from translog location " + location,e);

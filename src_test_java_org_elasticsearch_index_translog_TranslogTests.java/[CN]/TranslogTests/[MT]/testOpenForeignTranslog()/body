@@ -1,0 +1,32 @@
+{
+  List<Translog.Location> locations=newArrayList();
+  int translogOperations=randomIntBetween(1,10);
+  int firstUncommitted=0;
+  for (int op=0; op < translogOperations; op++) {
+    locations.add(translog.add(new Translog.Create("test","" + op,Integer.toString(op).getBytes(Charset.forName("UTF-8")))));
+    if (randomBoolean()) {
+      translog.commit();
+      firstUncommitted=op + 1;
+    }
+  }
+  TranslogConfig config=translog.getConfig();
+  Translog.TranslogGeneration translogGeneration=translog.getGeneration();
+  translog.close();
+  config.setTranslogGeneration(new Translog.TranslogGeneration(randomRealisticUnicodeOfCodepointLengthBetween(1,translogGeneration.translogUUID.length()),translogGeneration.translogFileGeneration));
+  try {
+    new Translog(config);
+    fail("translog doesn't belong to this UUID");
+  }
+ catch (  TranslogCorruptedException ex) {
+  }
+  config.setTranslogGeneration(translogGeneration);
+  this.translog=new Translog(config);
+  try (Translog.Snapshot snapshot=this.translog.newSnapshot()){
+    for (int i=firstUncommitted; i < translogOperations; i++) {
+      Translog.Operation next=snapshot.next();
+      assertNotNull("" + i,next);
+      assertEquals(Integer.parseInt(next.getSource().source.toUtf8()),i);
+    }
+    assertNull(snapshot.next());
+  }
+ }
