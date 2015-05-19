@@ -1,0 +1,46 @@
+{
+  super(config.getShardId(),config.getIndexSettings());
+  this.config=config;
+  TranslogGeneration translogGeneration=config.getTranslogGeneration();
+  if (translogGeneration == null || translogGeneration.translogUUID == null) {
+    translogUUID=Strings.randomBase64UUID();
+  }
+ else {
+    translogUUID=translogGeneration.translogUUID;
+  }
+  bigArrays=config.getBigArrays();
+  ReadWriteLock rwl=new ReentrantReadWriteLock();
+  readLock=new ReleasableLock(rwl.readLock());
+  writeLock=new ReleasableLock(rwl.writeLock());
+  this.location=config.getTranslogPath();
+  Files.createDirectories(this.location);
+  if (config.getSyncInterval().millis() > 0 && config.getThreadPool() != null) {
+    syncScheduler=config.getThreadPool().schedule(config.getSyncInterval(),ThreadPool.Names.SAME,new Sync());
+  }
+  try {
+    if (translogGeneration != null) {
+      final Checkpoint checkpoint=Checkpoint.read(location.resolve(CHECKPOINT_FILE_NAME));
+      this.recoveredTranslogs=recoverFromFiles(translogGeneration,checkpoint);
+      if (recoveredTranslogs.isEmpty()) {
+        throw new IllegalStateException("at least one reader must be recovered");
+      }
+      current=createWriter(checkpoint.generation + 1);
+      this.lastCommittedTranslogFileGeneration=translogGeneration.translogFileGeneration;
+    }
+ else {
+      this.recoveredTranslogs=Collections.EMPTY_LIST;
+      IOUtils.rm(location);
+      logger.debug("wipe translog location - creating new translog");
+      Files.createDirectories(location);
+      final long generation=1;
+      Checkpoint checkpoint=new Checkpoint(0,0,generation);
+      Checkpoint.write(location.resolve(CHECKPOINT_FILE_NAME),checkpoint,StandardOpenOption.WRITE,StandardOpenOption.CREATE_NEW);
+      current=createWriter(generation);
+      this.lastCommittedTranslogFileGeneration=-1;
+    }
+  }
+ catch (  Throwable t) {
+    IOUtils.closeWhileHandlingException(currentCommittingTranslog,current);
+    throw t;
+  }
+}

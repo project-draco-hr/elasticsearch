@@ -1,0 +1,29 @@
+{
+  boolean success=false;
+  ArrayList<ImmutableTranslogReader> foundTranslogs=new ArrayList<>();
+  try (ReleasableLock lock=writeLock.acquire()){
+    logger.debug("open uncommitted translog checkpoint {}",checkpoint);
+    final String checkpointTranslogFile=getFilename(checkpoint.generation);
+    for (long i=translogGeneration.translogFileGeneration; i < checkpoint.generation; i++) {
+      Path committedTranslogFile=location.resolve(getFilename(i));
+      if (Files.exists(committedTranslogFile) == false) {
+        throw new IllegalStateException("translog file doesn't exist with generation: " + i + " lastCommitted: "+ lastCommittedTranslogFileGeneration+ " checkpoint: "+ checkpoint.generation+ " - translog ids must be consecutive");
+      }
+      final ImmutableTranslogReader reader=openReader(committedTranslogFile,Checkpoint.read(location.resolve(getCommitCheckpointFileName(i))));
+      foundTranslogs.add(reader);
+      logger.debug("recovered local translog from checkpoint {}",checkpoint);
+    }
+    foundTranslogs.add(openReader(location.resolve(checkpointTranslogFile),checkpoint));
+    Path commitCheckpoint=location.resolve(getCommitCheckpointFileName(checkpoint.generation));
+    Files.copy(location.resolve(CHECKPOINT_FILE_NAME),commitCheckpoint);
+    IOUtils.fsync(commitCheckpoint,false);
+    IOUtils.fsync(commitCheckpoint.getParent(),true);
+    success=true;
+  }
+  finally {
+    if (success == false) {
+      IOUtils.closeWhileHandlingException(foundTranslogs);
+    }
+  }
+  return foundTranslogs;
+}

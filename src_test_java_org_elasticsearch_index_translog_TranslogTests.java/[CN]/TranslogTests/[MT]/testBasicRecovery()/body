@@ -1,0 +1,41 @@
+{
+  List<Translog.Location> locations=newArrayList();
+  int translogOperations=randomIntBetween(10,100);
+  Translog.TranslogGeneration translogGeneration=null;
+  int minUncommittedOp=-1;
+  final boolean commitOften=randomBoolean();
+  for (int op=0; op < translogOperations; op++) {
+    locations.add(translog.add(new Translog.Create("test","" + op,Integer.toString(op).getBytes(Charset.forName("UTF-8")))));
+    final boolean commit=commitOften ? frequently() : rarely();
+    if (commit && op < translogOperations - 1) {
+      translog.commit();
+      minUncommittedOp=op + 1;
+      translogGeneration=translog.getGeneration();
+    }
+  }
+  translog.sync();
+  TranslogConfig config=translog.getConfig();
+  translog.close();
+  config.setTranslogGeneration(translogGeneration);
+  translog=new Translog(config);
+  if (translogGeneration == null) {
+    assertEquals(0,translog.stats().estimatedNumberOfOperations());
+    assertEquals(1,translog.currentFileGeneration());
+    assertFalse(translog.syncNeeded());
+    try (Translog.Snapshot snapshot=translog.newSnapshot()){
+      assertNull(snapshot.next());
+    }
+   }
+ else {
+    assertEquals("lastCommitted must be 1 less than current",translogGeneration.translogFileGeneration + 1,translog.currentFileGeneration());
+    assertFalse(translog.syncNeeded());
+    try (Translog.Snapshot snapshot=translog.newSnapshot()){
+      for (int i=minUncommittedOp; i < translogOperations; i++) {
+        assertEquals("expected operation" + i + " to be in the previous translog but wasn't",translog.currentFileGeneration() - 1,locations.get(i).generation);
+        Translog.Operation next=snapshot.next();
+        assertNotNull("operation " + i + " must be non-null",next);
+        assertEquals(i,Integer.parseInt(next.getSource().source.toUtf8()));
+      }
+    }
+   }
+}

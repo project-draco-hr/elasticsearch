@@ -1,11 +1,11 @@
 {
-  final String term;
   final String field;
-  if (documentMapper.parentFieldMapper().active()) {
+  final String term;
+  if (isParentHit(hitContext.hit())) {
     field=ParentFieldMapper.NAME;
     term=Uid.createUid(hitContext.hit().type(),hitContext.hit().id());
   }
- else {
+ else   if (isChildHit(hitContext.hit())) {
     field=UidFieldMapper.NAME;
     SearchHitField parentField=hitContext.hit().field(ParentFieldMapper.NAME);
     if (parentField != null) {
@@ -20,14 +20,15 @@
       term=(String)fieldsVisitor.fields().get(ParentFieldMapper.NAME).get(0);
     }
   }
-  Filter filter=new QueryWrapperFilter(new TermQuery(new Term(field,term)));
-  Query typeFilter=documentMapper.typeFilter();
-  BooleanQuery filteredQuery=new BooleanQuery();
-  filteredQuery.add(query,Occur.MUST);
-  filteredQuery.add(filter,Occur.FILTER);
-  filteredQuery.add(typeFilter,Occur.FILTER);
+ else {
+    return Lucene.EMPTY_TOP_DOCS;
+  }
+  BooleanQuery q=new BooleanQuery();
+  q.add(query,Occur.MUST);
+  q.add(new TermQuery(new Term(field,term)),Occur.MUST);
+  q.add(documentMapper.typeFilter(),Occur.MUST);
   if (size() == 0) {
-    final int count=context.searcher().count(filteredQuery);
+    final int count=context.searcher().count(q);
     return new TopDocs(count,Lucene.EMPTY_SCORE_DOCS,0);
   }
  else {
@@ -39,7 +40,7 @@
  else {
       topDocsCollector=TopScoreDocCollector.create(topN);
     }
-    context.searcher().search(filteredQuery,topDocsCollector);
+    context.searcher().search(q,topDocsCollector);
     return topDocsCollector.topDocs(from(),size());
   }
 }

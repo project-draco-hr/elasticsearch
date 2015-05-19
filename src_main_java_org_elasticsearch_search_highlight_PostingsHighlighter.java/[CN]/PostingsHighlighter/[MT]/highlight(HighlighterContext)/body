@@ -7,46 +7,37 @@
   SearchContext context=highlighterContext.context;
   FetchSubPhase.HitContext hitContext=highlighterContext.hitContext;
   if (!hitContext.cache().containsKey(CACHE_KEY)) {
-    Query query;
-    try {
-      query=rewrite(highlighterContext,hitContext.topLevelReader());
-      SortedSet<Term> queryTerms=extractTerms(context.searcher().createNormalizedWeight(query,false));
-      hitContext.cache().put(CACHE_KEY,new HighlighterEntry(queryTerms));
-    }
- catch (    IOException e) {
-      throw new FetchPhaseExecutionException(context,"Failed to highlight field [" + highlighterContext.fieldName + "]",e);
-    }
+    hitContext.cache().put(CACHE_KEY,new HighlighterEntry());
   }
   HighlighterEntry highlighterEntry=(HighlighterEntry)hitContext.cache().get(CACHE_KEY);
   MapperHighlighterEntry mapperHighlighterEntry=highlighterEntry.mappers.get(fieldMapper);
   if (mapperHighlighterEntry == null) {
     Encoder encoder=field.fieldOptions().encoder().equals("html") ? HighlightUtils.Encoders.HTML : HighlightUtils.Encoders.DEFAULT;
     CustomPassageFormatter passageFormatter=new CustomPassageFormatter(field.fieldOptions().preTags()[0],field.fieldOptions().postTags()[0],encoder);
-    BytesRef[] filteredQueryTerms=filterTerms(highlighterEntry.queryTerms,fieldMapper.names().indexName(),field.fieldOptions().requireFieldMatch());
-    mapperHighlighterEntry=new MapperHighlighterEntry(passageFormatter,filteredQueryTerms);
+    mapperHighlighterEntry=new MapperHighlighterEntry(passageFormatter);
   }
-  boolean mergeValues=field.fieldOptions().numberOfFragments() != 0;
   List<Snippet> snippets=new ArrayList<>();
   int numberOfFragments;
   try {
-    List<Object> textsToHighlight=HighlightUtils.loadFieldValues(field,fieldMapper,context,hitContext);
-    CustomPostingsHighlighter highlighter=new CustomPostingsHighlighter(mapperHighlighterEntry.passageFormatter,textsToHighlight,mergeValues,Integer.MAX_VALUE - 1,field.fieldOptions().noMatchSize());
+    Analyzer analyzer=context.mapperService().documentMapper(hitContext.hit().type()).mappers().indexAnalyzer();
+    List<Object> fieldValues=HighlightUtils.loadFieldValues(field,fieldMapper,context,hitContext);
+    CustomPostingsHighlighter highlighter;
     if (field.fieldOptions().numberOfFragments() == 0) {
-      highlighter.setBreakIterator(new WholeBreakIterator());
-      numberOfFragments=1;
+      String fieldValue=mergeFieldValues(fieldValues,HighlightUtils.NULL_SEPARATOR);
+      CustomSeparatorBreakIterator breakIterator=new CustomSeparatorBreakIterator(HighlightUtils.NULL_SEPARATOR);
+      highlighter=new CustomPostingsHighlighter(analyzer,mapperHighlighterEntry.passageFormatter,breakIterator,fieldValue,field.fieldOptions().noMatchSize() > 0);
+      numberOfFragments=fieldValues.size();
     }
  else {
+      String fieldValue=mergeFieldValues(fieldValues,HighlightUtils.PARAGRAPH_SEPARATOR);
+      highlighter=new CustomPostingsHighlighter(analyzer,mapperHighlighterEntry.passageFormatter,fieldValue,field.fieldOptions().noMatchSize() > 0);
       numberOfFragments=field.fieldOptions().numberOfFragments();
     }
-    int values=mergeValues ? 1 : textsToHighlight.size();
-    for (int i=0; i < values; i++) {
-      Snippet[] fieldSnippets=highlighter.highlightDoc(fieldMapper.names().indexName(),mapperHighlighterEntry.filteredQueryTerms,hitContext.reader(),hitContext.docId(),numberOfFragments);
-      if (fieldSnippets != null) {
-        for (        Snippet fieldSnippet : fieldSnippets) {
-          if (Strings.hasText(fieldSnippet.getText())) {
-            snippets.add(fieldSnippet);
-          }
-        }
+    IndexSearcher searcher=new IndexSearcher(hitContext.reader());
+    Snippet[] fieldSnippets=highlighter.highlightField(fieldMapper.names().indexName(),highlighterContext.query.originalQuery(),searcher,hitContext.docId(),numberOfFragments);
+    for (    Snippet fieldSnippet : fieldSnippets) {
+      if (Strings.hasText(fieldSnippet.getText())) {
+        snippets.add(fieldSnippet);
       }
     }
   }

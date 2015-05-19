@@ -1,0 +1,28 @@
+{
+  final Translog.TranslogGeneration generation=loadTranslogIdFromCommit(writer);
+  final TranslogConfig translogConfig=engineConfig.getTranslogConfig();
+  if (createNew == false) {
+    if (generation == null) {
+      throw new IllegalStateException("no translog generation present in commit data but translog is expected to exist");
+    }
+    translogConfig.setTranslogGeneration(generation);
+    if (generation != null && generation.translogUUID == null) {
+      Translog.upgradeLegacyTranslog(logger,translogConfig);
+    }
+  }
+  final Translog translog=new Translog(translogConfig);
+  if (generation == null) {
+    logger.debug("no translog ID present in the current generation - creating one");
+    boolean success=false;
+    try {
+      commitIndexWriter(writer,translog);
+      success=true;
+    }
+  finally {
+      if (success == false) {
+        IOUtils.closeWhileHandlingException(translog);
+      }
+    }
+  }
+  return translog;
+}

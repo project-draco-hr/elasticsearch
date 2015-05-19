@@ -70,7 +70,7 @@ void newView(){
 closeView();
 view=translog.newView();
 writtenOpsAtView=new HashSet<>(writtenOps.keySet());
-logger.debug("--> [{}] opened view from [{}]",threadId,view.minTranslogId());
+logger.debug("--> [{}] opened view from [{}]",threadId,view.minTranslogGeneration());
 }
 @Override protected void doRun() throws Exception {
 barrier.await();
@@ -92,7 +92,7 @@ StringBuilder missed=new StringBuilder("missed ").append(expectedOps.size()).app
 boolean failed=false;
 for (Translog.Operation op : expectedOps) {
 final Translog.Location loc=writtenOps.get(op);
-if (loc.translogId < view.minTranslogId()) {
+if (loc.generation < view.minTranslogGeneration()) {
 continue;
 }
 failed=true;
@@ -113,7 +113,6 @@ readers[i].start();
 }
 barrier.await();
 try {
-long previousId=translog.currentId();
 for (int iterations=scaledRandomIntBetween(10,200); iterations > 0 && errors.isEmpty(); iterations--) {
 writtenOpsLatch.set(new CountDownLatch(flushEveryOps));
 while (writtenOpsLatch.get().await(200,TimeUnit.MILLISECONDS) == false) {
@@ -121,9 +120,7 @@ if (errors.size() > 0) {
 break;
 }
 }
-long newId=translog.newTranslog();
-translog.markCommitted(previousId);
-previousId=newId;
+translog.commit();
 }
 }
   finally {

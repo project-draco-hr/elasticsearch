@@ -1,0 +1,41 @@
+{
+  final TranslogWriter writer=translog.createWriter(0);
+  final int numOps=randomIntBetween(10,100);
+  byte[] bytes=new byte[4];
+  ByteArrayDataOutput out=new ByteArrayDataOutput(bytes);
+  for (int i=0; i < numOps; i++) {
+    out.reset(bytes);
+    out.writeInt(i);
+    writer.add(new BytesArray(bytes));
+  }
+  writer.sync();
+  final TranslogReader reader=randomBoolean() ? writer : translog.openReader(writer.path(),Checkpoint.read(translog.location().resolve(Translog.CHECKPOINT_FILE_NAME)));
+  for (int i=0; i < numOps; i++) {
+    ByteBuffer buffer=ByteBuffer.allocate(4);
+    reader.readBytes(buffer,reader.getFirstOperationOffset() + 4 * i);
+    buffer.flip();
+    final int value=buffer.getInt();
+    assertEquals(i,value);
+  }
+  out.reset(bytes);
+  out.writeInt(2048);
+  writer.add(new BytesArray(bytes));
+  if (reader instanceof ImmutableTranslogReader) {
+    ByteBuffer buffer=ByteBuffer.allocate(4);
+    try {
+      reader.readBytes(buffer,reader.getFirstOperationOffset() + 4 * numOps);
+      fail("read past EOF?");
+    }
+ catch (    EOFException ex) {
+    }
+  }
+ else {
+    ByteBuffer buffer=ByteBuffer.allocate(4);
+    final long pos=reader.getFirstOperationOffset() + 4 * numOps;
+    reader.readBytes(buffer,pos);
+    buffer.flip();
+    final int value=buffer.getInt();
+    assertEquals(2048,value);
+  }
+  IOUtils.close(writer,reader);
+}
