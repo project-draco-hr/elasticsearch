@@ -1,24 +1,45 @@
 {
   for (  long missingValue : new long[]{0,randomLong()}) {
     for (    MultiValueMode mode : MultiValueMode.values()) {
-      if (MultiValueMode.MEDIAN.equals(mode)) {
-        continue;
-      }
       final NumericDocValues selected=mode.select(values,missingValue);
       for (int i=0; i < maxDoc; ++i) {
         final long actual=selected.get(i);
-        long expected;
+        long expected=0;
         values.setDocument(i);
         int numValues=values.count();
         if (numValues == 0) {
           expected=missingValue;
         }
  else {
-          expected=mode.startLong();
-          for (int j=0; j < numValues; ++j) {
-            expected=mode.apply(expected,values.valueAt(j));
+          if (mode == MultiValueMode.MAX) {
+            expected=Long.MIN_VALUE;
           }
-          expected=mode.reduce(expected,numValues);
+ else           if (mode == MultiValueMode.MIN) {
+            expected=Long.MAX_VALUE;
+          }
+          for (int j=0; j < numValues; ++j) {
+            if (mode == MultiValueMode.SUM || mode == MultiValueMode.AVG) {
+              expected+=values.valueAt(j);
+            }
+ else             if (mode == MultiValueMode.MIN) {
+              expected=Math.min(expected,values.valueAt(j));
+            }
+ else             if (mode == MultiValueMode.MAX) {
+              expected=Math.max(expected,values.valueAt(j));
+            }
+          }
+          if (mode == MultiValueMode.AVG) {
+            expected=numValues > 1 ? Math.round((double)expected / (double)numValues) : expected;
+          }
+ else           if (mode == MultiValueMode.MEDIAN) {
+            int value=numValues / 2;
+            if (numValues % 2 == 0) {
+              expected=Math.round((values.valueAt(value - 1) + values.valueAt(value)) / 2.0);
+            }
+ else {
+              expected=values.valueAt(value);
+            }
+          }
         }
         assertEquals(mode.toString() + " docId=" + i,expected,actual);
       }
