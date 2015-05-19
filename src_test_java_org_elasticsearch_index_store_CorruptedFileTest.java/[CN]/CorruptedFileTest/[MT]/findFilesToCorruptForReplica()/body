@@ -1,0 +1,29 @@
+{
+  Map<String,List<Path>> filesToNodes=new HashMap<>();
+  ClusterState state=client().admin().cluster().prepareState().get().getState();
+  for (  ShardRouting shardRouting : state.getRoutingTable().allShards("test")) {
+    if (shardRouting.primary() == true) {
+      continue;
+    }
+    assertTrue(shardRouting.assignedToNode());
+    NodesStatsResponse nodeStatses=client().admin().cluster().prepareNodesStats(shardRouting.currentNodeId()).setFs(true).get();
+    NodeStats nodeStats=nodeStatses.getNodes()[0];
+    List<Path> files=new ArrayList<>();
+    filesToNodes.put(nodeStats.getNode().getName(),files);
+    for (    FsStats.Info info : nodeStats.getFs()) {
+      String path=info.getPath();
+      final String relativeDataLocationPath="indices/test/" + Integer.toString(shardRouting.getId()) + "/index";
+      Path file=PathUtils.get(path).resolve(relativeDataLocationPath);
+      if (Files.exists(file)) {
+        try (DirectoryStream<Path> stream=Files.newDirectoryStream(file)){
+          for (          Path item : stream) {
+            if (item.getFileName().toString().startsWith("segments_")) {
+              files.add(item);
+            }
+          }
+        }
+       }
+    }
+  }
+  return filesToNodes;
+}
