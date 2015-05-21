@@ -3,17 +3,18 @@
   long version=-1;
   final Map<String,Mapping> typesToUpdate;
   SegmentInfos si=null;
-  indexShard.store().incRef();
+  final Store store=indexShard.store();
+  store.incRef();
   try {
     try {
-      indexShard.store().failIfCorrupted();
+      store.failIfCorrupted();
       try {
-        si=Lucene.readSegmentInfos(indexShard.store().directory());
+        si=store.readLastCommittedSegmentsInfo();
       }
  catch (      Throwable e) {
         String files="_unknown_";
         try {
-          files=Arrays.toString(indexShard.store().directory().listAll());
+          files=Arrays.toString(store.directory().listAll());
         }
  catch (        Throwable e1) {
           files+=" (failure=" + ExceptionsHelper.detailedMessage(e1) + ")";
@@ -28,7 +29,7 @@
         }
  else {
           logger.trace("cleaning existing shard, shouldn't exists");
-          IndexWriter writer=new IndexWriter(indexShard.store().directory(),new IndexWriterConfig(Lucene.STANDARD_ANALYZER).setOpenMode(IndexWriterConfig.OpenMode.CREATE));
+          IndexWriter writer=new IndexWriter(store.directory(),new IndexWriterConfig(Lucene.STANDARD_ANALYZER).setOpenMode(IndexWriterConfig.OpenMode.CREATE));
           writer.close();
           recoveryState.getTranslog().totalOperations(0);
         }
@@ -41,7 +42,7 @@
     try {
       final RecoveryState.Index index=recoveryState.getIndex();
       if (si != null) {
-        final Directory directory=indexShard.store().directory();
+        final Directory directory=store.directory();
         for (        String name : Lucene.files(si)) {
           long length=directory.fileLength(name);
           index.addFileDetail(name,length,true);
@@ -66,6 +67,6 @@
     throw new IndexShardGatewayRecoveryException(shardId,"failed to recovery from gateway",e);
   }
  finally {
-    indexShard.store().decRef();
+    store.decRef();
   }
 }

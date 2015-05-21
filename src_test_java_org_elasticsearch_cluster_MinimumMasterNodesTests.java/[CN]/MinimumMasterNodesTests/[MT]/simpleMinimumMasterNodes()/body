@@ -51,25 +51,22 @@
   state=client().admin().cluster().prepareState().execute().actionGet().getState();
   assertThat(state.nodes().size(),equalTo(2));
   assertThat(state.metaData().indices().containsKey("test"),equalTo(true));
-  logger.info("Running Cluster Health");
-  ClusterHealthResponse clusterHealth=client().admin().cluster().health(clusterHealthRequest().waitForGreenStatus()).actionGet();
-  logger.info("Done Cluster Health, status " + clusterHealth.getStatus());
-  assertThat(clusterHealth.isTimedOut(),equalTo(false));
-  assertThat(clusterHealth.getStatus(),equalTo(ClusterHealthStatus.GREEN));
-  logger.info("--> verify we the data back");
+  ensureGreen();
+  logger.info("--> verify we the data back after cluster reform");
   for (int i=0; i < 10; i++) {
-    assertThat(client().prepareCount().setQuery(QueryBuilders.matchAllQuery()).execute().actionGet().getCount(),equalTo(100l));
+    assertHitCount(client().prepareCount().setQuery(QueryBuilders.matchAllQuery()).execute().actionGet(),100);
   }
   internalCluster().stopRandomNonMasterNode();
-  assertThat(awaitBusy(new Predicate<Object>(){
-    @Override public boolean apply(    Object obj){
+  assertBusy(new Runnable(){
+    @Override public void run(){
       ClusterState state=client().admin().cluster().prepareState().setLocal(true).execute().actionGet().getState();
-      return state.blocks().hasGlobalBlock(DiscoverySettings.NO_MASTER_BLOCK_ID);
+      assertThat(state.blocks().hasGlobalBlock(DiscoverySettings.NO_MASTER_BLOCK_ID),equalTo(true));
     }
   }
-),equalTo(true));
+);
   logger.info("--> starting the previous master node again...");
   internalCluster().startNode(settings);
+  ensureGreen();
   clusterHealthResponse=client().admin().cluster().prepareHealth().setWaitForEvents(Priority.LANGUID).setWaitForNodes("2").setWaitForGreenStatus().execute().actionGet();
   assertThat(clusterHealthResponse.isTimedOut(),equalTo(false));
   state=client().admin().cluster().prepareState().setLocal(true).execute().actionGet().getState();
@@ -83,6 +80,6 @@
   ensureGreen();
   logger.info("--> verify we the data back");
   for (int i=0; i < 10; i++) {
-    assertThat(client().prepareCount().setQuery(QueryBuilders.matchAllQuery()).execute().actionGet().getCount(),equalTo(100l));
+    assertHitCount(client().prepareCount().setQuery(QueryBuilders.matchAllQuery()).execute().actionGet(),100);
   }
 }

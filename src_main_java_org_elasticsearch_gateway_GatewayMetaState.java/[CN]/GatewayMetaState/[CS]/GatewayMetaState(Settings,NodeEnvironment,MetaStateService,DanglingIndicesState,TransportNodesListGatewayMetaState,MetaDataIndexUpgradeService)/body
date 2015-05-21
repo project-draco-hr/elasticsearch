@@ -1,0 +1,28 @@
+{
+  super(settings);
+  this.nodeEnv=nodeEnv;
+  this.metaStateService=metaStateService;
+  this.danglingIndicesState=danglingIndicesState;
+  this.metaDataIndexUpgradeService=metaDataIndexUpgradeService;
+  nodesListGatewayMetaState.init(this);
+  if (DiscoveryNode.dataNode(settings)) {
+    ensureNoPre019ShardState(nodeEnv);
+    MultiDataPathUpgrader.upgradeMultiDataPath(nodeEnv,logger);
+  }
+  if (DiscoveryNode.masterNode(settings) || DiscoveryNode.dataNode(settings)) {
+    nodeEnv.ensureAtomicMoveSupported();
+  }
+  if (DiscoveryNode.masterNode(settings) || DiscoveryNode.dataNode(settings)) {
+    try {
+      ensureNoPre019State();
+      pre20Upgrade();
+      long startNS=System.nanoTime();
+      metaStateService.loadFullState();
+      logger.debug("took {} to load state",TimeValue.timeValueMillis(TimeValue.nsecToMSec(System.nanoTime() - startNS)));
+    }
+ catch (    Exception e) {
+      logger.error("failed to read local state, exiting...",e);
+      throw e;
+    }
+  }
+}

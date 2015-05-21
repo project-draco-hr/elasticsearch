@@ -1,0 +1,52 @@
+{
+  final Client client=client();
+  logger.info("-->  creating repository");
+  assertAcked(client.admin().cluster().preparePutRepository("test-repo").setType("fs").setSettings(ImmutableSettings.settingsBuilder().put("location",randomRepoPath()).put("compress",randomBoolean()).put("chunk_size",randomIntBetween(100,1000))));
+  assertAcked(prepareCreate("test-idx",0,settingsBuilder().put("number_of_shards",between(1,20)).put("number_of_replicas",0)));
+  ensureGreen();
+  logger.info("--> indexing some data");
+  final int numdocs=randomIntBetween(10,100);
+  IndexRequestBuilder[] builders=new IndexRequestBuilder[numdocs];
+  for (int i=0; i < builders.length; i++) {
+    builders[i]=client().prepareIndex("test-idx","type1",Integer.toString(i)).setSource("field1","bar " + i);
+  }
+  indexRandom(true,builders);
+  flushAndRefresh();
+  final int numberOfShards=getNumShards("test-idx").numPrimaries;
+  logger.info("number of shards: {}",numberOfShards);
+  final ClusterService clusterService=internalCluster().clusterService(internalCluster().getMasterName());
+  BlockingClusterStateListener snapshotListener=new BlockingClusterStateListener(clusterService,"update_snapshot [","update snapshot state",Priority.HIGH);
+  try {
+    clusterService.addFirst(snapshotListener);
+    logger.info("--> snapshot");
+    ListenableActionFuture<CreateSnapshotResponse> snapshotFuture=client.admin().cluster().prepareCreateSnapshot("test-repo","test-snap").setWaitForCompletion(true).setIndices("test-idx").execute();
+    assertTrue(waitForPendingTasks("update snapshot state",numberOfShards));
+    snapshotListener.unblock();
+    CreateSnapshotResponse createSnapshotResponse=snapshotFuture.actionGet();
+    assertEquals(SnapshotState.SUCCESS,createSnapshotResponse.getSnapshotInfo().state());
+    assertEquals(numberOfShards,createSnapshotResponse.getSnapshotInfo().totalShards());
+    assertEquals(numberOfShards,createSnapshotResponse.getSnapshotInfo().successfulShards());
+  }
+  finally {
+    clusterService.remove(snapshotListener);
+  }
+  assertFalse(snapshotListener.timedOut());
+  assertEquals(1,snapshotListener.count());
+  logger.info("--> close indices");
+  client.admin().indices().prepareClose("test-idx").get();
+  BlockingClusterStateListener restoreListener=new BlockingClusterStateListener(clusterService,"restore_snapshot[","update snapshot state",Priority.HIGH);
+  try {
+    clusterService.addFirst(restoreListener);
+    logger.info("--> restore snapshot");
+    ListenableActionFuture<RestoreSnapshotResponse> futureRestore=client.admin().cluster().prepareRestoreSnapshot("test-repo","test-snap").setWaitForCompletion(true).execute();
+    assertTrue(waitForPendingTasks("update snapshot state",numberOfShards));
+    restoreListener.unblock();
+    RestoreSnapshotResponse restoreSnapshotResponse=futureRestore.actionGet();
+    assertThat(restoreSnapshotResponse.getRestoreInfo().totalShards(),equalTo(numberOfShards));
+  }
+  finally {
+    clusterService.remove(restoreListener);
+  }
+  assertFalse(restoreListener.timedOut());
+  assertEquals(1,restoreListener.count());
+}

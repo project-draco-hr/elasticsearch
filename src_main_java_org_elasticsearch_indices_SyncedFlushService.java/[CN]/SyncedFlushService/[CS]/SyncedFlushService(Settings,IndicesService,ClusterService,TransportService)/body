@@ -1,0 +1,25 @@
+{
+  super(settings);
+  this.indicesService=indicesService;
+  this.clusterService=clusterService;
+  this.transportService=transportService;
+  transportService.registerRequestHandler(PRE_SYNCED_FLUSH_ACTION_NAME,PreSyncedFlushRequest.class,ThreadPool.Names.FLUSH,new PreSyncedFlushTransportHandler());
+  transportService.registerRequestHandler(SYNCED_FLUSH_ACTION_NAME,SyncedFlushRequest.class,ThreadPool.Names.FLUSH,new SyncedFlushTransportHandler());
+  transportService.registerRequestHandler(IN_FLIGHT_OPS_ACTION_NAME,InFlightOpsRequest.class,ThreadPool.Names.SAME,new InFlightOpCountTransportHandler());
+  indicesService.indicesLifecycle().addListener(new IndicesLifecycle.Listener(){
+    @Override public void onShardInactive(    final IndexShard indexShard){
+      if (indexShard.routingEntry().primary()) {
+        attemptSyncedFlush(indexShard.shardId(),new ActionListener<SyncedFlushResult>(){
+          @Override public void onResponse(          SyncedFlushResult syncedFlushResult){
+            logger.debug("{} sync flush on inactive shard returned successfully for sync_id: {}",syncedFlushResult.getShardId(),syncedFlushResult.syncId());
+          }
+          @Override public void onFailure(          Throwable e){
+            logger.debug("{} sync flush on inactive shard failed",e,indexShard.shardId());
+          }
+        }
+);
+      }
+    }
+  }
+);
+}
