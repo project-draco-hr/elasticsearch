@@ -1,0 +1,85 @@
+{
+  ParseContext.InternalParseContext context=cache.get();
+  final Mapping mapping=docMapper.mapping();
+  if (source.type() != null && !source.type().equals(docMapper.type())) {
+    throw new MapperParsingException("Type mismatch, provide type [" + source.type() + "] but mapper is of type ["+ docMapper.type()+ "]");
+  }
+  source.type(docMapper.type());
+  XContentParser parser=source.parser();
+  try {
+    if (parser == null) {
+      parser=XContentHelper.createParser(source.source());
+    }
+    if (mapping.sourceTransforms.length > 0) {
+      parser=transform(mapping,parser);
+    }
+    context.reset(parser,new ParseContext.Document(),source);
+    int countDownTokens=0;
+    XContentParser.Token token=parser.nextToken();
+    if (token != XContentParser.Token.START_OBJECT) {
+      throw new MapperParsingException("Malformed content, must start with an object");
+    }
+    boolean emptyDoc=false;
+    token=parser.nextToken();
+    if (token == XContentParser.Token.END_OBJECT) {
+      emptyDoc=true;
+    }
+ else     if (token != XContentParser.Token.FIELD_NAME) {
+      throw new MapperParsingException("Malformed content, after first object, either the type field or the actual properties should exist");
+    }
+    for (    RootMapper rootMapper : mapping.rootMappers) {
+      rootMapper.preParse(context);
+    }
+    if (!emptyDoc) {
+      Mapper update=parseObject(context,mapping.root);
+      if (update != null) {
+        context.addDynamicMappingsUpdate(update);
+      }
+    }
+    for (int i=0; i < countDownTokens; i++) {
+      parser.nextToken();
+    }
+    for (    RootMapper rootMapper : mapping.rootMappers) {
+      rootMapper.postParse(context);
+    }
+  }
+ catch (  Throwable e) {
+    if (e instanceof MapperParsingException) {
+      throw (MapperParsingException)e;
+    }
+    if (source.source() != null && source.source().length() == 0) {
+      throw new MapperParsingException("failed to parse, document is empty");
+    }
+    throw new MapperParsingException("failed to parse",e);
+  }
+ finally {
+    if (source.parser() == null && parser != null) {
+      parser.close();
+    }
+  }
+  if (context.docs().size() > 1) {
+    Collections.reverse(context.docs());
+  }
+  if (context.docBoost() != 1.0f) {
+    Set<String> encounteredFields=Sets.newHashSet();
+    for (    ParseContext.Document doc : context.docs()) {
+      encounteredFields.clear();
+      for (      IndexableField field : doc) {
+        if (field.fieldType().indexOptions() != IndexOptions.NONE && !field.fieldType().omitNorms()) {
+          if (!encounteredFields.contains(field.name())) {
+            ((Field)field).setBoost(context.docBoost() * field.boost());
+            encounteredFields.add(field.name());
+          }
+        }
+      }
+    }
+  }
+  Mapper rootDynamicUpdate=context.dynamicMappingsUpdate();
+  Mapping update=null;
+  if (rootDynamicUpdate != null) {
+    update=mapping.mappingUpdate(rootDynamicUpdate);
+  }
+  ParsedDocument doc=new ParsedDocument(context.uid(),context.version(),context.id(),context.type(),source.routing(),source.timestamp(),source.ttl(),context.docs(),context.source(),update).parent(source.parent());
+  context.reset(null,null,null);
+  return doc;
+}
