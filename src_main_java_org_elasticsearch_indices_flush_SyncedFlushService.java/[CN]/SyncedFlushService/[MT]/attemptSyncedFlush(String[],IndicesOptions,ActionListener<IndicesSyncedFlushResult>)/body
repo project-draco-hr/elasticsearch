@@ -1,0 +1,37 @@
+{
+  final ClusterState state=clusterService.state();
+  final String[] concreteIndices=state.metaData().concreteIndices(indicesOptions,aliasesOrIndices);
+  final Map<String,List<ShardsSyncedFlushResult>> results=ConcurrentCollections.newConcurrentMap();
+  int totalNumberOfShards=0;
+  int numberOfShards=0;
+  for (  String index : concreteIndices) {
+    final IndexMetaData indexMetaData=state.metaData().index(index);
+    totalNumberOfShards+=indexMetaData.totalNumberOfShards();
+    numberOfShards+=indexMetaData.getNumberOfShards();
+    results.put(index,Collections.synchronizedList(new ArrayList<ShardsSyncedFlushResult>()));
+  }
+  final int finalTotalNumberOfShards=totalNumberOfShards;
+  final CountDown countDown=new CountDown(numberOfShards);
+  for (  final String index : concreteIndices) {
+    final int indexNumberOfShards=state.metaData().index(index).getNumberOfShards();
+    for (int shard=0; shard < indexNumberOfShards; shard++) {
+      final ShardId shardId=new ShardId(index,shard);
+      attemptSyncedFlush(shardId,new ActionListener<ShardsSyncedFlushResult>(){
+        @Override public void onResponse(        ShardsSyncedFlushResult syncedFlushResult){
+          results.get(index).add(syncedFlushResult);
+          if (countDown.countDown()) {
+            listener.onResponse(new IndicesSyncedFlushResult(results));
+          }
+        }
+        @Override public void onFailure(        Throwable e){
+          logger.debug("{} unexpected error while executing synced flush",shardId);
+          results.get(index).add(new ShardsSyncedFlushResult(shardId,finalTotalNumberOfShards,e.getMessage()));
+          if (countDown.countDown()) {
+            listener.onResponse(new IndicesSyncedFlushResult(results));
+          }
+        }
+      }
+);
+    }
+  }
+}

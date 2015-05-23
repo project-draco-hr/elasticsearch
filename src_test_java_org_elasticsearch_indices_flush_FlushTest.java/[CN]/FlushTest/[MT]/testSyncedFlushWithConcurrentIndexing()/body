@@ -1,0 +1,36 @@
+{
+  internalCluster().ensureAtLeastNumDataNodes(3);
+  createIndex("test");
+  client().admin().indices().prepareUpdateSettings("test").setSettings(ImmutableSettings.builder().put("index.translog.disable_flush",true).put("index.refresh_interval",-1).put("index.number_of_replicas",internalCluster().numDataNodes() - 1)).get();
+  ensureGreen();
+  final AtomicBoolean stop=new AtomicBoolean(false);
+  final AtomicInteger numDocs=new AtomicInteger(0);
+  Thread indexingThread=new Thread(){
+    @Override public void run(){
+      while (stop.get() == false) {
+        client().prepareIndex().setIndex("test").setType("doc").setSource("{}").get();
+        numDocs.incrementAndGet();
+      }
+    }
+  }
+;
+  indexingThread.start();
+  IndexStats indexStats=client().admin().indices().prepareStats("test").get().getIndex("test");
+  for (  ShardStats shardStats : indexStats.getShards()) {
+    assertNull(shardStats.getCommitStats().getUserData().get(Engine.SYNC_COMMIT_ID));
+  }
+  logger.info("--> trying sync flush");
+  IndicesSyncedFlushResult syncedFlushResult=SyncedFlushUtil.attemptSyncedFlush(internalCluster(),"test");
+  logger.info("--> sync flush done");
+  stop.set(true);
+  indexingThread.join();
+  indexStats=client().admin().indices().prepareStats("test").get().getIndex("test");
+  assertFlushResponseEqualsShardStats(indexStats.getShards(),syncedFlushResult.getShardsResultPerIndex().get("test"));
+  refresh();
+  assertThat(client().prepareCount().get().getCount(),equalTo((long)numDocs.get()));
+  logger.info("indexed {} docs",client().prepareCount().get().getCount());
+  logClusterState();
+  internalCluster().fullRestart();
+  ensureGreen();
+  assertThat(client().prepareCount().get().getCount(),equalTo((long)numDocs.get()));
+}
