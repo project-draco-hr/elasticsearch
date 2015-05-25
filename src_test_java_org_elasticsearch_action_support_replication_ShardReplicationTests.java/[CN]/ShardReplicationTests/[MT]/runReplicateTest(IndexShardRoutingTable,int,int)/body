@@ -1,0 +1,58 @@
+{
+  final ShardRouting primaryShard=shardRoutingTable.primaryShard();
+  final ShardIterator shardIt=shardRoutingTable.shardsIt();
+  final ShardId shardId=shardIt.shardId();
+  final Request request=new Request();
+  PlainActionFuture<Response> listener=new PlainActionFuture<>();
+  logger.debug("expecting [{}] assigned replicas, [{}] total shards. using state: \n{}",assignedReplicas,totalShards,clusterService.state().prettyPrint());
+  final TransportReplicationAction<Request,Request,Response>.InternalRequest internalRequest=action.new InternalRequest(request);
+  internalRequest.concreteIndex(shardId.index().name());
+  Releasable reference=getOrCreateIndexShardOperationsCounter();
+  assertIndexShardCounter(2);
+  TransportReplicationAction<Request,Request,Response>.ReplicationPhase replicationPhase=action.new ReplicationPhase(shardIt,request,new Response(),new ClusterStateObserver(clusterService,logger),primaryShard,internalRequest,listener,reference);
+  assertThat(replicationPhase.totalShards(),equalTo(totalShards));
+  assertThat(replicationPhase.pending(),equalTo(assignedReplicas));
+  replicationPhase.run();
+  final CapturingTransport.CapturedRequest[] capturedRequests=transport.capturedRequests();
+  transport.clear();
+  assertThat(capturedRequests.length,equalTo(assignedReplicas));
+  if (assignedReplicas > 0) {
+    assertThat("listener is done, but there are outstanding replicas",listener.isDone(),equalTo(false));
+  }
+  int pending=replicationPhase.pending();
+  int criticalFailures=0;
+  int successfull=1;
+  for (  CapturingTransport.CapturedRequest capturedRequest : capturedRequests) {
+    if (randomBoolean()) {
+      Throwable t;
+      if (randomBoolean()) {
+        t=new CorruptIndexException("simulated",(String)null);
+        criticalFailures++;
+      }
+ else {
+        t=new IndexShardNotStartedException(shardId,IndexShardState.RECOVERING);
+      }
+      logger.debug("--> simulating failure on {} with [{}]",capturedRequest.node,t.getClass().getSimpleName());
+      transport.handleResponse(capturedRequest.requestId,t);
+    }
+ else {
+      successfull++;
+      transport.handleResponse(capturedRequest.requestId,TransportResponse.Empty.INSTANCE);
+    }
+    pending--;
+    assertThat(replicationPhase.pending(),equalTo(pending));
+    assertThat(replicationPhase.successful(),equalTo(successfull));
+  }
+  assertThat(listener.isDone(),equalTo(true));
+  Response response=listener.get();
+  final ActionWriteResponse.ShardInfo shardInfo=response.getShardInfo();
+  assertThat(shardInfo.getFailed(),equalTo(criticalFailures));
+  assertThat(shardInfo.getFailures(),arrayWithSize(criticalFailures));
+  assertThat(shardInfo.getSuccessful(),equalTo(successfull));
+  assertThat(shardInfo.getTotal(),equalTo(totalShards));
+  assertThat("failed to see enough shard failures",transport.capturedRequests().length,equalTo(criticalFailures));
+  for (  CapturingTransport.CapturedRequest capturedRequest : transport.capturedRequests()) {
+    assertThat(capturedRequest.action,equalTo(ShardStateAction.SHARD_FAILED_ACTION_NAME));
+  }
+  assertIndexShardCounter(1);
+}
