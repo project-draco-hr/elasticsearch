@@ -1,0 +1,35 @@
+{
+  final ShardId shardId=new ShardId("test",0);
+  clusterService.setState(state(shardId.index().getName(),true,ShardRoutingState.STARTED,ShardRoutingState.STARTED));
+  action=new ActionWithDelay(Settings.EMPTY,"testActionWithExceptions",transportService,clusterService,threadPool);
+  final Action.ReplicaOperationTransportHandler replicaOperationTransportHandler=action.new ReplicaOperationTransportHandler();
+  Thread t=new Thread(){
+    public void run(){
+      try {
+        replicaOperationTransportHandler.messageReceived(new Request(),createTransportChannel());
+      }
+ catch (      Exception e) {
+      }
+    }
+  }
+;
+  t.start();
+  awaitBusy(new Predicate<Object>(){
+    @Override public boolean apply(    @Nullable Object input){
+      return count.get() == 2;
+    }
+  }
+);
+  ((ActionWithDelay)action).countDownLatch.countDown();
+  t.join();
+  assertIndexShardCounter(1);
+  action=new ActionWithExceptions(Settings.EMPTY,"testActionWithExceptions",transportService,clusterService,threadPool);
+  final Action.ReplicaOperationTransportHandler replicaOperationTransportHandlerForException=action.new ReplicaOperationTransportHandler();
+  try {
+    replicaOperationTransportHandlerForException.messageReceived(new Request(shardId),createTransportChannel());
+    fail();
+  }
+ catch (  Throwable t2) {
+  }
+  assertIndexShardCounter(1);
+}
