@@ -1,0 +1,30 @@
+{
+  deferred.preCollection();
+  List<ScoreDoc> allDocs=new ArrayList<>(shardSize);
+  for (int i=0; i < perBucketSamples.size(); i++) {
+    PerParentBucketSamples perBucketSample=perBucketSamples.get(i);
+    if (perBucketSample == null) {
+      continue;
+    }
+    perBucketSample.getMatches(allDocs);
+  }
+  ScoreDoc[] docsArr=allDocs.toArray(new ScoreDoc[allDocs.size()]);
+  Arrays.sort(docsArr,new Comparator<ScoreDoc>(){
+    @Override public int compare(    ScoreDoc o1,    ScoreDoc o2){
+      if (o1.doc == o2.doc) {
+        return o1.shardIndex - o2.shardIndex;
+      }
+      return o1.doc - o2.doc;
+    }
+  }
+);
+  try {
+    for (    PerSegmentCollects perSegDocs : entries) {
+      perSegDocs.replayRelatedMatches(docsArr);
+    }
+  }
+ catch (  IOException e) {
+    throw new ElasticsearchException("IOException collecting best scoring results",e);
+  }
+  deferred.postCollection();
+}

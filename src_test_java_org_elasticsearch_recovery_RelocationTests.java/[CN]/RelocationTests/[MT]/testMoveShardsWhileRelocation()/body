@@ -1,13 +1,13 @@
 {
   final String indexName="test";
-  ListenableFuture<String> blueFuture=internalCluster().startNodeAsync(ImmutableSettings.builder().put("node.color","blue").build());
-  ListenableFuture<String> redFuture=internalCluster().startNodeAsync(ImmutableSettings.builder().put("node.color","red").build());
-  internalCluster().startNode(ImmutableSettings.builder().put("node.color","green").build());
+  ListenableFuture<String> blueFuture=internalCluster().startNodeAsync(Settings.builder().put("node.color","blue").build());
+  ListenableFuture<String> redFuture=internalCluster().startNodeAsync(Settings.builder().put("node.color","red").build());
+  internalCluster().startNode(Settings.builder().put("node.color","green").build());
   final String blueNodeName=blueFuture.get();
   final String redNodeName=redFuture.get();
   ClusterHealthResponse response=client().admin().cluster().prepareHealth().setWaitForNodes(">=3").get();
   assertThat(response.isTimedOut(),is(false));
-  client().admin().indices().prepareCreate(indexName).setSettings(ImmutableSettings.builder().put(FilterAllocationDecider.INDEX_ROUTING_INCLUDE_GROUP + "color","blue").put(IndexMetaData.SETTING_NUMBER_OF_REPLICAS,0)).get();
+  client().admin().indices().prepareCreate(indexName).setSettings(Settings.builder().put(FilterAllocationDecider.INDEX_ROUTING_INCLUDE_GROUP + "color","blue").put(IndexMetaData.SETTING_NUMBER_OF_REPLICAS,0)).get();
   List<IndexRequestBuilder> requests=new ArrayList<>();
   int numDocs=scaledRandomIntBetween(25,250);
   for (int i=0; i < numDocs; i++) {
@@ -22,8 +22,8 @@
   assertHitCount(searchResponse,numDocs);
   IndicesStatsResponse statsResponse=client().admin().indices().prepareStats(indexName).get();
   long chunkSize=statsResponse.getIndex(indexName).getShards()[0].getStats().getStore().size().bytes() / 10;
-  assertTrue(client().admin().cluster().prepareUpdateSettings().setTransientSettings(ImmutableSettings.builder().put(RecoverySettings.INDICES_RECOVERY_MAX_BYTES_PER_SEC,chunkSize).put(RecoverySettings.INDICES_RECOVERY_FILE_CHUNK_SIZE,chunkSize)).get().isAcknowledged());
-  client().admin().indices().prepareUpdateSettings(indexName).setSettings(ImmutableSettings.builder().put(FilterAllocationDecider.INDEX_ROUTING_INCLUDE_GROUP + "color","red")).get();
+  assertTrue(client().admin().cluster().prepareUpdateSettings().setTransientSettings(Settings.builder().put(RecoverySettings.INDICES_RECOVERY_MAX_BYTES_PER_SEC,chunkSize).put(RecoverySettings.INDICES_RECOVERY_FILE_CHUNK_SIZE,chunkSize)).get().isAcknowledged());
+  client().admin().indices().prepareUpdateSettings(indexName).setSettings(Settings.builder().put(FilterAllocationDecider.INDEX_ROUTING_INCLUDE_GROUP + "color","red")).get();
   boolean applied=awaitBusy(new Predicate<Object>(){
     @Override public boolean apply(    Object input){
       RecoveryResponse recoveryResponse=internalCluster().client(redNodeName).admin().indices().prepareRecoveries(indexName).get();
@@ -32,8 +32,8 @@
   }
 );
   assertTrue(applied);
-  client().admin().indices().prepareUpdateSettings(indexName).setSettings(ImmutableSettings.builder().put(FilterAllocationDecider.INDEX_ROUTING_INCLUDE_GROUP + "color","green")).get();
-  assertTrue(client().admin().cluster().prepareUpdateSettings().setTransientSettings(ImmutableSettings.builder().put(RecoverySettings.INDICES_RECOVERY_MAX_BYTES_PER_SEC,"20mb").put(RecoverySettings.INDICES_RECOVERY_FILE_CHUNK_SIZE,"512kb")).get().isAcknowledged());
+  client().admin().indices().prepareUpdateSettings(indexName).setSettings(Settings.builder().put(FilterAllocationDecider.INDEX_ROUTING_INCLUDE_GROUP + "color","green")).get();
+  assertTrue(client().admin().cluster().prepareUpdateSettings().setTransientSettings(Settings.builder().put(RecoverySettings.INDICES_RECOVERY_MAX_BYTES_PER_SEC,"20mb").put(RecoverySettings.INDICES_RECOVERY_FILE_CHUNK_SIZE,"512kb")).get().isAcknowledged());
   ensureSearchable(indexName);
   searchResponse=client().prepareSearch(indexName).get();
   assertHitCount(searchResponse,numDocs);

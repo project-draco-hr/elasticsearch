@@ -1,27 +1,38 @@
 {
   for (  long missingValue : new long[]{0,randomLong()}) {
-    for (    MultiValueMode mode : MultiValueMode.values()) {
-      if (MultiValueMode.MEDIAN.equals(mode)) {
-        continue;
-      }
+    for (    MultiValueMode mode : new MultiValueMode[]{MultiValueMode.MIN,MultiValueMode.MAX,MultiValueMode.SUM,MultiValueMode.AVG}) {
       final NumericDocValues selected=mode.select(values,missingValue,rootDocs,new BitDocIdSet(innerDocs),maxDoc);
       int prevRoot=-1;
       for (int root=rootDocs.nextSetBit(0); root != -1; root=root + 1 < maxDoc ? rootDocs.nextSetBit(root + 1) : -1) {
         final long actual=selected.get(root);
-        long expected=mode.startLong();
+        long expected=0;
+        if (mode == MultiValueMode.MAX) {
+          expected=Long.MIN_VALUE;
+        }
+ else         if (mode == MultiValueMode.MIN) {
+          expected=Long.MAX_VALUE;
+        }
         int numValues=0;
         for (int child=innerDocs.nextSetBit(prevRoot + 1); child != -1 && child < root; child=innerDocs.nextSetBit(child + 1)) {
           values.setDocument(child);
           for (int j=0; j < values.count(); ++j) {
-            expected=mode.apply(expected,values.valueAt(j));
+            if (mode == MultiValueMode.SUM || mode == MultiValueMode.AVG) {
+              expected+=values.valueAt(j);
+            }
+ else             if (mode == MultiValueMode.MIN) {
+              expected=Math.min(expected,values.valueAt(j));
+            }
+ else             if (mode == MultiValueMode.MAX) {
+              expected=Math.max(expected,values.valueAt(j));
+            }
             ++numValues;
           }
         }
         if (numValues == 0) {
           expected=missingValue;
         }
- else {
-          expected=mode.reduce(expected,numValues);
+ else         if (mode == MultiValueMode.AVG) {
+          expected=numValues > 1 ? Math.round((double)expected / (double)numValues) : expected;
         }
         assertEquals(mode.toString() + " docId=" + root,expected,actual);
         prevRoot=root;
