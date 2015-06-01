@@ -1,4 +1,6 @@
 {
+  double usedDiskThresholdLow=100.0 - DiskThresholdDecider.this.freeDiskThresholdLow;
+  double usedDiskThresholdHigh=100.0 - DiskThresholdDecider.this.freeDiskThresholdHigh;
   if (!enabled) {
     return allocation.decision(Decision.YES,NAME,"disk threshold decider disabled");
   }
@@ -40,9 +42,10 @@
     usage=usageIncludingRelocations;
   }
   double freeDiskPercentage=usage.getFreeDiskAsPercentage();
+  double usedDiskPercentage=usage.getUsedDiskAsPercentage();
   long freeBytes=usage.getFreeBytes();
   if (logger.isTraceEnabled()) {
-    logger.trace("Node [{}] has {}% free disk",node.nodeId(),freeDiskPercentage);
+    logger.trace("Node [{}] has {}% used disk",node.nodeId(),usedDiskPercentage);
   }
   boolean primaryHasBeenAllocated=allocation.routingTable().index(shardRouting.index()).shard(shardRouting.id()).primaryAllocatedPostApi();
   if (freeBytes < freeBytesThresholdLow.bytes()) {
@@ -68,13 +71,13 @@
   if (freeDiskPercentage < freeDiskThresholdLow) {
     if (!shardRouting.primary() || (shardRouting.primary() && primaryHasBeenAllocated)) {
       if (logger.isDebugEnabled()) {
-        logger.debug("Less than the required {} free disk threshold ({} free) on node [{}], preventing allocation",Strings.format1Decimals(freeDiskThresholdLow,"%"),Strings.format1Decimals(freeDiskPercentage,"%"),node.nodeId());
+        logger.debug("More than the allowed {} used disk threshold ({} used) on node [{}], preventing allocation",Strings.format1Decimals(usedDiskThresholdLow,"%"),Strings.format1Decimals(usedDiskPercentage,"%"),node.nodeId());
       }
-      return allocation.decision(Decision.NO,NAME,"less than required [%s%%] free disk on node, free: [%s%%]",freeDiskThresholdLow,freeDiskPercentage);
+      return allocation.decision(Decision.NO,NAME,"more than allowed [%s%%] used disk on node, free: [%s%%]",usedDiskThresholdLow,freeDiskPercentage);
     }
  else     if (freeDiskPercentage > freeDiskThresholdHigh) {
       if (logger.isDebugEnabled()) {
-        logger.debug("Less than the required {} free disk threshold ({} free) on node [{}], " + "but allowing allocation because primary has never been allocated",Strings.format1Decimals(freeDiskThresholdLow,"%"),Strings.format1Decimals(freeDiskPercentage,"%"),node.nodeId());
+        logger.debug("More than the allowed {} used disk threshold ({} used) on node [{}], " + "but allowing allocation because primary has never been allocated",Strings.format1Decimals(usedDiskThresholdLow,"%"),Strings.format1Decimals(usedDiskPercentage,"%"),node.nodeId());
       }
       return allocation.decision(Decision.YES,NAME,"primary has never been allocated before");
     }
@@ -82,7 +85,7 @@
       if (logger.isDebugEnabled()) {
         logger.debug("Less than the required {} free bytes threshold ({} bytes free) on node {}, " + "preventing allocation even though primary has never been allocated",Strings.format1Decimals(freeDiskThresholdHigh,"%"),Strings.format1Decimals(freeDiskPercentage,"%"),node.nodeId());
       }
-      return allocation.decision(Decision.NO,NAME,"less than required [%s%%] free disk on node, free: [%s%%]",freeDiskThresholdLow,freeDiskPercentage);
+      return allocation.decision(Decision.NO,NAME,"more than allowed [%s%%] used disk on node, free: [%s%%]",usedDiskThresholdHigh,freeDiskPercentage);
     }
   }
   Long shardSize=shardSizes.get(shardIdentifierFromRouting(shardRouting));
@@ -94,8 +97,8 @@
     return allocation.decision(Decision.NO,NAME,"after allocation less than required [%s] free on node, free: [%s]",freeBytesThresholdLow,new ByteSizeValue(freeBytesAfterShard));
   }
   if (freeSpaceAfterShard < freeDiskThresholdHigh) {
-    logger.warn("After allocating, node [{}] would have less than the required {} free disk threshold ({} free), preventing allocation",node.nodeId(),Strings.format1Decimals(freeDiskThresholdHigh,"%"),Strings.format1Decimals(freeSpaceAfterShard,"%"));
-    return allocation.decision(Decision.NO,NAME,"after allocation less than required [%s%%] free disk on node, free: [%s%%]",freeDiskThresholdLow,freeSpaceAfterShard);
+    logger.warn("After allocating, node [{}] would have more than the allowed {} free disk threshold ({} free), preventing allocation",node.nodeId(),Strings.format1Decimals(freeDiskThresholdHigh,"%"),Strings.format1Decimals(freeSpaceAfterShard,"%"));
+    return allocation.decision(Decision.NO,NAME,"after allocation more than allowed [%s%%] used disk on node, free: [%s%%]",usedDiskThresholdLow,freeSpaceAfterShard);
   }
   return allocation.decision(Decision.YES,NAME,"enough disk for shard on node, free: [%s]",new ByteSizeValue(freeBytes));
 }
