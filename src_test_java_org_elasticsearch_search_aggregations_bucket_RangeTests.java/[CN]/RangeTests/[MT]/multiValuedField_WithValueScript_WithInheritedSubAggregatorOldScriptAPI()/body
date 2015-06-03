@@ -1,0 +1,49 @@
+{
+  SearchResponse response=client().prepareSearch("idx").addAggregation(range("range").field(MULTI_VALUED_FIELD_NAME).script("_value + 1").addUnboundedTo(3).addRange(3,6).addUnboundedFrom(6).subAggregation(sum("sum"))).execute().actionGet();
+  assertSearchResponse(response);
+  Range range=response.getAggregations().get("range");
+  assertThat(range,notNullValue());
+  assertThat(range.getName(),equalTo("range"));
+  List<? extends Bucket> buckets=range.getBuckets();
+  assertThat(range.getBuckets().size(),equalTo(3));
+  Range.Bucket bucket=buckets.get(0);
+  assertThat(bucket,notNullValue());
+  assertThat((String)bucket.getKey(),equalTo("*-3.0"));
+  assertThat(((Number)bucket.getFrom()).doubleValue(),equalTo(Double.NEGATIVE_INFINITY));
+  assertThat(((Number)bucket.getTo()).doubleValue(),equalTo(3.0));
+  assertThat(bucket.getFromAsString(),nullValue());
+  assertThat(bucket.getToAsString(),equalTo("3.0"));
+  assertThat(bucket.getDocCount(),equalTo(1l));
+  Sum sum=bucket.getAggregations().get("sum");
+  assertThat(sum,notNullValue());
+  assertThat(sum.getName(),equalTo("sum"));
+  assertThat(sum.getValue(),equalTo(2d + 3d));
+  bucket=buckets.get(1);
+  assertThat(bucket,notNullValue());
+  assertThat((String)bucket.getKey(),equalTo("3.0-6.0"));
+  assertThat(((Number)bucket.getFrom()).doubleValue(),equalTo(3.0));
+  assertThat(((Number)bucket.getTo()).doubleValue(),equalTo(6.0));
+  assertThat(bucket.getFromAsString(),equalTo("3.0"));
+  assertThat(bucket.getToAsString(),equalTo("6.0"));
+  assertThat(bucket.getDocCount(),equalTo(4l));
+  sum=bucket.getAggregations().get("sum");
+  assertThat(sum,notNullValue());
+  assertThat(sum.getName(),equalTo("sum"));
+  assertThat(sum.getValue(),equalTo((double)2 + 3 + 3+ 4+ 4+ 5+ 5+ 6));
+  bucket=buckets.get(2);
+  assertThat(bucket,notNullValue());
+  assertThat((String)bucket.getKey(),equalTo("6.0-*"));
+  assertThat(((Number)bucket.getFrom()).doubleValue(),equalTo(6.0));
+  assertThat(((Number)bucket.getTo()).doubleValue(),equalTo(Double.POSITIVE_INFINITY));
+  assertThat(bucket.getFromAsString(),equalTo("6.0"));
+  assertThat(bucket.getToAsString(),nullValue());
+  assertThat(bucket.getDocCount(),equalTo(numDocs - 3L));
+  sum=bucket.getAggregations().get("sum");
+  assertThat(sum,notNullValue());
+  assertThat(sum.getName(),equalTo("sum"));
+  long total=0;
+  for (int i=3; i < numDocs; ++i) {
+    total+=((i + 1) + 1) + ((i + 1) + 2);
+  }
+  assertThat(sum.getValue(),equalTo((double)total));
+}

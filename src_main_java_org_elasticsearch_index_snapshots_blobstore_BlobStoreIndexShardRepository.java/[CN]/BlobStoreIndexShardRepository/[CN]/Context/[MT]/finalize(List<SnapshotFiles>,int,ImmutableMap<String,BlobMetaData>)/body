@@ -1,0 +1,43 @@
+{
+  BlobStoreIndexShardSnapshots newSnapshots=new BlobStoreIndexShardSnapshots(snapshots);
+  for (  String blobName : blobs.keySet()) {
+    if (blobName.startsWith(SNAPSHOT_TEMP_PREFIX) || blobName.startsWith(SNAPSHOT_INDEX_PREFIX)) {
+      try {
+        blobContainer.deleteBlob(blobName);
+      }
+ catch (      IOException e) {
+        throw new IndexShardSnapshotFailedException(shardId,"error deleting index file [{}] during cleanup",e);
+      }
+    }
+  }
+  for (  String blobName : blobs.keySet()) {
+    if (blobName.startsWith(DATA_BLOB_PREFIX)) {
+      if (newSnapshots.findNameFile(FileInfo.canonicalName(blobName)) == null) {
+        try {
+          blobContainer.deleteBlob(blobName);
+        }
+ catch (        IOException e) {
+          logger.debug("[{}] [{}] error deleting blob [{}] during cleanup",e,snapshotId,shardId,blobName);
+        }
+      }
+    }
+  }
+  if (snapshots.size() > 0) {
+    String newSnapshotIndexName=SNAPSHOT_INDEX_PREFIX + fileListGeneration;
+    try (OutputStream output=blobContainer.createOutput(SNAPSHOT_TEMP_PREFIX + fileListGeneration)){
+      StreamOutput stream=compressIfNeeded(output);
+      XContentBuilder builder=XContentFactory.contentBuilder(XContentType.JSON,stream);
+      newSnapshots.toXContent(builder,ToXContent.EMPTY_PARAMS);
+      builder.flush();
+    }
+ catch (    IOException e) {
+      throw new IndexShardSnapshotFailedException(shardId,"Failed to write file list",e);
+    }
+    try {
+      blobContainer.move(SNAPSHOT_TEMP_PREFIX + fileListGeneration,newSnapshotIndexName);
+    }
+ catch (    IOException e) {
+      throw new IndexShardSnapshotFailedException(shardId,"Failed to rename file list",e);
+    }
+  }
+}

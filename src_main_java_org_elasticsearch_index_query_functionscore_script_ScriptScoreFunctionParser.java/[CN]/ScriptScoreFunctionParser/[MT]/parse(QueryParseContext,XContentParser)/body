@@ -1,8 +1,7 @@
 {
   ScriptParameterParser scriptParameterParser=new ScriptParameterParser();
-  String script=null;
+  Script script=null;
   Map<String,Object> vars=null;
-  ScriptService.ScriptType scriptType=null;
   String currentFieldName=null;
   XContentParser.Token token;
   while ((token=parser.nextToken()) != XContentParser.Token.END_OBJECT) {
@@ -10,7 +9,10 @@
       currentFieldName=parser.currentName();
     }
  else     if (token == XContentParser.Token.START_OBJECT) {
-      if ("params".equals(currentFieldName)) {
+      if (ScriptField.SCRIPT.match(currentFieldName)) {
+        script=Script.parse(parser);
+      }
+ else       if ("params".equals(currentFieldName)) {
         vars=parser.map();
       }
  else {
@@ -23,18 +25,25 @@
       }
     }
   }
-  ScriptParameterValue scriptValue=scriptParameterParser.getDefaultScriptParameterValue();
-  if (scriptValue != null) {
-    script=scriptValue.script();
-    scriptType=scriptValue.scriptType();
+  if (script == null) {
+    ScriptParameterValue scriptValue=scriptParameterParser.getDefaultScriptParameterValue();
+    if (scriptValue != null) {
+      if (vars == null) {
+        vars=newHashMap();
+      }
+      script=new Script(scriptValue.script(),scriptValue.scriptType(),scriptParameterParser.lang(),vars);
+    }
+  }
+ else   if (vars != null) {
+    throw new QueryParsingException(parseContext,"script params must be specified inside script object");
   }
   if (script == null) {
     throw new QueryParsingException(parseContext,NAMES[0] + " requires 'script' field");
   }
   SearchScript searchScript;
   try {
-    searchScript=parseContext.scriptService().search(parseContext.lookup(),new Script(scriptParameterParser.lang(),script,scriptType,vars),ScriptContext.Standard.SEARCH);
-    return new ScriptScoreFunction(script,vars,searchScript);
+    searchScript=parseContext.scriptService().search(parseContext.lookup(),script,ScriptContext.Standard.SEARCH);
+    return new ScriptScoreFunction(script,searchScript);
   }
  catch (  Exception e) {
     throw new QueryParsingException(parseContext,NAMES[0] + " the script could not be loaded",e);

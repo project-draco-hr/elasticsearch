@@ -4,19 +4,15 @@
     if (snapshotsBlobContainer.blobExists(snapshotBlobName)) {
       throw new InvalidSnapshotNameException(snapshotId,"snapshot with such name already exists");
     }
-    try (OutputStream output=snapshotsBlobContainer.createOutput(metaDataBlobName(snapshotId))){
+    try (StreamOutput output=compressIfNeeded(snapshotsBlobContainer.createOutput(metaDataBlobName(snapshotId)))){
       writeGlobalMetaData(metaData,output);
     }
      for (    String index : indices) {
       final IndexMetaData indexMetaData=metaData.index(index);
       final BlobPath indexPath=basePath().add("indices").add(index);
       final BlobContainer indexMetaDataBlobContainer=blobStore().blobContainer(indexPath);
-      try (OutputStream output=indexMetaDataBlobContainer.createOutput(snapshotBlobName(snapshotId))){
-        StreamOutput stream=new OutputStreamStreamOutput(output);
-        if (isCompress()) {
-          stream=CompressorFactory.defaultCompressor().streamOutput(stream);
-        }
-        XContentBuilder builder=XContentFactory.contentBuilder(XContentType.JSON,stream);
+      try (StreamOutput output=compressIfNeeded(indexMetaDataBlobContainer.createOutput(snapshotBlobName(snapshotId)))){
+        XContentBuilder builder=XContentFactory.contentBuilder(XContentType.JSON,output);
         builder.startObject();
         IndexMetaData.Builder.toXContent(indexMetaData,builder,ToXContent.EMPTY_PARAMS);
         builder.endObject();

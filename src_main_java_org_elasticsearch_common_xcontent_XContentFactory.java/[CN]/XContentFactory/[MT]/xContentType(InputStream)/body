@@ -1,52 +1,64 @@
 {
-  final int firstInt=si.read();
-  if (firstInt == -1) {
-    return null;
+  if (si.markSupported() == false) {
+    throw new IllegalArgumentException("Cannot guess the xcontent type without mark/reset support on " + si.getClass());
   }
-  final int secondInt=si.read();
-  if (secondInt == -1) {
-    return null;
-  }
-  final byte first=(byte)(0xff & firstInt);
-  final byte second=(byte)(0xff & secondInt);
-  if (first == SmileConstants.HEADER_BYTE_1 && second == SmileConstants.HEADER_BYTE_2) {
-    int third=si.read();
-    if (third == SmileConstants.HEADER_BYTE_3) {
-      return XContentType.SMILE;
-    }
-  }
-  if (first == '{' || second == '{') {
-    return XContentType.JSON;
-  }
-  if (first == '-' && second == '-') {
-    int third=si.read();
-    if (third == '-') {
-      return XContentType.YAML;
-    }
-  }
-  if (first == CBORConstants.BYTE_OBJECT_INDEFINITE) {
-    return XContentType.CBOR;
-  }
-  if (CBORConstants.hasMajorType(CBORConstants.MAJOR_TYPE_TAG,first)) {
-    int third=si.read();
-    if (third == -1) {
+  si.mark(GUESS_HEADER_LENGTH);
+  try {
+    final int firstInt=si.read();
+    if (firstInt == -1) {
       return null;
     }
-    if (first == (byte)0xD9 && second == (byte)0xD9 && third == (byte)0xF7) {
-      return XContentType.CBOR;
-    }
-  }
-  if (CBORConstants.hasMajorType(CBORConstants.MAJOR_TYPE_OBJECT,first)) {
-    return XContentType.CBOR;
-  }
-  for (int i=2; i < GUESS_HEADER_LENGTH; i++) {
-    int val=si.read();
-    if (val == -1) {
+    final int secondInt=si.read();
+    if (secondInt == -1) {
       return null;
     }
-    if (val == '{') {
+    final byte first=(byte)(0xff & firstInt);
+    final byte second=(byte)(0xff & secondInt);
+    if (first == SmileConstants.HEADER_BYTE_1 && second == SmileConstants.HEADER_BYTE_2) {
+      int third=si.read();
+      if (third == SmileConstants.HEADER_BYTE_3) {
+        return XContentType.SMILE;
+      }
+    }
+    if (first == '{' || second == '{') {
       return XContentType.JSON;
     }
+    if (first == '-' && second == '-') {
+      int third=si.read();
+      if (third == '-') {
+        return XContentType.YAML;
+      }
+    }
+    if (first == CBORConstants.BYTE_OBJECT_INDEFINITE) {
+      return XContentType.CBOR;
+    }
+    if (CBORConstants.hasMajorType(CBORConstants.MAJOR_TYPE_TAG,first)) {
+      int third=si.read();
+      if (third == -1) {
+        return null;
+      }
+      if (first == (byte)0xD9 && second == (byte)0xD9 && third == (byte)0xF7) {
+        return XContentType.CBOR;
+      }
+    }
+    if (CBORConstants.hasMajorType(CBORConstants.MAJOR_TYPE_OBJECT,first)) {
+      return XContentType.CBOR;
+    }
+    for (int i=2; i < GUESS_HEADER_LENGTH; i++) {
+      int val=si.read();
+      if (val == -1) {
+        return null;
+      }
+      if (val == '{') {
+        return XContentType.JSON;
+      }
+      if (Character.isWhitespace(val) == false) {
+        break;
+      }
+    }
+    return null;
   }
-  return null;
+  finally {
+    si.reset();
+  }
 }

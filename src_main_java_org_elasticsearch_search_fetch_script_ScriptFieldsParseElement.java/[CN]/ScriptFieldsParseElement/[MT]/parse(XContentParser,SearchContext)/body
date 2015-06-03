@@ -8,8 +8,7 @@
  else     if (token == XContentParser.Token.START_OBJECT) {
       String fieldName=currentFieldName;
       ScriptParameterParser scriptParameterParser=new ScriptParameterParser();
-      String script=null;
-      ScriptService.ScriptType scriptType=null;
+      Script script=null;
       Map<String,Object> params=null;
       boolean ignoreException=false;
       while ((token=parser.nextToken()) != XContentParser.Token.END_OBJECT) {
@@ -17,7 +16,12 @@
           currentFieldName=parser.currentName();
         }
  else         if (token == XContentParser.Token.START_OBJECT) {
-          params=parser.map();
+          if (ScriptField.SCRIPT.match(currentFieldName)) {
+            script=Script.parse(parser);
+          }
+ else           if ("params".equals(currentFieldName)) {
+            params=parser.map();
+          }
         }
  else         if (token.isValue()) {
           if ("ignore_failure".equals(currentFieldName)) {
@@ -28,12 +32,22 @@
           }
         }
       }
-      ScriptParameterValue scriptValue=scriptParameterParser.getDefaultScriptParameterValue();
-      if (scriptValue != null) {
-        script=scriptValue.script();
-        scriptType=scriptValue.scriptType();
+      if (script == null) {
+        ScriptParameterValue scriptValue=scriptParameterParser.getDefaultScriptParameterValue();
+        if (scriptValue != null) {
+          if (params == null) {
+            params=newHashMap();
+          }
+          script=new Script(scriptValue.script(),scriptValue.scriptType(),scriptParameterParser.lang(),params);
+        }
       }
-      SearchScript searchScript=context.scriptService().search(context.lookup(),new Script(scriptParameterParser.lang(),script,scriptType,params),ScriptContext.Standard.SEARCH);
+ else       if (params != null) {
+        throw new SearchParseException(context,"script params must be specified inside script object",parser.getTokenLocation());
+      }
+      if (script == null) {
+        throw new SearchParseException(context,"must specify a script in script fields",parser.getTokenLocation());
+      }
+      SearchScript searchScript=context.scriptService().search(context.lookup(),script,ScriptContext.Standard.SEARCH);
       context.scriptFields().add(new ScriptFieldsContext.ScriptField(fieldName,searchScript,ignoreException));
     }
   }

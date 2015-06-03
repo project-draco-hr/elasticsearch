@@ -32,14 +32,24 @@
           DocumentMapper newMapper;
           DocumentMapper existingMapper=indexService.mapperService().documentMapper(request.type());
           if (MapperService.DEFAULT_MAPPING.equals(request.type())) {
-            newMapper=indexService.mapperService().parse(request.type(),new CompressedString(request.source()),false);
+            newMapper=indexService.mapperService().parse(request.type(),new CompressedXContent(request.source()),false);
           }
  else {
-            newMapper=indexService.mapperService().parse(request.type(),new CompressedString(request.source()),existingMapper == null);
+            newMapper=indexService.mapperService().parse(request.type(),new CompressedXContent(request.source()),existingMapper == null);
             if (existingMapper != null) {
               MergeResult mergeResult=existingMapper.merge(newMapper.mapping(),true);
               if (mergeResult.hasConflicts()) {
                 throw new MergeMappingException(mergeResult.buildConflicts());
+              }
+            }
+ else {
+              if (Version.indexCreated(indexService.getIndexSettings()).onOrAfter(Version.V_2_0_0) && newMapper.parentFieldMapper().active()) {
+                IndexMetaData indexMetaData=currentState.metaData().index(index);
+                for (                ObjectCursor<MappingMetaData> mapping : indexMetaData.mappings().values()) {
+                  if (newMapper.parentFieldMapper().type().equals(mapping.value.type())) {
+                    throw new IllegalArgumentException("can't add a _parent field that points to an already existing type");
+                  }
+                }
               }
             }
           }
@@ -66,12 +76,12 @@
           if (indexService == null) {
             continue;
           }
-          CompressedString existingSource=null;
+          CompressedXContent existingSource=null;
           if (existingMappers.containsKey(entry.getKey())) {
             existingSource=existingMappers.get(entry.getKey()).mappingSource();
           }
           DocumentMapper mergedMapper=indexService.mapperService().merge(newMapper.type(),newMapper.mappingSource(),false);
-          CompressedString updatedSource=mergedMapper.mappingSource();
+          CompressedXContent updatedSource=mergedMapper.mappingSource();
           if (existingSource != null) {
             if (existingSource.equals(updatedSource)) {
             }
