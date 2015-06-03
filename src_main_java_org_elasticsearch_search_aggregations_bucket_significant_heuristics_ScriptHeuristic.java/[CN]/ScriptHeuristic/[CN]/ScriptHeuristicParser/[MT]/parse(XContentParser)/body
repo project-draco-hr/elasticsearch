@@ -1,18 +1,19 @@
 {
   NAMES_FIELD.match(parser.currentName(),ParseField.EMPTY_FLAGS);
-  String script=null;
-  String scriptLang;
+  Script script=null;
   XContentParser.Token token;
-  Map<String,Object> params=new HashMap<>();
+  Map<String,Object> params=null;
   String currentFieldName=null;
-  ScriptService.ScriptType scriptType=ScriptService.ScriptType.INLINE;
   ScriptParameterParser scriptParameterParser=new ScriptParameterParser();
   while ((token=parser.nextToken()) != XContentParser.Token.END_OBJECT) {
     if (token.equals(XContentParser.Token.FIELD_NAME)) {
       currentFieldName=parser.currentName();
     }
  else     if (token == XContentParser.Token.START_OBJECT) {
-      if ("params".equals(currentFieldName)) {
+      if (ScriptField.SCRIPT.match(currentFieldName)) {
+        script=Script.parse(parser);
+      }
+ else       if ("params".equals(currentFieldName)) {
         params=parser.map();
       }
  else {
@@ -23,21 +24,27 @@
       throw new ElasticsearchParseException("unknown field " + currentFieldName + " in script_heuristic");
     }
   }
-  ScriptParameterParser.ScriptParameterValue scriptValue=scriptParameterParser.getDefaultScriptParameterValue();
-  if (scriptValue != null) {
-    script=scriptValue.script();
-    scriptType=scriptValue.scriptType();
+  if (script == null) {
+    ScriptParameterValue scriptValue=scriptParameterParser.getDefaultScriptParameterValue();
+    if (scriptValue != null) {
+      if (params == null) {
+        params=newHashMap();
+      }
+      script=new Script(scriptValue.script(),scriptValue.scriptType(),scriptParameterParser.lang(),params);
+    }
   }
-  scriptLang=scriptParameterParser.lang();
+ else   if (params != null) {
+    throw new ElasticsearchParseException("script params must be specified inside script object");
+  }
   if (script == null) {
     throw new ElasticsearchParseException("No script found in script_heuristic");
   }
   ExecutableScript searchScript;
   try {
-    searchScript=scriptService.executable(new Script(scriptLang,script,scriptType,params),ScriptContext.Standard.AGGS);
+    searchScript=scriptService.executable(script,ScriptContext.Standard.AGGS);
   }
  catch (  Exception e) {
     throw new ElasticsearchParseException("The script [" + script + "] could not be loaded",e);
   }
-  return new ScriptHeuristic(searchScript,scriptLang,script,scriptType,params);
+  return new ScriptHeuristic(searchScript,script);
 }

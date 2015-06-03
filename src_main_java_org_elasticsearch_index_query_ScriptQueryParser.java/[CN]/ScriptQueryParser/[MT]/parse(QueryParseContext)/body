@@ -2,12 +2,10 @@
   XContentParser parser=parseContext.parser();
   ScriptParameterParser scriptParameterParser=new ScriptParameterParser();
   XContentParser.Token token;
-  String script=null;
-  String scriptLang;
+  Script script=null;
   Map<String,Object> params=null;
   String queryName=null;
   String currentFieldName=null;
-  ScriptService.ScriptType scriptType=null;
   while ((token=parser.nextToken()) != XContentParser.Token.END_OBJECT) {
     if (token == XContentParser.Token.FIELD_NAME) {
       currentFieldName=parser.currentName();
@@ -15,7 +13,10 @@
  else     if (parseContext.isDeprecatedSetting(currentFieldName)) {
     }
  else     if (token == XContentParser.Token.START_OBJECT) {
-      if ("params".equals(currentFieldName)) {
+      if (ScriptField.SCRIPT.match(currentFieldName)) {
+        script=Script.parse(parser);
+      }
+ else       if ("params".equals(currentFieldName)) {
         params=parser.map();
       }
  else {
@@ -31,19 +32,22 @@
       }
     }
   }
-  ScriptParameterValue scriptValue=scriptParameterParser.getDefaultScriptParameterValue();
-  if (scriptValue != null) {
-    script=scriptValue.script();
-    scriptType=scriptValue.scriptType();
+  if (script == null) {
+    ScriptParameterValue scriptValue=scriptParameterParser.getDefaultScriptParameterValue();
+    if (scriptValue != null) {
+      if (params == null) {
+        params=newHashMap();
+      }
+      script=new Script(scriptValue.script(),scriptValue.scriptType(),scriptParameterParser.lang(),params);
+    }
   }
-  scriptLang=scriptParameterParser.lang();
+ else   if (params != null) {
+    throw new QueryParsingException(parseContext,"script params must be specified inside script object in a [script] filter");
+  }
   if (script == null) {
     throw new QueryParsingException(parseContext,"script must be provided with a [script] filter");
   }
-  if (params == null) {
-    params=newHashMap();
-  }
-  Query query=new ScriptQuery(scriptLang,script,scriptType,params,parseContext.scriptService(),parseContext.lookup());
+  Query query=new ScriptQuery(script,parseContext.scriptService(),parseContext.lookup());
   if (queryName != null) {
     parseContext.addNamedQuery(queryName,query);
   }

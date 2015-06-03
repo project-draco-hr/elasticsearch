@@ -1,5 +1,8 @@
 {
-  String scriptLang;
+  Script initScript=null;
+  Script mapScript=null;
+  Script combineScript=null;
+  Script reduceScript=null;
   Map<String,Object> params=null;
   Map<String,Object> reduceParams=null;
   XContentParser.Token token;
@@ -15,7 +18,19 @@
       currentFieldName=parser.currentName();
     }
  else     if (token == XContentParser.Token.START_OBJECT) {
-      if (PARAMS_FIELD.match(currentFieldName)) {
+      if (INIT_SCRIPT_FIELD.match(currentFieldName)) {
+        initScript=Script.parse(parser);
+      }
+ else       if (MAP_SCRIPT_FIELD.match(currentFieldName)) {
+        mapScript=Script.parse(parser);
+      }
+ else       if (COMBINE_SCRIPT_FIELD.match(currentFieldName)) {
+        combineScript=Script.parse(parser);
+      }
+ else       if (REDUCE_SCRIPT_FIELD.match(currentFieldName)) {
+        reduceScript=Script.parse(parser);
+      }
+ else       if (PARAMS_FIELD.match(currentFieldName)) {
         params=parser.map();
       }
  else       if (REDUCE_PARAMS_FIELD.match(currentFieldName)) {
@@ -34,37 +49,41 @@
       throw new SearchParseException(context,"Unexpected token " + token + " in ["+ aggregationName+ "].",parser.getTokenLocation());
     }
   }
-  ScriptParameterValue initScriptValue=scriptParameterParser.getScriptParameterValue(INIT_SCRIPT);
-  String initScript=null;
-  ScriptType initScriptType=null;
-  if (initScriptValue != null) {
-    initScript=initScriptValue.script();
-    initScriptType=initScriptValue.scriptType();
+  if (initScript == null) {
+    ScriptParameterValue scriptValue=scriptParameterParser.getScriptParameterValue(INIT_SCRIPT);
+    if (scriptValue != null) {
+      initScript=new Script(scriptValue.script(),scriptValue.scriptType(),scriptParameterParser.lang(),params);
+    }
   }
-  ScriptParameterValue mapScriptValue=scriptParameterParser.getScriptParameterValue(MAP_SCRIPT);
-  String mapScript=null;
-  ScriptType mapScriptType=null;
-  if (mapScriptValue != null) {
-    mapScript=mapScriptValue.script();
-    mapScriptType=mapScriptValue.scriptType();
+ else   if (initScript.getParams() != null) {
+    throw new SearchParseException(context,"init_script params are not supported. Parameters for the init_script must be specified in the params field on the scripted_metric aggregator not inside the init_script object",parser.getTokenLocation());
   }
-  ScriptParameterValue combineScriptValue=scriptParameterParser.getScriptParameterValue(COMBINE_SCRIPT);
-  String combineScript=null;
-  ScriptType combineScriptType=null;
-  if (combineScriptValue != null) {
-    combineScript=combineScriptValue.script();
-    combineScriptType=combineScriptValue.scriptType();
+  if (mapScript == null) {
+    ScriptParameterValue scriptValue=scriptParameterParser.getScriptParameterValue(MAP_SCRIPT);
+    if (scriptValue != null) {
+      mapScript=new Script(scriptValue.script(),scriptValue.scriptType(),scriptParameterParser.lang(),params);
+    }
   }
-  ScriptParameterValue reduceScriptValue=scriptParameterParser.getScriptParameterValue(REDUCE_SCRIPT);
-  String reduceScript=null;
-  ScriptType reduceScriptType=null;
-  if (reduceScriptValue != null) {
-    reduceScript=reduceScriptValue.script();
-    reduceScriptType=reduceScriptValue.scriptType();
+ else   if (mapScript.getParams() != null) {
+    throw new SearchParseException(context,"map_script params are not supported. Parameters for the map_script must be specified in the params field on the scripted_metric aggregator not inside the map_script object",parser.getTokenLocation());
   }
-  scriptLang=scriptParameterParser.lang();
+  if (combineScript == null) {
+    ScriptParameterValue scriptValue=scriptParameterParser.getScriptParameterValue(COMBINE_SCRIPT);
+    if (scriptValue != null) {
+      combineScript=new Script(scriptValue.script(),scriptValue.scriptType(),scriptParameterParser.lang(),params);
+    }
+  }
+ else   if (combineScript.getParams() != null) {
+    throw new SearchParseException(context,"combine_script params are not supported. Parameters for the combine_script must be specified in the params field on the scripted_metric aggregator not inside the combine_script object",parser.getTokenLocation());
+  }
+  if (reduceScript == null) {
+    ScriptParameterValue scriptValue=scriptParameterParser.getScriptParameterValue(REDUCE_SCRIPT);
+    if (scriptValue != null) {
+      reduceScript=new Script(scriptValue.script(),scriptValue.scriptType(),scriptParameterParser.lang(),reduceParams);
+    }
+  }
   if (mapScript == null) {
     throw new SearchParseException(context,"map_script field is required in [" + aggregationName + "].",parser.getTokenLocation());
   }
-  return new ScriptedMetricAggregator.Factory(aggregationName,scriptLang,initScriptType,initScript,mapScriptType,mapScript,combineScriptType,combineScript,reduceScriptType,reduceScript,params,reduceParams);
+  return new ScriptedMetricAggregator.Factory(aggregationName,initScript,mapScript,combineScript,reduceScript,params);
 }
