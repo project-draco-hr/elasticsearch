@@ -1,0 +1,31 @@
+{
+  TermsBuilder termsBuilder=AggregationBuilders.terms("terms").field(STRING_FIELD_NAME);
+  TermsBuilder subTerm=AggregationBuilders.terms("subterms").field(INT_FIELD_NAME);
+  XContentBuilder subTermContentBuilder=XContentFactory.contentBuilder(Requests.CONTENT_TYPE);
+  subTermContentBuilder.startObject();
+  subTerm.toXContent(subTermContentBuilder,ToXContent.EMPTY_PARAMS);
+  subTermContentBuilder.endObject();
+  termsBuilder.subAggregation(subTermContentBuilder);
+  SearchResponse response=client().prepareSearch("idx").setTypes("type").addAggregation(termsBuilder).execute().actionGet();
+  assertSearchResponse(response);
+  Terms terms=response.getAggregations().get("terms");
+  assertThat(terms,notNullValue());
+  assertThat(terms.getName(),equalTo("terms"));
+  assertThat(terms.getBuckets().size(),equalTo(5));
+  for (int i=0; i < 5; i++) {
+    Terms.Bucket bucket=terms.getBucketByKey("val" + i);
+    assertThat(bucket,notNullValue());
+    assertThat(bucket.getKeyAsString(),equalTo("val" + i));
+    assertThat(bucket.getDocCount(),equalTo(1l));
+    Aggregations subAggs=bucket.getAggregations();
+    assertThat(subAggs,notNullValue());
+    assertThat(subAggs.asList().size(),equalTo(1));
+    Terms subTerms=subAggs.get("subterms");
+    assertThat(subTerms,notNullValue());
+    List<Bucket> subTermsBuckets=subTerms.getBuckets();
+    assertThat(subTermsBuckets,notNullValue());
+    assertThat(subTermsBuckets.size(),equalTo(1));
+    assertThat(((Number)subTermsBuckets.get(0).getKey()).intValue(),equalTo(i));
+    assertThat(subTermsBuckets.get(0).getDocCount(),equalTo(1l));
+  }
+}
