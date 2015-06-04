@@ -1,0 +1,21 @@
+{
+  clusterService.submitStateUpdateTask("update-index-compatibility-versions",Priority.URGENT,new AckedClusterStateUpdateTask<ClusterStateUpdateResponse>(request,listener){
+    @Override protected ClusterStateUpdateResponse newResponse(    boolean acknowledged){
+      return new ClusterStateUpdateResponse(acknowledged);
+    }
+    @Override public ClusterState execute(    ClusterState currentState){
+      MetaData.Builder metaDataBuilder=MetaData.builder(currentState.metaData());
+      for (      Map.Entry<String,String> entry : request.versions().entrySet()) {
+        String index=entry.getKey();
+        IndexMetaData indexMetaData=metaDataBuilder.get(index);
+        if (indexMetaData != null) {
+          if (Version.CURRENT.equals(indexMetaData.creationVersion()) == false) {
+            metaDataBuilder.put(IndexMetaData.builder(indexMetaData).settings(settingsBuilder().put(indexMetaData.settings()).put(IndexMetaData.SETTING_VERSION_MINIMUM_COMPATIBLE,entry.getValue()).put(IndexMetaData.SETTING_VERSION_UPGRADED,Version.CURRENT)));
+          }
+        }
+      }
+      return ClusterState.builder(currentState).metaData(metaDataBuilder).build();
+    }
+  }
+);
+}

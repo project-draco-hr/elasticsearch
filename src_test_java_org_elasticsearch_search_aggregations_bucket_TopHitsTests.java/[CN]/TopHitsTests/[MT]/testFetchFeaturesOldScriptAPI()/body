@@ -1,0 +1,29 @@
+{
+  SearchResponse response=client().prepareSearch("idx").setTypes("type").setQuery(matchQuery("text","text").queryName("test")).addAggregation(terms("terms").executionHint(randomExecutionHint()).field(TERMS_AGGS_FIELD).subAggregation(topHits("hits").setSize(1).addHighlightedField("text").setExplain(true).addFieldDataField("field1").addScriptField("script","doc['field1'].value").setFetchSource("text",null).setVersion(true))).get();
+  assertSearchResponse(response);
+  Terms terms=response.getAggregations().get("terms");
+  assertThat(terms,notNullValue());
+  assertThat(terms.getName(),equalTo("terms"));
+  assertThat(terms.getBuckets().size(),equalTo(5));
+  for (  Terms.Bucket bucket : terms.getBuckets()) {
+    TopHits topHits=bucket.getAggregations().get("hits");
+    SearchHits hits=topHits.getHits();
+    assertThat(hits.totalHits(),equalTo(10l));
+    assertThat(hits.getHits().length,equalTo(1));
+    SearchHit hit=hits.getAt(0);
+    HighlightField highlightField=hit.getHighlightFields().get("text");
+    assertThat(highlightField.getFragments().length,equalTo(1));
+    assertThat(highlightField.getFragments()[0].string(),equalTo("some <em>text</em> to entertain"));
+    Explanation explanation=hit.explanation();
+    assertThat(explanation.toString(),containsString("text:text"));
+    long version=hit.version();
+    assertThat(version,equalTo(1l));
+    assertThat(hit.matchedQueries()[0],equalTo("test"));
+    SearchHitField field=hit.field("field1");
+    assertThat(field.getValue().toString(),equalTo("5"));
+    field=hit.field("script");
+    assertThat(field.getValue().toString(),equalTo("5"));
+    assertThat(hit.sourceAsMap().size(),equalTo(1));
+    assertThat(hit.sourceAsMap().get("text").toString(),equalTo("some text to entertain"));
+  }
+}

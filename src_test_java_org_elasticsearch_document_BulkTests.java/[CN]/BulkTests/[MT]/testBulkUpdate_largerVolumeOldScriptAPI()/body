@@ -1,0 +1,113 @@
+{
+  createIndex("test");
+  ensureGreen();
+  int numDocs=scaledRandomIntBetween(100,2000);
+  if (numDocs % 2 == 1) {
+    numDocs++;
+  }
+  logger.info("Bulk-Indexing {} docs",numDocs);
+  BulkRequestBuilder builder=client().prepareBulk();
+  for (int i=0; i < numDocs; i++) {
+    builder.add(client().prepareUpdate().setIndex("test").setType("type1").setId(Integer.toString(i)).setScript("ctx._source.counter += 1",ScriptService.ScriptType.INLINE).setFields("counter").setUpsert(jsonBuilder().startObject().field("counter",1).endObject()));
+  }
+  BulkResponse response=builder.execute().actionGet();
+  assertThat(response.hasFailures(),equalTo(false));
+  assertThat(response.getItems().length,equalTo(numDocs));
+  for (int i=0; i < numDocs; i++) {
+    assertThat(response.getItems()[i].getId(),equalTo(Integer.toString(i)));
+    assertThat(response.getItems()[i].getVersion(),equalTo(1l));
+    assertThat(response.getItems()[i].getIndex(),equalTo("test"));
+    assertThat(response.getItems()[i].getType(),equalTo("type1"));
+    assertThat(response.getItems()[i].getOpType(),equalTo("update"));
+    assertThat(((UpdateResponse)response.getItems()[i].getResponse()).getId(),equalTo(Integer.toString(i)));
+    assertThat(((UpdateResponse)response.getItems()[i].getResponse()).getVersion(),equalTo(1l));
+    assertThat(((Integer)((UpdateResponse)response.getItems()[i].getResponse()).getGetResult().field("counter").getValue()),equalTo(1));
+    for (int j=0; j < 5; j++) {
+      GetResponse getResponse=client().prepareGet("test","type1",Integer.toString(i)).setFields("counter").execute().actionGet();
+      assertThat(getResponse.isExists(),equalTo(true));
+      assertThat(getResponse.getVersion(),equalTo(1l));
+      assertThat((Long)getResponse.getField("counter").getValue(),equalTo(1l));
+    }
+  }
+  builder=client().prepareBulk();
+  for (int i=0; i < numDocs; i++) {
+    UpdateRequestBuilder updateBuilder=client().prepareUpdate().setIndex("test").setType("type1").setId(Integer.toString(i)).setFields("counter");
+    if (i % 2 == 0) {
+      updateBuilder.setScript("ctx._source.counter += 1",ScriptService.ScriptType.INLINE);
+    }
+ else {
+      updateBuilder.setDoc(jsonBuilder().startObject().field("counter",2).endObject());
+    }
+    if (i % 3 == 0) {
+      updateBuilder.setRetryOnConflict(3);
+    }
+    builder.add(updateBuilder);
+  }
+  response=builder.execute().actionGet();
+  assertThat(response.hasFailures(),equalTo(false));
+  assertThat(response.getItems().length,equalTo(numDocs));
+  for (int i=0; i < numDocs; i++) {
+    assertThat(response.getItems()[i].getId(),equalTo(Integer.toString(i)));
+    assertThat(response.getItems()[i].getVersion(),equalTo(2l));
+    assertThat(response.getItems()[i].getIndex(),equalTo("test"));
+    assertThat(response.getItems()[i].getType(),equalTo("type1"));
+    assertThat(response.getItems()[i].getOpType(),equalTo("update"));
+    assertThat(((UpdateResponse)response.getItems()[i].getResponse()).getId(),equalTo(Integer.toString(i)));
+    assertThat(((UpdateResponse)response.getItems()[i].getResponse()).getVersion(),equalTo(2l));
+    assertThat(((Integer)((UpdateResponse)response.getItems()[i].getResponse()).getGetResult().field("counter").getValue()),equalTo(2));
+  }
+  builder=client().prepareBulk();
+  int maxDocs=numDocs / 2 + numDocs;
+  for (int i=(numDocs / 2); i < maxDocs; i++) {
+    builder.add(client().prepareUpdate().setIndex("test").setType("type1").setId(Integer.toString(i)).setScript("ctx._source.counter += 1",ScriptService.ScriptType.INLINE));
+  }
+  response=builder.execute().actionGet();
+  assertThat(response.hasFailures(),equalTo(true));
+  assertThat(response.getItems().length,equalTo(numDocs));
+  for (int i=0; i < numDocs; i++) {
+    int id=i + (numDocs / 2);
+    if (i >= (numDocs / 2)) {
+      assertThat(response.getItems()[i].getFailure().getId(),equalTo(Integer.toString(id)));
+      assertThat(response.getItems()[i].getFailure().getMessage(),containsString("document missing"));
+    }
+ else {
+      assertThat(response.getItems()[i].getId(),equalTo(Integer.toString(id)));
+      assertThat(response.getItems()[i].getVersion(),equalTo(3l));
+      assertThat(response.getItems()[i].getIndex(),equalTo("test"));
+      assertThat(response.getItems()[i].getType(),equalTo("type1"));
+      assertThat(response.getItems()[i].getOpType(),equalTo("update"));
+    }
+  }
+  builder=client().prepareBulk();
+  for (int i=0; i < numDocs; i++) {
+    builder.add(client().prepareUpdate().setIndex("test").setType("type1").setId(Integer.toString(i)).setScript("ctx.op = \"none\"",ScriptService.ScriptType.INLINE));
+  }
+  response=builder.execute().actionGet();
+  assertThat(response.buildFailureMessage(),response.hasFailures(),equalTo(false));
+  assertThat(response.getItems().length,equalTo(numDocs));
+  for (int i=0; i < numDocs; i++) {
+    assertThat(response.getItems()[i].getItemId(),equalTo(i));
+    assertThat(response.getItems()[i].getId(),equalTo(Integer.toString(i)));
+    assertThat(response.getItems()[i].getIndex(),equalTo("test"));
+    assertThat(response.getItems()[i].getType(),equalTo("type1"));
+    assertThat(response.getItems()[i].getOpType(),equalTo("update"));
+  }
+  builder=client().prepareBulk();
+  for (int i=0; i < numDocs; i++) {
+    builder.add(client().prepareUpdate().setIndex("test").setType("type1").setId(Integer.toString(i)).setScript("ctx.op = \"delete\"",ScriptService.ScriptType.INLINE));
+  }
+  response=builder.execute().actionGet();
+  assertThat(response.hasFailures(),equalTo(false));
+  assertThat(response.getItems().length,equalTo(numDocs));
+  for (int i=0; i < numDocs; i++) {
+    assertThat(response.getItems()[i].getItemId(),equalTo(i));
+    assertThat(response.getItems()[i].getId(),equalTo(Integer.toString(i)));
+    assertThat(response.getItems()[i].getIndex(),equalTo("test"));
+    assertThat(response.getItems()[i].getType(),equalTo("type1"));
+    assertThat(response.getItems()[i].getOpType(),equalTo("update"));
+    for (int j=0; j < 5; j++) {
+      GetResponse getResponse=client().prepareGet("test","type1",Integer.toString(i)).setFields("counter").execute().actionGet();
+      assertThat(getResponse.isExists(),equalTo(false));
+    }
+  }
+}

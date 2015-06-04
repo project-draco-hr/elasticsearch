@@ -1,0 +1,37 @@
+{
+  int latest=-1;
+  for (  String name : blobs.keySet()) {
+    if (name.startsWith(SNAPSHOT_INDEX_PREFIX)) {
+      try {
+        int gen=Integer.parseInt(name.substring(SNAPSHOT_INDEX_PREFIX.length()));
+        if (gen > latest) {
+          latest=gen;
+        }
+      }
+ catch (      NumberFormatException ex) {
+        logger.warn("failed to parse index file name [{}]",name);
+      }
+    }
+  }
+  if (latest >= 0) {
+    try (InputStream stream=blobContainer.openInput(SNAPSHOT_INDEX_PREFIX + latest)){
+      return new Tuple<>(readSnapshots(stream),latest);
+    }
+ catch (    IOException e) {
+      logger.warn("failed to read index file  [{}]",e,SNAPSHOT_INDEX_PREFIX + latest);
+    }
+  }
+  List<SnapshotFiles> snapshots=Lists.newArrayList();
+  for (  String name : blobs.keySet()) {
+    if (name.startsWith(SNAPSHOT_PREFIX)) {
+      try (InputStream stream=blobContainer.openInput(name)){
+        BlobStoreIndexShardSnapshot snapshot=readSnapshot(stream);
+        snapshots.add(new SnapshotFiles(snapshot.snapshot(),snapshot.indexFiles()));
+      }
+ catch (      IOException e) {
+        logger.warn("failed to read commit point [{}]",e,name);
+      }
+    }
+  }
+  return new Tuple<>(new BlobStoreIndexShardSnapshots(snapshots),-1);
+}

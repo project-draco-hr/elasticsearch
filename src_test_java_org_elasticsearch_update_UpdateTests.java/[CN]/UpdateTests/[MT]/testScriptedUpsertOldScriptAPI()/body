@@ -1,0 +1,20 @@
+{
+  createTestIndex();
+  ensureGreen();
+  String script="int oldBalance=ctx._source.balance;" + "int deduction=ctx.op == \"create\" ? (payment/2) :  payment;" + "ctx._source.balance=oldBalance-deduction;";
+  int openingBalance=10;
+  UpdateResponse updateResponse=client().prepareUpdate(indexOrAlias(),"type1","1").setUpsert(XContentFactory.jsonBuilder().startObject().field("balance",openingBalance).endObject()).setScriptedUpsert(true).addScriptParam("payment",2).setScript(script,ScriptService.ScriptType.INLINE).execute().actionGet();
+  assertTrue(updateResponse.isCreated());
+  assertThat(updateResponse.getIndex(),equalTo("test"));
+  for (int i=0; i < 5; i++) {
+    GetResponse getResponse=client().prepareGet("test","type1","1").execute().actionGet();
+    assertThat(getResponse.getSourceAsMap().get("balance").toString(),equalTo("9"));
+  }
+  updateResponse=client().prepareUpdate(indexOrAlias(),"type1","1").setUpsert(XContentFactory.jsonBuilder().startObject().field("balance",openingBalance).endObject()).setScriptedUpsert(true).addScriptParam("payment",2).setScript(script,ScriptService.ScriptType.INLINE).execute().actionGet();
+  assertFalse(updateResponse.isCreated());
+  assertThat(updateResponse.getIndex(),equalTo("test"));
+  for (int i=0; i < 5; i++) {
+    GetResponse getResponse=client().prepareGet("test","type1","1").execute().actionGet();
+    assertThat(getResponse.getSourceAsMap().get("balance").toString(),equalTo("7"));
+  }
+}

@@ -1,0 +1,33 @@
+{
+  long startTime=System.nanoTime();
+  if (types == null) {
+    types=Strings.EMPTY_ARRAY;
+  }
+  Query query;
+  try {
+    query=queryParserService.parseQuery(source).query();
+  }
+ catch (  QueryParsingException ex) {
+    if (queryParserService.getIndexCreatedVersion().onOrBefore(Version.V_1_0_0_Beta2)) {
+      try {
+        XContentParser parser=XContentHelper.createParser(source);
+        ParsedQuery parse=queryParserService.parse(parser);
+        query=parse.query();
+      }
+ catch (      Throwable t) {
+        ex.addSuppressed(t);
+        throw ex;
+      }
+    }
+ else {
+      throw ex;
+    }
+  }
+  Query searchFilter=mapperService.searchFilter(types);
+  if (searchFilter != null) {
+    query=Queries.filtered(query,searchFilter);
+  }
+  Query aliasFilter=indexAliasesService.aliasFilter(filteringAliases);
+  BitDocIdSetFilter parentFilter=mapperService.hasNested() ? indexCache.bitsetFilterCache().getBitDocIdSetFilter(Queries.newNonNestedFilter()) : null;
+  return new Engine.DeleteByQuery(query,source,filteringAliases,aliasFilter,parentFilter,origin,startTime,types);
+}

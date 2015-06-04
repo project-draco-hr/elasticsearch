@@ -1,0 +1,75 @@
+{
+  String[] ignorePrefixes=new String[]{"es.default.","elasticsearch.default."};
+  String[] ignoredPlaceholders=new String[]{SECRET_PROMPT_VALUE,TEXT_PROMPT_VALUE};
+  boolean useSystemProperties=!pSettings.getAsBoolean(IGNORE_SYSTEM_PROPERTIES_SETTING,false);
+  Settings.Builder settingsBuilder=settingsBuilder().put(pSettings);
+  if (useSystemProperties) {
+    settingsBuilder.putProperties("elasticsearch.default.",System.getProperties()).putProperties("es.default.",System.getProperties()).putProperties("elasticsearch.",System.getProperties(),ignorePrefixes).putProperties("es.",System.getProperties(),ignorePrefixes);
+  }
+  settingsBuilder.replacePropertyPlaceholders(ignoredPlaceholders);
+  Environment environment=new Environment(settingsBuilder.build());
+  if (loadConfigSettings) {
+    boolean loadFromEnv=true;
+    if (useSystemProperties) {
+      if (Strings.hasText(System.getProperty("es.default.config"))) {
+        loadFromEnv=true;
+        settingsBuilder.loadFromUrl(environment.resolveConfig(System.getProperty("es.default.config")));
+      }
+      if (Strings.hasText(System.getProperty("es.config"))) {
+        loadFromEnv=false;
+        settingsBuilder.loadFromUrl(environment.resolveConfig(System.getProperty("es.config")));
+      }
+      if (Strings.hasText(System.getProperty("elasticsearch.config"))) {
+        loadFromEnv=false;
+        settingsBuilder.loadFromUrl(environment.resolveConfig(System.getProperty("elasticsearch.config")));
+      }
+    }
+    if (loadFromEnv) {
+      for (      String allowedSuffix : ALLOWED_SUFFIXES) {
+        try {
+          settingsBuilder.loadFromUrl(environment.resolveConfig("elasticsearch" + allowedSuffix));
+        }
+ catch (        FailedToResolveConfigException e) {
+        }
+      }
+    }
+  }
+  settingsBuilder.put(pSettings);
+  if (useSystemProperties) {
+    settingsBuilder.putProperties("elasticsearch.",System.getProperties(),ignorePrefixes).putProperties("es.",System.getProperties(),ignorePrefixes);
+  }
+  settingsBuilder.replacePropertyPlaceholders(ignoredPlaceholders);
+  for (  Map.Entry<String,String> entry : pSettings.getAsMap().entrySet()) {
+    String setting=entry.getKey();
+    if (setting.startsWith("force.")) {
+      settingsBuilder.remove(setting);
+      settingsBuilder.put(setting.substring("force.".length()),entry.getValue());
+    }
+  }
+  settingsBuilder.replacePropertyPlaceholders(ignoredPlaceholders);
+  if (settingsBuilder.get("name") == null) {
+    String name=System.getProperty("name");
+    if (name == null || name.isEmpty()) {
+      name=settingsBuilder.get("node.name");
+      if (name == null || name.isEmpty()) {
+        name=Names.randomNodeName(environment.resolveConfig("names.txt"));
+      }
+    }
+    if (name != null) {
+      settingsBuilder.put("name",name);
+    }
+  }
+  if (settingsBuilder.get(ClusterName.SETTING) == null) {
+    settingsBuilder.put(ClusterName.SETTING,ClusterName.DEFAULT.value());
+  }
+  String v=settingsBuilder.get(Settings.SETTINGS_REQUIRE_UNITS);
+  if (v != null) {
+    Settings.setSettingsRequireUnits(Booleans.parseBoolean(v,true));
+  }
+  Settings v1=replacePromptPlaceholders(settingsBuilder.build(),terminal);
+  environment=new Environment(v1);
+  settingsBuilder=settingsBuilder().put(v1);
+  settingsBuilder.put("path.logs",cleanPath(environment.logsFile().toAbsolutePath().toString()));
+  v1=settingsBuilder.build();
+  return new Tuple<>(v1,environment);
+}
