@@ -11,8 +11,7 @@
   @SuppressWarnings("unchecked") Map<FieldMapper,org.apache.lucene.search.highlight.Highlighter> cache=(Map<FieldMapper,org.apache.lucene.search.highlight.Highlighter>)hitContext.cache().get(CACHE_KEY);
   org.apache.lucene.search.highlight.Highlighter entry=cache.get(mapper);
   if (entry == null) {
-    Query query=highlighterContext.query.originalQuery();
-    QueryScorer queryScorer=new CustomQueryScorer(query,field.fieldOptions().requireFieldMatch() ? mapper.names().indexName() : null);
+    QueryScorer queryScorer=new CustomQueryScorer(highlighterContext.query,field.fieldOptions().requireFieldMatch() ? mapper.fieldType().names().indexName() : null);
     queryScorer.setExpandMultiTermQuery(true);
     Fragmenter fragmenter;
     if (field.fieldOptions().numberOfFragments() == 0) {
@@ -44,7 +43,7 @@
     textsToHighlight=HighlightUtils.loadFieldValues(field,mapper,context,hitContext);
     for (    Object textToHighlight : textsToHighlight) {
       String text=textToHighlight.toString();
-      TokenStream tokenStream=analyzer.tokenStream(mapper.names().indexName(),text);
+      TokenStream tokenStream=analyzer.tokenStream(mapper.fieldType().names().indexName(),text);
       if (!tokenStream.hasAttribute(CharTermAttribute.class) || !tokenStream.hasAttribute(OffsetAttribute.class)) {
         continue;
       }
@@ -57,7 +56,12 @@
     }
   }
  catch (  Exception e) {
-    throw new FetchPhaseExecutionException(context,"Failed to highlight field [" + highlighterContext.fieldName + "]",e);
+    if (e instanceof BytesRefHash.MaxBytesLengthExceededException) {
+      return null;
+    }
+ else {
+      throw new FetchPhaseExecutionException(context,"Failed to highlight field [" + highlighterContext.fieldName + "]",e);
+    }
   }
   if (field.fieldOptions().scoreOrdered()) {
     CollectionUtil.introSort(fragsList,new Comparator<TextFragment>(){
@@ -89,7 +93,7 @@
     String fieldContents=textsToHighlight.get(0).toString();
     int end;
     try {
-      end=findGoodEndForNoHighlightExcerpt(noMatchSize,analyzer.tokenStream(mapper.names().indexName(),fieldContents));
+      end=findGoodEndForNoHighlightExcerpt(noMatchSize,analyzer.tokenStream(mapper.fieldType().names().indexName(),fieldContents));
     }
  catch (    Exception e) {
       throw new FetchPhaseExecutionException(context,"Failed to highlight field [" + highlighterContext.fieldName + "]",e);

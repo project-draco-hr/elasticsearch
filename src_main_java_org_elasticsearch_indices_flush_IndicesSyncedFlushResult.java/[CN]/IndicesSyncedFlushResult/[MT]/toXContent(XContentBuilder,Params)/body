@@ -1,0 +1,34 @@
+{
+  builder.startObject(Fields._SHARDS);
+  shardCounts.toXContent(builder,params);
+  builder.endObject();
+  for (  Map.Entry<String,List<ShardsSyncedFlushResult>> indexEntry : shardsResultPerIndex.entrySet()) {
+    List<ShardsSyncedFlushResult> indexResult=indexEntry.getValue();
+    builder.startObject(indexEntry.getKey());
+    ShardCounts indexShardCounts=calculateShardCounts(indexResult);
+    indexShardCounts.toXContent(builder,params);
+    if (indexShardCounts.failed > 0) {
+      builder.startArray(Fields.FAILURES);
+      for (      ShardsSyncedFlushResult shardResults : indexResult) {
+        if (shardResults.failed()) {
+          builder.startObject();
+          builder.field(Fields.SHARD,shardResults.shardId().id());
+          builder.field(Fields.REASON,shardResults.failureReason());
+          builder.endObject();
+          continue;
+        }
+        Map<ShardRouting,SyncedFlushService.SyncedFlushResponse> failedShards=shardResults.failedShards();
+        for (        Map.Entry<ShardRouting,SyncedFlushService.SyncedFlushResponse> shardEntry : failedShards.entrySet()) {
+          builder.startObject();
+          builder.field(Fields.SHARD,shardResults.shardId().id());
+          builder.field(Fields.REASON,shardEntry.getValue().failureReason());
+          builder.field(Fields.ROUTING,shardEntry.getKey());
+          builder.endObject();
+        }
+      }
+      builder.endArray();
+    }
+    builder.endObject();
+  }
+  return builder;
+}

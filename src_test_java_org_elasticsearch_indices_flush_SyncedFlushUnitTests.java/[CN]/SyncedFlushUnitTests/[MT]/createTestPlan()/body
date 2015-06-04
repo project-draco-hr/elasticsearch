@@ -1,0 +1,50 @@
+{
+  final TestPlan testPlan=new TestPlan();
+  final Map<String,List<ShardsSyncedFlushResult>> indicesResults=new HashMap<>();
+  final int indexCount=randomIntBetween(1,10);
+  int totalShards=0;
+  int totalSuccesful=0;
+  int totalFailed=0;
+  for (int i=0; i < indexCount; i++) {
+    final String index="index_" + i;
+    int shards=randomIntBetween(1,4);
+    int replicas=randomIntBetween(0,2);
+    int successful=0;
+    int failed=0;
+    int failures=0;
+    List<ShardsSyncedFlushResult> shardsResults=new ArrayList<>();
+    for (int shard=0; shard < shards; shard++) {
+      final ShardId shardId=new ShardId(index,shard);
+      if (randomInt(5) < 2) {
+        failed+=replicas + 1;
+        failures++;
+        shardsResults.add(new ShardsSyncedFlushResult(shardId,replicas + 1,"simulated total failure"));
+      }
+ else {
+        Map<ShardRouting,SyncedFlushResponse> shardResponses=new HashMap<>();
+        for (int copy=0; copy < replicas + 1; copy++) {
+          final ShardRouting shardRouting=new ImmutableShardRouting(index,shard,"node_" + shardId + "_"+ copy,null,copy == 0,ShardRoutingState.STARTED,0);
+          if (randomInt(5) < 2) {
+            failed++;
+            failures++;
+            shardResponses.put(shardRouting,new SyncedFlushResponse("copy failure " + shardId));
+          }
+ else {
+            successful++;
+            shardResponses.put(shardRouting,new SyncedFlushResponse());
+          }
+        }
+        shardsResults.add(new ShardsSyncedFlushResult(shardId,"_sync_id_" + shard,replicas + 1,shardResponses));
+      }
+    }
+    indicesResults.put(index,shardsResults);
+    testPlan.countsPerIndex.put(index,new ShardCounts(shards * (replicas + 1),successful,failed));
+    testPlan.expectedFailuresPerIndex.put(index,failures);
+    totalFailed+=failed;
+    totalShards+=shards * (replicas + 1);
+    totalSuccesful+=successful;
+  }
+  testPlan.result=new IndicesSyncedFlushResult(indicesResults);
+  testPlan.totalCounts=new ShardCounts(totalShards,totalSuccesful,totalFailed);
+  return testPlan;
+}

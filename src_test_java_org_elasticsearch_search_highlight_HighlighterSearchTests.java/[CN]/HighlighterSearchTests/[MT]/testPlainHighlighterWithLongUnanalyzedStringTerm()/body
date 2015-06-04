@@ -1,0 +1,20 @@
+{
+  XContentBuilder mappings=jsonBuilder();
+  mappings.startObject();
+  mappings.startObject("type").startObject("properties").startObject("long_text").field("type","string").field("analyzer","keyword").field("index_options","offsets").field("term_vector","with_positions_offsets").field("ignore_above",1).endObject().startObject("text").field("type","string").field("analyzer","keyword").field("index_options","offsets").field("term_vector","with_positions_offsets").endObject().endObject().endObject();
+  mappings.endObject();
+  assertAcked(prepareCreate("test").addMapping("type",mappings));
+  ensureYellow();
+  StringBuilder builder=new StringBuilder();
+  for (int i=0; i < 32767; i++) {
+    builder.append('a');
+  }
+  client().prepareIndex("test","type","1").setSource(jsonBuilder().startObject().field("long_text",builder.toString()).field("text","text").endObject()).get();
+  refresh();
+  String highlighter=randomFrom(new String[]{"plain","postings","fvh"});
+  SearchResponse search=client().prepareSearch().setQuery(constantScoreQuery(matchQuery("text","text"))).addHighlightedField(new Field("*").highlighterType(highlighter)).get();
+  assertHighlight(search,0,"text",0,equalTo("<em>text</em>"));
+  search=client().prepareSearch().setQuery(constantScoreQuery(matchQuery("text","text"))).addHighlightedField(new Field("long_text").highlighterType(highlighter)).get();
+  assertNoFailures(search);
+  assertThat(search.getHits().getAt(0).getHighlightFields().size(),equalTo(0));
+}
