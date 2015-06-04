@@ -1,7 +1,9 @@
 {
   List<String> indices=Collections.EMPTY_LIST;
+  Snapshot snapshot=null;
   try {
-    indices=readSnapshot(snapshotId).indices();
+    snapshot=readSnapshot(snapshotId);
+    indices=snapshot.indices();
   }
  catch (  SnapshotMissingException ex) {
     throw ex;
@@ -11,7 +13,17 @@ catch (  SnapshotException|ElasticsearchParseException ex) {
   }
   MetaData metaData=null;
   try {
-    metaData=readSnapshotMetaData(snapshotId,indices,true);
+    if (snapshot != null) {
+      metaData=readSnapshotMetaData(snapshotId,snapshot.version(),indices,true);
+    }
+ else {
+      try {
+        metaData=readSnapshotMetaData(snapshotId,false,indices,true);
+      }
+ catch (      IOException ex) {
+        metaData=readSnapshotMetaData(snapshotId,true,indices,true);
+      }
+    }
   }
  catch (  IOException|SnapshotException ex) {
     logger.warn("cannot read metadata for snapshot [{}]",ex,snapshotId);
@@ -19,7 +31,13 @@ catch (  SnapshotException|ElasticsearchParseException ex) {
   try {
     String blobName=snapshotBlobName(snapshotId);
     snapshotsBlobContainer.deleteBlob(blobName);
-    snapshotsBlobContainer.deleteBlob(metaDataBlobName(snapshotId));
+    if (snapshot != null) {
+      snapshotsBlobContainer.deleteBlob(metaDataBlobName(snapshotId,legacyMetaData(snapshot.version())));
+    }
+ else {
+      snapshotsBlobContainer.deleteBlob(metaDataBlobName(snapshotId,true));
+      snapshotsBlobContainer.deleteBlob(metaDataBlobName(snapshotId,false));
+    }
     List<SnapshotId> snapshotIds=snapshots();
     if (snapshotIds.contains(snapshotId)) {
       ImmutableList.Builder<SnapshotId> builder=ImmutableList.builder();

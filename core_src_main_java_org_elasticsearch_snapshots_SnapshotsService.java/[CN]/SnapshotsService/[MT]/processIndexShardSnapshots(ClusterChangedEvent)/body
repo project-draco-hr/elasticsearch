@@ -40,56 +40,58 @@
           for (          Map.Entry<ShardId,SnapshotMetaData.ShardSnapshotStatus> shard : entry.shards().entrySet()) {
             IndexShardSnapshotStatus snapshotStatus=snapshotShards.shards.get(shard.getKey());
             if (snapshotStatus != null) {
-              if (snapshotStatus.stage() == IndexShardSnapshotStatus.Stage.STARTED) {
+switch (snapshotStatus.stage()) {
+case STARTED:
                 snapshotStatus.abort();
-              }
- else               if (snapshotStatus.stage() == IndexShardSnapshotStatus.Stage.DONE) {
-                logger.debug("[{}] trying to cancel snapshot on the shard [{}] that is already done, updating status on the master",entry.snapshotId(),shard.getKey());
-                updateIndexShardSnapshotStatus(new UpdateIndexShardSnapshotStatusRequest(entry.snapshotId(),shard.getKey(),new ShardSnapshotStatus(event.state().nodes().localNodeId(),SnapshotMetaData.State.SUCCESS)));
-              }
- else               if (snapshotStatus.stage() == IndexShardSnapshotStatus.Stage.FAILURE) {
-                logger.debug("[{}] trying to cancel snapshot on the shard [{}] that has already failed, updating status on the master",entry.snapshotId(),shard.getKey());
-                updateIndexShardSnapshotStatus(new UpdateIndexShardSnapshotStatusRequest(entry.snapshotId(),shard.getKey(),new ShardSnapshotStatus(event.state().nodes().localNodeId(),State.FAILED,snapshotStatus.failure())));
-              }
-            }
-          }
-        }
-      }
-    }
-  }
-  shutdownLock.lock();
-  try {
-    shardSnapshots=ImmutableMap.copyOf(survivors);
-    if (shardSnapshots.isEmpty()) {
-      shutdownCondition.signalAll();
-    }
-  }
+              break;
+case DONE:
+            logger.debug("[{}] trying to cancel snapshot on the shard [{}] that is already done, updating status on the master",entry.snapshotId(),shard.getKey());
+          updateIndexShardSnapshotStatus(new UpdateIndexShardSnapshotStatusRequest(entry.snapshotId(),shard.getKey(),new ShardSnapshotStatus(event.state().nodes().localNodeId(),SnapshotMetaData.State.SUCCESS)));
+        break;
+case FAILURE:
+      logger.debug("[{}] trying to cancel snapshot on the shard [{}] that has already failed, updating status on the master",entry.snapshotId(),shard.getKey());
+    updateIndexShardSnapshotStatus(new UpdateIndexShardSnapshotStatusRequest(entry.snapshotId(),shard.getKey(),new ShardSnapshotStatus(event.state().nodes().localNodeId(),State.FAILED,snapshotStatus.failure())));
+  break;
+}
+}
+}
+}
+}
+}
+}
+shutdownLock.lock();
+try {
+shardSnapshots=ImmutableMap.copyOf(survivors);
+if (shardSnapshots.isEmpty()) {
+shutdownCondition.signalAll();
+}
+}
   finally {
-    shutdownLock.unlock();
-  }
-  if (!newSnapshots.isEmpty()) {
-    for (    final Map.Entry<SnapshotId,Map<ShardId,IndexShardSnapshotStatus>> entry : newSnapshots.entrySet()) {
-      for (      final Map.Entry<ShardId,IndexShardSnapshotStatus> shardEntry : entry.getValue().entrySet()) {
-        try {
-          final IndexShardSnapshotAndRestoreService shardSnapshotService=indicesService.indexServiceSafe(shardEntry.getKey().getIndex()).shardInjectorSafe(shardEntry.getKey().id()).getInstance(IndexShardSnapshotAndRestoreService.class);
-          threadPool.executor(ThreadPool.Names.SNAPSHOT).execute(new Runnable(){
-            @Override public void run(){
-              try {
-                shardSnapshotService.snapshot(entry.getKey(),shardEntry.getValue());
-                updateIndexShardSnapshotStatus(new UpdateIndexShardSnapshotStatusRequest(entry.getKey(),shardEntry.getKey(),new ShardSnapshotStatus(localNodeId,SnapshotMetaData.State.SUCCESS)));
-              }
- catch (              Throwable t) {
-                logger.warn("[{}] [{}] failed to create snapshot",t,shardEntry.getKey(),entry.getKey());
-                updateIndexShardSnapshotStatus(new UpdateIndexShardSnapshotStatusRequest(entry.getKey(),shardEntry.getKey(),new ShardSnapshotStatus(localNodeId,SnapshotMetaData.State.FAILED,ExceptionsHelper.detailedMessage(t))));
-              }
-            }
-          }
+shutdownLock.unlock();
+}
+if (!newSnapshots.isEmpty()) {
+for (final Map.Entry<SnapshotId,Map<ShardId,IndexShardSnapshotStatus>> entry : newSnapshots.entrySet()) {
+for (final Map.Entry<ShardId,IndexShardSnapshotStatus> shardEntry : entry.getValue().entrySet()) {
+try {
+final IndexShardSnapshotAndRestoreService shardSnapshotService=indicesService.indexServiceSafe(shardEntry.getKey().getIndex()).shardInjectorSafe(shardEntry.getKey().id()).getInstance(IndexShardSnapshotAndRestoreService.class);
+threadPool.executor(ThreadPool.Names.SNAPSHOT).execute(new Runnable(){
+@Override public void run(){
+try {
+shardSnapshotService.snapshot(entry.getKey(),shardEntry.getValue());
+updateIndexShardSnapshotStatus(new UpdateIndexShardSnapshotStatusRequest(entry.getKey(),shardEntry.getKey(),new ShardSnapshotStatus(localNodeId,SnapshotMetaData.State.SUCCESS)));
+}
+ catch (Throwable t) {
+logger.warn("[{}] [{}] failed to create snapshot",t,shardEntry.getKey(),entry.getKey());
+updateIndexShardSnapshotStatus(new UpdateIndexShardSnapshotStatusRequest(entry.getKey(),shardEntry.getKey(),new ShardSnapshotStatus(localNodeId,SnapshotMetaData.State.FAILED,ExceptionsHelper.detailedMessage(t))));
+}
+}
+}
 );
-        }
- catch (        Throwable t) {
-          updateIndexShardSnapshotStatus(new UpdateIndexShardSnapshotStatusRequest(entry.getKey(),shardEntry.getKey(),new ShardSnapshotStatus(localNodeId,SnapshotMetaData.State.FAILED,ExceptionsHelper.detailedMessage(t))));
-        }
-      }
-    }
-  }
+}
+ catch (Throwable t) {
+updateIndexShardSnapshotStatus(new UpdateIndexShardSnapshotStatusRequest(entry.getKey(),shardEntry.getKey(),new ShardSnapshotStatus(localNodeId,SnapshotMetaData.State.FAILED,ExceptionsHelper.detailedMessage(t))));
+}
+}
+}
+}
 }
