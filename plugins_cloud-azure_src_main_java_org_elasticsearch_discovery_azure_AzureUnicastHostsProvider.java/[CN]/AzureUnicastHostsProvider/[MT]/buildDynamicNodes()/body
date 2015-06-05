@@ -1,0 +1,92 @@
+{
+  if (refreshInterval.millis() != 0) {
+    if (cachedDiscoNodes != null && (refreshInterval.millis() < 0 || (System.currentTimeMillis() - lastRefresh) < refreshInterval.millis())) {
+      logger.trace("using cache to retrieve node list");
+      return cachedDiscoNodes;
+    }
+    lastRefresh=System.currentTimeMillis();
+  }
+  logger.debug("start building nodes list using Azure API");
+  cachedDiscoNodes=new ArrayList<>();
+  HostedServiceGetDetailedResponse detailed;
+  try {
+    detailed=azureComputeService.getServiceDetails();
+  }
+ catch (  AzureServiceDisableException e) {
+    logger.debug("Azure discovery service has been disabled. Returning empty list of nodes.");
+    return cachedDiscoNodes;
+  }
+catch (  AzureServiceRemoteException e) {
+    logger.warn("can not get list of azure nodes: [{}]. Returning empty list of nodes.",e.getMessage());
+    logger.trace("AzureServiceRemoteException caught",e);
+    return cachedDiscoNodes;
+  }
+  InetAddress ipAddress=null;
+  try {
+    ipAddress=networkService.resolvePublishHostAddress(null);
+    logger.trace("ip of current node: [{}]",ipAddress);
+  }
+ catch (  IOException e) {
+    logger.trace("exception while finding ip",e);
+  }
+  for (  HostedServiceGetDetailedResponse.Deployment deployment : detailed.getDeployments()) {
+    if (deployment.getDeploymentSlot() != deploymentSlot) {
+      logger.debug("current deployment slot [{}] for [{}] is different from [{}]. skipping...",deployment.getDeploymentSlot(),deployment.getName(),deploymentSlot);
+      continue;
+    }
+    if (deploymentName != null && !deploymentName.equals(deployment.getName())) {
+      logger.debug("current deployment name [{}] different from [{}]. skipping...",deployment.getName(),deploymentName);
+      continue;
+    }
+    if (deployment.getStatus() != DeploymentStatus.Starting && deployment.getStatus() != DeploymentStatus.Deploying && deployment.getStatus() != DeploymentStatus.Running) {
+      logger.debug("[{}] status is [{}]. skipping...",deployment.getName(),deployment.getStatus());
+      continue;
+    }
+    for (    RoleInstance instance : deployment.getRoleInstances()) {
+      String networkAddress=null;
+switch (hostType) {
+case PRIVATE_IP:
+        InetAddress privateIp=instance.getIPAddress();
+      if (privateIp != null) {
+        if (privateIp.equals(ipAddress)) {
+          logger.trace("adding ourselves {}",ipAddress);
+        }
+        networkAddress=privateIp.getHostAddress();
+      }
+ else {
+        logger.trace("no private ip provided. ignoring [{}]...",instance.getInstanceName());
+      }
+    break;
+case PUBLIC_IP:
+  for (  InstanceEndpoint endpoint : instance.getInstanceEndpoints()) {
+    if (!publicEndpointName.equals(endpoint.getName())) {
+      logger.trace("ignoring endpoint [{}] as different than [{}]",endpoint.getName(),publicEndpointName);
+      continue;
+    }
+    networkAddress=endpoint.getVirtualIPAddress().getHostAddress() + ":" + endpoint.getPort();
+  }
+if (networkAddress == null) {
+  logger.trace("no public ip provided. ignoring [{}]...",instance.getInstanceName());
+}
+break;
+default :
+logger.warn("undefined host_type [{}]. Please check your settings.",hostType);
+return cachedDiscoNodes;
+}
+if (networkAddress == null) {
+logger.warn("no network address found. ignoring [{}]...",instance.getInstanceName());
+continue;
+}
+try {
+TransportAddress[] addresses=transportService.addressesFromString(networkAddress);
+logger.trace("adding {}, transport_address {}",networkAddress,addresses[0]);
+cachedDiscoNodes.add(new DiscoveryNode("#cloud-" + instance.getInstanceName(),addresses[0],version.minimumCompatibilityVersion()));
+}
+ catch (Exception e) {
+logger.warn("can not convert [{}] to transport address. skipping. [{}]",networkAddress,e.getMessage());
+}
+}
+}
+logger.debug("{} node(s) added",cachedDiscoNodes.size());
+return cachedDiscoNodes;
+}

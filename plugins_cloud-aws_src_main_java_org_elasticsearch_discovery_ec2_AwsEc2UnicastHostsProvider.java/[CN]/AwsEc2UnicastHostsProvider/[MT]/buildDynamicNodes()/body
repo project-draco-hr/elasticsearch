@@ -1,0 +1,70 @@
+{
+  List<DiscoveryNode> discoNodes=new ArrayList<>();
+  DescribeInstancesResult descInstances;
+  try {
+    descInstances=client.describeInstances(buildDescribeInstancesRequest());
+  }
+ catch (  AmazonClientException e) {
+    logger.info("Exception while retrieving instance list from AWS API: {}",e.getMessage());
+    logger.debug("Full exception:",e);
+    return discoNodes;
+  }
+  logger.trace("building dynamic unicast discovery nodes...");
+  for (  Reservation reservation : descInstances.getReservations()) {
+    for (    Instance instance : reservation.getInstances()) {
+      if (!groups.isEmpty()) {
+        List<GroupIdentifier> instanceSecurityGroups=instance.getSecurityGroups();
+        ArrayList<String> securityGroupNames=new ArrayList<String>();
+        ArrayList<String> securityGroupIds=new ArrayList<String>();
+        for (        GroupIdentifier sg : instanceSecurityGroups) {
+          securityGroupNames.add(sg.getGroupName());
+          securityGroupIds.add(sg.getGroupId());
+        }
+        if (bindAnyGroup) {
+          if (Collections.disjoint(securityGroupNames,groups) && Collections.disjoint(securityGroupIds,groups)) {
+            logger.trace("filtering out instance {} based on groups {}, not part of {}",instance.getInstanceId(),instanceSecurityGroups,groups);
+            continue;
+          }
+        }
+ else {
+          if (!(securityGroupNames.containsAll(groups) || securityGroupIds.containsAll(groups))) {
+            logger.trace("filtering out instance {} based on groups {}, does not include all of {}",instance.getInstanceId(),instanceSecurityGroups,groups);
+            continue;
+          }
+        }
+      }
+      String address=null;
+switch (hostType) {
+case PRIVATE_DNS:
+        address=instance.getPrivateDnsName();
+      break;
+case PRIVATE_IP:
+    address=instance.getPrivateIpAddress();
+  break;
+case PUBLIC_DNS:
+address=instance.getPublicDnsName();
+break;
+case PUBLIC_IP:
+address=instance.getPublicIpAddress();
+break;
+}
+if (address != null) {
+try {
+TransportAddress[] addresses=transportService.addressesFromString(address);
+for (int i=0; (i < addresses.length && i < UnicastZenPing.LIMIT_PORTS_COUNT); i++) {
+logger.trace("adding {}, address {}, transport_address {}",instance.getInstanceId(),address,addresses[i]);
+discoNodes.add(new DiscoveryNode("#cloud-" + instance.getInstanceId() + "-"+ i,addresses[i],version.minimumCompatibilityVersion()));
+}
+}
+ catch (Exception e) {
+logger.warn("failed ot add {}, address {}",e,instance.getInstanceId(),address);
+}
+}
+ else {
+logger.trace("not adding {}, address is null, host_type {}",instance.getInstanceId(),hostType);
+}
+}
+}
+logger.debug("using dynamic discovery nodes {}",discoNodes);
+return discoNodes;
+}

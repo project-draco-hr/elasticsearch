@@ -1,0 +1,62 @@
+{
+  Tuple<String,String> clientDescriptor=new Tuple<String,String>(endpoint,account);
+  AmazonS3Client client=clients.get(clientDescriptor);
+  if (client != null) {
+    return client;
+  }
+  ClientConfiguration clientConfiguration=new ClientConfiguration();
+  clientConfiguration.setResponseMetadataCacheSize(0);
+  if (protocol == null) {
+    protocol=settings.get("cloud.aws.protocol","https").toLowerCase(Locale.ROOT);
+    protocol=settings.get("cloud.aws.s3.protocol",protocol).toLowerCase(Locale.ROOT);
+  }
+  if ("http".equals(protocol)) {
+    clientConfiguration.setProtocol(Protocol.HTTP);
+  }
+ else   if ("https".equals(protocol)) {
+    clientConfiguration.setProtocol(Protocol.HTTPS);
+  }
+ else {
+    throw new IllegalArgumentException("No protocol supported [" + protocol + "], can either be [http] or [https]");
+  }
+  String proxyHost=settings.get("cloud.aws.proxy_host");
+  proxyHost=settings.get("cloud.aws.s3.proxy_host",proxyHost);
+  if (proxyHost != null) {
+    String portString=settings.get("cloud.aws.proxy_port","80");
+    portString=settings.get("cloud.aws.s3.proxy_port",portString);
+    Integer proxyPort;
+    try {
+      proxyPort=Integer.parseInt(portString,10);
+    }
+ catch (    NumberFormatException ex) {
+      throw new IllegalArgumentException("The configured proxy port value [" + portString + "] is invalid",ex);
+    }
+    clientConfiguration.withProxyHost(proxyHost).setProxyPort(proxyPort);
+  }
+  if (maxRetries != null) {
+    clientConfiguration.setMaxErrorRetry(maxRetries);
+  }
+  String awsSigner=settings.get("cloud.aws.s3.signer",settings.get("cloud.aws.signer"));
+  if (awsSigner != null) {
+    logger.debug("using AWS API signer [{}]",awsSigner);
+    try {
+      AwsSigner.configureSigner(awsSigner,clientConfiguration);
+    }
+ catch (    IllegalArgumentException e) {
+      logger.warn("wrong signer set for [cloud.aws.s3.signer] or [cloud.aws.signer]: [{}]",awsSigner);
+    }
+  }
+  AWSCredentialsProvider credentials;
+  if (account == null && key == null) {
+    credentials=new AWSCredentialsProviderChain(new EnvironmentVariableCredentialsProvider(),new SystemPropertiesCredentialsProvider(),new InstanceProfileCredentialsProvider());
+  }
+ else {
+    credentials=new AWSCredentialsProviderChain(new StaticCredentialsProvider(new BasicAWSCredentials(account,key)));
+  }
+  client=new AmazonS3Client(credentials,clientConfiguration);
+  if (endpoint != null) {
+    client.setEndpoint(endpoint);
+  }
+  clients.put(clientDescriptor,client);
+  return client;
+}
