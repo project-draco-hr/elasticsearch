@@ -1,0 +1,57 @@
+{
+  try {
+    logger.trace("executing scroll request [{}]",scrollId);
+    scrollAction.execute(new SearchScrollRequest(scrollId).scroll(request.scroll()),new ActionListener<SearchResponse>(){
+      @Override public void onResponse(      SearchResponse scrollResponse){
+        final SearchHit[] docs=scrollResponse.getHits().getHits();
+        final String nextScrollId=scrollResponse.getScrollId();
+        addShardFailures(scrollResponse.getShardFailures());
+        if (logger.isTraceEnabled()) {
+          logger.trace("scroll request [{}] executed: [{}] document(s) returned",scrollId,docs.length);
+        }
+        if ((docs.length == 0) || (nextScrollId == null)) {
+          logger.trace("scrolling documents terminated");
+          finishHim(scrollId,false,null);
+          return;
+        }
+        if (hasTimedOut()) {
+          logger.trace("scrolling documents timed out");
+          finishHim(scrollId,true,null);
+          return;
+        }
+        BulkRequest bulkRequest=new BulkRequest();
+        for (        SearchHit doc : docs) {
+          DeleteRequest delete=new DeleteRequest(doc.index(),doc.type(),doc.id()).version(doc.version());
+          SearchHitField routing=doc.field("_routing");
+          if (routing != null) {
+            delete.routing((String)routing.value());
+          }
+          SearchHitField parent=doc.field("_parent");
+          if (parent != null) {
+            delete.parent((String)parent.value());
+          }
+          bulkRequest.add(delete);
+        }
+        logger.trace("executing bulk request with [{}] deletions",bulkRequest.numberOfActions());
+        client.bulk(bulkRequest,new ActionListener<BulkResponse>(){
+          @Override public void onResponse(          BulkResponse bulkResponse){
+            onBulkResponse(nextScrollId,bulkResponse);
+          }
+          @Override public void onFailure(          Throwable e){
+            onBulkFailure(nextScrollId,docs,e);
+          }
+        }
+);
+      }
+      @Override public void onFailure(      Throwable e){
+        logger.error("scroll request [{}] failed, scrolling document(s) is stopped",e,scrollId);
+        finishHim(scrollId,hasTimedOut(),e);
+      }
+    }
+);
+  }
+ catch (  Throwable t) {
+    logger.error("unable to execute scroll request [{}]",t,scrollId);
+    finishHim(scrollId,false,t);
+  }
+}

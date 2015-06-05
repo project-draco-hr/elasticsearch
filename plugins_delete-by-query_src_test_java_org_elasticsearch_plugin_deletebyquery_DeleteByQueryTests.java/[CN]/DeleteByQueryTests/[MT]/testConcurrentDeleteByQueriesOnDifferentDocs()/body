@@ -1,0 +1,52 @@
+{
+  createIndex("test");
+  ensureGreen();
+  final Thread[] threads=new Thread[scaledRandomIntBetween(2,5)];
+  final long docs=randomIntBetween(1,50);
+  for (int i=0; i < docs; i++) {
+    for (int j=0; j < threads.length; j++) {
+      index("test","test",String.valueOf(i * 10 + j),"field",j);
+    }
+  }
+  refresh();
+  assertHitCount(client().prepareCount("test").get(),docs * threads.length);
+  final CountDownLatch start=new CountDownLatch(1);
+  final AtomicReference<Throwable> exceptionHolder=new AtomicReference<>();
+  for (int i=0; i < threads.length; i++) {
+    final int threadNum=i;
+    assertHitCount(client().prepareCount("test").setQuery(QueryBuilders.termQuery("field",threadNum)).get(),docs);
+    Runnable r=new Runnable(){
+      @Override public void run(){
+        try {
+          start.await();
+          DeleteByQueryResponse rsp=newDeleteByQuery().setQuery(QueryBuilders.termQuery("field",threadNum)).get();
+          assertDBQResponse(rsp,docs,docs,0L,0L);
+        }
+ catch (        InterruptedException e) {
+          Thread.currentThread().interrupt();
+        }
+catch (        Throwable e) {
+          exceptionHolder.set(e);
+          Thread.currentThread().interrupt();
+        }
+      }
+    }
+;
+    threads[i]=new Thread(r);
+    threads[i].start();
+  }
+  start.countDown();
+  for (  Thread thread : threads) {
+    thread.join();
+  }
+  Throwable assertionError=exceptionHolder.get();
+  if (assertionError != null) {
+    assertionError.printStackTrace();
+  }
+  assertThat(assertionError + " should be null",assertionError,nullValue());
+  refresh();
+  for (int i=0; i < threads.length; i++) {
+    assertHitCount(client().prepareCount("test").setQuery(QueryBuilders.termQuery("field",i)).get(),0);
+  }
+  assertSearchContextsClosed();
+}

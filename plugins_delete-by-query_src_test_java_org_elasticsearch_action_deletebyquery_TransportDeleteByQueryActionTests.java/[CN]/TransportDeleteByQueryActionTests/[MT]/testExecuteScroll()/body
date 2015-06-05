@@ -1,0 +1,21 @@
+{
+  final int numDocs=randomIntBetween(1,100);
+  for (int i=1; i <= numDocs; i++) {
+    client().prepareIndex("test","type").setSource("num",i).get();
+  }
+  client().admin().indices().prepareRefresh("test").get();
+  assertHitCount(client().prepareCount("test").get(),numDocs);
+  final long limit=randomIntBetween(0,numDocs);
+  SearchResponse searchResponse=client().prepareSearch("test").setSearchType(SearchType.SCAN).setScroll(TimeValue.timeValueSeconds(10)).setQuery(boolQuery().must(rangeQuery("num").lte(limit))).addFields("_routing","_parent").setFetchSource(false).setVersion(true).get();
+  String scrollId=searchResponse.getScrollId();
+  assertTrue(Strings.hasText(scrollId));
+  assertThat(searchResponse.getHits().getTotalHits(),equalTo(limit));
+  DeleteByQueryRequest delete=new DeleteByQueryRequest().indices("test").size(100).source(boolQuery().must(rangeQuery("num").lte(limit)).buildAsBytes());
+  TestActionListener listener=new TestActionListener();
+  newAsyncAction(delete,listener).executeScroll(searchResponse.getScrollId());
+  waitForCompletion("scroll request should return all documents",listener);
+  assertNull(listener.getError());
+  assertFalse(listener.getResponse().isTimedOut());
+  assertThat(listener.getResponse().getTotalDeleted(),equalTo(limit));
+  assertSearchContextsClosed();
+}

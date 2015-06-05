@@ -1,0 +1,39 @@
+{
+  final int indices=randomIntBetween(2,5);
+  final int docs=randomIntBetween(2,10) * 2;
+  long[] candidates=new long[indices];
+  for (int i=0; i < indices; i++) {
+    candidates[i]=randomIntBetween(1,docs);
+    for (int j=0; j < docs; j++) {
+      boolean candidate=(j < candidates[i]);
+      index("test-" + i,"test",String.valueOf(j),"candidate",candidate);
+    }
+  }
+  long deletions=0;
+  for (  long i : candidates) {
+    deletions=deletions + i;
+  }
+  refresh();
+  assertHitCount(client().prepareCount().get(),docs * indices);
+  for (int i=0; i < indices; i++) {
+    assertHitCount(client().prepareCount("test-" + i).get(),docs);
+  }
+  DeleteByQueryResponse response=newDeleteByQuery().setIndices("test-*").setQuery(QueryBuilders.termQuery("candidate",true)).get();
+  refresh();
+  assertDBQResponse(response,deletions,deletions,0l,0l);
+  assertNotNull(response.getIndices());
+  assertThat(response.getIndices().length,equalTo(indices));
+  for (int i=0; i < indices; i++) {
+    String indexName="test-" + i;
+    IndexDeleteByQueryResponse indexResponse=response.getIndex(indexName);
+    assertThat(indexResponse.getFound(),equalTo(candidates[i]));
+    assertThat(indexResponse.getDeleted(),equalTo(candidates[i]));
+    assertThat(indexResponse.getFailed(),equalTo(0L));
+    assertThat(indexResponse.getMissing(),equalTo(0L));
+    assertThat(indexResponse.getIndex(),equalTo(indexName));
+    long remaining=docs - candidates[i];
+    assertHitCount(client().prepareCount(indexName).get(),remaining);
+  }
+  assertHitCount(client().prepareCount().get(),(indices * docs) - deletions);
+  assertSearchContextsClosed();
+}

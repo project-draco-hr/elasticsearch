@@ -1,0 +1,51 @@
+{
+  assertAcked(prepareCreate("test").setSettings(Settings.settingsBuilder().put("index.refresh_interval",-1)));
+  ensureGreen();
+  final long docs=randomIntBetween(50,100);
+  for (int i=0; i < docs; i++) {
+    index("test","test",String.valueOf(i),"foo","bar");
+  }
+  refresh();
+  assertHitCount(client().prepareCount("test").get(),docs);
+  final Thread[] threads=new Thread[scaledRandomIntBetween(2,9)];
+  final CountDownLatch start=new CountDownLatch(1);
+  final AtomicReference<Throwable> exceptionHolder=new AtomicReference<>();
+  final MatchQueryBuilder query=QueryBuilders.matchQuery("foo","bar");
+  final AtomicLong deleted=new AtomicLong(0);
+  for (int i=0; i < threads.length; i++) {
+    assertHitCount(client().prepareCount("test").setQuery(query).get(),docs);
+    Runnable r=new Runnable(){
+      @Override public void run(){
+        try {
+          start.await();
+          DeleteByQueryResponse rsp=newDeleteByQuery().setQuery(query).get();
+          deleted.addAndGet(rsp.getTotalDeleted());
+          assertThat(rsp.getTotalFound(),equalTo(docs));
+        }
+ catch (        InterruptedException e) {
+          Thread.currentThread().interrupt();
+        }
+catch (        Throwable e) {
+          exceptionHolder.set(e);
+          Thread.currentThread().interrupt();
+        }
+      }
+    }
+;
+    threads[i]=new Thread(r);
+    threads[i].start();
+  }
+  start.countDown();
+  for (  Thread thread : threads) {
+    thread.join();
+  }
+  refresh();
+  Throwable assertionError=exceptionHolder.get();
+  if (assertionError != null) {
+    assertionError.printStackTrace();
+  }
+  assertThat(assertionError + " should be null",assertionError,nullValue());
+  assertHitCount(client().prepareCount("test").get(),0L);
+  assertThat(deleted.get(),equalTo(docs));
+  assertSearchContextsClosed();
+}
