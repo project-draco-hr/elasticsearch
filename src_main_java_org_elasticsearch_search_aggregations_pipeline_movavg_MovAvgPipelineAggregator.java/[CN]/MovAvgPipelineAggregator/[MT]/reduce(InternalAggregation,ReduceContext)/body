@@ -4,11 +4,11 @@
   InternalHistogram.Factory<? extends InternalHistogram.Bucket> factory=histo.getFactory();
   List newBuckets=new ArrayList<>();
   EvictingQueue<Double> values=EvictingQueue.create(this.window);
-  long lastKey=0;
-  Object currentKey;
+  long lastValidKey=0;
+  int lastValidPosition=0;
+  int counter=0;
   for (  InternalHistogram.Bucket bucket : buckets) {
     Double thisBucketValue=resolveBucketValue(histo,bucket,bucketsPaths()[0],gapPolicy);
-    currentKey=bucket.getKey();
     InternalHistogram.Bucket newBucket=bucket;
     if (!(thisBucketValue == null || thisBucketValue.equals(Double.NaN))) {
       values.offer(thisBucketValue);
@@ -16,21 +16,23 @@
         double movavg=model.next(values);
         List<InternalAggregation> aggs=new ArrayList<>(Lists.transform(bucket.getAggregations().asList(),AGGREGATION_TRANFORM_FUNCTION));
         aggs.add(new InternalSimpleValue(name(),movavg,formatter,new ArrayList<PipelineAggregator>(),metaData()));
-        newBucket=factory.createBucket(currentKey,bucket.getDocCount(),new InternalAggregations(aggs),bucket.getKeyed(),bucket.getFormatter());
+        newBucket=factory.createBucket(bucket.getKey(),bucket.getDocCount(),new InternalAggregations(aggs),bucket.getKeyed(),bucket.getFormatter());
       }
-    }
-    newBuckets.add(newBucket);
-    if (predict > 0) {
-      if (currentKey instanceof Number) {
-        lastKey=((Number)bucket.getKey()).longValue();
-      }
- else       if (currentKey instanceof DateTime) {
-        lastKey=((DateTime)bucket.getKey()).getMillis();
-      }
+      if (predict > 0) {
+        if (bucket.getKey() instanceof Number) {
+          lastValidKey=((Number)bucket.getKey()).longValue();
+        }
+ else         if (bucket.getKey() instanceof DateTime) {
+          lastValidKey=((DateTime)bucket.getKey()).getMillis();
+        }
  else {
-        throw new AggregationExecutionException("Expected key of type Number or DateTime but got [" + currentKey + "]");
+          throw new AggregationExecutionException("Expected key of type Number or DateTime but got [" + lastValidKey + "]");
+        }
+        lastValidPosition=counter;
       }
     }
+    counter+=1;
+    newBuckets.add(newBucket);
   }
   if (buckets.size() > 0 && predict > 0) {
     boolean keyed;
@@ -39,12 +41,22 @@
     formatter=buckets.get(0).getFormatter();
     double[] predictions=model.predict(values,predict);
     for (int i=0; i < predictions.length; i++) {
-      List<InternalAggregation> aggs=new ArrayList<>();
-      aggs.add(new InternalSimpleValue(name(),predictions[i],formatter,new ArrayList<PipelineAggregator>(),metaData()));
-      long newKey=histo.getRounding().nextRoundingValue(lastKey);
-      InternalHistogram.Bucket newBucket=factory.createBucket(newKey,0,new InternalAggregations(aggs),keyed,formatter);
-      newBuckets.add(newBucket);
-      lastKey=newKey;
+      List<InternalAggregation> aggs;
+      long newKey=histo.getRounding().nextRoundingValue(lastValidKey);
+      if (lastValidPosition + i + 1 < newBuckets.size()) {
+        InternalHistogram.Bucket bucket=(InternalHistogram.Bucket)newBuckets.get(lastValidPosition + i + 1);
+        aggs=new ArrayList<>(Lists.transform(bucket.getAggregations().asList(),AGGREGATION_TRANFORM_FUNCTION));
+        aggs.add(new InternalSimpleValue(name(),predictions[i],formatter,new ArrayList<PipelineAggregator>(),metaData()));
+        InternalHistogram.Bucket newBucket=factory.createBucket(newKey,0,new InternalAggregations(aggs),keyed,formatter);
+        newBuckets.set(lastValidPosition + i + 1,newBucket);
+      }
+ else {
+        aggs=new ArrayList<>();
+        aggs.add(new InternalSimpleValue(name(),predictions[i],formatter,new ArrayList<PipelineAggregator>(),metaData()));
+        InternalHistogram.Bucket newBucket=factory.createBucket(newKey,0,new InternalAggregations(aggs),keyed,formatter);
+        newBuckets.add(newBucket);
+      }
+      lastValidKey=newKey;
     }
   }
   return factory.create(newBuckets,histo);

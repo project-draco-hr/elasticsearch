@@ -1,0 +1,57 @@
+{
+  SearchResponse response=client().prepareSearch("double_predict").setTypes("type").addAggregation(histogram("histo").field(INTERVAL_FIELD).interval(1).subAggregation(avg("avg").field(VALUE_FIELD)).subAggregation(derivative("deriv").setBucketsPaths("avg").gapPolicy(gapPolicy)).subAggregation(movingAvg("avg_movavg").window(windowSize).modelBuilder(new SimpleModel.SimpleModelBuilder()).gapPolicy(gapPolicy).predict(12).setBucketsPaths("avg")).subAggregation(movingAvg("deriv_movavg").window(windowSize).modelBuilder(new SimpleModel.SimpleModelBuilder()).gapPolicy(gapPolicy).predict(12).setBucketsPaths("deriv"))).execute().actionGet();
+  assertSearchResponse(response);
+  InternalHistogram<Bucket> histo=response.getAggregations().get("histo");
+  assertThat(histo,notNullValue());
+  assertThat(histo.getName(),equalTo("histo"));
+  List<? extends Bucket> buckets=histo.getBuckets();
+  assertThat("Size of buckets array is not correct.",buckets.size(),equalTo(24));
+  Bucket bucket=buckets.get(0);
+  assertThat(bucket,notNullValue());
+  assertThat((long)bucket.getKey(),equalTo((long)0));
+  assertThat(bucket.getDocCount(),equalTo(1l));
+  Avg avgAgg=bucket.getAggregations().get("avg");
+  assertThat(avgAgg,notNullValue());
+  assertThat(avgAgg.value(),equalTo(10d));
+  SimpleValue movAvgAgg=bucket.getAggregations().get("avg_movavg");
+  assertThat(movAvgAgg,notNullValue());
+  assertThat(movAvgAgg.value(),equalTo(10d));
+  Derivative deriv=bucket.getAggregations().get("deriv");
+  assertThat(deriv,nullValue());
+  SimpleValue derivMovAvg=bucket.getAggregations().get("deriv_movavg");
+  assertThat(derivMovAvg,nullValue());
+  for (int i=1; i < 12; i++) {
+    bucket=buckets.get(i);
+    assertThat(bucket,notNullValue());
+    assertThat((long)bucket.getKey(),equalTo((long)i));
+    assertThat(bucket.getDocCount(),equalTo(1l));
+    avgAgg=bucket.getAggregations().get("avg");
+    assertThat(avgAgg,notNullValue());
+    assertThat(avgAgg.value(),equalTo(10d));
+    deriv=bucket.getAggregations().get("deriv");
+    assertThat(deriv,notNullValue());
+    assertThat(deriv.value(),equalTo(0d));
+    movAvgAgg=bucket.getAggregations().get("avg_movavg");
+    assertThat(movAvgAgg,notNullValue());
+    assertThat(movAvgAgg.value(),equalTo(10d));
+    derivMovAvg=bucket.getAggregations().get("deriv_movavg");
+    assertThat(derivMovAvg,notNullValue());
+    assertThat(derivMovAvg.value(),equalTo(0d));
+  }
+  for (int i=12; i < 24; i++) {
+    bucket=buckets.get(i);
+    assertThat(bucket,notNullValue());
+    assertThat((long)bucket.getKey(),equalTo((long)i));
+    assertThat(bucket.getDocCount(),equalTo(0l));
+    avgAgg=bucket.getAggregations().get("avg");
+    assertThat(avgAgg,nullValue());
+    deriv=bucket.getAggregations().get("deriv");
+    assertThat(deriv,nullValue());
+    movAvgAgg=bucket.getAggregations().get("avg_movavg");
+    assertThat(movAvgAgg,notNullValue());
+    assertThat(movAvgAgg.value(),equalTo(10d));
+    derivMovAvg=bucket.getAggregations().get("deriv_movavg");
+    assertThat(derivMovAvg,notNullValue());
+    assertThat(derivMovAvg.value(),equalTo(0d));
+  }
+}
