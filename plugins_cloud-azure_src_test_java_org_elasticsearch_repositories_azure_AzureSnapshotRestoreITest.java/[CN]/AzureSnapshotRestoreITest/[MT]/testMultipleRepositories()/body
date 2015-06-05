@@ -1,0 +1,46 @@
+{
+  Client client=client();
+  logger.info("-->  creating azure repository with path [{}]",getRepositoryPath());
+  PutRepositoryResponse putRepositoryResponse1=client.admin().cluster().preparePutRepository("test-repo1").setType("azure").setSettings(Settings.settingsBuilder().put(Repository.CONTAINER,getContainerName().concat("-1")).put(Repository.BASE_PATH,getRepositoryPath()).put(Repository.CHUNK_SIZE,randomIntBetween(1000,10000))).get();
+  assertThat(putRepositoryResponse1.isAcknowledged(),equalTo(true));
+  PutRepositoryResponse putRepositoryResponse2=client.admin().cluster().preparePutRepository("test-repo2").setType("azure").setSettings(Settings.settingsBuilder().put(Repository.CONTAINER,getContainerName().concat("-2")).put(Repository.BASE_PATH,getRepositoryPath()).put(Repository.CHUNK_SIZE,randomIntBetween(1000,10000))).get();
+  assertThat(putRepositoryResponse2.isAcknowledged(),equalTo(true));
+  createIndex("test-idx-1","test-idx-2");
+  ensureGreen();
+  logger.info("--> indexing some data");
+  for (int i=0; i < 100; i++) {
+    index("test-idx-1","doc",Integer.toString(i),"foo","bar" + i);
+    index("test-idx-2","doc",Integer.toString(i),"foo","baz" + i);
+  }
+  refresh();
+  assertThat(client.prepareCount("test-idx-1").get().getCount(),equalTo(100L));
+  assertThat(client.prepareCount("test-idx-2").get().getCount(),equalTo(100L));
+  logger.info("--> snapshot 1");
+  CreateSnapshotResponse createSnapshotResponse1=client.admin().cluster().prepareCreateSnapshot("test-repo1","test-snap").setWaitForCompletion(true).setIndices("test-idx-1").get();
+  assertThat(createSnapshotResponse1.getSnapshotInfo().successfulShards(),greaterThan(0));
+  assertThat(createSnapshotResponse1.getSnapshotInfo().successfulShards(),equalTo(createSnapshotResponse1.getSnapshotInfo().totalShards()));
+  logger.info("--> snapshot 2");
+  CreateSnapshotResponse createSnapshotResponse2=client.admin().cluster().prepareCreateSnapshot("test-repo2","test-snap").setWaitForCompletion(true).setIndices("test-idx-2").get();
+  assertThat(createSnapshotResponse2.getSnapshotInfo().successfulShards(),greaterThan(0));
+  assertThat(createSnapshotResponse2.getSnapshotInfo().successfulShards(),equalTo(createSnapshotResponse2.getSnapshotInfo().totalShards()));
+  assertThat(client.admin().cluster().prepareGetSnapshots("test-repo1").setSnapshots("test-snap").get().getSnapshots().get(0).state(),equalTo(SnapshotState.SUCCESS));
+  assertThat(client.admin().cluster().prepareGetSnapshots("test-repo2").setSnapshots("test-snap").get().getSnapshots().get(0).state(),equalTo(SnapshotState.SUCCESS));
+  logger.info("--> delete indices");
+  cluster().wipeIndices("test-idx-1","test-idx-2");
+  logger.info("--> restore one index after deletion from snapshot 1");
+  RestoreSnapshotResponse restoreSnapshotResponse1=client.admin().cluster().prepareRestoreSnapshot("test-repo1","test-snap").setWaitForCompletion(true).setIndices("test-idx-1").execute().actionGet();
+  assertThat(restoreSnapshotResponse1.getRestoreInfo().totalShards(),greaterThan(0));
+  ensureGreen();
+  assertThat(client.prepareCount("test-idx-1").get().getCount(),equalTo(100L));
+  ClusterState clusterState=client.admin().cluster().prepareState().get().getState();
+  assertThat(clusterState.getMetaData().hasIndex("test-idx-1"),equalTo(true));
+  assertThat(clusterState.getMetaData().hasIndex("test-idx-2"),equalTo(false));
+  logger.info("--> restore other index after deletion from snapshot 2");
+  RestoreSnapshotResponse restoreSnapshotResponse2=client.admin().cluster().prepareRestoreSnapshot("test-repo2","test-snap").setWaitForCompletion(true).setIndices("test-idx-2").execute().actionGet();
+  assertThat(restoreSnapshotResponse2.getRestoreInfo().totalShards(),greaterThan(0));
+  ensureGreen();
+  assertThat(client.prepareCount("test-idx-2").get().getCount(),equalTo(100L));
+  clusterState=client.admin().cluster().prepareState().get().getState();
+  assertThat(clusterState.getMetaData().hasIndex("test-idx-1"),equalTo(true));
+  assertThat(clusterState.getMetaData().hasIndex("test-idx-2"),equalTo(true));
+}
