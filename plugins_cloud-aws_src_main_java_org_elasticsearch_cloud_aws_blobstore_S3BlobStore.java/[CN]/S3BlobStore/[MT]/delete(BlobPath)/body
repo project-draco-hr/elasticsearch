@@ -1,0 +1,38 @@
+{
+  ObjectListing prevListing=null;
+  DeleteObjectsRequest multiObjectDeleteRequest=null;
+  ArrayList<KeyVersion> keys=new ArrayList<KeyVersion>();
+  while (true) {
+    ObjectListing list;
+    if (prevListing != null) {
+      list=client.listNextBatchOfObjects(prevListing);
+    }
+ else {
+      String keyPath=path.buildAsString("/");
+      if (!keyPath.isEmpty()) {
+        keyPath=keyPath + "/";
+      }
+      list=client.listObjects(bucket,keyPath);
+      multiObjectDeleteRequest=new DeleteObjectsRequest(list.getBucketName());
+    }
+    for (    S3ObjectSummary summary : list.getObjectSummaries()) {
+      keys.add(new KeyVersion(summary.getKey()));
+      if (keys.size() > 500) {
+        multiObjectDeleteRequest.setKeys(keys);
+        client.deleteObjects(multiObjectDeleteRequest);
+        multiObjectDeleteRequest=new DeleteObjectsRequest(list.getBucketName());
+        keys.clear();
+      }
+    }
+    if (list.isTruncated()) {
+      prevListing=list;
+    }
+ else {
+      break;
+    }
+  }
+  if (!keys.isEmpty()) {
+    multiObjectDeleteRequest.setKeys(keys);
+    client.deleteObjects(multiObjectDeleteRequest);
+  }
+}

@@ -1,0 +1,51 @@
+{
+  Settings settings=internalCluster().getInstance(Settings.class);
+  Settings[] buckets={settings.getByPrefix("repositories.s3."),settings.getByPrefix("repositories.s3.private-bucket."),settings.getByPrefix("repositories.s3.remote-bucket."),settings.getByPrefix("repositories.s3.external-bucket.")};
+  for (  Settings bucket : buckets) {
+    String endpoint=bucket.get("endpoint",settings.get("repositories.s3.endpoint"));
+    String protocol=bucket.get("protocol",settings.get("repositories.s3.protocol"));
+    String region=bucket.get("region",settings.get("repositories.s3.region"));
+    String accessKey=bucket.get("access_key",settings.get("cloud.aws.access_key"));
+    String secretKey=bucket.get("secret_key",settings.get("cloud.aws.secret_key"));
+    String bucketName=bucket.get("bucket");
+    assertThat("Your settings in elasticsearch.yml are incorrects. Check README file.",bucketName,notNullValue());
+    AmazonS3 client=internalCluster().getInstance(AwsS3Service.class).client(endpoint,protocol,region,accessKey,secretKey);
+    try {
+      ObjectListing prevListing=null;
+      DeleteObjectsRequest multiObjectDeleteRequest=null;
+      ArrayList<DeleteObjectsRequest.KeyVersion> keys=new ArrayList<DeleteObjectsRequest.KeyVersion>();
+      while (true) {
+        ObjectListing list;
+        if (prevListing != null) {
+          list=client.listNextBatchOfObjects(prevListing);
+        }
+ else {
+          list=client.listObjects(bucketName,basePath);
+          multiObjectDeleteRequest=new DeleteObjectsRequest(list.getBucketName());
+        }
+        for (        S3ObjectSummary summary : list.getObjectSummaries()) {
+          keys.add(new DeleteObjectsRequest.KeyVersion(summary.getKey()));
+          if (keys.size() > 500) {
+            multiObjectDeleteRequest.setKeys(keys);
+            client.deleteObjects(multiObjectDeleteRequest);
+            multiObjectDeleteRequest=new DeleteObjectsRequest(list.getBucketName());
+            keys.clear();
+          }
+        }
+        if (list.isTruncated()) {
+          prevListing=list;
+        }
+ else {
+          break;
+        }
+      }
+      if (!keys.isEmpty()) {
+        multiObjectDeleteRequest.setKeys(keys);
+        client.deleteObjects(multiObjectDeleteRequest);
+      }
+    }
+ catch (    Throwable ex) {
+      logger.warn("Failed to delete S3 repository [{}] in [{}]",ex,bucketName,region);
+    }
+  }
+}
