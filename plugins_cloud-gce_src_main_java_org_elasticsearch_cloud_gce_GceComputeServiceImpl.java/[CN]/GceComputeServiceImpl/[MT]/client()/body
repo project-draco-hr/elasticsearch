@@ -1,0 +1,24 @@
+{
+  if (refreshInterval != null && refreshInterval.millis() != 0) {
+    if (client != null && (refreshInterval.millis() < 0 || (System.currentTimeMillis() - lastRefresh) < refreshInterval.millis())) {
+      if (logger.isTraceEnabled())       logger.trace("using cache to retrieve client");
+      return client;
+    }
+    lastRefresh=System.currentTimeMillis();
+  }
+  try {
+    HTTP_TRANSPORT=GoogleNetHttpTransport.newTrustedTransport();
+    JSON_FACTORY=new JacksonFactory();
+    logger.info("starting GCE discovery service");
+    ComputeCredential credential=new ComputeCredential.Builder(HTTP_TRANSPORT,JSON_FACTORY).setTokenServerEncodedUrl(TOKEN_SERVER_ENCODED_URL).build();
+    credential.refreshToken();
+    logger.debug("token [{}] will expire in [{}] s",credential.getAccessToken(),credential.getExpiresInSeconds());
+    refreshInterval=TimeValue.timeValueSeconds(credential.getExpiresInSeconds() - 1);
+    this.client=new Compute.Builder(HTTP_TRANSPORT,JSON_FACTORY,null).setApplicationName(Fields.VERSION).setHttpRequestInitializer(credential).build();
+  }
+ catch (  Exception e) {
+    logger.warn("unable to start GCE discovery service: {} : {}",e.getClass().getName(),e.getMessage());
+    throw new IllegalArgumentException("unable to start GCE discovery service",e);
+  }
+  return this.client;
+}
