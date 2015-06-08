@@ -1,7 +1,8 @@
 {
-  final ExecutableScript executable;
+  BytesReference processedQuery;
   if (request.template() != null) {
-    executable=this.scriptService.executable(request.template(),ScriptContext.Standard.SEARCH);
+    ExecutableScript executable=this.scriptService.executable(request.template(),ScriptContext.Standard.SEARCH);
+    processedQuery=(BytesReference)executable.run();
   }
  else {
     if (!hasLength(request.templateSource())) {
@@ -15,22 +16,31 @@
       if (template.getType() == ScriptService.ScriptType.INLINE) {
         parser=null;
         try {
-          byte[] templateBytes=template.getScript().getBytes(Charsets.UTF_8);
-          parser=XContentFactory.xContent(templateBytes).createParser(templateBytes);
+          ExecutableScript executable=this.scriptService.executable(template,ScriptContext.Standard.SEARCH);
+          processedQuery=(BytesReference)executable.run();
+          parser=XContentFactory.xContent(processedQuery).createParser(processedQuery);
         }
  catch (        ElasticsearchParseException epe) {
           template=new Template(template.getScript(),ScriptService.ScriptType.FILE,MustacheScriptEngineService.NAME,null,template.getParams());
+          ExecutableScript executable=this.scriptService.executable(template,ScriptContext.Standard.SEARCH);
+          processedQuery=(BytesReference)executable.run();
         }
         if (parser != null) {
           try {
             Template innerTemplate=TemplateQueryParser.parse(parser);
             if (hasLength(innerTemplate.getScript()) && !innerTemplate.getType().equals(ScriptService.ScriptType.INLINE)) {
               template=new Template(innerTemplate.getScript(),innerTemplate.getType(),MustacheScriptEngineService.NAME,null,template.getParams());
+              ExecutableScript executable=this.scriptService.executable(template,ScriptContext.Standard.SEARCH);
+              processedQuery=(BytesReference)executable.run();
             }
           }
  catch (          ScriptParseException e) {
           }
         }
+      }
+ else {
+        ExecutableScript executable=this.scriptService.executable(template,ScriptContext.Standard.SEARCH);
+        processedQuery=(BytesReference)executable.run();
       }
     }
  catch (    IOException e) {
@@ -42,8 +52,6 @@
     if (!hasLength(template.getScript())) {
       throw new ElasticsearchParseException("Template must have [template] field configured");
     }
-    executable=this.scriptService.executable(template,ScriptContext.Standard.SEARCH);
   }
-  BytesReference processedQuery=(BytesReference)executable.run();
   request.source(processedQuery);
 }
