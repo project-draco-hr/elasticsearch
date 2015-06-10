@@ -1,0 +1,42 @@
+{
+  final JavaScriptScriptEngineService se=new JavaScriptScriptEngineService(Settings.Builder.EMPTY_SETTINGS);
+  final Object compiled=se.compile("x + y");
+  final AtomicBoolean failed=new AtomicBoolean();
+  Thread[] threads=new Thread[50];
+  final CountDownLatch latch=new CountDownLatch(threads.length);
+  final CyclicBarrier barrier=new CyclicBarrier(threads.length + 1);
+  for (int i=0; i < threads.length; i++) {
+    threads[i]=new Thread(new Runnable(){
+      @Override public void run(){
+        try {
+          barrier.await();
+          long x=ThreadLocalRandom.current().nextInt();
+          Map<String,Object> vars=new HashMap<String,Object>();
+          vars.put("x",x);
+          ExecutableScript script=se.executable(compiled,vars);
+          for (int i=0; i < 100000; i++) {
+            long y=ThreadLocalRandom.current().nextInt();
+            long addition=x + y;
+            script.setNextVar("y",y);
+            long result=((Number)script.run()).longValue();
+            assertThat(result,equalTo(addition));
+          }
+        }
+ catch (        Throwable t) {
+          failed.set(true);
+          logger.error("failed",t);
+        }
+ finally {
+          latch.countDown();
+        }
+      }
+    }
+);
+  }
+  for (int i=0; i < threads.length; i++) {
+    threads[i].start();
+  }
+  barrier.await();
+  latch.await();
+  assertThat(failed.get(),equalTo(false));
+}

@@ -22,14 +22,18 @@
   assertThat(Files.exists(shardDirectory(node_3,"test",0)),equalTo(false));
   assertThat(Files.exists(indexDirectory(node_3,"test")),equalTo(false));
   logger.info("--> move shard from node_1 to node_3, and wait for relocation to finish");
+  SlowClusterStateProcessing disruption=null;
   if (randomBoolean()) {
-    final SlowClusterStateProcessing disruption=new SlowClusterStateProcessing(node_3,getRandom(),0,0,1000,2000);
+    disruption=new SlowClusterStateProcessing(node_3,getRandom(),0,0,1000,2000);
     internalCluster().setDisruptionScheme(disruption);
     disruption.startDisrupting();
   }
   internalCluster().client().admin().cluster().prepareReroute().add(new MoveAllocationCommand(new ShardId("test",0),node_1,node_3)).get();
   clusterHealth=client().admin().cluster().prepareHealth().setWaitForNodes("4").setWaitForRelocatingShards(0).get();
   assertThat(clusterHealth.isTimedOut(),equalTo(false));
+  if (disruption != null) {
+    disruption.stopDisrupting();
+  }
   assertThat(waitForShardDeletion(node_1,"test",0),equalTo(false));
   assertThat(waitForIndexDeletion(node_1,"test"),equalTo(false));
   assertThat(Files.exists(shardDirectory(node_2,"test",0)),equalTo(true));

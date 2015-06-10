@@ -1,6 +1,6 @@
 {
   final MapperService mapperService=indexShard.mapperService();
-  final Map<String,FieldMapper> warmUpGlobalOrdinals=new HashMap<>();
+  final Map<String,MappedFieldType> warmUpGlobalOrdinals=new HashMap<>();
   for (  DocumentMapper docMapper : mapperService.docMappers(false)) {
     for (    FieldMapper fieldMapper : docMapper.mappers()) {
       final FieldDataType fieldDataType=fieldMapper.fieldType().fieldDataType();
@@ -14,25 +14,25 @@
       if (warmUpGlobalOrdinals.containsKey(indexName)) {
         continue;
       }
-      warmUpGlobalOrdinals.put(indexName,fieldMapper);
+      warmUpGlobalOrdinals.put(indexName,fieldMapper.fieldType());
     }
   }
   final IndexFieldDataService indexFieldDataService=indexShard.indexFieldDataService();
   final Executor executor=threadPool.executor(executor());
   final CountDownLatch latch=new CountDownLatch(warmUpGlobalOrdinals.size());
-  for (  final FieldMapper fieldMapper : warmUpGlobalOrdinals.values()) {
+  for (  final MappedFieldType fieldType : warmUpGlobalOrdinals.values()) {
     executor.execute(new Runnable(){
       @Override public void run(){
         try {
           final long start=System.nanoTime();
-          IndexFieldData.Global ifd=indexFieldDataService.getForField(fieldMapper);
+          IndexFieldData.Global ifd=indexFieldDataService.getForField(fieldType);
           ifd.loadGlobal(context.reader());
           if (indexShard.warmerService().logger().isTraceEnabled()) {
-            indexShard.warmerService().logger().trace("warmed global ordinals for [{}], took [{}]",fieldMapper.fieldType().names().fullName(),TimeValue.timeValueNanos(System.nanoTime() - start));
+            indexShard.warmerService().logger().trace("warmed global ordinals for [{}], took [{}]",fieldType.names().fullName(),TimeValue.timeValueNanos(System.nanoTime() - start));
           }
         }
  catch (        Throwable t) {
-          indexShard.warmerService().logger().warn("failed to warm-up global ordinals for [{}]",t,fieldMapper.fieldType().names().fullName());
+          indexShard.warmerService().logger().warn("failed to warm-up global ordinals for [{}]",t,fieldType.names().fullName());
         }
  finally {
           latch.countDown();

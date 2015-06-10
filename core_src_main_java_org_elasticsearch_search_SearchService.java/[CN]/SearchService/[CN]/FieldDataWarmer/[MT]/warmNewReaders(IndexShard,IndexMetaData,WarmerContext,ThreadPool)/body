@@ -1,6 +1,6 @@
 {
   final MapperService mapperService=indexShard.mapperService();
-  final Map<String,FieldMapper> warmUp=new HashMap<>();
+  final Map<String,MappedFieldType> warmUp=new HashMap<>();
   for (  DocumentMapper docMapper : mapperService.docMappers(false)) {
     for (    FieldMapper fieldMapper : docMapper.mappers()) {
       final FieldDataType fieldDataType=fieldMapper.fieldType().fieldDataType();
@@ -14,25 +14,25 @@
       if (warmUp.containsKey(indexName)) {
         continue;
       }
-      warmUp.put(indexName,fieldMapper);
+      warmUp.put(indexName,fieldMapper.fieldType());
     }
   }
   final IndexFieldDataService indexFieldDataService=indexShard.indexFieldDataService();
   final Executor executor=threadPool.executor(executor());
   final CountDownLatch latch=new CountDownLatch(context.searcher().reader().leaves().size() * warmUp.size());
   for (  final LeafReaderContext ctx : context.searcher().reader().leaves()) {
-    for (    final FieldMapper fieldMapper : warmUp.values()) {
+    for (    final MappedFieldType fieldType : warmUp.values()) {
       executor.execute(new Runnable(){
         @Override public void run(){
           try {
             final long start=System.nanoTime();
-            indexFieldDataService.getForField(fieldMapper).load(ctx);
+            indexFieldDataService.getForField(fieldType).load(ctx);
             if (indexShard.warmerService().logger().isTraceEnabled()) {
-              indexShard.warmerService().logger().trace("warmed fielddata for [{}], took [{}]",fieldMapper.fieldType().names().fullName(),TimeValue.timeValueNanos(System.nanoTime() - start));
+              indexShard.warmerService().logger().trace("warmed fielddata for [{}], took [{}]",fieldType.names().fullName(),TimeValue.timeValueNanos(System.nanoTime() - start));
             }
           }
  catch (          Throwable t) {
-            indexShard.warmerService().logger().warn("failed to warm-up fielddata for [{}]",t,fieldMapper.fieldType().names().fullName());
+            indexShard.warmerService().logger().warn("failed to warm-up fielddata for [{}]",t,fieldType.names().fullName());
           }
  finally {
             latch.countDown();
