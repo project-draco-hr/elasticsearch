@@ -12,12 +12,11 @@
       if (batchSize == 0) {
         return currentState;
       }
-      final MetaData metaData=currentState.metaData();
-      final SnapshotMetaData snapshots=metaData.custom(SnapshotMetaData.TYPE);
+      final SnapshotsInProgress snapshots=currentState.custom(SnapshotsInProgress.TYPE);
       if (snapshots != null) {
         int changedCount=0;
-        final List<SnapshotMetaData.Entry> entries=newArrayList();
-        for (        SnapshotMetaData.Entry entry : snapshots.entries()) {
+        final List<SnapshotsInProgress.Entry> entries=newArrayList();
+        for (        SnapshotsInProgress.Entry entry : snapshots.entries()) {
           HashMap<ShardId,ShardSnapshotStatus> shards=null;
           for (int i=0; i < batchSize; i++) {
             final UpdateIndexShardSnapshotStatusRequest updateSnapshotState=drainedRequests.get(i);
@@ -33,10 +32,10 @@
           }
           if (shards != null) {
             if (!completed(shards.values())) {
-              entries.add(new SnapshotMetaData.Entry(entry,ImmutableMap.copyOf(shards)));
+              entries.add(new SnapshotsInProgress.Entry(entry,ImmutableMap.copyOf(shards)));
             }
  else {
-              SnapshotMetaData.Entry updatedEntry=new SnapshotMetaData.Entry(entry,State.SUCCESS,ImmutableMap.copyOf(shards));
+              SnapshotsInProgress.Entry updatedEntry=new SnapshotsInProgress.Entry(entry,State.SUCCESS,ImmutableMap.copyOf(shards));
               entries.add(updatedEntry);
               endSnapshot(updatedEntry);
               logger.info("snapshot [{}] is done",updatedEntry.snapshotId());
@@ -48,9 +47,8 @@
         }
         if (changedCount > 0) {
           logger.trace("changed cluster state triggered by {} snapshot state updates",changedCount);
-          final SnapshotMetaData updatedSnapshots=new SnapshotMetaData(entries.toArray(new SnapshotMetaData.Entry[entries.size()]));
-          final MetaData.Builder mdBuilder=MetaData.builder(currentState.metaData()).putCustom(SnapshotMetaData.TYPE,updatedSnapshots);
-          return ClusterState.builder(currentState).metaData(mdBuilder).build();
+          final SnapshotsInProgress updatedSnapshots=new SnapshotsInProgress(entries.toArray(new SnapshotsInProgress.Entry[entries.size()]));
+          return ClusterState.builder(currentState).putCustom(SnapshotsInProgress.TYPE,updatedSnapshots).build();
         }
       }
       return currentState;

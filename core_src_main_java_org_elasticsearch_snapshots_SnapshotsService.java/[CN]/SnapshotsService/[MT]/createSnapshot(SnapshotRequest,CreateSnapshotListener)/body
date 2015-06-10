@@ -1,23 +1,21 @@
 {
   final SnapshotId snapshotId=new SnapshotId(request.repository(),request.name());
   clusterService.submitStateUpdateTask(request.cause(),new TimeoutClusterStateUpdateTask(){
-    private SnapshotMetaData.Entry newSnapshot=null;
+    private SnapshotsInProgress.Entry newSnapshot=null;
     @Override public ClusterState execute(    ClusterState currentState){
       validate(request,currentState);
       MetaData metaData=currentState.metaData();
-      MetaData.Builder mdBuilder=MetaData.builder(currentState.metaData());
-      SnapshotMetaData snapshots=metaData.custom(SnapshotMetaData.TYPE);
+      SnapshotsInProgress snapshots=currentState.custom(SnapshotsInProgress.TYPE);
       if (snapshots == null || snapshots.entries().isEmpty()) {
         ImmutableList<String> indices=ImmutableList.copyOf(metaData.concreteIndices(request.indicesOptions(),request.indices()));
         logger.trace("[{}][{}] creating snapshot for indices [{}]",request.repository(),request.name(),indices);
-        newSnapshot=new SnapshotMetaData.Entry(snapshotId,request.includeGlobalState(),State.INIT,indices,System.currentTimeMillis(),null);
-        snapshots=new SnapshotMetaData(newSnapshot);
+        newSnapshot=new SnapshotsInProgress.Entry(snapshotId,request.includeGlobalState(),State.INIT,indices,System.currentTimeMillis(),null);
+        snapshots=new SnapshotsInProgress(newSnapshot);
       }
  else {
         throw new ConcurrentSnapshotExecutionException(snapshotId,"a snapshot is already running");
       }
-      mdBuilder.putCustom(SnapshotMetaData.TYPE,snapshots);
-      return ClusterState.builder(currentState).metaData(mdBuilder).build();
+      return ClusterState.builder(currentState).putCustom(SnapshotsInProgress.TYPE,snapshots).build();
     }
     @Override public void onFailure(    String source,    Throwable t){
       logger.warn("[{}][{}] failed to create snapshot",t,request.repository(),request.name());

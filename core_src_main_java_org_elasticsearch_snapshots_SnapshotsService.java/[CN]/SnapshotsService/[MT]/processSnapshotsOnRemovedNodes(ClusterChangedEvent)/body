@@ -4,16 +4,14 @@
     clusterService.submitStateUpdateTask("update snapshot state after node removal",new ClusterStateUpdateTask(){
       @Override public ClusterState execute(      ClusterState currentState) throws Exception {
         DiscoveryNodes nodes=currentState.nodes();
-        MetaData metaData=currentState.metaData();
-        MetaData.Builder mdBuilder=MetaData.builder(currentState.metaData());
-        SnapshotMetaData snapshots=metaData.custom(SnapshotMetaData.TYPE);
+        SnapshotsInProgress snapshots=currentState.custom(SnapshotsInProgress.TYPE);
         if (snapshots == null) {
           return currentState;
         }
         boolean changed=false;
-        ArrayList<SnapshotMetaData.Entry> entries=newArrayList();
-        for (        final SnapshotMetaData.Entry snapshot : snapshots.entries()) {
-          SnapshotMetaData.Entry updatedSnapshot=snapshot;
+        ArrayList<SnapshotsInProgress.Entry> entries=newArrayList();
+        for (        final SnapshotsInProgress.Entry snapshot : snapshots.entries()) {
+          SnapshotsInProgress.Entry updatedSnapshot=snapshot;
           boolean snapshotChanged=false;
           if (snapshot.state() == State.STARTED || snapshot.state() == State.ABORTED) {
             ImmutableMap.Builder<ShardId,ShardSnapshotStatus> shards=ImmutableMap.builder();
@@ -34,11 +32,11 @@
               changed=true;
               ImmutableMap<ShardId,ShardSnapshotStatus> shardsMap=shards.build();
               if (!snapshot.state().completed() && completed(shardsMap.values())) {
-                updatedSnapshot=new SnapshotMetaData.Entry(snapshot,State.SUCCESS,shardsMap);
+                updatedSnapshot=new SnapshotsInProgress.Entry(snapshot,State.SUCCESS,shardsMap);
                 endSnapshot(updatedSnapshot);
               }
  else {
-                updatedSnapshot=new SnapshotMetaData.Entry(snapshot,snapshot.state(),shardsMap);
+                updatedSnapshot=new SnapshotsInProgress.Entry(snapshot,snapshot.state(),shardsMap);
               }
             }
             entries.add(updatedSnapshot);
@@ -59,9 +57,8 @@
           }
         }
         if (changed) {
-          snapshots=new SnapshotMetaData(entries.toArray(new SnapshotMetaData.Entry[entries.size()]));
-          mdBuilder.putCustom(SnapshotMetaData.TYPE,snapshots);
-          return ClusterState.builder(currentState).metaData(mdBuilder).build();
+          snapshots=new SnapshotsInProgress(entries.toArray(new SnapshotsInProgress.Entry[entries.size()]));
+          return ClusterState.builder(currentState).putCustom(SnapshotsInProgress.TYPE,snapshots).build();
         }
         return currentState;
       }
