@@ -1,0 +1,39 @@
+{
+  int totalNumDocs=merge.totalNumDocs();
+  long totalSizeInBytes=merge.totalBytesSize();
+  long timeNS=System.nanoTime();
+  currentMerges.inc();
+  currentMergesNumDocs.inc(totalNumDocs);
+  currentMergesSizeInBytes.inc(totalSizeInBytes);
+  OnGoingMerge onGoingMerge=new OnGoingMerge(merge);
+  onGoingMerges.add(onGoingMerge);
+  if (logger.isTraceEnabled()) {
+    logger.trace("merge [{}] starting..., merging [{}] segments, [{}] docs, [{}] size, into [{}] estimated_size",OneMergeHelper.getSegmentName(merge),merge.segments.size(),totalNumDocs,new ByteSizeValue(totalSizeInBytes),new ByteSizeValue(merge.estimatedMergeBytes));
+  }
+  try {
+    beforeMerge(onGoingMerge);
+    super.doMerge(writer,merge);
+  }
+  finally {
+    long tookMS=TimeValue.nsecToMSec(System.nanoTime() - timeNS);
+    onGoingMerges.remove(onGoingMerge);
+    afterMerge(onGoingMerge);
+    currentMerges.dec();
+    currentMergesNumDocs.dec(totalNumDocs);
+    currentMergesSizeInBytes.dec(totalSizeInBytes);
+    totalMergesNumDocs.inc(totalNumDocs);
+    totalMergesSizeInBytes.inc(totalSizeInBytes);
+    totalMerges.inc(tookMS);
+    long stoppedMS=TimeValue.nsecToMSec(merge.rateLimiter.getTotalStoppedNS());
+    long throttledMS=TimeValue.nsecToMSec(merge.rateLimiter.getTotalPausedNS());
+    totalMergeStoppedTime.inc(stoppedMS);
+    totalMergeThrottledTime.inc(throttledMS);
+    String message=String.format(Locale.ROOT,"merge segment [%s] done: took [%s], [%,.1f MB], [%,d docs], [%s stopped], [%s throttled], [%,.1f MB written], [%,.1f MB/sec throttle]",OneMergeHelper.getSegmentName(merge),TimeValue.timeValueMillis(tookMS),totalSizeInBytes / 1024f / 1024f,totalNumDocs,TimeValue.timeValueMillis(stoppedMS),TimeValue.timeValueMillis(throttledMS),merge.rateLimiter.getTotalBytesWritten() / 1024f / 1024f,merge.rateLimiter.getMBPerSec());
+    if (tookMS > 20000) {
+      logger.debug(message);
+    }
+ else     if (logger.isTraceEnabled()) {
+      logger.trace(message);
+    }
+  }
+}
