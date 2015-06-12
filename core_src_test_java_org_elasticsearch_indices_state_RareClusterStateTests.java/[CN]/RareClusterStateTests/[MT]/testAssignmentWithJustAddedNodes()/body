@@ -1,0 +1,41 @@
+{
+  internalCluster().startNode();
+  final String index="index";
+  prepareCreate(index).setSettings(IndexMetaData.SETTING_NUMBER_OF_SHARDS,1,IndexMetaData.SETTING_NUMBER_OF_REPLICAS,0).get();
+  ensureGreen(index);
+  client().admin().indices().prepareClose(index).get();
+  final String masterName=internalCluster().getMasterName();
+  final ClusterService clusterService=internalCluster().clusterService(masterName);
+  final AllocationService allocationService=internalCluster().getInstance(AllocationService.class,masterName);
+  clusterService.submitStateUpdateTask("test-inject-node-and-reroute",new ClusterStateUpdateTask(){
+    @Override public ClusterState execute(    ClusterState currentState) throws Exception {
+      ClusterState.Builder builder=ClusterState.builder(currentState);
+      builder.nodes(DiscoveryNodes.builder(currentState.nodes()).put(new DiscoveryNode("_non_existent",DummyTransportAddress.INSTANCE,Version.CURRENT)));
+      final IndexMetaData indexMetaData=IndexMetaData.builder(currentState.metaData().index(index)).state(IndexMetaData.State.OPEN).build();
+      builder.metaData(MetaData.builder(currentState.metaData()).put(indexMetaData,true));
+      builder.blocks(ClusterBlocks.builder().blocks(currentState.blocks()).removeIndexBlocks(index));
+      ClusterState updatedState=builder.build();
+      RoutingTable.Builder routingTable=RoutingTable.builder(updatedState.routingTable());
+      routingTable.addAsRecovery(updatedState.metaData().index(index));
+      updatedState=ClusterState.builder(updatedState).routingTable(routingTable).build();
+      RoutingAllocation.Result result=allocationService.reroute(updatedState);
+      return ClusterState.builder(updatedState).routingResult(result).build();
+    }
+    @Override public void onFailure(    String source,    Throwable t){
+    }
+  }
+);
+  ensureGreen(index);
+  clusterService.submitStateUpdateTask("test-remove-injected-node",new ClusterStateUpdateTask(){
+    @Override public ClusterState execute(    ClusterState currentState) throws Exception {
+      ClusterState.Builder builder=ClusterState.builder(currentState);
+      builder.nodes(DiscoveryNodes.builder(currentState.nodes()).remove("_non_existent"));
+      currentState=builder.build();
+      RoutingAllocation.Result result=allocationService.reroute(currentState);
+      return ClusterState.builder(currentState).routingResult(result).build();
+    }
+    @Override public void onFailure(    String source,    Throwable t){
+    }
+  }
+);
+}
