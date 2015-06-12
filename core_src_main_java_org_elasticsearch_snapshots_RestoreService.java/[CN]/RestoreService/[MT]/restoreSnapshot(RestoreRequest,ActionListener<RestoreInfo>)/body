@@ -17,17 +17,18 @@
     clusterService.submitStateUpdateTask(request.cause(),new TimeoutClusterStateUpdateTask(){
       RestoreInfo restoreInfo=null;
       @Override public ClusterState execute(      ClusterState currentState){
-        RestoreMetaData restoreMetaData=currentState.metaData().custom(RestoreMetaData.TYPE);
-        if (restoreMetaData != null && !restoreMetaData.entries().isEmpty()) {
+        RestoreInProgress restoreInProgress=currentState.custom(RestoreInProgress.TYPE);
+        if (restoreInProgress != null && !restoreInProgress.entries().isEmpty()) {
           throw new ConcurrentSnapshotExecutionException(snapshotId,"Restore process is already running in this cluster");
         }
+        ClusterState.Builder builder=ClusterState.builder(currentState);
         MetaData.Builder mdBuilder=MetaData.builder(currentState.metaData());
         ClusterBlocks.Builder blocks=ClusterBlocks.builder().blocks(currentState.blocks());
         RoutingTable.Builder rtBuilder=RoutingTable.builder(currentState.routingTable());
-        final ImmutableMap<ShardId,RestoreMetaData.ShardRestoreStatus> shards;
+        final ImmutableMap<ShardId,RestoreInProgress.ShardRestoreStatus> shards;
         Set<String> aliases=newHashSet();
         if (!renamedIndices.isEmpty()) {
-          ImmutableMap.Builder<ShardId,RestoreMetaData.ShardRestoreStatus> shardsBuilder=ImmutableMap.builder();
+          ImmutableMap.Builder<ShardId,RestoreInProgress.ShardRestoreStatus> shardsBuilder=ImmutableMap.builder();
           for (          Map.Entry<String,String> indexEntry : renamedIndices.entrySet()) {
             String index=indexEntry.getValue();
             boolean partial=checkPartial(index);
@@ -88,16 +89,16 @@
             }
             for (int shard=0; shard < snapshotIndexMetaData.getNumberOfShards(); shard++) {
               if (!ignoreShards.contains(shard)) {
-                shardsBuilder.put(new ShardId(renamedIndex,shard),new RestoreMetaData.ShardRestoreStatus(clusterService.state().nodes().localNodeId()));
+                shardsBuilder.put(new ShardId(renamedIndex,shard),new RestoreInProgress.ShardRestoreStatus(clusterService.state().nodes().localNodeId()));
               }
  else {
-                shardsBuilder.put(new ShardId(renamedIndex,shard),new RestoreMetaData.ShardRestoreStatus(clusterService.state().nodes().localNodeId(),RestoreMetaData.State.FAILURE));
+                shardsBuilder.put(new ShardId(renamedIndex,shard),new RestoreInProgress.ShardRestoreStatus(clusterService.state().nodes().localNodeId(),RestoreInProgress.State.FAILURE));
               }
             }
           }
           shards=shardsBuilder.build();
-          RestoreMetaData.Entry restoreEntry=new RestoreMetaData.Entry(snapshotId,RestoreMetaData.State.INIT,ImmutableList.copyOf(renamedIndices.keySet()),shards);
-          mdBuilder.putCustom(RestoreMetaData.TYPE,new RestoreMetaData(restoreEntry));
+          RestoreInProgress.Entry restoreEntry=new RestoreInProgress.Entry(snapshotId,RestoreInProgress.State.INIT,ImmutableList.copyOf(renamedIndices.keySet()),shards);
+          builder.putCustom(RestoreInProgress.TYPE,new RestoreInProgress(restoreEntry));
         }
  else {
           shards=ImmutableMap.of();
@@ -107,7 +108,7 @@
         if (completed(shards)) {
           restoreInfo=new RestoreInfo(request.name(),ImmutableList.copyOf(renamedIndices.keySet()),shards.size(),shards.size() - failedShards(shards));
         }
-        ClusterState updatedState=ClusterState.builder(currentState).metaData(mdBuilder).blocks(blocks).routingTable(rtBuilder).build();
+        ClusterState updatedState=builder.metaData(mdBuilder).blocks(blocks).routingTable(rtBuilder).build();
         RoutingAllocation.Result routingResult=allocationService.reroute(ClusterState.builder(updatedState).routingTable(rtBuilder).build());
         return ClusterState.builder(updatedState).routingResult(routingResult).build();
       }

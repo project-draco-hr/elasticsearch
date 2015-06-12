@@ -2,13 +2,11 @@
   clusterService.submitStateUpdateTask("delete snapshot",new ProcessedClusterStateUpdateTask(){
     boolean waitForSnapshot=false;
     @Override public ClusterState execute(    ClusterState currentState) throws Exception {
-      MetaData metaData=currentState.metaData();
-      MetaData.Builder mdBuilder=MetaData.builder(currentState.metaData());
-      SnapshotMetaData snapshots=metaData.custom(SnapshotMetaData.TYPE);
+      SnapshotsInProgress snapshots=currentState.custom(SnapshotsInProgress.TYPE);
       if (snapshots == null) {
         return currentState;
       }
-      SnapshotMetaData.Entry snapshot=snapshots.snapshot(snapshotId);
+      SnapshotsInProgress.Entry snapshot=snapshots.snapshot(snapshotId);
       if (snapshot == null) {
         if (!snapshots.entries().isEmpty()) {
           throw new ConcurrentSnapshotExecutionException(snapshotId,"another snapshot is currently running cannot delete");
@@ -53,10 +51,9 @@
             endSnapshot(snapshot);
           }
         }
-        SnapshotMetaData.Entry newSnapshot=new SnapshotMetaData.Entry(snapshot,State.ABORTED,shards);
-        snapshots=new SnapshotMetaData(newSnapshot);
-        mdBuilder.putCustom(SnapshotMetaData.TYPE,snapshots);
-        return ClusterState.builder(currentState).metaData(mdBuilder).build();
+        SnapshotsInProgress.Entry newSnapshot=new SnapshotsInProgress.Entry(snapshot,State.ABORTED,shards);
+        snapshots=new SnapshotsInProgress(newSnapshot);
+        return ClusterState.builder(currentState).putCustom(SnapshotsInProgress.TYPE,snapshots).build();
       }
     }
     @Override public void onFailure(    String source,    Throwable t){
