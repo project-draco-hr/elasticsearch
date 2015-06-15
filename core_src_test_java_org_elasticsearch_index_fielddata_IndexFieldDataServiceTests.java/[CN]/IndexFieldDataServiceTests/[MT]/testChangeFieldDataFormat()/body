@@ -2,7 +2,7 @@
   final IndexService indexService=createIndex("test");
   final IndexFieldDataService ifdService=indexService.fieldData();
   final BuilderContext ctx=new BuilderContext(indexService.settingsService().getSettings(),new ContentPath(1));
-  final MappedFieldType mapper1=MapperBuilders.stringField("s").tokenized(false).fieldDataSettings(Settings.builder().put(FieldDataType.FORMAT_KEY,"paged_bytes").build()).build(ctx).fieldType();
+  final MappedFieldType mapper1=MapperBuilders.stringField("s").tokenized(false).docValues(true).fieldDataSettings(Settings.builder().put(FieldDataType.FORMAT_KEY,"paged_bytes").build()).build(ctx).fieldType();
   final IndexWriter writer=new IndexWriter(new RAMDirectory(),new IndexWriterConfig(new KeywordAnalyzer()));
   Document doc=new Document();
   doc.add(new StringField("s","thisisastring",Store.NO));
@@ -18,19 +18,10 @@
   }
   writer.addDocument(doc);
   final IndexReader reader2=DirectoryReader.open(writer,true);
-  final MappedFieldType mapper2=MapperBuilders.stringField("s").tokenized(false).fieldDataSettings(Settings.builder().put(FieldDataType.FORMAT_KEY,"fst").build()).build(ctx).fieldType();
+  final MappedFieldType mapper2=MapperBuilders.stringField("s").tokenized(false).docValues(true).fieldDataSettings(Settings.builder().put(FieldDataType.FORMAT_KEY,"doc_values").build()).build(ctx).fieldType();
   ifdService.onMappingUpdate();
   ifd=ifdService.getForField(mapper2);
-  assertThat(ifd,instanceOf(FSTBytesIndexFieldData.class));
-  for (  LeafReaderContext arc : reader2.leaves()) {
-    AtomicFieldData afd=ifd.load(arc);
-    if (oldSegments.contains(arc.reader())) {
-      assertThat(afd,instanceOf(PagedBytesAtomicFieldData.class));
-    }
- else {
-      assertThat(afd,instanceOf(FSTBytesAtomicFieldData.class));
-    }
-  }
+  assertThat(ifd,instanceOf(SortedSetDVOrdinalsIndexFieldData.class));
   reader1.close();
   reader2.close();
   writer.close();
