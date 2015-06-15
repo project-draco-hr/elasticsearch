@@ -1,0 +1,18 @@
+{
+  configureCluster(3,2);
+  Future<List<String>> masterNodes=internalCluster().startMasterOnlyNodesAsync(2);
+  Future<String> dataNode=internalCluster().startDataOnlyNodeAsync();
+  dataNode.get();
+  masterNodes.get();
+  ensureStableCluster(3);
+  assertAcked(prepareCreate("test"));
+  ensureYellow();
+  String masterNode1=internalCluster().getMasterName();
+  NetworkPartition networkPartition=new NetworkUnresponsivePartition(masterNode1,dataNode.get(),getRandom());
+  internalCluster().setDisruptionScheme(networkPartition);
+  networkPartition.startDisrupting();
+  internalCluster().client(masterNode1).admin().indices().prepareDelete("test").setTimeout("1s").get();
+  internalCluster().restartNode(masterNode1,InternalTestCluster.EMPTY_CALLBACK);
+  ensureYellow();
+  assertFalse(client().admin().indices().prepareExists("test").get().isExists());
+}
