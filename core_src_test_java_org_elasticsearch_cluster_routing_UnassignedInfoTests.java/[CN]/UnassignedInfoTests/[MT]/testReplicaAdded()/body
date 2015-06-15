@@ -1,0 +1,17 @@
+{
+  AllocationService allocation=createAllocationService();
+  MetaData metaData=MetaData.builder().put(IndexMetaData.builder("test").settings(settings(Version.CURRENT)).numberOfShards(1).numberOfReplicas(0)).build();
+  ClusterState clusterState=ClusterState.builder(ClusterName.DEFAULT).metaData(metaData).routingTable(RoutingTable.builder().addAsNew(metaData.index("test"))).build();
+  clusterState=ClusterState.builder(clusterState).nodes(DiscoveryNodes.builder().put(newNode("node1"))).build();
+  clusterState=ClusterState.builder(clusterState).routingResult(allocation.reroute(clusterState)).build();
+  clusterState=ClusterState.builder(clusterState).routingResult(allocation.applyStartedShards(clusterState,clusterState.routingNodes().shardsWithState(INITIALIZING))).build();
+  IndexRoutingTable.Builder builder=IndexRoutingTable.builder("test");
+  for (  IndexShardRoutingTable indexShardRoutingTable : clusterState.routingTable().index("test")) {
+    builder.addIndexShard(indexShardRoutingTable);
+  }
+  builder.addReplica();
+  clusterState=ClusterState.builder(clusterState).routingTable(RoutingTable.builder(clusterState.routingTable()).add(builder)).build();
+  assertThat(clusterState.routingNodes().shardsWithState(UNASSIGNED).size(),equalTo(1));
+  assertThat(clusterState.routingNodes().shardsWithState(UNASSIGNED).get(0).unassignedInfo(),notNullValue());
+  assertThat(clusterState.routingNodes().shardsWithState(UNASSIGNED).get(0).unassignedInfo().getReason(),equalTo(UnassignedInfo.Reason.REPLICA_ADDED));
+}
