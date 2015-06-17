@@ -6,8 +6,13 @@
     if (lifecycle.stopped()) {
       return;
     }
+    if (rerouting.compareAndSet(false,true) == false) {
+      logger.trace("already has pending reroute, ignoring");
+      return;
+    }
     clusterService.submitStateUpdateTask(CLUSTER_UPDATE_TASK_SOURCE,Priority.HIGH,new ClusterStateUpdateTask(){
       @Override public ClusterState execute(      ClusterState currentState){
+        rerouting.set(false);
         RoutingAllocation.Result routingResult=allocationService.reroute(currentState);
         if (!routingResult.changed()) {
           return currentState;
@@ -15,8 +20,10 @@
         return ClusterState.builder(currentState).routingResult(routingResult).build();
       }
       @Override public void onNoLongerMaster(      String source){
+        rerouting.set(false);
       }
       @Override public void onFailure(      String source,      Throwable t){
+        rerouting.set(false);
         ClusterState state=clusterService.state();
         if (logger.isTraceEnabled()) {
           logger.error("unexpected failure during [{}], current state:\n{}",t,source,state.prettyPrint());
@@ -29,7 +36,8 @@
 );
     routingTableDirty=false;
   }
- catch (  Exception e) {
+ catch (  Throwable e) {
+    rerouting.set(false);
     ClusterState state=clusterService.state();
     logger.warn("Failed to reroute routing table, current state:\n{}",e,state.prettyPrint());
   }

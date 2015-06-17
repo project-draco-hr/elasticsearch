@@ -1,0 +1,18 @@
+{
+  AllocationService allocation=createAllocationService();
+  MetaData metaData=MetaData.builder().put(IndexMetaData.builder("test1").settings(settings(Version.CURRENT)).numberOfShards(1).numberOfReplicas(1)).put(IndexMetaData.builder("test2").settings(settings(Version.CURRENT)).numberOfShards(1).numberOfReplicas(1)).build();
+  ClusterState clusterState=ClusterState.builder(ClusterName.DEFAULT).metaData(metaData).routingTable(RoutingTable.builder().addAsNew(metaData.index("test1")).addAsNew(metaData.index("test2"))).build();
+  clusterState=ClusterState.builder(clusterState).nodes(DiscoveryNodes.builder().put(newNode("node1")).put(newNode("node2"))).build();
+  clusterState=ClusterState.builder(clusterState).routingResult(allocation.reroute(clusterState)).build();
+  assertThat(UnassignedInfo.getNumberOfDelayedUnassigned(Settings.builder().put(UnassignedInfo.DELAYED_NODE_LEFT_TIMEOUT,"10h").build(),clusterState),equalTo(0));
+  clusterState=ClusterState.builder(clusterState).routingResult(allocation.applyStartedShards(clusterState,clusterState.routingNodes().shardsWithState(INITIALIZING))).build();
+  clusterState=ClusterState.builder(clusterState).routingResult(allocation.applyStartedShards(clusterState,clusterState.routingNodes().shardsWithState(INITIALIZING))).build();
+  assertThat(clusterState.routingNodes().hasUnassigned(),equalTo(false));
+  clusterState=ClusterState.builder(clusterState).nodes(DiscoveryNodes.builder(clusterState.nodes()).remove("node2")).build();
+  clusterState=ClusterState.builder(clusterState).routingResult(allocation.reroute(clusterState)).build();
+  long nextDelaySetting=UnassignedInfo.findSmallestDelayedAllocationSetting(Settings.builder().put(UnassignedInfo.DELAYED_NODE_LEFT_TIMEOUT,"10h").build(),clusterState);
+  assertThat(nextDelaySetting,equalTo(TimeValue.timeValueHours(10).millis()));
+  long nextDelay=UnassignedInfo.findNextDelayedAllocationIn(Settings.builder().put(UnassignedInfo.DELAYED_NODE_LEFT_TIMEOUT,"10h").build(),clusterState);
+  assertThat(nextDelay,greaterThan(TimeValue.timeValueHours(9).millis()));
+  assertThat(nextDelay,lessThanOrEqualTo(TimeValue.timeValueHours(10).millis()));
+}
