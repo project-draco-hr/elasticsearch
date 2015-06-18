@@ -1,26 +1,8 @@
 {
-  if (event.source().equals(CLUSTER_UPDATE_TASK_SOURCE)) {
+  if (event.source().startsWith(CLUSTER_UPDATE_TASK_SOURCE)) {
     return;
   }
   if (event.state().nodes().localNodeMaster()) {
-    if (scheduledRoutingTableFuture == null) {
-      routingTableDirty=true;
-      scheduledRoutingTableFuture=threadPool.scheduleWithFixedDelay(new RoutingTableUpdater(),schedule);
-    }
-    if (event.nodesRemoved()) {
-      routingTableDirty=true;
-      reroute();
-    }
- else {
-      if (event.nodesAdded()) {
-        for (        DiscoveryNode node : event.nodesDelta().addedNodes()) {
-          if (node.dataNode()) {
-            routingTableDirty=true;
-            break;
-          }
-        }
-      }
-    }
     long nextDelaySetting=UnassignedInfo.findSmallestDelayedAllocationSetting(settings,event.state());
     if (nextDelaySetting > 0 && nextDelaySetting < registeredNextDelaySetting) {
       FutureUtils.cancel(registeredNextDelayFuture);
@@ -29,9 +11,8 @@
       logger.info("delaying allocation for [{}] unassigned shards, next check in [{}]",UnassignedInfo.getNumberOfDelayedUnassigned(settings,event.state()),nextDelay);
       registeredNextDelayFuture=threadPool.schedule(nextDelay,ThreadPool.Names.SAME,new AbstractRunnable(){
         @Override protected void doRun() throws Exception {
-          routingTableDirty=true;
           registeredNextDelaySetting=Long.MAX_VALUE;
-          reroute();
+          reroute("assign delayed unassigned shards");
         }
         @Override public void onFailure(        Throwable t){
           logger.warn("failed to schedule/execute reroute post unassigned shard",t);
@@ -42,9 +23,5 @@
  else {
       logger.trace("no need to schedule reroute due to delayed unassigned, next_delay_setting [{}], registered [{}]",nextDelaySetting,registeredNextDelaySetting);
     }
-  }
- else {
-    FutureUtils.cancel(scheduledRoutingTableFuture);
-    scheduledRoutingTableFuture=null;
   }
 }

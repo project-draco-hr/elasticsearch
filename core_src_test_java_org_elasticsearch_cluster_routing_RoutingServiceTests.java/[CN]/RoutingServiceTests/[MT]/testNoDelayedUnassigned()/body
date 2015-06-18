@@ -1,0 +1,18 @@
+{
+  AllocationService allocation=createAllocationService();
+  MetaData metaData=MetaData.builder().put(IndexMetaData.builder("test").settings(settings(Version.CURRENT).put(UnassignedInfo.INDEX_DELAYED_NODE_LEFT_TIMEOUT_SETTING,"0")).numberOfShards(1).numberOfReplicas(1)).build();
+  ClusterState clusterState=ClusterState.builder(ClusterName.DEFAULT).metaData(metaData).routingTable(RoutingTable.builder().addAsNew(metaData.index("test"))).build();
+  clusterState=ClusterState.builder(clusterState).nodes(DiscoveryNodes.builder().put(newNode("node1")).put(newNode("node2")).localNodeId("node1").masterNodeId("node1")).build();
+  clusterState=ClusterState.builder(clusterState).routingResult(allocation.reroute(clusterState)).build();
+  clusterState=ClusterState.builder(clusterState).routingResult(allocation.applyStartedShards(clusterState,clusterState.routingNodes().shardsWithState(INITIALIZING))).build();
+  clusterState=ClusterState.builder(clusterState).routingResult(allocation.applyStartedShards(clusterState,clusterState.routingNodes().shardsWithState(INITIALIZING))).build();
+  assertThat(clusterState.routingNodes().hasUnassigned(),equalTo(false));
+  ClusterState prevState=clusterState;
+  clusterState=ClusterState.builder(clusterState).nodes(DiscoveryNodes.builder(clusterState.nodes()).remove("node2")).build();
+  clusterState=ClusterState.builder(clusterState).routingResult(allocation.reroute(clusterState)).build();
+  ClusterState newState=clusterState;
+  assertThat(routingService.getRegisteredNextDelaySetting(),equalTo(Long.MAX_VALUE));
+  routingService.clusterChanged(new ClusterChangedEvent("test",newState,prevState));
+  assertThat(routingService.getRegisteredNextDelaySetting(),equalTo(Long.MAX_VALUE));
+  assertThat(routingService.hasReroutedAndClear(),equalTo(false));
+}
