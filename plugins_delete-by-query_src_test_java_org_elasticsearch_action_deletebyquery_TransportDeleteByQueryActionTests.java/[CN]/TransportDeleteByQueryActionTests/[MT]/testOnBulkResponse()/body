@@ -1,0 +1,41 @@
+{
+  final int nbItems=randomIntBetween(0,20);
+  long deleted=0;
+  long missing=0;
+  long failed=0;
+  BulkItemResponse[] items=new BulkItemResponse[nbItems];
+  for (int i=0; i < nbItems; i++) {
+    if (randomBoolean()) {
+      boolean delete=true;
+      if (rarely()) {
+        delete=false;
+        missing++;
+      }
+ else {
+        deleted++;
+      }
+      items[i]=new BulkItemResponse(i,"delete",new DeleteResponse("test","type",String.valueOf(i),1,delete));
+    }
+ else {
+      items[i]=new BulkItemResponse(i,"delete",new BulkItemResponse.Failure("test","type",String.valueOf(i),new Throwable("item failed")));
+      failed++;
+    }
+  }
+  createIndex("test");
+  SearchResponse searchResponse=client().prepareSearch().setSearchType(SearchType.SCAN).setScroll(TimeValue.timeValueSeconds(10)).get();
+  String scrollId=searchResponse.getScrollId();
+  assertTrue(Strings.hasText(scrollId));
+  try {
+    DeleteByQueryRequest delete=new DeleteByQueryRequest();
+    TestActionListener listener=new TestActionListener();
+    newAsyncAction(delete,listener).onBulkResponse(scrollId,new BulkResponse(items,0L));
+    waitForCompletion("waiting for bulk response to complete",listener);
+    assertNoFailures(listener);
+    assertThat(listener.getResponse().getTotalDeleted(),equalTo(deleted));
+    assertThat(listener.getResponse().getTotalFailed(),equalTo(failed));
+    assertThat(listener.getResponse().getTotalMissing(),equalTo(missing));
+  }
+  finally {
+    client().prepareClearScroll().addScrollId(scrollId).get();
+  }
+}

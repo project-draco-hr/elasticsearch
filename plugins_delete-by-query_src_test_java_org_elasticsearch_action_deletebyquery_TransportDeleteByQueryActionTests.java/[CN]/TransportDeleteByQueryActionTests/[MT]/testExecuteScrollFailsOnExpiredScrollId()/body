@@ -1,0 +1,21 @@
+{
+  final long numDocs=randomIntBetween(1,100);
+  for (int i=1; i <= numDocs; i++) {
+    client().prepareIndex("test","type").setSource("num",i).get();
+  }
+  client().admin().indices().prepareRefresh("test").get();
+  assertHitCount(client().prepareCount("test").get(),numDocs);
+  SearchResponse searchResponse=client().prepareSearch("test").setSearchType(SearchType.SCAN).setScroll(TimeValue.timeValueSeconds(10)).get();
+  assertThat(searchResponse.getHits().getTotalHits(),equalTo(numDocs));
+  String scrollId=searchResponse.getScrollId();
+  assertTrue(Strings.hasText(scrollId));
+  ClearScrollResponse clearScrollResponse=client().prepareClearScroll().addScrollId(scrollId).get();
+  assertTrue(clearScrollResponse.isSucceeded());
+  DeleteByQueryRequest delete=new DeleteByQueryRequest().indices("test");
+  TestActionListener listener=new TestActionListener();
+  newAsyncAction(delete,listener).executeScroll(searchResponse.getScrollId());
+  waitForCompletion("scroll request returns zero documents on expired scroll id",listener);
+  assertNull(listener.getError());
+  assertShardFailuresContains(listener.getResponse().getShardFailures(),"No search context found");
+  assertSearchContextsClosed();
+}

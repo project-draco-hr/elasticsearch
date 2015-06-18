@@ -1,0 +1,40 @@
+{
+  try {
+    final SearchRequest scanRequest=new SearchRequest(request.indices()).types(request.types()).indicesOptions(request.indicesOptions());
+    scanRequest.searchType(SearchType.SCAN).scroll(request.scroll());
+    if (request.routing() != null) {
+      scanRequest.routing(request.routing());
+    }
+    SearchSourceBuilder source=new SearchSourceBuilder().query(request.source()).fields("_routing","_parent").fetchSource(false).version(true);
+    if (request.size() > 0) {
+      source.size(request.size());
+    }
+    if (request.timeout() != null) {
+      source.timeout(request.timeout());
+    }
+    scanRequest.source(source);
+    logger.trace("executing scan request");
+    searchAction.execute(scanRequest,new ActionListener<SearchResponse>(){
+      @Override public void onResponse(      SearchResponse searchResponse){
+        long hits=searchResponse.getHits().getTotalHits();
+        logger.trace("scan request executed: found [{}] document(s) to delete",hits);
+        addShardFailures(searchResponse.getShardFailures());
+        if (hits == 0) {
+          finishHim(searchResponse.getScrollId(),false,null);
+          return;
+        }
+        total.set(hits);
+        logger.trace("start scrolling [{}] document(s)",hits);
+        executeScroll(searchResponse.getScrollId());
+      }
+      @Override public void onFailure(      Throwable e){
+        listener.onFailure(e);
+      }
+    }
+);
+  }
+ catch (  Throwable t) {
+    logger.error("unable to execute the initial scan request of delete by query",t);
+    listener.onFailure(t);
+  }
+}

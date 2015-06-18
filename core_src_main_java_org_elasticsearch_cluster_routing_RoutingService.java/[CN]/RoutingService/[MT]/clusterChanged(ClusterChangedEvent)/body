@@ -21,6 +21,26 @@
         }
       }
     }
+    long nextDelaySetting=UnassignedInfo.findSmallestDelayedAllocationSetting(settings,event.state());
+    if (nextDelaySetting > 0 && nextDelaySetting < registeredNextDelaySetting) {
+      FutureUtils.cancel(registeredNextDelayFuture);
+      registeredNextDelaySetting=nextDelaySetting;
+      TimeValue nextDelay=TimeValue.timeValueMillis(UnassignedInfo.findNextDelayedAllocationIn(settings,event.state()));
+      logger.info("delaying allocation for [{}] unassigned shards, next check in [{}]",UnassignedInfo.getNumberOfDelayedUnassigned(settings,event.state()),nextDelay);
+      registeredNextDelayFuture=threadPool.schedule(nextDelay,ThreadPool.Names.SAME,new AbstractRunnable(){
+        @Override protected void doRun() throws Exception {
+          routingTableDirty=true;
+          reroute();
+        }
+        @Override public void onFailure(        Throwable t){
+          logger.warn("failed to schedule/execute reroute post unassigned shard",t);
+        }
+      }
+);
+    }
+ else {
+      logger.trace("no need to schedule reroute due to delayed unassigned, next_delay_setting [{}], registered [{}]",nextDelaySetting,registeredNextDelaySetting);
+    }
   }
  else {
     FutureUtils.cancel(scheduledRoutingTableFuture);

@@ -1,0 +1,21 @@
+{
+  client().prepareIndex("test","type").setSource("num","1").setRefresh(true).get();
+  SearchResponse searchResponse=client().prepareSearch("test").setSearchType(SearchType.SCAN).setScroll(TimeValue.timeValueSeconds(10)).get();
+  String scrollId=searchResponse.getScrollId();
+  assertTrue(Strings.hasText(scrollId));
+  DeleteByQueryRequest delete=new DeleteByQueryRequest().indices("test").timeout(TimeValue.timeValueSeconds(1));
+  TestActionListener listener=new TestActionListener();
+  final TransportDeleteByQueryAction.AsyncDeleteByQueryAction async=newAsyncAction(delete,listener);
+  awaitBusy(new Predicate<Object>(){
+    @Override public boolean apply(    Object input){
+      return async.hasTimedOut();
+    }
+  }
+);
+  async.executeScroll(searchResponse.getScrollId());
+  waitForCompletion("scroll request returns zero documents on expired scroll id",listener);
+  assertNull(listener.getError());
+  assertTrue(listener.getResponse().isTimedOut());
+  assertThat(listener.getResponse().getTotalDeleted(),equalTo(0L));
+  assertSearchContextsClosed();
+}

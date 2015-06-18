@@ -1,0 +1,20 @@
+{
+  createIndex("test");
+  final int numDocs=randomIntBetween(1,200);
+  for (int i=1; i <= numDocs; i++) {
+    client().prepareIndex("test","type").setSource("num",i).get();
+  }
+  client().admin().indices().prepareRefresh("test").get();
+  assertHitCount(client().prepareCount("test").get(),numDocs);
+  final long limit=randomIntBetween(0,numDocs);
+  DeleteByQueryRequest delete=new DeleteByQueryRequest().indices("test").source(boolQuery().must(rangeQuery("num").lte(limit)).buildAsBytes());
+  TestActionListener listener=new TestActionListener();
+  newAsyncAction(delete,listener).executeScan();
+  waitForCompletion("scan request should return the exact number of documents",listener);
+  assertNoFailures(listener);
+  DeleteByQueryResponse response=listener.getResponse();
+  assertNotNull(response);
+  assertThat(response.getTotalFound(),equalTo(limit));
+  assertThat(response.getTotalDeleted(),equalTo(limit));
+  assertSearchContextsClosed();
+}
