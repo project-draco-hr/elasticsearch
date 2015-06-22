@@ -1,0 +1,21 @@
+{
+  SearchResponse response=client().prepareSearch("idx").addAggregation(histogram("histo").field(SINGLE_VALUED_FIELD_NAME).interval(interval).subAggregation(sum("sum").field(SINGLE_VALUED_FIELD_NAME)).subAggregation(cumulativeSum("cumulative_sum").setBucketsPaths("sum"))).execute().actionGet();
+  assertSearchResponse(response);
+  Histogram histo=response.getAggregations().get("histo");
+  assertThat(histo,notNullValue());
+  assertThat(histo.getName(),equalTo("histo"));
+  List<? extends Bucket> buckets=histo.getBuckets();
+  double bucketSum=0;
+  for (int i=0; i < buckets.size(); ++i) {
+    Bucket bucket=buckets.get(i);
+    assertThat(bucket,notNullValue());
+    assertThat(((Number)bucket.getKey()).longValue(),equalTo((long)i * interval));
+    Sum sum=bucket.getAggregations().get("sum");
+    assertThat(sum,notNullValue());
+    bucketSum+=sum.value();
+    InternalSimpleValue sumBucketValue=bucket.getAggregations().get("cumulative_sum");
+    assertThat(sumBucketValue,notNullValue());
+    assertThat(sumBucketValue.getName(),equalTo("cumulative_sum"));
+    assertThat(sumBucketValue.value(),equalTo(bucketSum));
+  }
+}
