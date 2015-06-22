@@ -9,12 +9,12 @@
         block.await();
       }
  catch (      InterruptedException e) {
-        fail();
+        throw new RuntimeException(e);
       }
       return currentState;
     }
     @Override public void onFailure(    String source,    Throwable t){
-      fail();
+      throw new RuntimeException(t);
     }
   }
 );
@@ -35,8 +35,19 @@
     }
   }
 );
-  assertThat(timedOut.await(500,TimeUnit.MILLISECONDS),equalTo(true));
+  timedOut.await();
   block.countDown();
-  Thread.sleep(100);
+  final CountDownLatch allProcessed=new CountDownLatch(1);
+  clusterService1.submitStateUpdateTask("test3",new ClusterStateUpdateTask(){
+    @Override public void onFailure(    String source,    Throwable t){
+      throw new RuntimeException(t);
+    }
+    @Override public ClusterState execute(    ClusterState currentState){
+      allProcessed.countDown();
+      return currentState;
+    }
+  }
+);
+  allProcessed.await();
   assertThat(executeCalled.get(),equalTo(false));
 }
