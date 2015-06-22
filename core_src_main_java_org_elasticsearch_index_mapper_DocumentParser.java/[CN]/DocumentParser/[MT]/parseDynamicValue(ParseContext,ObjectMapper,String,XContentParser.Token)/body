@@ -9,143 +9,32 @@
   if (dynamic == ObjectMapper.Dynamic.FALSE) {
     return null;
   }
-  Mapper mapper=null;
-  Mapper.BuilderContext builderContext=new Mapper.BuilderContext(context.indexSettings(),context.path());
-  if (token == XContentParser.Token.VALUE_STRING) {
-    boolean resolved=false;
-    if (!resolved) {
-      Mapper.Builder builder=context.root().findTemplateBuilder(context,currentFieldName,"string",null);
-      if (builder != null) {
-        mapper=builder.build(builderContext);
-        resolved=true;
-      }
+  final Mapper.BuilderContext builderContext=new Mapper.BuilderContext(context.indexSettings(),context.path());
+  final MappedFieldType existingFieldType=context.mapperService().fullName(context.path().fullPathAsText(currentFieldName));
+  Mapper.Builder builder=null;
+  if (existingFieldType != null) {
+    builder=createBuilderFromFieldType(context,existingFieldType,currentFieldName);
+  }
+  if (builder == null) {
+    builder=createBuilderFromDynamicValue(context,token,currentFieldName);
+  }
+  if (existingFieldType != null) {
+    if (builder instanceof StringFieldMapper.Builder) {
+      StringFieldMapper.Builder stringBuilder=(StringFieldMapper.Builder)builder;
+      stringBuilder.store(existingFieldType.stored());
+      stringBuilder.indexOptions(existingFieldType.indexOptions());
+      stringBuilder.omitNorms(existingFieldType.omitNorms());
+      stringBuilder.docValues(existingFieldType.hasDocValues());
     }
-    if (!resolved && context.root().dateDetection()) {
-      String text=context.parser().text();
-      if (Strings.countOccurrencesOf(text,":") > 1 || Strings.countOccurrencesOf(text,"-") > 1 || Strings.countOccurrencesOf(text,"/") > 1) {
-        for (        FormatDateTimeFormatter dateTimeFormatter : context.root().dynamicDateTimeFormatters()) {
-          try {
-            dateTimeFormatter.parser().parseMillis(text);
-            Mapper.Builder builder=context.root().findTemplateBuilder(context,currentFieldName,"date");
-            if (builder == null) {
-              builder=MapperBuilders.dateField(currentFieldName).dateTimeFormatter(dateTimeFormatter);
-            }
-            mapper=builder.build(builderContext);
-            resolved=true;
-            break;
-          }
- catch (          Exception e) {
-          }
-        }
-      }
-    }
-    if (!resolved && context.root().numericDetection()) {
-      String text=context.parser().text();
-      try {
-        Long.parseLong(text);
-        Mapper.Builder builder=context.root().findTemplateBuilder(context,currentFieldName,"long");
-        if (builder == null) {
-          builder=MapperBuilders.longField(currentFieldName);
-        }
-        mapper=builder.build(builderContext);
-        resolved=true;
-      }
- catch (      Exception e) {
-      }
-      if (!resolved) {
-        try {
-          Double.parseDouble(text);
-          Mapper.Builder builder=context.root().findTemplateBuilder(context,currentFieldName,"double");
-          if (builder == null) {
-            builder=MapperBuilders.doubleField(currentFieldName);
-          }
-          mapper=builder.build(builderContext);
-          resolved=true;
-        }
- catch (        Exception e) {
-        }
-      }
-    }
-    if (!resolved) {
-      Mapper.Builder builder=context.root().findTemplateBuilder(context,currentFieldName,"string");
-      if (builder == null) {
-        builder=MapperBuilders.stringField(currentFieldName);
-      }
-      mapper=builder.build(builderContext);
+ else     if (builder instanceof NumberFieldMapper.Builder) {
+      NumberFieldMapper.Builder<?,?> numberBuilder=(NumberFieldMapper.Builder<?,?>)builder;
+      numberBuilder.store(existingFieldType.stored());
+      numberBuilder.indexOptions(existingFieldType.indexOptions());
+      numberBuilder.omitNorms(existingFieldType.omitNorms());
+      numberBuilder.docValues(existingFieldType.hasDocValues());
     }
   }
- else   if (token == XContentParser.Token.VALUE_NUMBER) {
-    XContentParser.NumberType numberType=context.parser().numberType();
-    if (numberType == XContentParser.NumberType.INT) {
-      if (context.parser().estimatedNumberType()) {
-        Mapper.Builder builder=context.root().findTemplateBuilder(context,currentFieldName,"long");
-        if (builder == null) {
-          builder=MapperBuilders.longField(currentFieldName);
-        }
-        mapper=builder.build(builderContext);
-      }
- else {
-        Mapper.Builder builder=context.root().findTemplateBuilder(context,currentFieldName,"integer");
-        if (builder == null) {
-          builder=MapperBuilders.integerField(currentFieldName);
-        }
-        mapper=builder.build(builderContext);
-      }
-    }
- else     if (numberType == XContentParser.NumberType.LONG) {
-      Mapper.Builder builder=context.root().findTemplateBuilder(context,currentFieldName,"long");
-      if (builder == null) {
-        builder=MapperBuilders.longField(currentFieldName);
-      }
-      mapper=builder.build(builderContext);
-    }
- else     if (numberType == XContentParser.NumberType.FLOAT) {
-      if (context.parser().estimatedNumberType()) {
-        Mapper.Builder builder=context.root().findTemplateBuilder(context,currentFieldName,"double");
-        if (builder == null) {
-          builder=MapperBuilders.doubleField(currentFieldName);
-        }
-        mapper=builder.build(builderContext);
-      }
- else {
-        Mapper.Builder builder=context.root().findTemplateBuilder(context,currentFieldName,"float");
-        if (builder == null) {
-          builder=MapperBuilders.floatField(currentFieldName);
-        }
-        mapper=builder.build(builderContext);
-      }
-    }
- else     if (numberType == XContentParser.NumberType.DOUBLE) {
-      Mapper.Builder builder=context.root().findTemplateBuilder(context,currentFieldName,"double");
-      if (builder == null) {
-        builder=MapperBuilders.doubleField(currentFieldName);
-      }
-      mapper=builder.build(builderContext);
-    }
-  }
- else   if (token == XContentParser.Token.VALUE_BOOLEAN) {
-    Mapper.Builder builder=context.root().findTemplateBuilder(context,currentFieldName,"boolean");
-    if (builder == null) {
-      builder=MapperBuilders.booleanField(currentFieldName);
-    }
-    mapper=builder.build(builderContext);
-  }
- else   if (token == XContentParser.Token.VALUE_EMBEDDED_OBJECT) {
-    Mapper.Builder builder=context.root().findTemplateBuilder(context,currentFieldName,"binary");
-    if (builder == null) {
-      builder=MapperBuilders.binaryField(currentFieldName);
-    }
-    mapper=builder.build(builderContext);
-  }
- else {
-    Mapper.Builder builder=context.root().findTemplateBuilder(context,currentFieldName,null);
-    if (builder != null) {
-      mapper=builder.build(builderContext);
-    }
- else {
-      throw new IllegalStateException("Can't handle serializing a dynamic type with content token [" + token + "] and field name ["+ currentFieldName+ "]");
-    }
-  }
+  Mapper mapper=builder.build(builderContext);
   mapper=parseAndMergeUpdate(mapper,context);
   ObjectMapper update=null;
   if (mapper != null) {
