@@ -1,41 +1,9 @@
 {
-  if (!enabled) {
-    return allocation.decision(Decision.YES,NAME,"disk threshold decider disabled");
+  final Decision decision=earlyTerminate(allocation);
+  if (decision != null) {
+    return decision;
   }
-  if (allocation.nodes().size() <= 1) {
-    return allocation.decision(Decision.YES,NAME,"only a single node is present");
-  }
-  ClusterInfo clusterInfo=allocation.clusterInfo();
-  if (clusterInfo == null) {
-    if (logger.isTraceEnabled()) {
-      logger.trace("Cluster info unavailable for disk threshold decider, allowing allocation.");
-    }
-    return allocation.decision(Decision.YES,NAME,"cluster info unavailable");
-  }
-  Map<String,DiskUsage> usages=clusterInfo.getNodeDiskUsages();
-  if (usages.isEmpty()) {
-    if (logger.isTraceEnabled()) {
-      logger.trace("Unable to determine disk usages for disk-aware allocation, allowing allocation");
-    }
-    return allocation.decision(Decision.YES,NAME,"disk usages unavailable");
-  }
-  DiskUsage usage=usages.get(node.nodeId());
-  if (usage == null) {
-    usage=averageUsage(node,usages);
-    if (logger.isDebugEnabled()) {
-      logger.debug("Unable to determine disk usage for {}, defaulting to average across nodes [{} total] [{} free] [{}% free]",node.nodeId(),usage.getTotalBytes(),usage.getFreeBytes(),usage.getFreeDiskAsPercentage());
-    }
-  }
-  if (includeRelocations) {
-    Map<String,Long> shardSizes=clusterInfo.getShardSizes();
-    long relocatingShardsSize=sizeOfRelocatingShards(node,shardSizes,true);
-    DiskUsage usageIncludingRelocations=new DiskUsage(node.nodeId(),node.node().name(),usage.getTotalBytes(),usage.getFreeBytes() - relocatingShardsSize);
-    if (logger.isTraceEnabled()) {
-      logger.trace("usage without relocations: {}",usage);
-      logger.trace("usage with relocations: [{} bytes] {}",relocatingShardsSize,usageIncludingRelocations);
-    }
-    usage=usageIncludingRelocations;
-  }
+  DiskUsage usage=getDiskUsage(node,allocation);
   double freeDiskPercentage=usage.getFreeDiskAsPercentage();
   long freeBytes=usage.getFreeBytes();
   if (logger.isDebugEnabled()) {

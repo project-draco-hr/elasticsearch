@@ -1,0 +1,37 @@
+{
+  IndexShardRepository indexShardRepository=snapshotsService.getRepositoriesService().indexShardRepository(snapshotId.getRepository());
+  ShardId shardId=indexShard.shardId();
+  if (!indexShard.routingEntry().primary()) {
+    throw new IndexShardSnapshotFailedException(shardId,"snapshot should be performed only on primary");
+  }
+  if (indexShard.routingEntry().relocating()) {
+    throw new IndexShardSnapshotFailedException(shardId,"cannot snapshot while relocating");
+  }
+  if (indexShard.state() == IndexShardState.CREATED || indexShard.state() == IndexShardState.RECOVERING) {
+    throw new IndexShardSnapshotFailedException(shardId,"shard didn't fully recover yet");
+  }
+  try {
+    SnapshotIndexCommit snapshotIndexCommit=indexShard.snapshotIndex(true);
+    try {
+      indexShardRepository.snapshot(snapshotId,shardId,snapshotIndexCommit,snapshotStatus);
+      if (logger.isDebugEnabled()) {
+        StringBuilder sb=new StringBuilder();
+        sb.append("snapshot (").append(snapshotId.getSnapshot()).append(") completed to ").append(indexShardRepository).append(", took [").append(TimeValue.timeValueMillis(snapshotStatus.time())).append("]\n");
+        sb.append("    index    : version [").append(snapshotStatus.indexVersion()).append("], number_of_files [").append(snapshotStatus.numberOfFiles()).append("] with total_size [").append(new ByteSizeValue(snapshotStatus.totalSize())).append("]\n");
+        logger.debug(sb.toString());
+      }
+    }
+  finally {
+      snapshotIndexCommit.close();
+    }
+  }
+ catch (  SnapshotFailedEngineException e) {
+    throw e;
+  }
+catch (  IndexShardSnapshotFailedException e) {
+    throw e;
+  }
+catch (  Throwable e) {
+    throw new IndexShardSnapshotFailedException(shardId,"Failed to snapshot",e);
+  }
+}

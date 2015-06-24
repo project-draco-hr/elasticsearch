@@ -1,0 +1,65 @@
+{
+  logger.trace("received updated snapshot restore state [{}]",request);
+  updatedSnapshotStateQueue.add(request);
+  clusterService.submitStateUpdateTask("update snapshot state",new ClusterStateUpdateTask(){
+    private final List<UpdateIndexShardSnapshotStatusRequest> drainedRequests=new ArrayList<>();
+    @Override public ClusterState execute(    ClusterState currentState){
+      if (request.isProcessed()) {
+        return currentState;
+      }
+      updatedSnapshotStateQueue.drainTo(drainedRequests);
+      final int batchSize=drainedRequests.size();
+      if (batchSize == 0) {
+        return currentState;
+      }
+      final SnapshotsInProgress snapshots=currentState.custom(SnapshotsInProgress.TYPE);
+      if (snapshots != null) {
+        int changedCount=0;
+        final List<SnapshotsInProgress.Entry> entries=newArrayList();
+        for (        SnapshotsInProgress.Entry entry : snapshots.entries()) {
+          final Map<ShardId,SnapshotsInProgress.ShardSnapshotStatus> shards=newHashMap();
+          boolean updated=false;
+          for (int i=0; i < batchSize; i++) {
+            final UpdateIndexShardSnapshotStatusRequest updateSnapshotState=drainedRequests.get(i);
+            updateSnapshotState.markAsProcessed();
+            if (entry.snapshotId().equals(updateSnapshotState.snapshotId())) {
+              logger.trace("[{}] Updating shard [{}] with status [{}]",updateSnapshotState.snapshotId(),updateSnapshotState.shardId(),updateSnapshotState.status().state());
+              if (updated == false) {
+                shards.putAll(entry.shards());
+                updated=true;
+              }
+              shards.put(updateSnapshotState.shardId(),updateSnapshotState.status());
+              changedCount++;
+            }
+          }
+          if (updated) {
+            if (completed(shards.values()) == false) {
+              entries.add(new SnapshotsInProgress.Entry(entry,ImmutableMap.copyOf(shards)));
+            }
+ else {
+              SnapshotsInProgress.Entry updatedEntry=new SnapshotsInProgress.Entry(entry,SnapshotsInProgress.State.SUCCESS,ImmutableMap.copyOf(shards));
+              entries.add(updatedEntry);
+              snapshotsService.endSnapshot(updatedEntry);
+              logger.info("snapshot [{}] is done",updatedEntry.snapshotId());
+            }
+          }
+ else {
+            entries.add(entry);
+          }
+        }
+        if (changedCount > 0) {
+          logger.trace("changed cluster state triggered by {} snapshot state updates",changedCount);
+          final SnapshotsInProgress updatedSnapshots=new SnapshotsInProgress(entries.toArray(new SnapshotsInProgress.Entry[entries.size()]));
+          return ClusterState.builder(currentState).putCustom(SnapshotsInProgress.TYPE,updatedSnapshots).build();
+        }
+      }
+      return currentState;
+    }
+    @Override public void onFailure(    String source,    Throwable t){
+      for (      UpdateIndexShardSnapshotStatusRequest request : drainedRequests) {
+        logger.warn("[{}][{}] failed to update snapshot status to [{}]",t,request.snapshotId(),request.shardId(),request.status());
+      }
+    }
+  }
+);
+}

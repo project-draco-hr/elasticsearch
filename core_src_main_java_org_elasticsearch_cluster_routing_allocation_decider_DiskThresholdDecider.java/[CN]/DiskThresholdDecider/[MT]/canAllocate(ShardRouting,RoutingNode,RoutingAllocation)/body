@@ -1,46 +1,11 @@
 {
-  double usedDiskThresholdLow=100.0 - DiskThresholdDecider.this.freeDiskThresholdLow;
-  double usedDiskThresholdHigh=100.0 - DiskThresholdDecider.this.freeDiskThresholdHigh;
-  if (!enabled) {
-    return allocation.decision(Decision.YES,NAME,"disk threshold decider disabled");
+  final Decision decision=earlyTerminate(allocation);
+  if (decision != null) {
+    return decision;
   }
-  if (allocation.nodes().size() <= 1) {
-    if (logger.isTraceEnabled()) {
-      logger.trace("Only a single node is present, allowing allocation");
-    }
-    return allocation.decision(Decision.YES,NAME,"only a single node is present");
-  }
-  ClusterInfo clusterInfo=allocation.clusterInfo();
-  if (clusterInfo == null) {
-    if (logger.isTraceEnabled()) {
-      logger.trace("Cluster info unavailable for disk threshold decider, allowing allocation.");
-    }
-    return allocation.decision(Decision.YES,NAME,"cluster info unavailable");
-  }
-  Map<String,DiskUsage> usages=clusterInfo.getNodeDiskUsages();
-  Map<String,Long> shardSizes=clusterInfo.getShardSizes();
-  if (usages.isEmpty()) {
-    if (logger.isTraceEnabled()) {
-      logger.trace("Unable to determine disk usages for disk-aware allocation, allowing allocation");
-    }
-    return allocation.decision(Decision.YES,NAME,"disk usages unavailable");
-  }
-  DiskUsage usage=usages.get(node.nodeId());
-  if (usage == null) {
-    usage=averageUsage(node,usages);
-    if (logger.isDebugEnabled()) {
-      logger.debug("Unable to determine disk usage for [{}], defaulting to average across nodes [{} total] [{} free] [{}% free]",node.nodeId(),usage.getTotalBytes(),usage.getFreeBytes(),usage.getFreeDiskAsPercentage());
-    }
-  }
-  if (includeRelocations) {
-    long relocatingShardsSize=sizeOfRelocatingShards(node,shardSizes,false);
-    DiskUsage usageIncludingRelocations=new DiskUsage(node.nodeId(),node.node().name(),usage.getTotalBytes(),usage.getFreeBytes() - relocatingShardsSize);
-    if (logger.isTraceEnabled()) {
-      logger.trace("usage without relocations: {}",usage);
-      logger.trace("usage with relocations: [{} bytes] {}",relocatingShardsSize,usageIncludingRelocations);
-    }
-    usage=usageIncludingRelocations;
-  }
+  final double usedDiskThresholdLow=100.0 - DiskThresholdDecider.this.freeDiskThresholdLow;
+  final double usedDiskThresholdHigh=100.0 - DiskThresholdDecider.this.freeDiskThresholdHigh;
+  DiskUsage usage=getDiskUsage(node,allocation);
   double freeDiskPercentage=usage.getFreeDiskAsPercentage();
   double usedDiskPercentage=usage.getUsedDiskAsPercentage();
   long freeBytes=usage.getFreeBytes();
@@ -88,9 +53,10 @@
       return allocation.decision(Decision.NO,NAME,"more than allowed [%s%%] used disk on node, free: [%s%%]",usedDiskThresholdHigh,freeDiskPercentage);
     }
   }
+  Map<String,Long> shardSizes=allocation.clusterInfo().getShardSizes();
   Long shardSize=shardSizes.get(shardIdentifierFromRouting(shardRouting));
   shardSize=shardSize == null ? 0 : shardSize;
-  double freeSpaceAfterShard=this.freeDiskPercentageAfterShardAssigned(usage,shardSize);
+  double freeSpaceAfterShard=freeDiskPercentageAfterShardAssigned(usage,shardSize);
   long freeBytesAfterShard=freeBytes - shardSize;
   if (freeBytesAfterShard < freeBytesThresholdHigh.bytes()) {
     logger.warn("After allocating, node [{}] would have less than the required {} free bytes threshold ({} bytes free), preventing allocation",node.nodeId(),freeBytesThresholdHigh,freeBytesAfterShard);
