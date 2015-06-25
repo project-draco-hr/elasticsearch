@@ -1,2 +1,79 @@
 {
-}
+  Path translogPath=config.getTranslogPath();
+  TranslogGeneration translogGeneration=config.getTranslogGeneration();
+  if (translogGeneration == null) {
+    throw new IllegalArgumentException("TranslogGeneration must be set in order to upgrade");
+  }
+  if (translogGeneration.translogUUID != null) {
+    throw new IllegalArgumentException("TranslogGeneration has a non-null UUID - index must have already been upgraded");
+  }
+  try {
+    if (Checkpoint.read(translogPath.resolve(CHECKPOINT_FILE_NAME)) != null) {
+      throw new IllegalStateException(CHECKPOINT_FILE_NAME + " file already present, translog is already upgraded");
+    }
+  }
+ catch (  NoSuchFileException|FileNotFoundException ex) {
+    logger.debug("upgrading translog - no checkpoint found");
+  }
+  final Pattern parseLegacyIdPattern=Pattern.compile("^" + TRANSLOG_FILE_PREFIX + "(\\d+)((\\.recovering))?$");
+  try (DirectoryStream<Path> stream=Files.newDirectoryStream(translogPath,new DirectoryStream.Filter<Path>(){
+    @Override public boolean accept(    Path entry) throws IOException {
+      Matcher matcher=parseLegacyIdPattern.matcher(entry.getFileName().toString());
+      if (matcher.matches() == false) {
+        Matcher newIdMatcher=PARSE_STRICT_ID_PATTERN.matcher(entry.getFileName().toString());
+        return newIdMatcher.matches();
+      }
+ else {
+        return true;
+      }
+    }
+  }
+)){
+    long latestGeneration=-1;
+    List<Tuple<Path,Long>> filesToUpgrade=new ArrayList<>();
+    for (    Path path : stream) {
+      Matcher matcher=parseLegacyIdPattern.matcher(path.getFileName().toString());
+      if (matcher.matches()) {
+        long generation=Long.parseLong(matcher.group(1));
+        if (generation >= translogGeneration.translogFileGeneration) {
+          latestGeneration=Math.max(translogGeneration.translogFileGeneration,generation);
+        }
+        filesToUpgrade.add(new Tuple<>(path,generation));
+      }
+ else {
+        Matcher strict_matcher=PARSE_STRICT_ID_PATTERN.matcher(path.getFileName().toString());
+        if (strict_matcher.matches()) {
+          throw new IllegalStateException("non-legacy translog file [" + path.getFileName().toString() + "] found on a translog that wasn't upgraded yet");
+        }
+      }
+    }
+    if (latestGeneration < translogGeneration.translogFileGeneration) {
+      throw new IllegalStateException("latest found translog has a lower generation that the excepcted uncommitted " + translogGeneration.translogFileGeneration + " > "+ latestGeneration);
+    }
+    CollectionUtil.timSort(filesToUpgrade,new Comparator<Tuple<Path,Long>>(){
+      @Override public int compare(      Tuple<Path,Long> o1,      Tuple<Path,Long> o2){
+        long gen1=o1.v2();
+        long gen2=o2.v2();
+        return Long.compare(gen1,gen2);
+      }
+    }
+);
+    for (    Tuple<Path,Long> pathAndGeneration : filesToUpgrade) {
+      final Path path=pathAndGeneration.v1();
+      final long generation=pathAndGeneration.v2();
+      final Path target=path.resolveSibling(getFilename(generation));
+      logger.debug("upgrading translog copy file from {} to {}",path,target);
+      Files.move(path,target,StandardCopyOption.ATOMIC_MOVE);
+      logger.debug("write commit point for {}",target);
+      if (generation == latestGeneration) {
+        Checkpoint checkpoint=new Checkpoint(Files.size(translogPath.resolve(getFilename(latestGeneration))),-1,latestGeneration);
+        Checkpoint.write(translogPath.resolve(CHECKPOINT_FILE_NAME),checkpoint,StandardOpenOption.WRITE,StandardOpenOption.CREATE_NEW);
+      }
+ else {
+        Checkpoint checkpoint=new Checkpoint(Files.size(target),-1,generation);
+        Checkpoint.write(translogPath.resolve(getCommitCheckpointFileName(generation)),checkpoint,StandardOpenOption.WRITE,StandardOpenOption.CREATE_NEW);
+      }
+    }
+    IOUtils.fsync(translogPath,true);
+  }
+ }
