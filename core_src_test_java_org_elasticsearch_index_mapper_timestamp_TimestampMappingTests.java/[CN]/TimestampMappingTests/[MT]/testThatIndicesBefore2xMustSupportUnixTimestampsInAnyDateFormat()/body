@@ -1,0 +1,23 @@
+{
+  String mapping=XContentFactory.jsonBuilder().startObject().startObject("type").startObject("_timestamp").field("enabled",true).field("format","dateOptionalTime").endObject().endObject().endObject().string();
+  BytesReference source=XContentFactory.jsonBuilder().startObject().field("field","value").endObject().bytes();
+  Settings oldSettings=settingsBuilder().put(IndexMetaData.SETTING_VERSION_CREATED,randomVersionBetween(random(),Version.V_0_90_0,Version.V_1_6_0)).build();
+  DocumentMapper docMapper=createIndex("old-index",oldSettings).mapperService().documentMapperParser().parse(mapping);
+  MetaData metaData=client().admin().cluster().prepareState().get().getState().getMetaData();
+  IndexRequest oldIndexDateIndexRequest=new IndexRequest("old-index","type","1").source(source).timestamp("1970-01-01");
+  oldIndexDateIndexRequest.process(metaData,new MappingMetaData(docMapper),true,"old-index");
+  IndexRequest oldIndexTimestampIndexRequest=new IndexRequest("old-index","type","1").source(source).timestamp("1234567890");
+  oldIndexTimestampIndexRequest.process(metaData,new MappingMetaData(docMapper),true,"old-index");
+  DocumentMapper currentMapper=createIndex("new-index").mapperService().documentMapperParser().parse(mapping);
+  MetaData newMetaData=client().admin().cluster().prepareState().get().getState().getMetaData();
+  IndexRequest request=new IndexRequest("new-index","type","1").source(source).timestamp("1970-01-01");
+  request.process(newMetaData,new MappingMetaData(currentMapper),true,"new-index");
+  request=new IndexRequest("new-index","type","1").source(source).timestamp("1234567890");
+  try {
+    request.process(newMetaData,new MappingMetaData(currentMapper),true,"new-index");
+  }
+ catch (  Exception e) {
+    assertThat(e.getCause(),instanceOf(IllegalArgumentException.class));
+    assertThat(e.getMessage(),containsString("failed to parse timestamp [1234567890]"));
+  }
+}
