@@ -1,2 +1,36 @@
 {
+  if (failEngineLock.tryLock()) {
+    store.incRef();
+    try {
+      try {
+        closeNoLock("engine failed on: [" + reason + "]");
+      }
+  finally {
+        if (failedEngine != null) {
+          logger.debug("tried to fail engine but engine is already failed. ignoring. [{}]",reason,failure);
+          return;
+        }
+        logger.warn("failed engine [{}]",failure,reason);
+        failedEngine=(failure != null) ? failure : new IllegalStateException(reason);
+        if (Lucene.isCorruptionException(failure)) {
+          try {
+            store.markStoreCorrupted(new IOException("failed engine (reason: [" + reason + "])",ExceptionsHelper.unwrapCorruption(failure)));
+          }
+ catch (          IOException e) {
+            logger.warn("Couldn't mark store corrupted",e);
+          }
+        }
+        failedEngineListener.onFailedEngine(shardId,reason,failure);
+      }
+    }
+ catch (    Throwable t) {
+      logger.warn("failEngine threw exception",t);
+    }
+ finally {
+      store.decRef();
+    }
+  }
+ else {
+    logger.debug("tried to fail engine but could not acquire lock - engine should be failed by now [{}]",reason,failure);
+  }
 }
