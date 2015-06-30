@@ -1,10 +1,10 @@
 {
-  SearchResponse response=client().prepareSearch("idx").addAggregation(filters("tags").filter("tag1",termQuery("tag","tag1")).filter("tag2",termQuery("tag","tag2")).subAggregation(avg("avg_value").field("value"))).execute().actionGet();
+  SearchResponse response=client().prepareSearch("idx").addAggregation(filters("tags").otherBucket(true).filter("tag1",termQuery("tag","tag1")).filter("tag2",termQuery("tag","tag2")).subAggregation(avg("avg_value").field("value"))).execute().actionGet();
   assertSearchResponse(response);
   Filters filters=response.getAggregations().get("tags");
   assertThat(filters,notNullValue());
   assertThat(filters.getName(),equalTo("tags"));
-  assertThat(filters.getBuckets().size(),equalTo(2));
+  assertThat(filters.getBuckets().size(),equalTo(3));
   Object[] propertiesKeys=(Object[])filters.getProperty("_key");
   Object[] propertiesDocCounts=(Object[])filters.getProperty("_count");
   Object[] propertiesCounts=(Object[])filters.getProperty("avg_value.value");
@@ -38,4 +38,19 @@
   assertThat((String)propertiesKeys[1],equalTo("tag2"));
   assertThat((long)propertiesDocCounts[1],equalTo((long)numTag2Docs));
   assertThat((double)propertiesCounts[1],equalTo((double)sum / numTag2Docs));
+  bucket=filters.getBucketByKey("_other_");
+  assertThat(bucket,Matchers.notNullValue());
+  assertThat(bucket.getDocCount(),equalTo((long)numOtherDocs));
+  sum=0;
+  for (int i=numTag1Docs + numTag2Docs; i < numDocs; ++i) {
+    sum+=i;
+  }
+  assertThat(bucket.getAggregations().asList().isEmpty(),is(false));
+  avgValue=bucket.getAggregations().get("avg_value");
+  assertThat(avgValue,notNullValue());
+  assertThat(avgValue.getName(),equalTo("avg_value"));
+  assertThat(avgValue.getValue(),equalTo((double)sum / numOtherDocs));
+  assertThat((String)propertiesKeys[2],equalTo("_other_"));
+  assertThat((long)propertiesDocCounts[2],equalTo((long)numOtherDocs));
+  assertThat((double)propertiesCounts[2],equalTo((double)sum / numOtherDocs));
 }
