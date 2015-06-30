@@ -2,7 +2,8 @@
   XContentParser parser=parseContext.parser();
   Query query=null;
   Query filter=null;
-  float boost=1.0f;
+  float boost=AbstractQueryBuilder.DEFAULT_BOOST;
+  String queryName=null;
   FiltersFunctionScoreQuery.ScoreMode scoreMode=FiltersFunctionScoreQuery.ScoreMode.Multiply;
   ArrayList<FiltersFunctionScoreQuery.FilterFunction> filterFunctions=new ArrayList<>();
   Float maxBoost=null;
@@ -34,6 +35,9 @@
     }
  else     if ("boost".equals(currentFieldName)) {
       boost=parser.floatValue();
+    }
+ else     if ("_name".equals(currentFieldName)) {
+      queryName=parser.text();
     }
  else     if ("min_score".equals(currentFieldName) || "minScore".equals(currentFieldName)) {
       minScore=parser.floatValue();
@@ -85,22 +89,26 @@
   if (maxBoost == null) {
     maxBoost=Float.MAX_VALUE;
   }
+  Query result;
   if (filterFunctions.size() == 0 || filterFunctions.size() == 1 && (filterFunctions.get(0).filter == null || Queries.isConstantMatchAllQuery(filterFunctions.get(0).filter))) {
     ScoreFunction function=filterFunctions.size() == 0 ? null : filterFunctions.get(0).function;
     FunctionScoreQuery theQuery=new FunctionScoreQuery(query,function,minScore);
     if (combineFunction != null) {
       theQuery.setCombineFunction(combineFunction);
     }
-    theQuery.setBoost(boost);
     theQuery.setMaxBoost(maxBoost);
-    return theQuery;
+    result=theQuery;
   }
  else {
     FiltersFunctionScoreQuery functionScoreQuery=new FiltersFunctionScoreQuery(query,scoreMode,filterFunctions.toArray(new FiltersFunctionScoreQuery.FilterFunction[filterFunctions.size()]),maxBoost,minScore);
     if (combineFunction != null) {
       functionScoreQuery.setCombineFunction(combineFunction);
     }
-    functionScoreQuery.setBoost(boost);
-    return functionScoreQuery;
+    result=functionScoreQuery;
   }
+  result.setBoost(boost);
+  if (queryName != null) {
+    parseContext.addNamedQuery(queryName,query);
+  }
+  return result;
 }
