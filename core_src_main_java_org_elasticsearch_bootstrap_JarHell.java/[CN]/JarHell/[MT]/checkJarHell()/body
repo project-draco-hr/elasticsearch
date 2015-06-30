@@ -1,0 +1,59 @@
+{
+  ClassLoader loader=JarHell.class.getClassLoader();
+  if (loader instanceof URLClassLoader == false) {
+    return;
+  }
+  final Map<String,URL> clazzes=new HashMap<>(32768);
+  Set<String> seenJars=new HashSet<>();
+  for (  final URL url : ((URLClassLoader)loader).getURLs()) {
+    String path=url.getPath();
+    if (path.endsWith(".jar")) {
+      if (!seenJars.add(path)) {
+        continue;
+      }
+      try (JarFile file=new JarFile(url.getPath())){
+        Manifest manifest=file.getManifest();
+        if (manifest != null) {
+          String systemVersion=System.getProperty("java.specification.version");
+          String targetVersion=manifest.getMainAttributes().getValue("X-Compile-Target-JDK");
+          if (targetVersion != null) {
+            float current=Float.POSITIVE_INFINITY;
+            float target=Float.NEGATIVE_INFINITY;
+            try {
+              current=Float.parseFloat(systemVersion);
+              target=Float.parseFloat(targetVersion);
+            }
+ catch (            NumberFormatException e) {
+            }
+            if (current < target) {
+              throw new IllegalStateException(path + " requires Java " + targetVersion+ ", your system: "+ systemVersion);
+            }
+          }
+        }
+        Enumeration<JarEntry> elements=file.entries();
+        while (elements.hasMoreElements()) {
+          String entry=elements.nextElement().getName();
+          if (entry.endsWith(".class")) {
+            entry=entry.replace('/','.').substring(0,entry.length() - 6);
+            checkClass(clazzes,entry,url);
+          }
+        }
+      }
+     }
+ else {
+      final Path root=PathUtils.get(url.toURI());
+      final String sep=root.getFileSystem().getSeparator();
+      Files.walkFileTree(root,new SimpleFileVisitor<Path>(){
+        @Override public FileVisitResult visitFile(        Path file,        BasicFileAttributes attrs) throws IOException {
+          String entry=root.relativize(file).toString();
+          if (entry.endsWith(".class")) {
+            entry=entry.replace(sep,".").substring(0,entry.length() - 6);
+            checkClass(clazzes,entry,url);
+          }
+          return super.visitFile(file,attrs);
+        }
+      }
+);
+    }
+  }
+}
