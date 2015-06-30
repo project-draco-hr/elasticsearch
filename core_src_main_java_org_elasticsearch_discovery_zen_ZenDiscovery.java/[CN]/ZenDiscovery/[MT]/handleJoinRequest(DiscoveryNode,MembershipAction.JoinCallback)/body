@@ -8,12 +8,12 @@
     processJoinRequests.add(new Tuple<>(node,callback));
     clusterService.submitStateUpdateTask("zen-disco-receive(join from node[" + node + "])",Priority.URGENT,new ProcessedClusterStateUpdateTask(){
       private final List<Tuple<DiscoveryNode,MembershipAction.JoinCallback>> drainedJoinRequests=new ArrayList<>();
+      private boolean nodeAdded=false;
       @Override public ClusterState execute(      ClusterState currentState){
         processJoinRequests.drainTo(drainedJoinRequests);
         if (drainedJoinRequests.isEmpty()) {
           return currentState;
         }
-        boolean modified=false;
         DiscoveryNodes.Builder nodesBuilder=DiscoveryNodes.builder(currentState.nodes());
         for (        Tuple<DiscoveryNode,MembershipAction.JoinCallback> task : drainedJoinRequests) {
           DiscoveryNode node=task.v1();
@@ -21,7 +21,7 @@
             logger.debug("received a join request for an existing node [{}]",node);
           }
  else {
-            modified=true;
+            nodeAdded=true;
             nodesBuilder.put(node);
             for (            DiscoveryNode existingNode : currentState.nodes()) {
               if (node.address().equals(existingNode.address())) {
@@ -32,11 +32,11 @@
           }
         }
         ClusterState.Builder stateBuilder=ClusterState.builder(currentState);
-        if (modified) {
+        if (nodeAdded) {
           stateBuilder.nodes(nodesBuilder);
         }
         currentState=stateBuilder.build();
-        RoutingAllocation.Result result=allocationService.reroute(currentState);
+        RoutingAllocation.Result result=routingService.getAllocationService().reroute(currentState);
         return ClusterState.builder(currentState).routingResult(result).build();
       }
       @Override public void onNoLongerMaster(      String source){
@@ -59,6 +59,9 @@
         innerOnFailure(t);
       }
       @Override public void clusterStateProcessed(      String source,      ClusterState oldState,      ClusterState newState){
+        if (nodeAdded) {
+          routingService.reroute("post_node_add");
+        }
         for (        Tuple<DiscoveryNode,MembershipAction.JoinCallback> drainedTask : drainedJoinRequests) {
           try {
             drainedTask.v2().onSuccess();
