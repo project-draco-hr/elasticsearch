@@ -11,22 +11,13 @@
       if (shardRoutingEntries.isEmpty()) {
         return currentState;
       }
-      MetaData metaData=currentState.getMetaData();
+      final MetaData metaData=currentState.getMetaData();
       List<FailedRerouteAllocation.FailedShard> shardRoutingsToBeApplied=new ArrayList<>(shardRoutingEntries.size());
-      for (int i=0; i < shardRoutingEntries.size(); i++) {
-        ShardRoutingEntry shardRoutingEntry=shardRoutingEntries.get(i);
-        shardRoutingEntry.processed=true;
-        ShardRouting shardRouting=shardRoutingEntry.shardRouting;
-        IndexMetaData indexMetaData=metaData.index(shardRouting.index());
-        if (indexMetaData == null) {
-          continue;
-        }
-        if (!indexMetaData.isSameUUID(shardRoutingEntry.indexUUID)) {
-          logger.debug("{} ignoring shard failed, different index uuid, current {}, got {}",shardRouting.shardId(),indexMetaData.getUUID(),shardRoutingEntry);
-          continue;
-        }
-        logger.debug("{} will apply shard failed {}",shardRouting.shardId(),shardRoutingEntry);
-        shardRoutingsToBeApplied.add(new FailedRerouteAllocation.FailedShard(shardRouting,shardRoutingEntry.reason));
+      for (      ShardRoutingEntry entry : extractShardsToBeApplied(shardRoutingEntries,"failed",metaData,logger)) {
+        shardRoutingsToBeApplied.add(new FailedRerouteAllocation.FailedShard(entry.shardRouting,entry.reason));
+      }
+      for (      ShardRoutingEntry entry : shardRoutingEntries) {
+        entry.processed=true;
       }
       RoutingAllocation.Result routingResult=allocationService.applyFailedShards(currentState,shardRoutingsToBeApplied);
       if (!routingResult.changed()) {
