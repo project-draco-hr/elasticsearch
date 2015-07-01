@@ -1,2 +1,188 @@
 {
+  if (name == null) {
+    throw new IllegalArgumentException("plugin name must be supplied with --install [name].");
+  }
+  HttpDownloadHelper downloadHelper=new HttpDownloadHelper();
+  boolean downloaded=false;
+  HttpDownloadHelper.DownloadProgress progress;
+  if (outputMode == OutputMode.SILENT) {
+    progress=new HttpDownloadHelper.NullProgress();
+  }
+ else {
+    progress=new HttpDownloadHelper.VerboseProgress(SysOut.getOut());
+  }
+  if (!Files.isWritable(environment.pluginsFile())) {
+    throw new IOException("plugin directory " + environment.pluginsFile() + " is read only");
+  }
+  PluginHandle pluginHandle=PluginHandle.parse(name);
+  checkForForbiddenName(pluginHandle.name);
+  Path pluginFile=pluginHandle.distroFile(environment);
+  final Path extractLocation=pluginHandle.extractedDir(environment);
+  if (Files.exists(extractLocation)) {
+    throw new IOException("plugin directory " + extractLocation.toAbsolutePath() + " already exists. To update the plugin, uninstall it first using --remove "+ name+ " command");
+  }
+  if (url != null) {
+    URL pluginUrl=new URL(url);
+    log("Trying " + pluginUrl.toExternalForm() + "...");
+    try {
+      downloadHelper.download(pluginUrl,pluginFile,progress,this.timeout);
+      downloaded=true;
+    }
+ catch (    ElasticsearchTimeoutException e) {
+      throw e;
+    }
+catch (    Exception e) {
+      log("Failed: " + ExceptionsHelper.detailedMessage(e));
+    }
+  }
+  if (!downloaded) {
+    for (    URL url : pluginHandle.urls()) {
+      log("Trying " + url.toExternalForm() + "...");
+      try {
+        downloadHelper.download(url,pluginFile,progress,this.timeout);
+        downloaded=true;
+        break;
+      }
+ catch (      ElasticsearchTimeoutException e) {
+        throw e;
+      }
+catch (      Exception e) {
+        debug("Failed: " + ExceptionsHelper.detailedMessage(e));
+      }
+    }
+  }
+  if (!downloaded) {
+    throw new IOException("failed to download out of all possible locations..., use --verbose to get detailed information");
+  }
+  Path tmp=unzipToTemporary(pluginFile);
+  final List<URL> jars=new ArrayList<>();
+  ClassLoader loader=PluginManager.class.getClassLoader();
+  if (loader instanceof URLClassLoader) {
+    for (    URL url : ((URLClassLoader)loader).getURLs()) {
+      jars.add(url);
+    }
+  }
+  Files.walkFileTree(tmp,new SimpleFileVisitor<Path>(){
+    @Override public FileVisitResult visitFile(    Path file,    BasicFileAttributes attrs) throws IOException {
+      if (file.toString().endsWith(".jar")) {
+        jars.add(file.toUri().toURL());
+      }
+      return FileVisitResult.CONTINUE;
+    }
+  }
+);
+  try {
+    JarHell.checkJarHell(jars.toArray(new URL[0]));
+  }
+ catch (  Exception ex) {
+    throw new RuntimeException(ex);
+  }
+  IOUtils.rm(tmp);
+  try (FileSystem zipFile=FileSystems.newFileSystem(pluginFile,null)){
+    for (    final Path root : zipFile.getRootDirectories()) {
+      final Path[] topLevelFiles=FileSystemUtils.files(root);
+      final boolean stripTopLevelDirectory;
+      if (topLevelFiles.length == 1 && Files.isDirectory(topLevelFiles[0])) {
+switch (topLevelFiles[0].getFileName().toString()) {
+case "_site/":
+case "bin/":
+case "config/":
+case "_dict/":
+          stripTopLevelDirectory=false;
+        break;
+default :
+      stripTopLevelDirectory=true;
+  }
+}
+ else {
+  stripTopLevelDirectory=false;
+}
+Files.walkFileTree(root,new SimpleFileVisitor<Path>(){
+  @Override public FileVisitResult visitFile(  Path file,  BasicFileAttributes attrs) throws IOException {
+    Path target=FileSystemUtils.append(extractLocation,file,stripTopLevelDirectory ? 1 : 0);
+    Files.createDirectories(target);
+    Files.copy(file,target,StandardCopyOption.REPLACE_EXISTING);
+    return FileVisitResult.CONTINUE;
+  }
+}
+);
+}
+log("Installed " + name + " into "+ extractLocation.toAbsolutePath());
+}
+ catch (Exception e) {
+log("failed to extract plugin [" + pluginFile + "]: "+ ExceptionsHelper.detailedMessage(e));
+return;
+}
+ finally {
+try {
+Files.delete(pluginFile);
+}
+ catch (Exception ex) {
+log("Failed to delete plugin file" + pluginFile + " "+ ex);
+}
+}
+if (FileSystemUtils.hasExtensions(extractLocation,".java")) {
+debug("Plugin installation assumed to be site plugin, but contains source code, aborting installation...");
+try {
+IOUtils.rm(extractLocation);
+}
+ catch (Exception ex) {
+debug("Failed to remove site plugin from path " + extractLocation + " - "+ ex.getMessage());
+}
+throw new IllegalArgumentException("Plugin installation assumed to be site plugin, but contains source code, aborting installation.");
+}
+boolean potentialSitePlugin=true;
+Path binFile=extractLocation.resolve("bin");
+if (Files.isDirectory(binFile)) {
+Path toLocation=pluginHandle.binDir(environment);
+debug("Found bin, moving to " + toLocation.toAbsolutePath());
+if (Files.exists(toLocation)) {
+IOUtils.rm(toLocation);
+}
+try {
+FileSystemUtils.move(binFile,toLocation);
+}
+ catch (IOException e) {
+throw new IOException("Could not move [" + binFile + "] to ["+ toLocation+ "]",e);
+}
+if (Files.getFileStore(toLocation).supportsFileAttributeView(PosixFileAttributeView.class)) {
+final Set<PosixFilePermission> perms=new HashSet<>();
+perms.add(PosixFilePermission.OWNER_EXECUTE);
+perms.add(PosixFilePermission.GROUP_EXECUTE);
+perms.add(PosixFilePermission.OTHERS_EXECUTE);
+Files.walkFileTree(toLocation,new SimpleFileVisitor<Path>(){
+  @Override public FileVisitResult visitFile(  Path file,  BasicFileAttributes attrs) throws IOException {
+    if (attrs.isRegularFile()) {
+      Files.setPosixFilePermissions(file,perms);
+    }
+    return FileVisitResult.CONTINUE;
+  }
+}
+);
+}
+ else {
+debug("Skipping posix permissions - filestore doesn't support posix permission");
+}
+debug("Installed " + name + " into "+ toLocation.toAbsolutePath());
+potentialSitePlugin=false;
+}
+Path configFile=extractLocation.resolve("config");
+if (Files.isDirectory(configFile)) {
+Path configDestLocation=pluginHandle.configDir(environment);
+debug("Found config, moving to " + configDestLocation.toAbsolutePath());
+moveFilesWithoutOverwriting(configFile,configDestLocation,".new");
+debug("Installed " + name + " into "+ configDestLocation.toAbsolutePath());
+potentialSitePlugin=false;
+}
+if (!Files.exists(extractLocation.resolve("_site"))) {
+if (potentialSitePlugin && !FileSystemUtils.hasExtensions(extractLocation,".class",".jar")) {
+log("Identified as a _site plugin, moving to _site structure ...");
+Path site=extractLocation.resolve("_site");
+Path tmpLocation=environment.pluginsFile().resolve(extractLocation.getFileName() + ".tmp");
+Files.move(extractLocation,tmpLocation);
+Files.createDirectories(extractLocation);
+Files.move(tmpLocation,site);
+debug("Installed " + name + " into "+ site.toAbsolutePath());
+}
+}
 }
