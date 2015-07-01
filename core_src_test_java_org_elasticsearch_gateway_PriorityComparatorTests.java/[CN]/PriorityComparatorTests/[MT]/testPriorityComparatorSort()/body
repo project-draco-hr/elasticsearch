@@ -1,0 +1,48 @@
+{
+  RoutingNodes.UnassignedShards shards=new RoutingNodes.UnassignedShards();
+  int numIndices=randomIntBetween(3,99);
+  IndexMeta[] indices=new IndexMeta[numIndices];
+  final Map<String,IndexMeta> map=new HashMap<>();
+  for (int i=0; i < indices.length; i++) {
+    if (frequently()) {
+      indices[i]=new IndexMeta("idx_2015_04_" + String.format("%02d",i),randomIntBetween(1,1000),randomIntBetween(1,10000));
+    }
+ else {
+      indices[i]=new IndexMeta("idx_2015_04_" + String.format("%02d",i));
+    }
+    map.put(indices[i].name,indices[i]);
+  }
+  int numShards=randomIntBetween(10,100);
+  for (int i=0; i < numShards; i++) {
+    IndexMeta indexMeta=randomFrom(indices);
+    shards.add(new ShardRouting(indexMeta.name,randomIntBetween(1,5),null,null,null,randomBoolean(),ShardRoutingState.UNASSIGNED,randomIntBetween(0,100),new UnassignedInfo(randomFrom(UnassignedInfo.Reason.values()),"foobar")));
+  }
+  shards.sort(new PriorityComparator(){
+    @Override protected Settings getIndexSettings(    String index){
+      IndexMeta indexMeta=map.get(index);
+      return indexMeta.settings;
+    }
+  }
+);
+  ShardRouting previous=null;
+  for (  ShardRouting routing : shards) {
+    if (previous != null) {
+      IndexMeta prevMeta=map.get(previous.getIndex());
+      IndexMeta currentMeta=map.get(routing.getIndex());
+      if (prevMeta.priority == currentMeta.priority) {
+        if (prevMeta.creationDate == currentMeta.creationDate) {
+          if (prevMeta.name.equals(currentMeta.name) == false) {
+            assertTrue("indexName mismatch, expected:" + currentMeta.name + " after "+ prevMeta.name+ " "+ prevMeta.name.compareTo(currentMeta.name),prevMeta.name.compareTo(currentMeta.name) > 0);
+          }
+        }
+ else {
+          assertTrue("creationDate mismatch, expected:" + currentMeta.creationDate + " after "+ prevMeta.creationDate,prevMeta.creationDate > currentMeta.creationDate);
+        }
+      }
+ else {
+        assertTrue("priority mismatch, expected:" + currentMeta.priority + " after "+ prevMeta.priority,prevMeta.priority > currentMeta.priority);
+      }
+    }
+    previous=routing;
+  }
+}
