@@ -1,0 +1,45 @@
+{
+  MetaData.Builder mdBuilder=MetaData.builder().put(indexBuilder("foo1-closed").state(IndexMetaData.State.CLOSE).putAlias(AliasMetaData.builder("foobar1-closed")).putAlias(AliasMetaData.builder("foobar2-closed"))).put(indexBuilder("foo2-closed").state(IndexMetaData.State.CLOSE).putAlias(AliasMetaData.builder("foobar2-closed"))).put(indexBuilder("foo3").putAlias(AliasMetaData.builder("foobar2-closed")));
+  ClusterState state=ClusterState.builder(new ClusterName("_name")).metaData(mdBuilder).build();
+  IndexNameExpressionResolver indexNameExpressionResolver=new IndexNameExpressionResolver();
+  IndexNameExpressionResolver.Context context=new IndexNameExpressionResolver.Context(state,IndicesOptions.strictExpandOpenAndForbidClosed());
+  try {
+    indexNameExpressionResolver.concreteIndices(context,"foo1-closed");
+    fail("foo1-closed should be closed, but it is open");
+  }
+ catch (  IndexClosedException e) {
+  }
+  try {
+    indexNameExpressionResolver.concreteIndices(context,"foobar1-closed");
+    fail("foo1-closed should be closed, but it is open");
+  }
+ catch (  IndexClosedException e) {
+  }
+  context=new IndexNameExpressionResolver.Context(state,IndicesOptions.fromOptions(true,context.getOptions().allowNoIndices(),context.getOptions().expandWildcardsOpen(),context.getOptions().expandWildcardsClosed(),context.getOptions()));
+  String[] results=indexNameExpressionResolver.concreteIndices(context,"foo1-closed");
+  assertThat(results,emptyArray());
+  results=indexNameExpressionResolver.concreteIndices(context,"foobar1-closed");
+  assertThat(results,emptyArray());
+  context=new IndexNameExpressionResolver.Context(state,IndicesOptions.lenientExpandOpen());
+  results=indexNameExpressionResolver.concreteIndices(context,"foo1-closed");
+  assertThat(results,arrayWithSize(1));
+  assertThat(results,arrayContaining("foo1-closed"));
+  results=indexNameExpressionResolver.concreteIndices(context,"foobar1-closed");
+  assertThat(results,arrayWithSize(1));
+  assertThat(results,arrayContaining("foo1-closed"));
+  context=new IndexNameExpressionResolver.Context(state,IndicesOptions.strictExpandOpenAndForbidClosed());
+  try {
+    indexNameExpressionResolver.concreteIndices(context,"foobar2-closed");
+    fail("foo2-closed should be closed, but it is open");
+  }
+ catch (  IndexClosedException e) {
+  }
+  context=new IndexNameExpressionResolver.Context(state,IndicesOptions.fromOptions(true,context.getOptions().allowNoIndices(),context.getOptions().expandWildcardsOpen(),context.getOptions().expandWildcardsClosed(),context.getOptions()));
+  results=indexNameExpressionResolver.concreteIndices(context,"foobar2-closed");
+  assertThat(results,arrayWithSize(1));
+  assertThat(results,arrayContaining("foo3"));
+  context=new IndexNameExpressionResolver.Context(state,IndicesOptions.lenientExpandOpen());
+  results=indexNameExpressionResolver.concreteIndices(context,"foobar2-closed");
+  assertThat(results,arrayWithSize(3));
+  assertThat(results,arrayContainingInAnyOrder("foo1-closed","foo2-closed","foo3"));
+}

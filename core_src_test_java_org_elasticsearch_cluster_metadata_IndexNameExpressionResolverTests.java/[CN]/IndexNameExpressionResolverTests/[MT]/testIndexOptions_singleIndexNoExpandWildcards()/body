@@ -1,0 +1,50 @@
+{
+  MetaData.Builder mdBuilder=MetaData.builder().put(indexBuilder("foo").putAlias(AliasMetaData.builder("foofoobar"))).put(indexBuilder("foobar").putAlias(AliasMetaData.builder("foofoobar"))).put(indexBuilder("foofoo-closed").state(IndexMetaData.State.CLOSE)).put(indexBuilder("foofoo").putAlias(AliasMetaData.builder("barbaz")));
+  ClusterState state=ClusterState.builder(new ClusterName("_name")).metaData(mdBuilder).build();
+  IndexNameExpressionResolver indexNameExpressionResolver=new IndexNameExpressionResolver();
+  try {
+    IndexNameExpressionResolver.Context context=new IndexNameExpressionResolver.Context(state,IndicesOptions.strictSingleIndexNoExpandForbidClosed());
+    indexNameExpressionResolver.concreteIndices(context,"baz*");
+    fail();
+  }
+ catch (  IndexMissingException e) {
+    assertThat(e.index().name(),equalTo("baz*"));
+  }
+  try {
+    IndexNameExpressionResolver.Context context=new IndexNameExpressionResolver.Context(state,IndicesOptions.strictSingleIndexNoExpandForbidClosed());
+    indexNameExpressionResolver.concreteIndices(context,"foo","baz*");
+    fail();
+  }
+ catch (  IndexMissingException e) {
+    assertThat(e.index().name(),equalTo("baz*"));
+  }
+  try {
+    IndexNameExpressionResolver.Context context=new IndexNameExpressionResolver.Context(state,IndicesOptions.strictSingleIndexNoExpandForbidClosed());
+    indexNameExpressionResolver.concreteIndices(context,"foofoobar");
+    fail();
+  }
+ catch (  IllegalArgumentException e) {
+    assertThat(e.getMessage(),containsString("Alias [foofoobar] has more than one indices associated with it"));
+  }
+  try {
+    IndexNameExpressionResolver.Context context=new IndexNameExpressionResolver.Context(state,IndicesOptions.strictSingleIndexNoExpandForbidClosed());
+    indexNameExpressionResolver.concreteIndices(context,"foo","foofoobar");
+    fail();
+  }
+ catch (  IllegalArgumentException e) {
+    assertThat(e.getMessage(),containsString("Alias [foofoobar] has more than one indices associated with it"));
+  }
+  try {
+    IndexNameExpressionResolver.Context context=new IndexNameExpressionResolver.Context(state,IndicesOptions.strictSingleIndexNoExpandForbidClosed());
+    indexNameExpressionResolver.concreteIndices(context,"foofoo-closed","foofoobar");
+    fail();
+  }
+ catch (  IndexClosedException e) {
+    assertThat(e.getMessage(),equalTo("closed"));
+    assertEquals(e.index().getName(),"foofoo-closed");
+  }
+  IndexNameExpressionResolver.Context context=new IndexNameExpressionResolver.Context(state,IndicesOptions.strictSingleIndexNoExpandForbidClosed());
+  String[] results=indexNameExpressionResolver.concreteIndices(context,"foo","barbaz");
+  assertEquals(2,results.length);
+  assertThat(results,arrayContainingInAnyOrder("foo","foofoo"));
+}
