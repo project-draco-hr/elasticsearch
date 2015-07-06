@@ -1,0 +1,31 @@
+{
+  DiscoveryNodes.Builder nodes=DiscoveryNodes.builder(clusterService.state().nodes()).masterNodeId(null);
+  clusterService.setState(ClusterState.builder(clusterService.state()).nodes(nodes));
+  int nodeId=0;
+  try {
+    joinNode(newNode(nodeId++));
+    fail("failed to fail node join when not a master");
+  }
+ catch (  ExecutionException e) {
+    assertThat(e.getCause(),instanceOf(NotMasterException.class));
+  }
+  logger.debug("--> testing joins fail post accumulation");
+  ArrayList<Future<Void>> pendingJoins=new ArrayList<>();
+  nodeJoinController.startAccumulatingJoins();
+  for (int i=1 + randomInt(5); i > 0; i--) {
+    DiscoveryNode node=newNode(nodeId++);
+    final Future<Void> future=joinNodeAsync(node);
+    pendingJoins.add(future);
+    assertThat(future.isDone(),equalTo(false));
+  }
+  nodeJoinController.stopAccumulatingJoins();
+  for (  Future<Void> future : pendingJoins) {
+    try {
+      future.get();
+      fail("failed to fail accumulated node join when not a master");
+    }
+ catch (    ExecutionException e) {
+      assertThat(e.getCause(),instanceOf(NotMasterException.class));
+    }
+  }
+}

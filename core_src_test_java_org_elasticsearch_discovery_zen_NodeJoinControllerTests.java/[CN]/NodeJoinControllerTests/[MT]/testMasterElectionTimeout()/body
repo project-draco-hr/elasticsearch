@@ -1,0 +1,58 @@
+{
+  DiscoveryNodes.Builder nodes=DiscoveryNodes.builder(clusterService.state().nodes()).masterNodeId(null);
+  clusterService.setState(ClusterState.builder(clusterService.state()).nodes(nodes));
+  int nodeId=0;
+  final int requiredJoins=1 + randomInt(5);
+  logger.debug("--> using requiredJoins [{}]",requiredJoins);
+  for (int i=randomInt(5); i > 0; i--) {
+    try {
+      joinNode(newNode(nodeId++));
+      fail("failed to fail node join when not a master");
+    }
+ catch (    ExecutionException e) {
+      assertThat(e.getCause(),instanceOf(NotMasterException.class));
+    }
+  }
+  nodeJoinController.startAccumulatingJoins();
+  final int initialJoins=randomIntBetween(0,requiredJoins - 1);
+  final ArrayList<SimpleFuture> pendingJoins=new ArrayList<>();
+  ArrayList<DiscoveryNode> nodesToJoin=new ArrayList<>();
+  for (int i=0; i < initialJoins; i++) {
+    DiscoveryNode node=newNode(nodeId++);
+    for (int j=1 + randomInt(3); j > 0; j--) {
+      nodesToJoin.add(node);
+    }
+  }
+  Collections.shuffle(nodesToJoin);
+  logger.debug("--> joining [{}] nodes, with repetition a total of [{}]",initialJoins,nodesToJoin.size());
+  for (  DiscoveryNode node : nodesToJoin) {
+    pendingJoins.add(joinNodeAsync(node));
+  }
+  final AtomicReference<Throwable> failure=new AtomicReference<>();
+  final CountDownLatch latch=new CountDownLatch(1);
+  nodeJoinController.waitToBeElectedAsMaster(requiredJoins,TimeValue.timeValueMillis(1),new NodeJoinController.Callback(){
+    @Override public void onElectedAsMaster(    ClusterState state){
+      assertThat("callback called with elected as master, but state disagrees",state.nodes().localNodeMaster(),equalTo(true));
+      latch.countDown();
+    }
+    @Override public void onFailure(    Throwable t){
+      failure.set(t);
+      latch.countDown();
+    }
+  }
+);
+  latch.await();
+  logger.debug("--> verifying election timed out");
+  assertThat(failure.get(),instanceOf(ElasticsearchTimeoutException.class));
+  logger.debug("--> verifying all joins are failed");
+  for (  SimpleFuture future : pendingJoins) {
+    logger.debug("waiting on {}",future);
+    try {
+      future.get();
+      fail("failed to fail node join [" + future + "]");
+    }
+ catch (    ExecutionException e) {
+      assertThat(e.getCause(),instanceOf(NotMasterException.class));
+    }
+  }
+}

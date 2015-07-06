@@ -1,0 +1,32 @@
+{
+  Thread[] threads=new Thread[3 + randomInt(5)];
+  ArrayList<DiscoveryNode> nodes=new ArrayList<>();
+  nodes.add(clusterService.localNode());
+  final CyclicBarrier barrier=new CyclicBarrier(threads.length);
+  final List<Throwable> backgroundExceptions=new CopyOnWriteArrayList<>();
+  for (int i=0; i < threads.length; i++) {
+    final DiscoveryNode node=newNode(i);
+    final int iterations=rarely() ? randomIntBetween(1,4) : 1;
+    nodes.add(node);
+    threads[i]=new Thread(new AbstractRunnable(){
+      @Override public void onFailure(      Throwable t){
+        logger.error("unexpected error in join thread",t);
+        backgroundExceptions.add(t);
+      }
+      @Override protected void doRun() throws Exception {
+        barrier.await();
+        for (int i=0; i < iterations; i++) {
+          logger.debug("{} joining",node);
+          joinNode(node);
+        }
+      }
+    }
+,"t_" + i);
+    threads[i].start();
+  }
+  logger.info("--> waiting for joins to complete");
+  for (  Thread thread : threads) {
+    thread.join();
+  }
+  assertNodesInCurrentState(nodes);
+}
