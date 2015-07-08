@@ -11,6 +11,20 @@
   assertSearchResponse(searchResponse);
   indicesStats=client().admin().indices().prepareStats().execute().actionGet();
   assertThat(indicesStats.getTotal().getSearch().getOpenContexts(),equalTo((long)numAssignedShards("test1")));
+  assertThat(indicesStats.getTotal().getSearch().getTotal().getScrollCurrent(),equalTo((long)numAssignedShards("test1")));
+  int count=0;
+  while (true) {
+    count++;
+    searchResponse=client().prepareSearchScroll(searchResponse.getScrollId()).setScroll(TimeValue.timeValueMinutes(2)).execute().actionGet();
+    if (searchResponse.getHits().getHits().length == 0) {
+      break;
+    }
+  }
+  indicesStats=client().admin().indices().prepareStats().execute().actionGet();
+  Stats stats=indicesStats.getTotal().getSearch().getTotal();
+  assertThat(stats.getQueryCount(),equalTo(count * (long)numAssignedShards("test1")));
+  assertThat(stats.getScrollCount(),equalTo((long)numAssignedShards("test1")));
+  assertThat(stats.getScrollTimeInMillis(),greaterThan(0l));
   searchResponse=client().prepareSearchScroll(searchResponse.getScrollId()).execute().actionGet();
   indicesStats=client().admin().indices().prepareStats().execute().actionGet();
   assertThat(indicesStats.getTotal().getSearch().getOpenContexts(),equalTo(0l));
