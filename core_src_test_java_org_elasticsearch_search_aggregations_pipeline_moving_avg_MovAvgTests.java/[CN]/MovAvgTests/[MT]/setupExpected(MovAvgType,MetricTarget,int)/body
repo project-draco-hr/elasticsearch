@@ -1,0 +1,55 @@
+{
+  ArrayList<Double> values=new ArrayList<>(numBuckets);
+  EvictingQueue<Double> window=EvictingQueue.create(windowSize);
+  for (  PipelineAggregationHelperTests.MockBucket mockBucket : mockHisto) {
+    double metricValue;
+    double[] docValues=mockBucket.docValues;
+    if (mockBucket.count == 0 && target.equals(MetricTarget.VALUE)) {
+      if (gapPolicy.equals(BucketHelpers.GapPolicy.SKIP)) {
+        values.add(null);
+        continue;
+      }
+ else       if (gapPolicy.equals(BucketHelpers.GapPolicy.INSERT_ZEROS)) {
+        metricValue=0.0;
+      }
+ else {
+        metricValue=PipelineAggregationHelperTests.calculateMetric(docValues,metric);
+      }
+    }
+ else {
+      metricValue=target.equals(MetricTarget.VALUE) ? PipelineAggregationHelperTests.calculateMetric(docValues,metric) : mockBucket.count;
+    }
+    if (window.size() > 0) {
+switch (type) {
+case SIMPLE:
+        values.add(simple(window));
+      break;
+case LINEAR:
+    values.add(linear(window));
+  break;
+case EWMA:
+values.add(ewma(window));
+break;
+case HOLT:
+values.add(holt(window));
+break;
+case HOLT_BIG_MINIMIZE:
+values.add(holt(window));
+break;
+case HOLT_WINTERS:
+if (window.size() >= period * 2) {
+values.add(holtWinters(window));
+}
+ else {
+values.add(null);
+}
+break;
+}
+}
+ else {
+values.add(null);
+}
+window.offer(metricValue);
+}
+testValues.put(type.name() + "_" + target.name(),values);
+}
