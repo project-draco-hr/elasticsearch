@@ -1,0 +1,69 @@
+{
+  try {
+    Expression expr=(Expression)compiledScript.compiled();
+    MapperService mapper=lookup.doc().mapperService();
+    SimpleBindings bindings=new SimpleBindings();
+    ReplaceableConstValueSource specialValue=null;
+    for (    String variable : expr.variables) {
+      if (variable.equals("_score")) {
+        bindings.add(new SortField("_score",SortField.Type.SCORE));
+      }
+ else       if (variable.equals("_value")) {
+        specialValue=new ReplaceableConstValueSource();
+        bindings.add("_value",specialValue);
+      }
+ else       if (vars != null && vars.containsKey(variable)) {
+        Object value=vars.get(variable);
+        if (value instanceof Number) {
+          bindings.add(variable,new DoubleConstValueSource(((Number)value).doubleValue()));
+        }
+ else {
+          throw new ExpressionScriptCompilationException("Parameter [" + variable + "] must be a numeric type");
+        }
+      }
+ else {
+        String fieldname=null;
+        String methodname=null;
+        VariableContext[] parts=VariableContext.parse(variable);
+        if (parts[0].text.equals("doc") == false) {
+          throw new ExpressionScriptCompilationException("Unknown variable [" + parts[0].text + "] in expression");
+        }
+        if (parts.length < 2 || parts[1].type != VariableContext.Type.STR_INDEX) {
+          throw new ExpressionScriptCompilationException("Variable 'doc' in expression must be used with a specific field like: doc['myfield']");
+        }
+ else {
+          fieldname=parts[1].text;
+        }
+        if (parts.length == 3) {
+          if (parts[2].type == VariableContext.Type.METHOD) {
+            methodname=parts[2].text;
+          }
+ else           if (parts[2].type != VariableContext.Type.MEMBER || !"value".equals(parts[2].text)) {
+            throw new ExpressionScriptCompilationException("Only the member variable [value] or member methods may be accessed on a field when not accessing the field directly");
+          }
+        }
+        if (parts.length > 3) {
+          throw new ExpressionScriptCompilationException("Variable [" + variable + "] does not follow an allowed format of either doc['field'] or doc['field'].method()");
+        }
+        MappedFieldType fieldType=mapper.smartNameFieldType(fieldname);
+        if (fieldType == null) {
+          throw new ExpressionScriptCompilationException("Field [" + fieldname + "] used in expression does not exist in mappings");
+        }
+        if (fieldType.isNumeric() == false) {
+          throw new ExpressionScriptCompilationException("Field [" + fieldname + "] used in expression must be numeric");
+        }
+        IndexFieldData<?> fieldData=lookup.doc().fieldDataService().getForField((NumberFieldMapper.NumberFieldType)fieldType);
+        if (methodname == null) {
+          bindings.add(variable,new FieldDataValueSource(fieldData,MultiValueMode.MIN));
+        }
+ else {
+          bindings.add(variable,getMethodValueSource(fieldType,fieldData,fieldname,methodname));
+        }
+      }
+    }
+    return new ExpressionSearchScript(compiledScript,bindings,specialValue);
+  }
+ catch (  Exception exception) {
+    throw new ScriptException("Error during search with " + compiledScript,exception);
+  }
+}

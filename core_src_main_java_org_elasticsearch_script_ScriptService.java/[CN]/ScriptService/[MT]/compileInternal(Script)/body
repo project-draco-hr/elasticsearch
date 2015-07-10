@@ -2,32 +2,37 @@
   if (script == null) {
     throw new IllegalArgumentException("The parameter script (Script) must not be null.");
   }
-  String lang=script.getLang();
-  if (lang == null) {
-    lang=defaultLang;
-  }
+  String lang=script.getLang() == null ? defaultLang : script.getLang();
+  ScriptType type=script.getType();
+  String name=script.getScript();
   if (logger.isTraceEnabled()) {
-    logger.trace("Compiling lang: [{}] type: [{}] script: {}",lang,script.getType(),script.getScript());
+    logger.trace("Compiling lang: [{}] type: [{}] script: {}",lang,type,name);
   }
   ScriptEngineService scriptEngineService=getScriptEngineServiceForLang(lang);
-  String cacheKey=getCacheKey(scriptEngineService,script.getScript());
-  if (script.getType() == ScriptType.FILE) {
-    CompiledScript compiled=staticCache.get(cacheKey);
-    if (compiled == null) {
-      throw new IllegalArgumentException("Unable to find on disk script " + script.getScript());
+  if (type == ScriptType.FILE) {
+    String cacheKey=getCacheKey(scriptEngineService,name,null);
+    CompiledScript compiledScript=staticCache.get(cacheKey);
+    if (compiledScript == null) {
+      throw new IllegalArgumentException("Unable to find on disk file script [" + name + "] using lang ["+ lang+ "]");
     }
-    return compiled;
+    return compiledScript;
   }
   String code=script.getScript();
-  if (script.getType() == ScriptType.INDEXED) {
-    final IndexedScript indexedScript=new IndexedScript(lang,script.getScript());
+  if (type == ScriptType.INDEXED) {
+    final IndexedScript indexedScript=new IndexedScript(lang,name);
+    name=indexedScript.id;
     code=getScriptFromIndex(indexedScript.lang,indexedScript.id);
-    cacheKey=getCacheKey(scriptEngineService,code);
   }
-  CompiledScript compiled=cache.getIfPresent(cacheKey);
-  if (compiled == null) {
-    compiled=new CompiledScript(lang,scriptEngineService.compile(code));
-    cache.put(cacheKey,compiled);
+  String cacheKey=getCacheKey(scriptEngineService,type == ScriptType.INLINE ? null : name,code);
+  CompiledScript compiledScript=cache.getIfPresent(cacheKey);
+  if (compiledScript == null) {
+    try {
+      compiledScript=new CompiledScript(type,name,lang,scriptEngineService.compile(code));
+    }
+ catch (    Exception exception) {
+      throw new ScriptException("Failed to compile " + type + " script ["+ name+ "] using lang ["+ lang+ "]",exception);
+    }
+    cache.put(cacheKey,compiledScript);
   }
-  return compiled;
+  return compiledScript;
 }
