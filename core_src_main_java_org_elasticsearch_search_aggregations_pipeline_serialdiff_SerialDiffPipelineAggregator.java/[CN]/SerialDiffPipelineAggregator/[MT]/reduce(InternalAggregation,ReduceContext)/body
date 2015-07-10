@@ -1,0 +1,32 @@
+{
+  InternalHistogram histo=(InternalHistogram)aggregation;
+  List<? extends InternalHistogram.Bucket> buckets=histo.getBuckets();
+  InternalHistogram.Factory<? extends InternalHistogram.Bucket> factory=histo.getFactory();
+  List newBuckets=new ArrayList<>();
+  EvictingQueue<Double> lagWindow=EvictingQueue.create(lag);
+  int counter=0;
+  for (  InternalHistogram.Bucket bucket : buckets) {
+    Double thisBucketValue=resolveBucketValue(histo,bucket,bucketsPaths()[0],gapPolicy);
+    InternalHistogram.Bucket newBucket=bucket;
+    counter+=1;
+    Double lagValue;
+    if (counter <= lag) {
+      lagValue=Double.NaN;
+    }
+ else {
+      lagValue=lagWindow.peek();
+    }
+    if (thisBucketValue == null) {
+      thisBucketValue=Double.NaN;
+    }
+    if (!Double.isNaN(thisBucketValue) && !Double.isNaN(lagValue)) {
+      double diff=thisBucketValue - lagValue;
+      List<InternalAggregation> aggs=new ArrayList<>(Lists.transform(bucket.getAggregations().asList(),AGGREGATION_TRANFORM_FUNCTION));
+      aggs.add(new InternalSimpleValue(name(),diff,formatter,new ArrayList<PipelineAggregator>(),metaData()));
+      newBucket=factory.createBucket(bucket.getKey(),bucket.getDocCount(),new InternalAggregations(aggs),bucket.getKeyed(),bucket.getFormatter());
+    }
+    newBuckets.add(newBucket);
+    lagWindow.add(thisBucketValue);
+  }
+  return factory.create(newBuckets,histo);
+}
