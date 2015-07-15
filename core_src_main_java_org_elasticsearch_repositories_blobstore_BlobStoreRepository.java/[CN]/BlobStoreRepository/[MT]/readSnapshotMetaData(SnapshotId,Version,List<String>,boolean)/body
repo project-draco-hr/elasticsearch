@@ -1,3 +1,41 @@
 {
-  return readSnapshotMetaData(snapshotId,legacyMetaData(snapshotVersion),indices,ignoreIndexErrors);
+  MetaData metaData;
+  if (snapshotVersion == null) {
+    assert ignoreIndexErrors;
+    if (globalMetaDataFormat.exists(snapshotsBlobContainer,snapshotId.getSnapshot())) {
+      snapshotVersion=Version.CURRENT;
+    }
+ else     if (globalMetaDataLegacyFormat.exists(snapshotsBlobContainer,snapshotId.getSnapshot())) {
+      snapshotVersion=Version.V_1_0_0;
+    }
+ else {
+      throw new SnapshotMissingException(snapshotId);
+    }
+  }
+  try {
+    metaData=globalMetaDataFormat(snapshotVersion).read(snapshotsBlobContainer,snapshotId.getSnapshot());
+  }
+ catch (  FileNotFoundException|NoSuchFileException ex) {
+    throw new SnapshotMissingException(snapshotId,ex);
+  }
+catch (  IOException ex) {
+    throw new SnapshotException(snapshotId,"failed to get snapshots",ex);
+  }
+  MetaData.Builder metaDataBuilder=MetaData.builder(metaData);
+  for (  String index : indices) {
+    BlobPath indexPath=basePath().add("indices").add(index);
+    BlobContainer indexMetaDataBlobContainer=blobStore().blobContainer(indexPath);
+    try {
+      metaDataBuilder.put(indexMetaDataFormat(snapshotVersion).read(indexMetaDataBlobContainer,snapshotId.getSnapshot()),false);
+    }
+ catch (    ElasticsearchParseException|IOException ex) {
+      if (ignoreIndexErrors) {
+        logger.warn("[{}] [{}] failed to read metadata for index",snapshotId,index,ex);
+      }
+ else {
+        throw ex;
+      }
+    }
+  }
+  return metaDataBuilder.build();
 }
