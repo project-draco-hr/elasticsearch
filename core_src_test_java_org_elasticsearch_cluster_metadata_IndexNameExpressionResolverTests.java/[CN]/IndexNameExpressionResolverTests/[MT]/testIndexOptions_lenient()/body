@@ -1,0 +1,49 @@
+{
+  MetaData.Builder mdBuilder=MetaData.builder().put(indexBuilder("foo").putAlias(AliasMetaData.builder("foofoobar"))).put(indexBuilder("foobar").putAlias(AliasMetaData.builder("foofoobar"))).put(indexBuilder("foofoo-closed").state(IndexMetaData.State.CLOSE)).put(indexBuilder("foofoo").putAlias(AliasMetaData.builder("barbaz")));
+  ClusterState state=ClusterState.builder(new ClusterName("_name")).metaData(mdBuilder).build();
+  IndexNameExpressionResolver indexNameExpressionResolver=new IndexNameExpressionResolver();
+  IndicesOptions lenientExpand=IndicesOptions.fromOptions(true,true,true,true);
+  IndicesOptions[] indicesOptions=new IndicesOptions[]{IndicesOptions.lenientExpandOpen(),lenientExpand};
+  for (  IndicesOptions options : indicesOptions) {
+    IndexNameExpressionResolver.Context context=new IndexNameExpressionResolver.Context(state,options);
+    String[] results=indexNameExpressionResolver.concreteIndices(context,"foo");
+    assertEquals(1,results.length);
+    assertEquals("foo",results[0]);
+    results=indexNameExpressionResolver.concreteIndices(context,"bar");
+    assertThat(results,emptyArray());
+    results=indexNameExpressionResolver.concreteIndices(context,"foofoo","foobar");
+    assertEquals(2,results.length);
+    assertThat(results,arrayContainingInAnyOrder("foofoo","foobar"));
+    results=indexNameExpressionResolver.concreteIndices(context,"foofoobar");
+    assertEquals(2,results.length);
+    assertEquals(new HashSet<>(Arrays.asList("foo","foobar")),new HashSet<>(Arrays.asList(results)));
+    results=indexNameExpressionResolver.concreteIndices(context,"foo","bar");
+    assertEquals(1,results.length);
+    assertThat(results,arrayContainingInAnyOrder("foo"));
+    results=indexNameExpressionResolver.concreteIndices(context,"barbaz","foobar");
+    assertEquals(2,results.length);
+    assertThat(results,arrayContainingInAnyOrder("foofoo","foobar"));
+    results=indexNameExpressionResolver.concreteIndices(context,"barbaz","bar");
+    assertEquals(1,results.length);
+    assertThat(results,arrayContainingInAnyOrder("foofoo"));
+    results=indexNameExpressionResolver.concreteIndices(context,"baz*");
+    assertThat(results,emptyArray());
+    results=indexNameExpressionResolver.concreteIndices(context,"foo","baz*");
+    assertEquals(1,results.length);
+    assertEquals("foo",results[0]);
+  }
+  IndexNameExpressionResolver.Context context=new IndexNameExpressionResolver.Context(state,IndicesOptions.lenientExpandOpen());
+  String[] results=indexNameExpressionResolver.concreteIndices(context,Strings.EMPTY_ARRAY);
+  assertEquals(3,results.length);
+  context=new IndexNameExpressionResolver.Context(state,lenientExpand);
+  results=indexNameExpressionResolver.concreteIndices(context,Strings.EMPTY_ARRAY);
+  assertEquals(4,results.length);
+  context=new IndexNameExpressionResolver.Context(state,IndicesOptions.lenientExpandOpen());
+  results=indexNameExpressionResolver.concreteIndices(context,"foofoo*");
+  assertEquals(3,results.length);
+  assertThat(results,arrayContainingInAnyOrder("foo","foobar","foofoo"));
+  context=new IndexNameExpressionResolver.Context(state,lenientExpand);
+  results=indexNameExpressionResolver.concreteIndices(context,"foofoo*");
+  assertEquals(4,results.length);
+  assertThat(results,arrayContainingInAnyOrder("foo","foobar","foofoo","foofoo-closed"));
+}

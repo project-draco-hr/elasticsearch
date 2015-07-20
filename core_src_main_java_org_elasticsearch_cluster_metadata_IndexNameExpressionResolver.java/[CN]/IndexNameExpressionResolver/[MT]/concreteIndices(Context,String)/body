@@ -1,0 +1,78 @@
+{
+  if (indexExpressions == null || indexExpressions.length == 0) {
+    indexExpressions=new String[]{MetaData.ALL};
+  }
+  MetaData metaData=context.getState().metaData();
+  IndicesOptions options=context.getOptions();
+  boolean failClosed=options.forbidClosedIndices() && options.ignoreUnavailable() == false;
+  boolean failNoIndices=options.ignoreUnavailable() == false;
+  if (indexExpressions.length == 1) {
+    failNoIndices=options.allowNoIndices() == false;
+  }
+  List<String> expressions=Arrays.asList(indexExpressions);
+  for (  ExpressionResolver expressionResolver : expressionResolvers) {
+    expressions=expressionResolver.resolve(context,expressions);
+  }
+  if (expressions.isEmpty()) {
+    if (!options.allowNoIndices()) {
+      IndexNotFoundException infe=new IndexNotFoundException((String)null);
+      infe.setResources("index_expression",indexExpressions);
+      throw infe;
+    }
+ else {
+      return Strings.EMPTY_ARRAY;
+    }
+  }
+  List<String> concreteIndices=new ArrayList<>(expressions.size());
+  for (  String expression : expressions) {
+    List<IndexMetaData> indexMetaDatas;
+    IndexMetaData indexMetaData=metaData.getIndices().get(expression);
+    if (indexMetaData == null) {
+      ImmutableOpenMap<String,AliasMetaData> indexAliasMap=metaData.aliases().get(expression);
+      if (indexAliasMap == null) {
+        if (failNoIndices) {
+          IndexNotFoundException infe=new IndexNotFoundException(expression);
+          infe.setResources("index_expression",expression);
+          throw infe;
+        }
+ else {
+          continue;
+        }
+      }
+      if (indexAliasMap.size() > 1 && !options.allowAliasesToMultipleIndices()) {
+        throw new IllegalArgumentException("Alias [" + expression + "] has more than one indices associated with it ["+ Arrays.toString(indexAliasMap.keys().toArray(String.class))+ "], can't execute a single index op");
+      }
+      indexMetaDatas=new ArrayList<>(indexAliasMap.size());
+      for (      ObjectObjectCursor<String,AliasMetaData> cursor : indexAliasMap) {
+        indexMetaDatas.add(metaData.getIndices().get(cursor.key));
+      }
+    }
+ else {
+      indexMetaDatas=Collections.singletonList(indexMetaData);
+    }
+    for (    IndexMetaData found : indexMetaDatas) {
+      if (found.getState() == IndexMetaData.State.CLOSE) {
+        if (failClosed) {
+          throw new IndexClosedException(new Index(found.getIndex()));
+        }
+ else {
+          if (options.forbidClosedIndices() == false) {
+            concreteIndices.add(found.getIndex());
+          }
+        }
+      }
+ else       if (found.getState() == IndexMetaData.State.OPEN) {
+        concreteIndices.add(found.getIndex());
+      }
+ else {
+        throw new IllegalStateException("index state [" + found.getState() + "] not supported");
+      }
+    }
+  }
+  if (options.allowNoIndices() == false && concreteIndices.isEmpty()) {
+    IndexNotFoundException infe=new IndexNotFoundException((String)null);
+    infe.setResources("index_expression",indexExpressions);
+    throw infe;
+  }
+  return concreteIndices.toArray(new String[concreteIndices.size()]);
+}

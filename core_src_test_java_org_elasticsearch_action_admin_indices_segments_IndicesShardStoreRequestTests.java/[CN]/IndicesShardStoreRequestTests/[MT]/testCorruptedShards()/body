@@ -1,0 +1,45 @@
+{
+  String index="test";
+  internalCluster().ensureAtLeastNumDataNodes(2);
+  assertAcked(prepareCreate(index).setSettings(Settings.builder().put(IndexMetaData.SETTING_NUMBER_OF_SHARDS,"5").put(MockFSDirectoryService.CHECK_INDEX_ON_CLOSE,false)));
+  indexRandomData(index);
+  ensureGreen(index);
+  logger.info("--> disable allocation");
+  disableAllocation(index);
+  logger.info("--> corrupt random shard copies");
+  Map<Integer,Set<String>> corruptedShardIDMap=new HashMap<>();
+  for (  String node : internalCluster().nodesInclude(index)) {
+    IndicesService indexServices=internalCluster().getInstance(IndicesService.class,node);
+    IndexService indexShards=indexServices.indexServiceSafe(index);
+    for (    Integer shardId : indexShards.shardIds()) {
+      IndexShard shard=indexShards.shardSafe(shardId);
+      if (randomBoolean()) {
+        shard.failShard("test",new CorruptIndexException("test corrupted",""));
+        Set<String> nodes=corruptedShardIDMap.get(shardId);
+        if (nodes == null) {
+          nodes=new HashSet<>();
+        }
+        nodes.add(node);
+        corruptedShardIDMap.put(shardId,nodes);
+      }
+    }
+  }
+  IndicesShardStoresResponse rsp=client().admin().indices().prepareShardStores(index).setShardStatuses("all").get();
+  ImmutableOpenIntMap<List<IndicesShardStoresResponse.StoreStatus>> shardStatuses=rsp.getStoreStatuses().get(index);
+  assertNotNull(shardStatuses);
+  assertThat(shardStatuses.size(),greaterThan(0));
+  for (  IntObjectCursor<List<IndicesShardStoresResponse.StoreStatus>> shardStatus : shardStatuses) {
+    for (    IndicesShardStoresResponse.StoreStatus status : shardStatus.value) {
+      if (corruptedShardIDMap.containsKey(shardStatus.key) && corruptedShardIDMap.get(shardStatus.key).contains(status.getNode().name())) {
+        assertThat(status.getVersion(),greaterThanOrEqualTo(0l));
+        assertThat(status.getStoreException(),notNullValue());
+      }
+ else {
+        assertThat(status.getVersion(),greaterThanOrEqualTo(0l));
+        assertNull(status.getStoreException());
+      }
+    }
+  }
+  logger.info("--> enable allocation");
+  enableAllocation(index);
+}

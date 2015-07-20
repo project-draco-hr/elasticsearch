@@ -16,12 +16,18 @@
   final int numPhase2Docs=scaledRandomIntBetween(25,200);
   final CountDownLatch phase1finished=new CountDownLatch(1);
   final CountDownLatch phase2finished=new CountDownLatch(1);
+  final CopyOnWriteArrayList<Throwable> exceptions=new CopyOnWriteArrayList<>();
   Thread thread=new Thread(){
     @Override public void run(){
       started.countDown();
       while (counter.get() < (numPhase1Docs + numPhase2Docs)) {
-        final IndexResponse indexResponse=client().prepareIndex(IDX,"doc",Integer.toString(counter.incrementAndGet())).setSource("foo","bar").get();
-        assertTrue(indexResponse.isCreated());
+        try {
+          final IndexResponse indexResponse=client().prepareIndex(IDX,"doc",Integer.toString(counter.incrementAndGet())).setSource("foo","bar").get();
+          assertTrue(indexResponse.isCreated());
+        }
+ catch (        Throwable t) {
+          exceptions.add(t);
+        }
         final int docCount=counter.get();
         if (docCount == numPhase1Docs) {
           phase1finished.countDown();
@@ -39,6 +45,7 @@
   Settings build=Settings.builder().put("index.routing.allocation.exclude._name",node1).build();
   client().admin().indices().prepareUpdateSettings(IDX).setSettings(build).execute().actionGet();
   phase2finished.await();
+  ExceptionsHelper.rethrowAndSuppress(exceptions);
   ensureGreen(IDX);
   thread.join();
   logger.info("--> performing query");

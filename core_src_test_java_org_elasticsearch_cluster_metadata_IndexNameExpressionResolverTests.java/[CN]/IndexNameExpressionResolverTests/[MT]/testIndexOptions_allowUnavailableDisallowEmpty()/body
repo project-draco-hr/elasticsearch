@@ -1,0 +1,41 @@
+{
+  MetaData.Builder mdBuilder=MetaData.builder().put(indexBuilder("foo")).put(indexBuilder("foobar")).put(indexBuilder("foofoo-closed").state(IndexMetaData.State.CLOSE)).put(indexBuilder("foofoo").putAlias(AliasMetaData.builder("barbaz")));
+  ClusterState state=ClusterState.builder(new ClusterName("_name")).metaData(mdBuilder).build();
+  IndexNameExpressionResolver indexNameExpressionResolver=new IndexNameExpressionResolver();
+  IndicesOptions expandOpen=IndicesOptions.fromOptions(true,false,true,false);
+  IndicesOptions expand=IndicesOptions.fromOptions(true,false,true,true);
+  IndicesOptions[] indicesOptions=new IndicesOptions[]{expandOpen,expand};
+  for (  IndicesOptions options : indicesOptions) {
+    IndexNameExpressionResolver.Context context=new IndexNameExpressionResolver.Context(state,options);
+    String[] results=indexNameExpressionResolver.concreteIndices(context,"foo");
+    assertEquals(1,results.length);
+    assertEquals("foo",results[0]);
+    try {
+      indexNameExpressionResolver.concreteIndices(context,"bar");
+      fail();
+    }
+ catch (    IndexNotFoundException e) {
+      assertThat(e.getIndex(),equalTo("bar"));
+    }
+    try {
+      indexNameExpressionResolver.concreteIndices(context,"baz*");
+      fail();
+    }
+ catch (    IndexNotFoundException e) {
+      assertThat(e.getIndex(),equalTo("baz*"));
+    }
+    try {
+      indexNameExpressionResolver.concreteIndices(context,"foo","baz*");
+      fail();
+    }
+ catch (    IndexNotFoundException e) {
+      assertThat(e.getIndex(),equalTo("baz*"));
+    }
+  }
+  IndexNameExpressionResolver.Context context=new IndexNameExpressionResolver.Context(state,expandOpen);
+  String[] results=indexNameExpressionResolver.concreteIndices(context,Strings.EMPTY_ARRAY);
+  assertEquals(3,results.length);
+  context=new IndexNameExpressionResolver.Context(state,expand);
+  results=indexNameExpressionResolver.concreteIndices(context,Strings.EMPTY_ARRAY);
+  assertEquals(4,results.length);
+}

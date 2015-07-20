@@ -1,0 +1,34 @@
+{
+  DiscoveryNodes.Builder nodesBuilder;
+synchronized (pendingJoinRequests) {
+    if (pendingJoinRequests.isEmpty()) {
+      return currentState;
+    }
+    nodesBuilder=DiscoveryNodes.builder(currentState.nodes());
+    Iterator<Map.Entry<DiscoveryNode,List<MembershipAction.JoinCallback>>> iterator=pendingJoinRequests.entrySet().iterator();
+    while (iterator.hasNext()) {
+      Map.Entry<DiscoveryNode,List<MembershipAction.JoinCallback>> entry=iterator.next();
+      final DiscoveryNode node=entry.getKey();
+      joinCallbacksToRespondTo.addAll(entry.getValue());
+      iterator.remove();
+      if (currentState.nodes().nodeExists(node.id())) {
+        logger.debug("received a join request for an existing node [{}]",node);
+      }
+ else {
+        nodeAdded=true;
+        nodesBuilder.put(node);
+        for (        DiscoveryNode existingNode : currentState.nodes()) {
+          if (node.address().equals(existingNode.address())) {
+            nodesBuilder.remove(existingNode.id());
+            logger.warn("received join request from node [{}], but found existing node {} with same address, removing existing node",node,existingNode);
+          }
+        }
+      }
+    }
+  }
+  final ClusterState.Builder newState=ClusterState.builder(currentState);
+  if (nodeAdded) {
+    newState.nodes(nodesBuilder);
+  }
+  return newState.build();
+}

@@ -1,2 +1,54 @@
 {
+  final ModelIndex index=maxNode.getIndex(idx);
+  Decision decision=null;
+  if (index != null) {
+    if (logger.isTraceEnabled()) {
+      logger.trace("Try relocating shard for index index [{}] from node [{}] to node [{}]",idx,maxNode.getNodeId(),minNode.getNodeId());
+    }
+    final RoutingNode node=routingNodes.node(minNode.getNodeId());
+    ShardRouting candidate=null;
+    final AllocationDeciders deciders=allocation.deciders();
+    final ArrayList<ShardRouting> shards=new ArrayList<>(index.getAllShards());
+    for (    ShardRouting shard : shards) {
+      if (shard.started()) {
+        Decision allocationDecision=deciders.canAllocate(shard,node,allocation);
+        Decision rebalanceDecision=deciders.canRebalance(shard,allocation);
+        if (((allocationDecision.type() == Type.YES) || (allocationDecision.type() == Type.THROTTLE)) && ((rebalanceDecision.type() == Type.YES) || (rebalanceDecision.type() == Type.THROTTLE))) {
+          Decision srcDecision;
+          if ((srcDecision=maxNode.removeShard(shard)) != null) {
+            minNode.addShard(shard,srcDecision);
+            final float delta=weight.weight(operation,this,minNode,idx) - weight.weight(operation,this,maxNode,idx);
+            if (delta < minCost || (candidate != null && delta == minCost && candidate.id() > shard.id())) {
+              minCost=delta;
+              candidate=shard;
+              decision=new Decision.Multi().add(allocationDecision).add(rebalanceDecision);
+            }
+            minNode.removeShard(shard);
+            maxNode.addShard(shard,srcDecision);
+          }
+        }
+      }
+    }
+    if (candidate != null) {
+      maxNode.removeShard(candidate);
+      minNode.addShard(candidate,decision);
+      if (decision.type() == Type.YES) {
+        if (logger.isTraceEnabled()) {
+          logger.trace("Relocate shard [{}] from node [{}] to node [{}]",candidate,maxNode.getNodeId(),minNode.getNodeId());
+        }
+        if (candidate.started()) {
+          RoutingNode lowRoutingNode=routingNodes.node(minNode.getNodeId());
+          routingNodes.relocate(candidate,lowRoutingNode.nodeId());
+        }
+ else {
+          routingNodes.initialize(candidate,routingNodes.node(minNode.getNodeId()).nodeId());
+        }
+        return true;
+      }
+    }
+  }
+  if (logger.isTraceEnabled()) {
+    logger.trace("Couldn't find shard to relocate from node [{}] to node [{}] allocation decision [{}]",maxNode.getNodeId(),minNode.getNodeId(),decision == null ? "NO" : decision.type().name());
+  }
+  return false;
 }

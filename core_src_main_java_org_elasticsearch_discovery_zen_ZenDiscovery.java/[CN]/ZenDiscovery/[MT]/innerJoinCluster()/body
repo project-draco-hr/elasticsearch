@@ -1,6 +1,7 @@
 {
   DiscoveryNode masterNode=null;
   final Thread currentThread=Thread.currentThread();
+  nodeJoinController.startAccumulatingJoins();
   while (masterNode == null && joinThreadControl.joinThreadActive(currentThread)) {
     masterNode=findMaster();
   }
@@ -9,38 +10,25 @@
     return;
   }
   if (clusterService.localNode().equals(masterNode)) {
-    clusterService.submitStateUpdateTask("zen-disco-join (elected_as_master)",Priority.IMMEDIATE,new ProcessedClusterStateNonMasterUpdateTask(){
-      @Override public ClusterState execute(      ClusterState currentState){
-        if (currentState.nodes().masterNode() != null) {
-          logger.trace("join thread elected local node as master, but there is already a master in place: {}",currentState.nodes().masterNode());
-          return currentState;
-        }
-        DiscoveryNodes.Builder builder=new DiscoveryNodes.Builder(currentState.nodes()).masterNodeId(currentState.nodes().localNode().id());
-        ClusterBlocks clusterBlocks=ClusterBlocks.builder().blocks(currentState.blocks()).removeGlobalBlock(discoverySettings.getNoMasterBlock()).build();
-        currentState=ClusterState.builder(currentState).nodes(builder).blocks(clusterBlocks).build();
-        RoutingAllocation.Result result=routingService.getAllocationService().reroute(currentState);
-        return ClusterState.builder(currentState).routingResult(result).build();
-      }
-      @Override public void onFailure(      String source,      Throwable t){
-        logger.error("unexpected failure during [{}]",t,source);
-        joinThreadControl.markThreadAsDoneAndStartNew(currentThread);
-      }
-      @Override public void clusterStateProcessed(      String source,      ClusterState oldState,      ClusterState newState){
-        if (newState.nodes().localNodeMaster()) {
-          joinThreadControl.markThreadAsDone(currentThread);
-          nodesFD.updateNodesAndPing(newState);
-        }
- else {
-          joinThreadControl.markThreadAsDoneAndStartNew(currentThread);
-        }
+    final int requiredJoins=Math.max(0,electMaster.minimumMasterNodes() - 1);
+    logger.debug("elected as master, waiting for incoming joins ([{}] needed)",requiredJoins);
+    nodeJoinController.waitToBeElectedAsMaster(requiredJoins,masterElectionWaitForJoinsTimeout,new NodeJoinController.Callback(){
+      @Override public void onElectedAsMaster(      ClusterState state){
+        joinThreadControl.markThreadAsDone(currentThread);
+        nodesFD.updateNodesAndPing(state);
         sendInitialStateEventIfNeeded();
         long count=clusterJoinsCounter.incrementAndGet();
         logger.trace("cluster joins counter set to [{}] (elected as master)",count);
+      }
+      @Override public void onFailure(      Throwable t){
+        logger.trace("failed while waiting for nodes to join, rejoining",t);
+        joinThreadControl.markThreadAsDoneAndStartNew(currentThread);
       }
     }
 );
   }
  else {
+    nodeJoinController.stopAccumulatingJoins();
     final boolean success=joinElectedMaster(masterNode);
     final DiscoveryNode finalMasterNode=masterNode;
     clusterService.submitStateUpdateTask("finalize_join (" + masterNode + ")",new ClusterStateNonMasterUpdateTask(){

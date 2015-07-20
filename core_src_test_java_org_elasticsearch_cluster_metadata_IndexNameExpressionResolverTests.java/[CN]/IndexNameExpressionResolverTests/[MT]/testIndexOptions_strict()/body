@@ -1,0 +1,71 @@
+{
+  MetaData.Builder mdBuilder=MetaData.builder().put(indexBuilder("foo").putAlias(AliasMetaData.builder("foofoobar"))).put(indexBuilder("foobar").putAlias(AliasMetaData.builder("foofoobar"))).put(indexBuilder("foofoo-closed").state(IndexMetaData.State.CLOSE)).put(indexBuilder("foofoo").putAlias(AliasMetaData.builder("barbaz")));
+  ClusterState state=ClusterState.builder(new ClusterName("_name")).metaData(mdBuilder).build();
+  IndexNameExpressionResolver indexNameExpressionResolver=new IndexNameExpressionResolver();
+  IndicesOptions[] indicesOptions=new IndicesOptions[]{IndicesOptions.strictExpandOpen(),IndicesOptions.strictExpand()};
+  for (  IndicesOptions options : indicesOptions) {
+    IndexNameExpressionResolver.Context context=new IndexNameExpressionResolver.Context(state,options);
+    String[] results=indexNameExpressionResolver.concreteIndices(context,"foo");
+    assertEquals(1,results.length);
+    assertEquals("foo",results[0]);
+    try {
+      indexNameExpressionResolver.concreteIndices(context,"bar");
+      fail();
+    }
+ catch (    IndexNotFoundException e) {
+      assertThat(e.getIndex(),equalTo("bar"));
+    }
+    results=indexNameExpressionResolver.concreteIndices(context,"foofoo","foobar");
+    assertEquals(2,results.length);
+    assertThat(results,arrayContainingInAnyOrder("foofoo","foobar"));
+    results=indexNameExpressionResolver.concreteIndices(context,"foofoobar");
+    assertEquals(new HashSet<>(Arrays.asList("foo","foobar")),new HashSet<>(Arrays.asList(results)));
+    try {
+      indexNameExpressionResolver.concreteIndices(context,"bar");
+      fail();
+    }
+ catch (    IndexNotFoundException e) {
+      assertThat(e.getIndex(),equalTo("bar"));
+    }
+    try {
+      indexNameExpressionResolver.concreteIndices(context,"foo","bar");
+      fail();
+    }
+ catch (    IndexNotFoundException e) {
+      assertThat(e.getIndex(),equalTo("bar"));
+    }
+    results=indexNameExpressionResolver.concreteIndices(context,"barbaz","foobar");
+    assertEquals(2,results.length);
+    assertThat(results,arrayContainingInAnyOrder("foofoo","foobar"));
+    try {
+      indexNameExpressionResolver.concreteIndices(context,"barbaz","bar");
+      fail();
+    }
+ catch (    IndexNotFoundException e) {
+      assertThat(e.getIndex(),equalTo("bar"));
+    }
+    results=indexNameExpressionResolver.concreteIndices(context,"baz*");
+    assertThat(results,emptyArray());
+    results=indexNameExpressionResolver.concreteIndices(context,"foo","baz*");
+    assertEquals(1,results.length);
+    assertEquals("foo",results[0]);
+  }
+  IndexNameExpressionResolver.Context context=new IndexNameExpressionResolver.Context(state,IndicesOptions.strictExpandOpen());
+  String[] results=indexNameExpressionResolver.concreteIndices(context,Strings.EMPTY_ARRAY);
+  assertEquals(3,results.length);
+  results=indexNameExpressionResolver.concreteIndices(context,null);
+  assertEquals(3,results.length);
+  context=new IndexNameExpressionResolver.Context(state,IndicesOptions.strictExpand());
+  results=indexNameExpressionResolver.concreteIndices(context,Strings.EMPTY_ARRAY);
+  assertEquals(4,results.length);
+  results=indexNameExpressionResolver.concreteIndices(context,null);
+  assertEquals(4,results.length);
+  context=new IndexNameExpressionResolver.Context(state,IndicesOptions.strictExpandOpen());
+  results=indexNameExpressionResolver.concreteIndices(context,"foofoo*");
+  assertEquals(3,results.length);
+  assertThat(results,arrayContainingInAnyOrder("foo","foobar","foofoo"));
+  context=new IndexNameExpressionResolver.Context(state,IndicesOptions.strictExpand());
+  results=indexNameExpressionResolver.concreteIndices(context,"foofoo*");
+  assertEquals(4,results.length);
+  assertThat(results,arrayContainingInAnyOrder("foo","foobar","foofoo","foofoo-closed"));
+}

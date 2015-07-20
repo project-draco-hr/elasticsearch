@@ -1,0 +1,31 @@
+{
+  ImmutableOpenMap.Builder<String,ImmutableOpenIntMap<java.util.List<IndicesShardStoresResponse.StoreStatus>>> indicesStoreStatusesBuilder=ImmutableOpenMap.builder();
+  ImmutableList.Builder<IndicesShardStoresResponse.Failure> failureBuilder=ImmutableList.builder();
+  for (  Response fetchResponse : fetchResponses) {
+    ImmutableOpenIntMap<java.util.List<IndicesShardStoresResponse.StoreStatus>> indexStoreStatuses=indicesStoreStatusesBuilder.get(fetchResponse.shardId.getIndex());
+    final ImmutableOpenIntMap.Builder<java.util.List<IndicesShardStoresResponse.StoreStatus>> indexShardsBuilder;
+    if (indexStoreStatuses == null) {
+      indexShardsBuilder=ImmutableOpenIntMap.builder();
+    }
+ else {
+      indexShardsBuilder=ImmutableOpenIntMap.builder(indexStoreStatuses);
+    }
+    java.util.List<IndicesShardStoresResponse.StoreStatus> storeStatuses=indexShardsBuilder.get(fetchResponse.shardId.id());
+    if (storeStatuses == null) {
+      storeStatuses=new ArrayList<>();
+    }
+    for (    NodeGatewayStartedShards response : fetchResponse.responses) {
+      if (shardExistsInNode(response)) {
+        IndicesShardStoresResponse.StoreStatus.Allocation allocation=getAllocation(fetchResponse.shardId.getIndex(),fetchResponse.shardId.id(),response.getNode());
+        storeStatuses.add(new IndicesShardStoresResponse.StoreStatus(response.getNode(),response.version(),allocation,response.storeException()));
+      }
+    }
+    CollectionUtil.timSort(storeStatuses);
+    indexShardsBuilder.put(fetchResponse.shardId.id(),storeStatuses);
+    indicesStoreStatusesBuilder.put(fetchResponse.shardId.getIndex(),indexShardsBuilder.build());
+    for (    FailedNodeException failure : fetchResponse.failures) {
+      failureBuilder.add(new IndicesShardStoresResponse.Failure(failure.nodeId(),fetchResponse.shardId.getIndex(),fetchResponse.shardId.id(),failure.getCause()));
+    }
+  }
+  listener.onResponse(new IndicesShardStoresResponse(indicesStoreStatusesBuilder.build(),failureBuilder.build()));
+}

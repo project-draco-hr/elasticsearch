@@ -1,24 +1,15 @@
 {
   try {
-    String snapshotBlobName=snapshotBlobName(snapshotId);
-    if (snapshotsBlobContainer.blobExists(snapshotBlobName)) {
+    if (snapshotFormat.exists(snapshotsBlobContainer,snapshotId.getSnapshot()) || snapshotLegacyFormat.exists(snapshotsBlobContainer,snapshotId.getSnapshot())) {
       throw new InvalidSnapshotNameException(snapshotId,"snapshot with such name already exists");
     }
-    try (StreamOutput output=compressIfNeeded(snapshotsBlobContainer.createOutput(metaDataBlobName(snapshotId,false)))){
-      writeGlobalMetaData(metaData,output);
-    }
-     for (    String index : indices) {
+    globalMetaDataFormat.write(metaData,snapshotsBlobContainer,snapshotId.getSnapshot());
+    for (    String index : indices) {
       final IndexMetaData indexMetaData=metaData.index(index);
       final BlobPath indexPath=basePath().add("indices").add(index);
       final BlobContainer indexMetaDataBlobContainer=blobStore().blobContainer(indexPath);
-      try (StreamOutput output=compressIfNeeded(indexMetaDataBlobContainer.createOutput(snapshotBlobName(snapshotId)))){
-        XContentBuilder builder=XContentFactory.contentBuilder(XContentType.JSON,output);
-        builder.startObject();
-        IndexMetaData.Builder.toXContent(indexMetaData,builder,ToXContent.EMPTY_PARAMS);
-        builder.endObject();
-        builder.close();
-      }
-     }
+      indexMetaDataFormat.write(indexMetaData,indexMetaDataBlobContainer,snapshotId.getSnapshot());
+    }
   }
  catch (  IOException ex) {
     throw new SnapshotCreationException(snapshotId,ex);

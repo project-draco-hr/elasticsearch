@@ -1,0 +1,83 @@
+{
+  List<String> resolvedExpressions=expressions != null ? Arrays.asList(expressions) : Collections.<String>emptyList();
+  Context context=new Context(state,IndicesOptions.lenientExpandOpen());
+  for (  ExpressionResolver expressionResolver : expressionResolvers) {
+    resolvedExpressions=expressionResolver.resolve(context,resolvedExpressions);
+  }
+  if (isAllIndices(resolvedExpressions)) {
+    return resolveSearchRoutingAllIndices(state.metaData(),routing);
+  }
+  if (resolvedExpressions.size() == 1) {
+    return resolveSearchRoutingSingleValue(state.metaData(),routing,resolvedExpressions.get(0));
+  }
+  Map<String,Set<String>> routings=null;
+  Set<String> paramRouting=null;
+  Set<String> norouting=new HashSet<>();
+  if (routing != null) {
+    paramRouting=Strings.splitStringByCommaToSet(routing);
+  }
+  for (  String expression : resolvedExpressions) {
+    ImmutableOpenMap<String,AliasMetaData> indexToRoutingMap=state.metaData().getAliases().get(expression);
+    if (indexToRoutingMap != null && !indexToRoutingMap.isEmpty()) {
+      for (      ObjectObjectCursor<String,AliasMetaData> indexRouting : indexToRoutingMap) {
+        if (!norouting.contains(indexRouting.key)) {
+          if (!indexRouting.value.searchRoutingValues().isEmpty()) {
+            if (routings == null) {
+              routings=newHashMap();
+            }
+            Set<String> r=routings.get(indexRouting.key);
+            if (r == null) {
+              r=new HashSet<>();
+              routings.put(indexRouting.key,r);
+            }
+            r.addAll(indexRouting.value.searchRoutingValues());
+            if (paramRouting != null) {
+              r.retainAll(paramRouting);
+            }
+            if (r.isEmpty()) {
+              routings.remove(indexRouting.key);
+            }
+          }
+ else {
+            if (!norouting.contains(indexRouting.key)) {
+              norouting.add(indexRouting.key);
+              if (paramRouting != null) {
+                Set<String> r=new HashSet<>(paramRouting);
+                if (routings == null) {
+                  routings=newHashMap();
+                }
+                routings.put(indexRouting.key,r);
+              }
+ else {
+                if (routings != null) {
+                  routings.remove(indexRouting.key);
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+ else {
+      if (!norouting.contains(expression)) {
+        norouting.add(expression);
+        if (paramRouting != null) {
+          Set<String> r=new HashSet<>(paramRouting);
+          if (routings == null) {
+            routings=newHashMap();
+          }
+          routings.put(expression,r);
+        }
+ else {
+          if (routings != null) {
+            routings.remove(expression);
+          }
+        }
+      }
+    }
+  }
+  if (routings == null || routings.isEmpty()) {
+    return null;
+  }
+  return routings;
+}

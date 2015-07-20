@@ -1,0 +1,50 @@
+{
+  List<String> resolvedExpressions=expressions != null ? Arrays.asList(expressions) : Collections.<String>emptyList();
+  Context context=new Context(state,IndicesOptions.lenientExpandOpen());
+  for (  ExpressionResolver expressionResolver : expressionResolvers) {
+    resolvedExpressions=expressionResolver.resolve(context,resolvedExpressions);
+  }
+  if (isAllIndices(resolvedExpressions)) {
+    return null;
+  }
+  if (resolvedExpressions.size() == 1) {
+    String alias=resolvedExpressions.get(0);
+    IndexMetaData indexMetaData=state.metaData().getIndices().get(index);
+    if (indexMetaData == null) {
+      throw new IndexNotFoundException(index);
+    }
+    AliasMetaData aliasMetaData=indexMetaData.aliases().get(alias);
+    boolean filteringRequired=aliasMetaData != null && aliasMetaData.filteringRequired();
+    if (!filteringRequired) {
+      return null;
+    }
+    return new String[]{alias};
+  }
+  List<String> filteringAliases=null;
+  for (  String alias : resolvedExpressions) {
+    if (alias.equals(index)) {
+      return null;
+    }
+    IndexMetaData indexMetaData=state.metaData().getIndices().get(index);
+    if (indexMetaData == null) {
+      throw new IndexNotFoundException(index);
+    }
+    AliasMetaData aliasMetaData=indexMetaData.aliases().get(alias);
+    if (aliasMetaData != null) {
+      boolean filteringRequired=aliasMetaData.filteringRequired();
+      if (filteringRequired) {
+        if (filteringAliases == null) {
+          filteringAliases=newArrayList();
+        }
+        filteringAliases.add(alias);
+      }
+ else {
+        return null;
+      }
+    }
+  }
+  if (filteringAliases == null) {
+    return null;
+  }
+  return filteringAliases.toArray(new String[filteringAliases.size()]);
+}
