@@ -6,54 +6,46 @@
   }
   final boolean docValues=fieldType.hasDocValues();
   final String key=fieldNames.indexName();
-  IndexFieldData<?> fieldData=loadedFieldData.get(key);
-  if (fieldData == null) {
-    fieldLoadingLock.acquire(key);
-    try {
-      fieldData=loadedFieldData.get(key);
-      if (fieldData == null) {
-        IndexFieldData.Builder builder=null;
-        String format=type.getFormat(indexSettings);
-        if (format != null && FieldDataType.DOC_VALUES_FORMAT_VALUE.equals(format) && !docValues) {
-          logger.warn("field [" + fieldNames.fullName() + "] has no doc values, will use default field data format");
-          format=null;
-        }
-        if (format != null) {
-          builder=buildersByTypeAndFormat.get(Tuple.tuple(type.getType(),format));
-          if (builder == null) {
-            logger.warn("failed to find format [" + format + "] for field ["+ fieldNames.fullName()+ "], will use default");
-          }
-        }
-        if (builder == null && docValues) {
-          builder=docValuesBuildersByType.get(type.getType());
-        }
-        if (builder == null) {
-          builder=buildersByType.get(type.getType());
-        }
-        if (builder == null) {
-          throw new IllegalArgumentException("failed to find field data builder for field " + fieldNames.fullName() + ", and type "+ type.getType());
-        }
-        IndexFieldDataCache cache=fieldDataCaches.get(fieldNames.indexName());
-        if (cache == null) {
-          String cacheType=type.getSettings().get("cache",indexSettings.get(FIELDDATA_CACHE_KEY,FIELDDATA_CACHE_VALUE_NODE));
-          if (FIELDDATA_CACHE_VALUE_NODE.equals(cacheType)) {
-            cache=indicesFieldDataCache.buildIndexFieldDataCache(indexService,index,fieldNames,type);
-          }
- else           if ("none".equals(cacheType)) {
-            cache=new IndexFieldDataCache.None();
-          }
- else {
-            throw new IllegalArgumentException("cache type not supported [" + cacheType + "] for field ["+ fieldNames.fullName()+ "]");
-          }
-          fieldDataCaches.put(fieldNames.indexName(),cache);
-        }
-        fieldData=builder.build(index,indexSettings,fieldType,cache,circuitBreakerService,indexService.mapperService());
-        loadedFieldData.put(fieldNames.indexName(),fieldData);
+  fieldLoadingLock.acquire(key);
+  try {
+    IndexFieldData.Builder builder=null;
+    String format=type.getFormat(indexSettings);
+    if (format != null && FieldDataType.DOC_VALUES_FORMAT_VALUE.equals(format) && !docValues) {
+      logger.warn("field [" + fieldNames.fullName() + "] has no doc values, will use default field data format");
+      format=null;
+    }
+    if (format != null) {
+      builder=buildersByTypeAndFormat.get(Tuple.tuple(type.getType(),format));
+      if (builder == null) {
+        logger.warn("failed to find format [" + format + "] for field ["+ fieldNames.fullName()+ "], will use default");
       }
     }
-  finally {
-      fieldLoadingLock.release(key);
+    if (builder == null && docValues) {
+      builder=docValuesBuildersByType.get(type.getType());
     }
+    if (builder == null) {
+      builder=buildersByType.get(type.getType());
+    }
+    if (builder == null) {
+      throw new IllegalArgumentException("failed to find field data builder for field " + fieldNames.fullName() + ", and type "+ type.getType());
+    }
+    IndexFieldDataCache cache=fieldDataCaches.get(fieldNames.indexName());
+    if (cache == null) {
+      String cacheType=type.getSettings().get("cache",indexSettings.get(FIELDDATA_CACHE_KEY,FIELDDATA_CACHE_VALUE_NODE));
+      if (FIELDDATA_CACHE_VALUE_NODE.equals(cacheType)) {
+        cache=indicesFieldDataCache.buildIndexFieldDataCache(indexService,index,fieldNames,type);
+      }
+ else       if ("none".equals(cacheType)) {
+        cache=new IndexFieldDataCache.None();
+      }
+ else {
+        throw new IllegalArgumentException("cache type not supported [" + cacheType + "] for field ["+ fieldNames.fullName()+ "]");
+      }
+      fieldDataCaches.put(fieldNames.indexName(),cache);
+    }
+    return (IFD)builder.build(index,indexSettings,fieldType,cache,circuitBreakerService,indexService.mapperService());
   }
-  return (IFD)fieldData;
+  finally {
+    fieldLoadingLock.release(key);
+  }
 }
