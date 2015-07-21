@@ -1,0 +1,26 @@
+{
+  MetaData metaData=MetaData.builder().put(IndexMetaData.builder(shardId.getIndex()).settings(settings(Version.CURRENT)).numberOfShards(1).numberOfReplicas(2)).build();
+  RoutingTable routingTable=RoutingTable.builder().addAsRecovery(metaData.index(shardId.getIndex())).build();
+  ClusterState state=ClusterState.builder(org.elasticsearch.cluster.ClusterName.DEFAULT).metaData(metaData).routingTable(routingTable).nodes(DiscoveryNodes.builder().put(node1).put(node2).put(node3)).build();
+  RoutingAllocation allocation=new RoutingAllocation(yesAllocationDeciders(),state.routingNodes(),state.nodes(),null);
+  boolean changed=testAllocator.allocateUnassigned(allocation);
+  assertThat(changed,equalTo(false));
+  assertThat(allocation.routingNodes().unassigned().ignored().size(),equalTo(1));
+  assertThat(allocation.routingNodes().unassigned().ignored().get(0).shardId(),equalTo(shardId));
+  assertThat(allocation.routingNodes().shardsWithState(ShardRoutingState.UNASSIGNED).size(),equalTo(2));
+  testAllocator.addData(node1,1);
+  allocation=new RoutingAllocation(yesAllocationDeciders(),state.routingNodes(),state.nodes(),null);
+  changed=testAllocator.allocateUnassigned(allocation);
+  assertThat(changed,equalTo(false));
+  assertThat(allocation.routingNodes().unassigned().ignored().size(),equalTo(1));
+  assertThat(allocation.routingNodes().unassigned().ignored().get(0).shardId(),equalTo(shardId));
+  assertThat(allocation.routingNodes().shardsWithState(ShardRoutingState.UNASSIGNED).size(),equalTo(2));
+  testAllocator.addData(node2,2);
+  allocation=new RoutingAllocation(yesAllocationDeciders(),state.routingNodes(),state.nodes(),null);
+  changed=testAllocator.allocateUnassigned(allocation);
+  assertThat(changed,equalTo(true));
+  assertThat(allocation.routingNodes().unassigned().ignored().size(),equalTo(0));
+  assertThat(allocation.routingNodes().shardsWithState(ShardRoutingState.UNASSIGNED).size(),equalTo(2));
+  assertThat(allocation.routingNodes().shardsWithState(ShardRoutingState.INITIALIZING).size(),equalTo(1));
+  assertThat(allocation.routingNodes().shardsWithState(ShardRoutingState.INITIALIZING).get(0).currentNodeId(),equalTo(node2.id()));
+}

@@ -1,0 +1,54 @@
+{
+  final Map<DiscoveryNode,Long> nodesWithVersion=Maps.newHashMap();
+  int numberOfAllocationsFound=0;
+  long highestVersion=-1;
+  for (  TransportNodesListGatewayStartedShards.NodeGatewayStartedShards nodeShardState : shardState.getData().values()) {
+    long version=nodeShardState.version();
+    DiscoveryNode node=nodeShardState.getNode();
+    if (ignoreNodes.contains(node.id())) {
+      continue;
+    }
+    if (nodeShardState.storeException() == null) {
+      logger.trace("[{}] on node [{}] has version [{}] of shard",shard,nodeShardState.getNode(),version);
+    }
+ else {
+      logger.trace("[{}] on node [{}] has version [{}] but the store can not be opened, treating as version -1",nodeShardState.storeException(),shard,nodeShardState.getNode(),version);
+      version=-1;
+    }
+    if (recoveryOnAnyNode) {
+      numberOfAllocationsFound++;
+      if (version > highestVersion) {
+        highestVersion=version;
+      }
+      nodesWithVersion.put(node,version);
+    }
+ else     if (version != -1) {
+      numberOfAllocationsFound++;
+      if (version > highestVersion) {
+        highestVersion=version;
+        nodesWithVersion.clear();
+        nodesWithVersion.put(node,version);
+      }
+ else       if (version == highestVersion) {
+        nodesWithVersion.put(node,version);
+      }
+    }
+  }
+  List<DiscoveryNode> nodesWithHighestVersion=Lists.newArrayList();
+  nodesWithHighestVersion.addAll(nodesWithVersion.keySet());
+  CollectionUtil.timSort(nodesWithHighestVersion,new Comparator<DiscoveryNode>(){
+    @Override public int compare(    DiscoveryNode o1,    DiscoveryNode o2){
+      return Long.compare(nodesWithVersion.get(o2),nodesWithVersion.get(o1));
+    }
+  }
+);
+  if (logger.isTraceEnabled()) {
+    StringBuilder sb=new StringBuilder("[");
+    for (    DiscoveryNode n : nodesWithVersion.keySet()) {
+      sb.append("[").append(n.getName()).append("]").append(" -> ").append(nodesWithVersion.get(n)).append(", ");
+    }
+    sb.append("]");
+    logger.trace("{} candidates for allocation: {}",shard,sb.toString());
+  }
+  return new NodesAndVersions(Collections.unmodifiableList(nodesWithHighestVersion),numberOfAllocationsFound,highestVersion);
+}
