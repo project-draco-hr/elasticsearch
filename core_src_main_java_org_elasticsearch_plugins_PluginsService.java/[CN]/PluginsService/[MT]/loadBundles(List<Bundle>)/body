@@ -1,0 +1,37 @@
+{
+  ImmutableList.Builder<Tuple<PluginInfo,Plugin>> plugins=ImmutableList.builder();
+  for (  Bundle bundle : bundles) {
+    try {
+      final List<URL> jars=new ArrayList<>();
+      ClassLoader parentLoader=settings.getClassLoader();
+      if (parentLoader instanceof URLClassLoader) {
+        for (        URL url : ((URLClassLoader)parentLoader).getURLs()) {
+          jars.add(url);
+        }
+      }
+      jars.addAll(bundle.urls);
+      JarHell.checkJarHell(jars.toArray(new URL[0]));
+    }
+ catch (    Exception e) {
+      logger.warn("failed to load bundle {} due to jar hell",bundle.urls);
+    }
+    ClassLoader loader=URLClassLoader.newInstance(bundle.urls.toArray(new URL[0]),settings.getClassLoader());
+    Settings settings=Settings.builder().put(this.settings).classLoader(loader).build();
+    for (    PluginInfo pluginInfo : bundle.plugins) {
+      try {
+        final Plugin plugin;
+        if (pluginInfo.isJvm()) {
+          plugin=loadPlugin(pluginInfo.getClassname(),settings);
+        }
+ else {
+          plugin=null;
+        }
+        plugins.add(new Tuple<>(pluginInfo,plugin));
+      }
+ catch (      Throwable e) {
+        logger.warn("failed to load plugin from [" + bundle.urls + "]",e);
+      }
+    }
+  }
+  return plugins.build();
+}
