@@ -22,18 +22,25 @@
   assertThat(Files.exists(shardDirectory(node_3,"test",0)),equalTo(false));
   assertThat(Files.exists(indexDirectory(node_3,"test")),equalTo(false));
   logger.info("--> move shard from node_1 to node_3, and wait for relocation to finish");
-  SlowClusterStateProcessing disruption=null;
   if (randomBoolean()) {
-    disruption=new SlowClusterStateProcessing(node_3,getRandom(),0,0,1000,2000);
+    SingleNodeDisruption disruption=new BlockClusterStateProcessing(node_3,getRandom());
     internalCluster().setDisruptionScheme(disruption);
+    MockTransportService transportServiceNode3=(MockTransportService)internalCluster().getInstance(TransportService.class,node_3);
+    CountDownLatch beginRelocationLatch=new CountDownLatch(1);
+    CountDownLatch endRelocationLatch=new CountDownLatch(1);
+    transportServiceNode3.addTracer(new ReclocationStartEndTracer(logger,beginRelocationLatch,endRelocationLatch));
+    internalCluster().client().admin().cluster().prepareReroute().add(new MoveAllocationCommand(new ShardId("test",0),node_1,node_3)).get();
+    beginRelocationLatch.await();
     disruption.startDisrupting();
-  }
-  internalCluster().client().admin().cluster().prepareReroute().add(new MoveAllocationCommand(new ShardId("test",0),node_1,node_3)).get();
-  clusterHealth=client().admin().cluster().prepareHealth().setWaitForNodes("4").setWaitForRelocatingShards(0).get();
-  assertThat(clusterHealth.isTimedOut(),equalTo(false));
-  if (disruption != null) {
+    endRelocationLatch.await();
+    sleep(50);
     disruption.stopDisrupting();
   }
+ else {
+    internalCluster().client().admin().cluster().prepareReroute().add(new MoveAllocationCommand(new ShardId("test",0),node_1,node_3)).get();
+  }
+  clusterHealth=client().admin().cluster().prepareHealth().setWaitForRelocatingShards(0).get();
+  assertThat(clusterHealth.isTimedOut(),equalTo(false));
   assertThat(waitForShardDeletion(node_1,"test",0),equalTo(false));
   assertThat(waitForIndexDeletion(node_1,"test"),equalTo(false));
   assertThat(Files.exists(shardDirectory(node_2,"test",0)),equalTo(true));
