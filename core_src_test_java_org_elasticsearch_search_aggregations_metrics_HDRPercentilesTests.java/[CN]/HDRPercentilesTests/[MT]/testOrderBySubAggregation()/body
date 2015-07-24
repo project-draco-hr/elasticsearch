@@ -1,0 +1,19 @@
+{
+  int sigDigits=randomSignificantDigits();
+  boolean asc=randomBoolean();
+  SearchResponse searchResponse=client().prepareSearch("idx").setQuery(matchAllQuery()).addAggregation(histogram("histo").field("value").interval(2l).subAggregation(percentiles("percentiles").method(PercentilesMethod.HDR).numberOfSignificantValueDigits(sigDigits).percentiles(99)).order(Order.aggregation("percentiles","99",asc))).execute().actionGet();
+  assertThat(searchResponse.getHits().getTotalHits(),equalTo(10l));
+  Histogram histo=searchResponse.getAggregations().get("histo");
+  double previous=asc ? Double.NEGATIVE_INFINITY : Double.POSITIVE_INFINITY;
+  for (  Histogram.Bucket bucket : histo.getBuckets()) {
+    Percentiles percentiles=bucket.getAggregations().get("percentiles");
+    double p99=percentiles.percentile(99);
+    if (asc) {
+      assertThat(p99,greaterThanOrEqualTo(previous));
+    }
+ else {
+      assertThat(p99,lessThanOrEqualTo(previous));
+    }
+    previous=p99;
+  }
+}
