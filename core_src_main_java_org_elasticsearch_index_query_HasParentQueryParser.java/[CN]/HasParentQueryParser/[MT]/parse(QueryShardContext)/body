@@ -1,0 +1,82 @@
+{
+  QueryParseContext parseContext=context.parseContext();
+  XContentParser parser=parseContext.parser();
+  boolean queryFound=false;
+  float boost=AbstractQueryBuilder.DEFAULT_BOOST;
+  String parentType=null;
+  boolean score=false;
+  String queryName=null;
+  Tuple<String,SubSearchContext> innerHits=null;
+  String currentFieldName=null;
+  XContentParser.Token token;
+  XContentStructure.InnerQuery iq=null;
+  while ((token=parser.nextToken()) != XContentParser.Token.END_OBJECT) {
+    if (token == XContentParser.Token.FIELD_NAME) {
+      currentFieldName=parser.currentName();
+    }
+ else     if (token == XContentParser.Token.START_OBJECT) {
+      if (parseContext.parseFieldMatcher().match(currentFieldName,QUERY_FIELD)) {
+        iq=new XContentStructure.InnerQuery(parseContext,parentType == null ? null : new String[]{parentType});
+        queryFound=true;
+      }
+ else       if ("inner_hits".equals(currentFieldName)) {
+        innerHits=innerHitsQueryParserHelper.parse(parseContext);
+      }
+ else {
+        throw new QueryParsingException(parseContext,"[has_parent] query does not support [" + currentFieldName + "]");
+      }
+    }
+ else     if (token.isValue()) {
+      if ("type".equals(currentFieldName) || "parent_type".equals(currentFieldName) || "parentType".equals(currentFieldName)) {
+        parentType=parser.text();
+      }
+ else       if ("score_type".equals(currentFieldName) || "scoreType".equals(currentFieldName)) {
+        String scoreTypeValue=parser.text();
+        if ("score".equals(scoreTypeValue)) {
+          score=true;
+        }
+ else         if ("none".equals(scoreTypeValue)) {
+          score=false;
+        }
+      }
+ else       if ("score_mode".equals(currentFieldName) || "scoreMode".equals(currentFieldName)) {
+        String scoreModeValue=parser.text();
+        if ("score".equals(scoreModeValue)) {
+          score=true;
+        }
+ else         if ("none".equals(scoreModeValue)) {
+          score=false;
+        }
+      }
+ else       if ("boost".equals(currentFieldName)) {
+        boost=parser.floatValue();
+      }
+ else       if ("_name".equals(currentFieldName)) {
+        queryName=parser.text();
+      }
+ else {
+        throw new QueryParsingException(parseContext,"[has_parent] query does not support [" + currentFieldName + "]");
+      }
+    }
+  }
+  if (!queryFound) {
+    throw new QueryParsingException(parseContext,"[has_parent] query requires 'query' field");
+  }
+  if (parentType == null) {
+    throw new QueryParsingException(parseContext,"[has_parent] query requires 'parent_type' field");
+  }
+  Query innerQuery=iq.asQuery(parentType);
+  if (innerQuery == null) {
+    return null;
+  }
+  innerQuery.setBoost(boost);
+  Query query=createParentQuery(innerQuery,parentType,score,context,innerHits);
+  if (query == null) {
+    return null;
+  }
+  query.setBoost(boost);
+  if (queryName != null) {
+    context.addNamedQuery(queryName,query);
+  }
+  return query;
+}

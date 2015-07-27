@@ -1,0 +1,40 @@
+{
+  if (fieldsAndWeights.isEmpty()) {
+    String field=context.defaultField();
+    fieldsAndWeights.put(field,1.0F);
+  }
+  Map<String,Float> resolvedFieldsAndWeights=new TreeMap<>();
+  for (  String fField : fieldsAndWeights.keySet()) {
+    if (Regex.isSimpleMatchPattern(fField)) {
+      for (      String fieldName : context.mapperService().simpleMatchToIndexNames(fField)) {
+        resolvedFieldsAndWeights.put(fieldName,fieldsAndWeights.get(fField));
+      }
+    }
+ else {
+      MappedFieldType fieldType=context.fieldMapper(fField);
+      if (fieldType != null) {
+        resolvedFieldsAndWeights.put(fieldType.names().indexName(),fieldsAndWeights.get(fField));
+      }
+ else {
+        resolvedFieldsAndWeights.put(fField,fieldsAndWeights.get(fField));
+      }
+    }
+  }
+  Analyzer luceneAnalyzer;
+  if (analyzer == null) {
+    luceneAnalyzer=context.mapperService().searchAnalyzer();
+  }
+ else {
+    luceneAnalyzer=context.analysisService().analyzer(analyzer);
+    if (luceneAnalyzer == null) {
+      throw new QueryShardException(context,"[" + SimpleQueryStringBuilder.NAME + "] analyzer ["+ analyzer+ "] not found");
+    }
+  }
+  SimpleQueryParser sqp=new SimpleQueryParser(luceneAnalyzer,resolvedFieldsAndWeights,flags,settings);
+  sqp.setDefaultOperator(defaultOperator.toBooleanClauseOccur());
+  Query query=sqp.parse(queryText);
+  if (minimumShouldMatch != null && query instanceof BooleanQuery) {
+    Queries.applyMinimumShouldMatch((BooleanQuery)query,minimumShouldMatch);
+  }
+  return query;
+}

@@ -1,0 +1,52 @@
+{
+  QueryParseContext parseContext=context.parseContext();
+  ScriptParameterParser scriptParameterParser=new ScriptParameterParser();
+  Script script=null;
+  Map<String,Object> vars=null;
+  String currentFieldName=null;
+  XContentParser.Token token;
+  while ((token=parser.nextToken()) != XContentParser.Token.END_OBJECT) {
+    if (token == XContentParser.Token.FIELD_NAME) {
+      currentFieldName=parser.currentName();
+    }
+ else     if (token == XContentParser.Token.START_OBJECT) {
+      if (parseContext.parseFieldMatcher().match(currentFieldName,ScriptField.SCRIPT)) {
+        script=Script.parse(parser,parseContext.parseFieldMatcher());
+      }
+ else       if ("params".equals(currentFieldName)) {
+        vars=parser.map();
+      }
+ else {
+        throw new QueryParsingException(parseContext,NAMES[0] + " query does not support [" + currentFieldName+ "]");
+      }
+    }
+ else     if (token.isValue()) {
+      if (!scriptParameterParser.token(currentFieldName,token,parser,parseContext.parseFieldMatcher())) {
+        throw new QueryParsingException(parseContext,NAMES[0] + " query does not support [" + currentFieldName+ "]");
+      }
+    }
+  }
+  if (script == null) {
+    ScriptParameterValue scriptValue=scriptParameterParser.getDefaultScriptParameterValue();
+    if (scriptValue != null) {
+      if (vars == null) {
+        vars=newHashMap();
+      }
+      script=new Script(scriptValue.script(),scriptValue.scriptType(),scriptParameterParser.lang(),vars);
+    }
+  }
+ else   if (vars != null) {
+    throw new QueryParsingException(parseContext,"script params must be specified inside script object");
+  }
+  if (script == null) {
+    throw new QueryParsingException(parseContext,NAMES[0] + " requires 'script' field");
+  }
+  SearchScript searchScript;
+  try {
+    searchScript=context.scriptService().search(context.lookup(),script,ScriptContext.Standard.SEARCH);
+    return new ScriptScoreFunction(script,searchScript);
+  }
+ catch (  Exception e) {
+    throw new QueryParsingException(parseContext,NAMES[0] + " the script could not be loaded",e);
+  }
+}

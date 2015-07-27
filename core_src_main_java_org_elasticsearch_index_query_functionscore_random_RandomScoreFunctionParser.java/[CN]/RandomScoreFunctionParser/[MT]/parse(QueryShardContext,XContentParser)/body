@@ -1,0 +1,46 @@
+{
+  QueryParseContext parseContext=context.parseContext();
+  int seed=-1;
+  String currentFieldName=null;
+  XContentParser.Token token;
+  while ((token=parser.nextToken()) != XContentParser.Token.END_OBJECT) {
+    if (token == XContentParser.Token.FIELD_NAME) {
+      currentFieldName=parser.currentName();
+    }
+ else     if (token.isValue()) {
+      if ("seed".equals(currentFieldName)) {
+        if (token == XContentParser.Token.VALUE_NUMBER) {
+          if (parser.numberType() == XContentParser.NumberType.INT) {
+            seed=parser.intValue();
+          }
+ else           if (parser.numberType() == XContentParser.NumberType.LONG) {
+            seed=Longs.hashCode(parser.longValue());
+          }
+ else {
+            throw new QueryParsingException(parseContext,"random_score seed must be an int, long or string, not '" + token.toString() + "'");
+          }
+        }
+ else         if (token == XContentParser.Token.VALUE_STRING) {
+          seed=parser.text().hashCode();
+        }
+ else {
+          throw new QueryParsingException(parseContext,"random_score seed must be an int/long or string, not '" + token.toString() + "'");
+        }
+      }
+ else {
+        throw new QueryParsingException(parseContext,NAMES[0] + " query does not support [" + currentFieldName+ "]");
+      }
+    }
+  }
+  final MappedFieldType fieldType=SearchContext.current().mapperService().smartNameFieldType("_uid");
+  if (fieldType == null) {
+    return new RandomScoreFunction();
+  }
+  if (seed == -1) {
+    seed=Longs.hashCode(context.nowInMillis());
+  }
+  final ShardId shardId=SearchContext.current().indexShard().shardId();
+  final int salt=(shardId.index().name().hashCode() << 10) | shardId.id();
+  final IndexFieldData<?> uidFieldData=SearchContext.current().fieldData().getForField(fieldType);
+  return new RandomScoreFunction(seed,salt,uidFieldData);
+}
