@@ -1,15 +1,27 @@
 {
-  QB testQuery=createTestQueryBuilder();
   QueryParseContext context=createContext();
   context.setAllowUnmappedFields(true);
-  Query expectedQuery=createExpectedQuery(testQuery,context);
-  Query actualQuery=testQuery.toQuery(context);
-  if (expectedQuery == null) {
-    assertNull("Expected a null query, saw some object.",actualQuery);
-  }
- else {
-    assertThat(actualQuery,instanceOf(expectedQuery.getClass()));
-    assertThat(actualQuery,equalTo(expectedQuery));
-    assertLuceneQuery(testQuery,actualQuery,context);
-  }
-}
+  QB firstQuery=createTestQueryBuilder();
+  Query firstLuceneQuery=firstQuery.toQuery(context);
+  assertLuceneQuery(firstQuery,firstLuceneQuery,context);
+  try (BytesStreamOutput output=new BytesStreamOutput()){
+    firstQuery.writeTo(output);
+    try (StreamInput in=new FilterStreamInput(StreamInput.wrap(output.bytes()),namedWriteableRegistry)){
+      QueryBuilder<? extends QueryBuilder> prototype=queryParserService.queryParser(firstQuery.getName()).getBuilderPrototype();
+      @SuppressWarnings("unchecked") QB secondQuery=(QB)prototype.readFrom(in);
+      if (randomBoolean()) {
+        secondQuery.queryName(secondQuery.queryName() == null ? randomAsciiOfLengthBetween(1,30) : secondQuery.queryName() + randomAsciiOfLengthBetween(1,10));
+      }
+      Query secondLuceneQuery=secondQuery.toQuery(context);
+      assertLuceneQuery(secondQuery,secondLuceneQuery,context);
+      assertThat("two equivalent query builders lead to different lucene queries",secondLuceneQuery,equalTo(firstLuceneQuery));
+      if (firstLuceneQuery != null) {
+        secondQuery.boost(firstQuery.boost() + 1f + randomFloat());
+        if (supportsBoostAndQueryName()) {
+          Query thirdLuceneQuery=secondQuery.toQuery(context);
+          assertThat("modifying the boost doesn't affect the corresponding lucene query",firstLuceneQuery,not(equalTo(thirdLuceneQuery)));
+        }
+      }
+    }
+   }
+ }
