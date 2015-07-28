@@ -1,0 +1,40 @@
+{
+  String index="test12278";
+  prepareCreate(index).setSettings(Settings.builder().put(indexSettings()).put("index.number_of_shards",1).put("index.number_of_replicas",0)).execute().actionGet();
+  DateMathParser parser=new DateMathParser(Joda.getStrictStandardDateFormatter());
+  final Callable<Long> callable=new Callable<Long>(){
+    @Override public Long call() throws Exception {
+      return System.currentTimeMillis();
+    }
+  }
+;
+  List<IndexRequestBuilder> builders=new ArrayList<>();
+  int timeZoneHourOffset=randomIntBetween(-12,12);
+  DateTimeZone timezone=DateTimeZone.forOffsetHours(timeZoneHourOffset);
+  DateTime timeZoneStartToday=new DateTime(parser.parse("now/d",callable,false,timezone),DateTimeZone.UTC);
+  DateTime timeZoneNoonToday=new DateTime(parser.parse("now/d+12h",callable,false,timezone),DateTimeZone.UTC);
+  builders.add(indexDoc(index,timeZoneStartToday,1));
+  builders.add(indexDoc(index,timeZoneNoonToday,2));
+  indexRandom(true,builders);
+  ensureSearchable(index);
+  SearchResponse response=null;
+  response=client().prepareSearch(index).setQuery(QueryBuilders.rangeQuery("date").from("now/d").to("now/d").includeLower(true).includeUpper(true).timeZone(timezone.getID())).addAggregation(dateHistogram("histo").field("date").interval(DateHistogramInterval.hours(1)).timeZone(timezone.getID()).minDocCount(0).extendedBounds("now/d","now/d+23h")).execute().actionGet();
+  assertSearchResponse(response);
+  assertThat("Expected 24 buckets for one day aggregation with hourly interval",response.getHits().totalHits(),equalTo(2l));
+  Histogram histo=response.getAggregations().get("histo");
+  assertThat(histo,notNullValue());
+  assertThat(histo.getName(),equalTo("histo"));
+  List<? extends Bucket> buckets=histo.getBuckets();
+  assertThat(buckets.size(),equalTo(24));
+  for (int i=0; i < buckets.size(); i++) {
+    Histogram.Bucket bucket=buckets.get(i);
+    assertThat(bucket,notNullValue());
+    assertThat("Bucket " + i + " had wrong key",(DateTime)bucket.getKey(),equalTo(new DateTime(timeZoneStartToday.getMillis() + (i * 60 * 60* 1000),DateTimeZone.UTC)));
+    if (i == 0 || i == 12) {
+      assertThat(bucket.getDocCount(),equalTo(1l));
+    }
+ else {
+      assertThat(bucket.getDocCount(),equalTo(0l));
+    }
+  }
+}
