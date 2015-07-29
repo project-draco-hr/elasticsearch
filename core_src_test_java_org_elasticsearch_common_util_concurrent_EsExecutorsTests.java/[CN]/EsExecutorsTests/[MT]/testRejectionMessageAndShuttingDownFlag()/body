@@ -1,0 +1,70 @@
+{
+  int pool=between(1,10);
+  int queue=between(0,100);
+  int actions=queue + pool;
+  final CountDownLatch latch=new CountDownLatch(1);
+  EsThreadPoolExecutor executor=EsExecutors.newFixed(getTestName(),pool,queue,EsExecutors.daemonThreadFactory("dummy"));
+  try {
+    for (int i=0; i < actions; i++) {
+      executor.execute(new Runnable(){
+        @Override public void run(){
+          try {
+            latch.await();
+          }
+ catch (          InterruptedException e) {
+            throw new RuntimeException(e);
+          }
+        }
+      }
+);
+    }
+    try {
+      executor.execute(new Runnable(){
+        @Override public void run(){
+        }
+        @Override public String toString(){
+          return "dummy runnable";
+        }
+      }
+);
+      fail("Didn't get a rejection when we expected one.");
+    }
+ catch (    EsRejectedExecutionException e) {
+      assertFalse("Thread pool registering as terminated when it isn't",e.isExecutorShutdown());
+      String message=ExceptionsHelper.detailedMessage(e);
+      assertThat(message,containsString("of dummy runnable"));
+      assertThat(message,containsString("on EsThreadPoolExecutor[testRejectionMessage"));
+      assertThat(message,containsString("queue capacity = " + queue));
+      assertThat(message,containsString("state = Running"));
+      assertThat(message,containsString("active threads = " + pool));
+      assertThat(message,containsString("queued tasks = " + queue));
+      assertThat(message,containsString("completed tasks = 0"));
+    }
+  }
+  finally {
+    latch.countDown();
+    terminate(executor);
+  }
+  try {
+    executor.execute(new Runnable(){
+      @Override public void run(){
+      }
+      @Override public String toString(){
+        return "dummy runnable";
+      }
+    }
+);
+    fail("Didn't get a rejection when we expected one.");
+  }
+ catch (  EsRejectedExecutionException e) {
+    assertTrue("Thread pool not registering as terminated when it is",e.isExecutorShutdown());
+    String message=ExceptionsHelper.detailedMessage(e);
+    assertThat(message,containsString("of dummy runnable"));
+    assertThat(message,containsString("on EsThreadPoolExecutor[" + getTestName()));
+    assertThat(message,containsString("queue capacity = " + queue));
+    assertThat(message,containsString("state = Terminated"));
+    assertThat(message,containsString("active threads = 0"));
+    assertThat(message,containsString("queued tasks = 0"));
+    assertThat(message,containsString("completed tasks = " + actions));
+  }
+}
