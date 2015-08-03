@@ -1,34 +1,27 @@
 {
-  String pluginName="plugin-test";
-  Tuple<Settings,Environment> initialSettings=buildInitialSettings();
+  String pluginName="fake-plugin";
+  Path pluginDir=createTempDir().resolve(pluginName);
+  Files.createDirectories(pluginDir.resolve("bin"));
+  Files.createFile(pluginDir.resolve("bin").resolve("tool"));
+  Files.createDirectories(pluginDir.resolve("config"));
+  Files.createFile(pluginDir.resolve("config").resolve("file"));
+  String pluginUrl=createPlugin(pluginDir,"description","fake desc","version","1.0","elasticsearch.version",Version.CURRENT.toString(),"java.version",System.getProperty("java.specification.version"),"jvm","true","classname","FakePlugin");
   Environment env=initialSettings.v2();
   Path binDir=env.binFile();
-  if (!Files.exists(binDir)) {
-    Files.createDirectories(binDir);
-  }
   Path pluginBinDir=binDir.resolve(pluginName);
-  Path configDir=env.configFile();
-  if (!Files.exists(configDir)) {
-    Files.createDirectories(configDir);
-  }
-  Path pluginConfigDir=configDir.resolve(pluginName);
-  try {
-    PluginManager pluginManager=pluginManager(getPluginUrlForResource("plugin_with_bin_and_config.zip"),initialSettings);
-    pluginManager.downloadAndExtract(pluginName);
-    Path[] plugins=pluginManager.getListInstalledPlugins();
-    assertThat(plugins,arrayWithSize(1));
-    assertDirectoryExists(pluginBinDir);
-    assertDirectoryExists(pluginConfigDir);
-    Path toolFile=pluginBinDir.resolve("tool");
-    assertFileExists(toolFile);
-    PosixFileAttributeView view=Files.getFileAttributeView(toolFile,PosixFileAttributeView.class);
-    if (view != null) {
-      PosixFileAttributes attributes=view.readAttributes();
-      assertTrue("unexpected permissions: " + attributes.permissions(),attributes.permissions().contains(PosixFilePermission.OWNER_EXECUTE));
-      assertTrue("unexpected permissions: " + attributes.permissions(),attributes.permissions().contains(PosixFilePermission.OWNER_READ));
-    }
-  }
-  finally {
-    IOUtils.rm(pluginBinDir,pluginConfigDir);
+  Path pluginConfigDir=env.configFile().resolve(pluginName);
+  assertStatusOk("install " + pluginName + " --url "+ pluginUrl+ " --verbose");
+  terminal.getTerminalOutput().clear();
+  assertStatusOk("list");
+  assertThat(terminal.getTerminalOutput(),hasItem(containsString(pluginName)));
+  assertDirectoryExists(pluginBinDir);
+  assertDirectoryExists(pluginConfigDir);
+  Path toolFile=pluginBinDir.resolve("tool");
+  assertFileExists(toolFile);
+  PosixFileAttributeView view=Files.getFileAttributeView(toolFile,PosixFileAttributeView.class);
+  if (view != null) {
+    PosixFileAttributes attributes=view.readAttributes();
+    assertThat(attributes.permissions(),hasItem(PosixFilePermission.OWNER_EXECUTE));
+    assertThat(attributes.permissions(),hasItem(PosixFilePermission.OWNER_READ));
   }
 }

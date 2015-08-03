@@ -1,29 +1,22 @@
 {
+  BootstrapCLIParser bootstrapCLIParser=new BootstrapCLIParser();
+  CliTool.ExitStatus status=bootstrapCLIParser.execute(args);
+  if (CliTool.ExitStatus.OK != status) {
+    System.exit(status.status());
+  }
   System.setProperty("es.logger.prefix","");
   INSTANCE=new Bootstrap();
-  boolean foreground=System.getProperty("es.foreground",System.getProperty("es-foreground")) != null;
+  boolean foreground=!"false".equals(System.getProperty("es.foreground",System.getProperty("es-foreground")));
   if (System.getProperty("wrapper.service","XXX").equalsIgnoreCase("true")) {
     foreground=false;
   }
-  String stage="Settings";
-  Settings settings=null;
-  Environment environment=null;
-  try {
-    Tuple<Settings,Environment> tuple=initialSettings(foreground);
-    settings=tuple.v1();
-    environment=tuple.v2();
-    if (environment.pidFile() != null) {
-      stage="Pid";
-      PidFile.create(environment.pidFile(),true);
-    }
-    stage="Logging";
-    setupLogging(settings,environment);
+  Tuple<Settings,Environment> tuple=initialSettings(foreground);
+  Settings settings=tuple.v1();
+  Environment environment=tuple.v2();
+  if (environment.pidFile() != null) {
+    PidFile.create(environment.pidFile(),true);
   }
- catch (  Exception e) {
-    String errorMessage=buildErrorMessage(stage,e);
-    sysError(errorMessage,true);
-    System.exit(3);
-  }
+  setupLogging(settings,environment);
   if (System.getProperty("es.max-open-files","false").equals("true")) {
     ESLogger logger=Loggers.getLogger(Bootstrap.class);
     logger.info("max_open_files [{}]",ProcessProbe.getInstance().getMaxFileDescriptorCount());
@@ -32,7 +25,6 @@
     ESLogger logger=Loggers.getLogger(Bootstrap.class);
     logger.warn("jvm uses the client vm, make sure to run `java` with the server vm for best performance by adding `-server` to the command line");
   }
-  stage="Initialization";
   try {
     if (!foreground) {
       Loggers.disableConsoleLogging();
@@ -40,7 +32,6 @@
     }
     JVMCheck.check();
     INSTANCE.setup(true,settings,environment);
-    stage="Startup";
     INSTANCE.start();
     if (!foreground) {
       closeSysError();
@@ -51,12 +42,7 @@
     if (INSTANCE.node != null) {
       logger=Loggers.getLogger(Bootstrap.class,INSTANCE.node.settings().get("name"));
     }
-    String errorMessage=buildErrorMessage(stage,e);
-    if (foreground) {
-      sysError(errorMessage,true);
-      Loggers.disableConsoleLogging();
-    }
     logger.error("Exception",e);
-    System.exit(3);
+    throw e;
   }
 }

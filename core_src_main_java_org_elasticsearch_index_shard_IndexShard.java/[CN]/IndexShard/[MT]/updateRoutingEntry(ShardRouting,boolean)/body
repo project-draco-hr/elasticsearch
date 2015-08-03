@@ -1,2 +1,50 @@
 {
+  final ShardRouting currentRouting=this.shardRouting;
+  if (!newRouting.shardId().equals(shardId())) {
+    throw new IllegalArgumentException("Trying to set a routing entry with shardId [" + newRouting.shardId() + "] on a shard with shardId ["+ shardId()+ "]");
+  }
+  if ((currentRouting == null || newRouting.isSameAllocation(currentRouting)) == false) {
+    throw new IllegalArgumentException("Trying to set a routing entry with a different allocation. Current " + currentRouting + ", new "+ newRouting);
+  }
+  try {
+    if (currentRouting != null) {
+      if (!newRouting.primary() && currentRouting.primary()) {
+        logger.warn("suspect illegal state: trying to move shard from primary mode to replica mode");
+      }
+      if (currentRouting.equalsIgnoringMetaData(newRouting)) {
+        this.shardRouting=newRouting;
+        return;
+      }
+    }
+    if (state == IndexShardState.POST_RECOVERY) {
+      if (newRouting.state() == ShardRoutingState.STARTED || newRouting.state() == ShardRoutingState.RELOCATING) {
+        try {
+          engine().refresh("cluster_state_started");
+        }
+ catch (        Throwable t) {
+          logger.debug("failed to refresh due to move to cluster wide started",t);
+        }
+        boolean movedToStarted=false;
+synchronized (mutex) {
+          if (state == IndexShardState.POST_RECOVERY) {
+            changeState(IndexShardState.STARTED,"global state is [" + newRouting.state() + "]");
+            movedToStarted=true;
+          }
+ else {
+            logger.debug("state [{}] not changed, not in POST_RECOVERY, global state is [{}]",state,newRouting.state());
+          }
+        }
+        if (movedToStarted) {
+          indicesLifecycle.afterIndexShardStarted(this);
+        }
+      }
+    }
+    this.shardRouting=newRouting;
+    indicesLifecycle.shardRoutingChanged(this,currentRouting,newRouting);
+  }
+  finally {
+    if (persistState) {
+      persistMetadata(newRouting,currentRouting);
+    }
+  }
 }

@@ -1,0 +1,129 @@
+{
+  if (expression.startsWith(EXPRESSION_LEFT_BOUND) == false || expression.endsWith(EXPRESSION_RIGHT_BOUND) == false) {
+    return expression;
+  }
+  boolean escape=false;
+  boolean inDateFormat=false;
+  boolean inPlaceHolder=false;
+  final StringBuilder beforePlaceHolderSb=new StringBuilder();
+  StringBuilder inPlaceHolderSb=new StringBuilder();
+  final char[] text=expression.toCharArray();
+  final int from=1;
+  final int length=text.length - 1;
+  for (int i=from; i < length; i++) {
+    boolean escapedChar=escape;
+    if (escape) {
+      escape=false;
+    }
+    char c=text[i];
+    if (c == ESCAPE_CHAR) {
+      if (escapedChar) {
+        beforePlaceHolderSb.append(c);
+        escape=false;
+      }
+ else {
+        escape=true;
+      }
+      continue;
+    }
+    if (inPlaceHolder) {
+switch (c) {
+case LEFT_BOUND:
+        if (inDateFormat && escapedChar) {
+          inPlaceHolderSb.append(c);
+        }
+ else         if (!inDateFormat) {
+          inDateFormat=true;
+          inPlaceHolderSb.append(c);
+        }
+ else {
+          throw new ElasticsearchParseException("invalid dynamic name expression [{}]. invalid character in placeholder at position [{}]",new String(text,from,length),i);
+        }
+      break;
+case RIGHT_BOUND:
+    if (inDateFormat && escapedChar) {
+      inPlaceHolderSb.append(c);
+    }
+ else     if (inDateFormat) {
+      inDateFormat=false;
+      inPlaceHolderSb.append(c);
+    }
+ else {
+      String inPlaceHolderString=inPlaceHolderSb.toString();
+      int dateTimeFormatLeftBoundIndex=inPlaceHolderString.indexOf(LEFT_BOUND);
+      String mathExpression;
+      String dateFormatterPattern;
+      DateTimeFormatter dateFormatter;
+      final DateTimeZone timeZone;
+      if (dateTimeFormatLeftBoundIndex < 0) {
+        mathExpression=inPlaceHolderString;
+        dateFormatterPattern=defaultDateFormatterPattern;
+        dateFormatter=defaultDateFormatter;
+        timeZone=defaultTimeZone;
+      }
+ else {
+        if (inPlaceHolderString.lastIndexOf(RIGHT_BOUND) != inPlaceHolderString.length() - 1) {
+          throw new ElasticsearchParseException("invalid dynamic name expression [{}]. missing closing `}` for date math format",inPlaceHolderString);
+        }
+        if (dateTimeFormatLeftBoundIndex == inPlaceHolderString.length() - 2) {
+          throw new ElasticsearchParseException("invalid dynamic name expression [{}]. missing date format",inPlaceHolderString);
+        }
+        mathExpression=inPlaceHolderString.substring(0,dateTimeFormatLeftBoundIndex);
+        String dateFormatterPatternAndTimeZoneId=inPlaceHolderString.substring(dateTimeFormatLeftBoundIndex + 1,inPlaceHolderString.length() - 1);
+        int formatPatternTimeZoneSeparatorIndex=dateFormatterPatternAndTimeZoneId.indexOf(TIME_ZONE_BOUND);
+        if (formatPatternTimeZoneSeparatorIndex != -1) {
+          dateFormatterPattern=dateFormatterPatternAndTimeZoneId.substring(0,formatPatternTimeZoneSeparatorIndex);
+          timeZone=DateTimeZone.forID(dateFormatterPatternAndTimeZoneId.substring(formatPatternTimeZoneSeparatorIndex + 1));
+        }
+ else {
+          dateFormatterPattern=dateFormatterPatternAndTimeZoneId;
+          timeZone=defaultTimeZone;
+        }
+        dateFormatter=DateTimeFormat.forPattern(dateFormatterPattern);
+      }
+      DateTimeFormatter parser=dateFormatter.withZone(timeZone);
+      FormatDateTimeFormatter formatter=new FormatDateTimeFormatter(dateFormatterPattern,parser,Locale.ROOT);
+      DateMathParser dateMathParser=new DateMathParser(formatter);
+      long millis=dateMathParser.parse(mathExpression,new Callable<Long>(){
+        @Override public Long call() throws Exception {
+          return context.getStartTime();
+        }
+      }
+,false,timeZone);
+      String time=formatter.printer().print(millis);
+      beforePlaceHolderSb.append(time);
+      inPlaceHolderSb=new StringBuilder();
+      inPlaceHolder=false;
+    }
+  break;
+default :
+inPlaceHolderSb.append(c);
+}
+}
+ else {
+switch (c) {
+case LEFT_BOUND:
+if (escapedChar) {
+beforePlaceHolderSb.append(c);
+}
+ else {
+inPlaceHolder=true;
+}
+break;
+case RIGHT_BOUND:
+if (!escapedChar) {
+throw new ElasticsearchParseException("invalid dynamic name expression [{}]. invalid character at position [{}]. " + "`{` and `}` are reserved characters and should be escaped when used as part of the index name using `\\` (e.g. `\\{text\\}`)",new String(text,from,length),i);
+}
+default :
+beforePlaceHolderSb.append(c);
+}
+}
+}
+if (inPlaceHolder) {
+throw new ElasticsearchParseException("invalid dynamic name expression [{}]. date math placeholder is open ended",new String(text,from,length));
+}
+if (beforePlaceHolderSb.length() == 0) {
+throw new ElasticsearchParseException("nothing captured");
+}
+return beforePlaceHolderSb.toString();
+}
