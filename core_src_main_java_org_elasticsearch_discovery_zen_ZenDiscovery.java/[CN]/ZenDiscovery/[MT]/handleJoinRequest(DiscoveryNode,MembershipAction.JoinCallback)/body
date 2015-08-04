@@ -2,6 +2,9 @@
   if (!transportService.addressSupported(node.address().getClass())) {
     logger.warn("received a wrong address type from [{}], ignoring...",node);
   }
+ else   if (nodeJoinController == null) {
+    throw new IllegalStateException("discovery module is not yet started");
+  }
  else {
     Version minimumNodeJoinVersion=localNode().getVersion().minimumCompatibilityVersion();
     if (node.getVersion().before(minimumNodeJoinVersion)) {
@@ -10,71 +13,6 @@
     }
     transportService.connectToNode(node);
     membership.sendValidateJoinRequestBlocking(node,joinTimeout);
-    processJoinRequests.add(new Tuple<>(node,callback));
-    clusterService.submitStateUpdateTask("zen-disco-receive(join from node[" + node + "])",Priority.URGENT,new ProcessedClusterStateUpdateTask(){
-      private final List<Tuple<DiscoveryNode,MembershipAction.JoinCallback>> drainedJoinRequests=new ArrayList<>();
-      private boolean nodeAdded=false;
-      @Override public ClusterState execute(      ClusterState currentState){
-        processJoinRequests.drainTo(drainedJoinRequests);
-        if (drainedJoinRequests.isEmpty()) {
-          return currentState;
-        }
-        DiscoveryNodes.Builder nodesBuilder=DiscoveryNodes.builder(currentState.nodes());
-        for (        Tuple<DiscoveryNode,MembershipAction.JoinCallback> task : drainedJoinRequests) {
-          DiscoveryNode node=task.v1();
-          if (currentState.nodes().nodeExists(node.id())) {
-            logger.debug("received a join request for an existing node [{}]",node);
-          }
- else {
-            nodeAdded=true;
-            nodesBuilder.put(node);
-            for (            DiscoveryNode existingNode : currentState.nodes()) {
-              if (node.address().equals(existingNode.address())) {
-                nodesBuilder.remove(existingNode.id());
-                logger.warn("received join request from node [{}], but found existing node {} with same address, removing existing node",node,existingNode);
-              }
-            }
-          }
-        }
-        final ClusterState.Builder newState=ClusterState.builder(currentState);
-        if (nodeAdded) {
-          newState.nodes(nodesBuilder);
-        }
-        return newState.build();
-      }
-      @Override public void onNoLongerMaster(      String source){
-        processJoinRequests.drainTo(drainedJoinRequests);
-        Exception e=new NotMasterException("Node [" + clusterService.localNode() + "] not master for join request from ["+ node+ "]");
-        innerOnFailure(e);
-      }
-      void innerOnFailure(      Throwable t){
-        for (        Tuple<DiscoveryNode,MembershipAction.JoinCallback> drainedTask : drainedJoinRequests) {
-          try {
-            drainedTask.v2().onFailure(t);
-          }
- catch (          Exception e) {
-            logger.error("error during task failure",e);
-          }
-        }
-      }
-      @Override public void onFailure(      String source,      Throwable t){
-        logger.error("unexpected failure during [{}]",t,source);
-        innerOnFailure(t);
-      }
-      @Override public void clusterStateProcessed(      String source,      ClusterState oldState,      ClusterState newState){
-        if (nodeAdded) {
-          routingService.reroute("post_node_add");
-        }
-        for (        Tuple<DiscoveryNode,MembershipAction.JoinCallback> drainedTask : drainedJoinRequests) {
-          try {
-            drainedTask.v2().onSuccess();
-          }
- catch (          Exception e) {
-            logger.error("unexpected error during [{}]",e,source);
-          }
-        }
-      }
-    }
-);
+    nodeJoinController.handleJoinRequest(node,callback);
   }
 }

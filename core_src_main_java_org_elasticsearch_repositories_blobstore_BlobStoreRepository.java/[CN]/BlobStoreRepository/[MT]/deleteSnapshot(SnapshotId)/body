@@ -8,7 +8,7 @@
  catch (  SnapshotMissingException ex) {
     throw ex;
   }
-catch (  SnapshotException|ElasticsearchParseException ex) {
+catch (  IllegalStateException|SnapshotException|ElasticsearchParseException ex) {
     logger.warn("cannot read snapshot file [{}]",ex,snapshotId);
   }
   MetaData metaData=null;
@@ -17,26 +17,22 @@ catch (  SnapshotException|ElasticsearchParseException ex) {
       metaData=readSnapshotMetaData(snapshotId,snapshot.version(),indices,true);
     }
  else {
-      try {
-        metaData=readSnapshotMetaData(snapshotId,false,indices,true);
-      }
- catch (      IOException ex) {
-        metaData=readSnapshotMetaData(snapshotId,true,indices,true);
-      }
+      metaData=readSnapshotMetaData(snapshotId,null,indices,true);
     }
   }
  catch (  IOException|SnapshotException ex) {
     logger.warn("cannot read metadata for snapshot [{}]",ex,snapshotId);
   }
   try {
-    String blobName=snapshotBlobName(snapshotId);
-    snapshotsBlobContainer.deleteBlob(blobName);
     if (snapshot != null) {
-      snapshotsBlobContainer.deleteBlob(metaDataBlobName(snapshotId,legacyMetaData(snapshot.version())));
+      snapshotFormat(snapshot.version()).delete(snapshotsBlobContainer,snapshotId.getSnapshot());
+      globalMetaDataFormat(snapshot.version()).delete(snapshotsBlobContainer,snapshotId.getSnapshot());
     }
  else {
-      snapshotsBlobContainer.deleteBlob(metaDataBlobName(snapshotId,true));
-      snapshotsBlobContainer.deleteBlob(metaDataBlobName(snapshotId,false));
+      snapshotFormat.delete(snapshotsBlobContainer,snapshotId.getSnapshot());
+      snapshotLegacyFormat.delete(snapshotsBlobContainer,snapshotId.getSnapshot());
+      globalMetaDataLegacyFormat.delete(snapshotsBlobContainer,snapshotId.getSnapshot());
+      globalMetaDataFormat.delete(snapshotsBlobContainer,snapshotId.getSnapshot());
     }
     List<SnapshotId> snapshotIds=snapshots();
     if (snapshotIds.contains(snapshotId)) {
@@ -53,7 +49,7 @@ catch (  SnapshotException|ElasticsearchParseException ex) {
       BlobPath indexPath=basePath().add("indices").add(index);
       BlobContainer indexMetaDataBlobContainer=blobStore().blobContainer(indexPath);
       try {
-        indexMetaDataBlobContainer.deleteBlob(blobName);
+        indexMetaDataFormat(snapshot.version()).delete(indexMetaDataBlobContainer,snapshotId.getSnapshot());
       }
  catch (      IOException ex) {
         logger.warn("[{}] failed to delete metadata for index [{}]",ex,snapshotId,index);
@@ -64,7 +60,7 @@ catch (  SnapshotException|ElasticsearchParseException ex) {
           for (int i=0; i < indexMetaData.getNumberOfShards(); i++) {
             ShardId shardId=new ShardId(index,i);
             try {
-              indexShardRepository.delete(snapshotId,shardId);
+              indexShardRepository.delete(snapshotId,snapshot.version(),shardId);
             }
  catch (            SnapshotException ex) {
               logger.warn("[{}] failed to delete shard data for shard [{}]",ex,snapshotId,shardId);

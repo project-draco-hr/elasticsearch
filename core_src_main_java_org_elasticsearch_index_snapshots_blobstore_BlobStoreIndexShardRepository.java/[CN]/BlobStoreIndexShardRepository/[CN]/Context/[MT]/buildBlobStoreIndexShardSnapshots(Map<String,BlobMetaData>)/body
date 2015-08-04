@@ -14,8 +14,8 @@
     }
   }
   if (latest >= 0) {
-    try (InputStream stream=blobContainer.openInput(SNAPSHOT_INDEX_PREFIX + latest)){
-      return new Tuple<>(readSnapshots(stream,parseFieldMatcher),latest);
+    try {
+      return new Tuple<>(indexShardSnapshotsFormat.read(blobContainer,Integer.toString(latest)),latest);
     }
  catch (    IOException e) {
       logger.warn("failed to read index file  [{}]",e,SNAPSHOT_INDEX_PREFIX + latest);
@@ -23,14 +23,20 @@
   }
   List<SnapshotFiles> snapshots=Lists.newArrayList();
   for (  String name : blobs.keySet()) {
-    if (name.startsWith(SNAPSHOT_PREFIX)) {
-      try (InputStream stream=blobContainer.openInput(name)){
-        BlobStoreIndexShardSnapshot snapshot=readSnapshot(stream,parseFieldMatcher);
+    try {
+      BlobStoreIndexShardSnapshot snapshot=null;
+      if (name.startsWith(SNAPSHOT_PREFIX)) {
+        snapshot=indexShardSnapshotFormat.readBlob(blobContainer,name);
+      }
+ else       if (name.startsWith(LEGACY_SNAPSHOT_PREFIX)) {
+        snapshot=indexShardSnapshotLegacyFormat.readBlob(blobContainer,name);
+      }
+      if (snapshot != null) {
         snapshots.add(new SnapshotFiles(snapshot.snapshot(),snapshot.indexFiles()));
       }
- catch (      IOException e) {
-        logger.warn("failed to read commit point [{}]",e,name);
-      }
+    }
+ catch (    IOException e) {
+      logger.warn("failed to read commit point [{}]",e,name);
     }
   }
   return new Tuple<>(new BlobStoreIndexShardSnapshots(snapshots),-1);

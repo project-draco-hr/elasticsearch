@@ -1,0 +1,34 @@
+{
+  Iterable<TransportService> instances=internalCluster().getInstances(TransportService.class);
+  TransportAddress[] addresses=new TransportAddress[internalCluster().size()];
+  int i=0;
+  for (  TransportService instance : instances) {
+    addresses[i++]=instance.boundAddress().publishAddress();
+  }
+  Settings.Builder builder=settingsBuilder().put("client.transport.nodes_sampler_interval","1s").put("name","transport_client_retry_test").put("node.mode",InternalTestCluster.nodeMode()).put(ClusterName.SETTING,internalCluster().getClusterName()).put(InternalSettingsPreparer.IGNORE_SYSTEM_PROPERTIES_SETTING,true).put("path.home",createTempDir());
+  try (TransportClient transportClient=TransportClient.builder().settings(builder.build()).build()){
+    transportClient.addTransportAddresses(addresses);
+    assertThat(transportClient.connectedNodes().size(),equalTo(internalCluster().size()));
+    int size=cluster().size();
+    for (int j=1; j < size; j++) {
+      internalCluster().stopRandomNode(new Predicate<Settings>(){
+        @Override public boolean apply(        Settings input){
+          return true;
+        }
+      }
+);
+      ClusterStateRequest clusterStateRequest=Requests.clusterStateRequest().local(true);
+      ClusterState clusterState;
+      if (randomBoolean()) {
+        clusterState=transportClient.admin().cluster().state(clusterStateRequest).get().getState();
+      }
+ else {
+        PlainListenableActionFuture<ClusterStateResponse> future=new PlainListenableActionFuture<>(transportClient.threadPool());
+        transportClient.admin().cluster().state(clusterStateRequest,future);
+        clusterState=future.get().getState();
+      }
+      assertThat(clusterState.nodes().size(),greaterThanOrEqualTo(size - j));
+      assertThat(transportClient.connectedNodes().size(),greaterThanOrEqualTo(size - j));
+    }
+  }
+ }

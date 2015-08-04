@@ -1,3 +1,38 @@
 {
-  return new MetaData(clusterUUID,version,transientSettings,persistentSettings,indices.build(),templates.build(),customs.build());
+  List<String> allIndicesLst=Lists.newArrayList();
+  for (  ObjectCursor<IndexMetaData> cursor : indices.values()) {
+    allIndicesLst.add(cursor.value.index());
+  }
+  String[] allIndices=allIndicesLst.toArray(new String[allIndicesLst.size()]);
+  List<String> allOpenIndicesLst=Lists.newArrayList();
+  List<String> allClosedIndicesLst=Lists.newArrayList();
+  for (  ObjectCursor<IndexMetaData> cursor : indices.values()) {
+    IndexMetaData indexMetaData=cursor.value;
+    if (indexMetaData.state() == IndexMetaData.State.OPEN) {
+      allOpenIndicesLst.add(indexMetaData.index());
+    }
+ else     if (indexMetaData.state() == IndexMetaData.State.CLOSE) {
+      allClosedIndicesLst.add(indexMetaData.index());
+    }
+  }
+  String[] allOpenIndices=allOpenIndicesLst.toArray(new String[allOpenIndicesLst.size()]);
+  String[] allClosedIndices=allClosedIndicesLst.toArray(new String[allClosedIndicesLst.size()]);
+  SortedMap<String,AliasOrIndex> aliasAndIndexLookup=new TreeMap<>();
+  for (  ObjectCursor<IndexMetaData> cursor : indices.values()) {
+    IndexMetaData indexMetaData=cursor.value;
+    aliasAndIndexLookup.put(indexMetaData.getIndex(),new AliasOrIndex.Index(indexMetaData));
+    for (    ObjectObjectCursor<String,AliasMetaData> aliasCursor : indexMetaData.getAliases()) {
+      AliasMetaData aliasMetaData=aliasCursor.value;
+      AliasOrIndex.Alias aliasOrIndex=(AliasOrIndex.Alias)aliasAndIndexLookup.get(aliasMetaData.getAlias());
+      if (aliasOrIndex == null) {
+        aliasOrIndex=new AliasOrIndex.Alias(aliasMetaData,indexMetaData);
+        aliasAndIndexLookup.put(aliasMetaData.getAlias(),aliasOrIndex);
+      }
+ else {
+        aliasOrIndex.addIndex(indexMetaData);
+      }
+    }
+  }
+  aliasAndIndexLookup=Collections.unmodifiableSortedMap(aliasAndIndexLookup);
+  return new MetaData(clusterUUID,version,transientSettings,persistentSettings,indices.build(),templates.build(),customs.build(),allIndices,allOpenIndices,allClosedIndices,aliasAndIndexLookup);
 }

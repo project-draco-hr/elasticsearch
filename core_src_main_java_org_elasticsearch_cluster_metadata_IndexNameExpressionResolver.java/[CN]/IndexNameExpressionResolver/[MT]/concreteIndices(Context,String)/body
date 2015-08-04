@@ -25,47 +25,42 @@
   }
   List<String> concreteIndices=new ArrayList<>(expressions.size());
   for (  String expression : expressions) {
-    List<IndexMetaData> indexMetaDatas;
-    IndexMetaData indexMetaData=metaData.getIndices().get(expression);
-    if (indexMetaData == null) {
-      ImmutableOpenMap<String,AliasMetaData> indexAliasMap=metaData.aliases().get(expression);
-      if (indexAliasMap == null) {
-        if (failNoIndices) {
-          IndexNotFoundException infe=new IndexNotFoundException(expression);
-          infe.setResources("index_expression",expression);
-          throw infe;
-        }
+    AliasOrIndex aliasOrIndex=metaData.getAliasAndIndexLookup().get(expression);
+    if (aliasOrIndex == null) {
+      if (failNoIndices) {
+        IndexNotFoundException infe=new IndexNotFoundException(expression);
+        infe.setResources("index_expression",expression);
+        throw infe;
+      }
  else {
-          continue;
-        }
-      }
-      if (indexAliasMap.size() > 1 && !options.allowAliasesToMultipleIndices()) {
-        throw new IllegalArgumentException("Alias [" + expression + "] has more than one indices associated with it ["+ Arrays.toString(indexAliasMap.keys().toArray(String.class))+ "], can't execute a single index op");
-      }
-      indexMetaDatas=new ArrayList<>(indexAliasMap.size());
-      for (      ObjectObjectCursor<String,AliasMetaData> cursor : indexAliasMap) {
-        indexMetaDatas.add(metaData.getIndices().get(cursor.key));
+        continue;
       }
     }
- else {
-      indexMetaDatas=Collections.singletonList(indexMetaData);
+    Collection<IndexMetaData> resolvedIndices=aliasOrIndex.getIndices();
+    if (resolvedIndices.size() > 1 && !options.allowAliasesToMultipleIndices()) {
+      String[] indexNames=new String[resolvedIndices.size()];
+      int i=0;
+      for (      IndexMetaData indexMetaData : resolvedIndices) {
+        indexNames[i++]=indexMetaData.getIndex();
+      }
+      throw new IllegalArgumentException("Alias [" + expression + "] has more than one indices associated with it ["+ Arrays.toString(indexNames)+ "], can't execute a single index op");
     }
-    for (    IndexMetaData found : indexMetaDatas) {
-      if (found.getState() == IndexMetaData.State.CLOSE) {
+    for (    IndexMetaData index : resolvedIndices) {
+      if (index.getState() == IndexMetaData.State.CLOSE) {
         if (failClosed) {
-          throw new IndexClosedException(new Index(found.getIndex()));
+          throw new IndexClosedException(new Index(index.getIndex()));
         }
  else {
           if (options.forbidClosedIndices() == false) {
-            concreteIndices.add(found.getIndex());
+            concreteIndices.add(index.getIndex());
           }
         }
       }
- else       if (found.getState() == IndexMetaData.State.OPEN) {
-        concreteIndices.add(found.getIndex());
+ else       if (index.getState() == IndexMetaData.State.OPEN) {
+        concreteIndices.add(index.getIndex());
       }
  else {
-        throw new IllegalStateException("index state [" + found.getState() + "] not supported");
+        throw new IllegalStateException("index state [" + index.getState() + "] not supported");
       }
     }
   }

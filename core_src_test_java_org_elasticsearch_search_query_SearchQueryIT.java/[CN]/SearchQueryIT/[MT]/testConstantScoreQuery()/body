@@ -1,0 +1,48 @@
+{
+  Random random=getRandom();
+  createIndex("test");
+  indexRandom(true,client().prepareIndex("test","type1","1").setSource("field1","quick brown fox","field2","quick brown fox"),client().prepareIndex("test","type1","2").setSource("field1","quick lazy huge brown fox","field2","quick lazy huge brown fox"));
+  SearchResponse searchResponse=client().prepareSearch().setQuery(constantScoreQuery(matchQuery("field1","quick"))).get();
+  assertHitCount(searchResponse,2l);
+  for (  SearchHit searchHit : searchResponse.getHits().hits()) {
+    assertSearchHit(searchHit,hasScore(1.0f));
+  }
+  searchResponse=client().prepareSearch("test").setQuery(boolQuery().must(matchAllQuery()).must(constantScoreQuery(matchQuery("field1","quick")).boost(1.0f + getRandom().nextFloat()))).get();
+  assertHitCount(searchResponse,2l);
+  assertFirstHit(searchResponse,hasScore(searchResponse.getHits().getAt(1).score()));
+  client().prepareSearch("test").setQuery(constantScoreQuery(matchQuery("field1","quick")).boost(1.0f + getRandom().nextFloat())).get();
+  assertHitCount(searchResponse,2l);
+  assertFirstHit(searchResponse,hasScore(searchResponse.getHits().getAt(1).score()));
+  searchResponse=client().prepareSearch("test").setQuery(constantScoreQuery(boolQuery().must(matchAllQuery()).must(constantScoreQuery(matchQuery("field1","quick")).boost(1.0f + (random.nextBoolean() ? 0.0f : random.nextFloat()))))).get();
+  assertHitCount(searchResponse,2l);
+  assertFirstHit(searchResponse,hasScore(searchResponse.getHits().getAt(1).score()));
+  for (  SearchHit searchHit : searchResponse.getHits().hits()) {
+    assertSearchHit(searchHit,hasScore(1.0f));
+  }
+  int num=scaledRandomIntBetween(100,200);
+  IndexRequestBuilder[] builders=new IndexRequestBuilder[num];
+  for (int i=0; i < builders.length; i++) {
+    builders[i]=client().prepareIndex("test","type","" + i).setSource("f",English.intToEnglish(i));
+  }
+  createIndex("test_1");
+  indexRandom(true,builders);
+  int queryRounds=scaledRandomIntBetween(10,20);
+  for (int i=0; i < queryRounds; i++) {
+    MatchQueryBuilder matchQuery=matchQuery("f",English.intToEnglish(between(0,num)));
+    searchResponse=client().prepareSearch("test_1").setQuery(matchQuery).setSize(num).get();
+    long totalHits=searchResponse.getHits().totalHits();
+    SearchHits hits=searchResponse.getHits();
+    for (    SearchHit searchHit : hits) {
+      assertSearchHit(searchHit,hasScore(1.0f));
+    }
+    searchResponse=client().prepareSearch("test_1").setQuery(boolQuery().must(matchAllQuery()).must(constantScoreQuery(matchQuery).boost(1.0f + (random.nextBoolean() ? 0.0f : random.nextFloat())))).setSize(num).get();
+    hits=searchResponse.getHits();
+    assertThat(hits.totalHits(),equalTo(totalHits));
+    if (totalHits > 1) {
+      float expected=hits.getAt(0).score();
+      for (      SearchHit searchHit : hits) {
+        assertSearchHit(searchHit,hasScore(expected));
+      }
+    }
+  }
+}

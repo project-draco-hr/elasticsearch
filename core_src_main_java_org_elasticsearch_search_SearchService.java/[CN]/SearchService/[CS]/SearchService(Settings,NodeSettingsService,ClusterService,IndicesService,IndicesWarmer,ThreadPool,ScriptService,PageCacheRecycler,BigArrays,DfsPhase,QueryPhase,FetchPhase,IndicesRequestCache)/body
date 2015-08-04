@@ -1,0 +1,41 @@
+{
+  super(settings);
+  this.parseFieldMatcher=new ParseFieldMatcher(settings);
+  this.threadPool=threadPool;
+  this.clusterService=clusterService;
+  this.indicesService=indicesService;
+  indicesService.indicesLifecycle().addListener(new IndicesLifecycle.Listener(){
+    @Override public void afterIndexClosed(    Index index,    @IndexSettings Settings indexSettings){
+      IndexMetaData idxMeta=SearchService.this.clusterService.state().metaData().index(index.getName());
+      if (idxMeta != null && idxMeta.state() == IndexMetaData.State.CLOSE) {
+        afterIndexDeleted(index,indexSettings);
+      }
+    }
+    @Override public void afterIndexDeleted(    Index index,    @IndexSettings Settings indexSettings){
+      freeAllContextForIndex(index);
+    }
+  }
+);
+  this.indicesWarmer=indicesWarmer;
+  this.scriptService=scriptService;
+  this.pageCacheRecycler=pageCacheRecycler;
+  this.bigArrays=bigArrays;
+  this.dfsPhase=dfsPhase;
+  this.queryPhase=queryPhase;
+  this.fetchPhase=fetchPhase;
+  this.indicesQueryCache=indicesQueryCache;
+  TimeValue keepAliveInterval=settings.getAsTime(KEEPALIVE_INTERVAL_KEY,timeValueMinutes(1));
+  this.defaultKeepAlive=settings.getAsTime(DEFAULT_KEEPALIVE_KEY,timeValueMinutes(5)).millis();
+  Map<String,SearchParseElement> elementParsers=new HashMap<>();
+  elementParsers.putAll(dfsPhase.parseElements());
+  elementParsers.putAll(queryPhase.parseElements());
+  elementParsers.putAll(fetchPhase.parseElements());
+  elementParsers.put("stats",new StatsGroupsParseElement());
+  this.elementParsers=ImmutableMap.copyOf(elementParsers);
+  this.keepAliveReaper=threadPool.scheduleWithFixedDelay(new Reaper(),keepAliveInterval);
+  this.indicesWarmer.addListener(new NormsWarmer());
+  this.indicesWarmer.addListener(new FieldDataWarmer());
+  this.indicesWarmer.addListener(new SearchWarmer());
+  defaultSearchTimeout=settings.getAsTime(DEFAULT_SEARCH_TIMEOUT,NO_TIMEOUT);
+  nodeSettingsService.addListener(new SearchSettingsListener());
+}

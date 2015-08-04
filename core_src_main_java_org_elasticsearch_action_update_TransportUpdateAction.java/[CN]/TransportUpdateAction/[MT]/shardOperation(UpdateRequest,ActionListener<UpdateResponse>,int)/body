@@ -1,0 +1,106 @@
+{
+  IndexService indexService=indicesService.indexServiceSafe(request.concreteIndex());
+  IndexShard indexShard=indexService.shardSafe(request.shardId());
+  final UpdateHelper.Result result=updateHelper.prepare(request,indexShard);
+switch (result.operation()) {
+case UPSERT:
+    IndexRequest upsertRequest=new IndexRequest((IndexRequest)result.action(),request);
+  final BytesReference upsertSourceBytes=upsertRequest.source();
+indexAction.execute(upsertRequest,new ActionListener<IndexResponse>(){
+  @Override public void onResponse(  IndexResponse response){
+    UpdateResponse update=new UpdateResponse(response.getShardInfo(),response.getIndex(),response.getType(),response.getId(),response.getVersion(),response.isCreated());
+    if (request.fields() != null && request.fields().length > 0) {
+      Tuple<XContentType,Map<String,Object>> sourceAndContent=XContentHelper.convertToMap(upsertSourceBytes,true);
+      update.setGetResult(updateHelper.extractGetResult(request,request.concreteIndex(),response.getVersion(),sourceAndContent.v2(),sourceAndContent.v1(),upsertSourceBytes));
+    }
+ else {
+      update.setGetResult(null);
+    }
+    listener.onResponse(update);
+  }
+  @Override public void onFailure(  Throwable e){
+    e=ExceptionsHelper.unwrapCause(e);
+    if (e instanceof VersionConflictEngineException || e instanceof DocumentAlreadyExistsException) {
+      if (retryCount < request.retryOnConflict()) {
+        threadPool.executor(executor()).execute(new ActionRunnable<UpdateResponse>(listener){
+          @Override protected void doRun(){
+            shardOperation(request,listener,retryCount + 1);
+          }
+        }
+);
+        return;
+      }
+    }
+    listener.onFailure(e);
+  }
+}
+);
+break;
+case INDEX:
+IndexRequest indexRequest=new IndexRequest((IndexRequest)result.action(),request);
+final BytesReference indexSourceBytes=indexRequest.source();
+indexAction.execute(indexRequest,new ActionListener<IndexResponse>(){
+@Override public void onResponse(IndexResponse response){
+UpdateResponse update=new UpdateResponse(response.getShardInfo(),response.getIndex(),response.getType(),response.getId(),response.getVersion(),response.isCreated());
+update.setGetResult(updateHelper.extractGetResult(request,request.concreteIndex(),response.getVersion(),result.updatedSourceAsMap(),result.updateSourceContentType(),indexSourceBytes));
+listener.onResponse(update);
+}
+@Override public void onFailure(Throwable e){
+e=ExceptionsHelper.unwrapCause(e);
+if (e instanceof VersionConflictEngineException) {
+if (retryCount < request.retryOnConflict()) {
+threadPool.executor(executor()).execute(new ActionRunnable<UpdateResponse>(listener){
+  @Override protected void doRun(){
+    shardOperation(request,listener,retryCount + 1);
+  }
+}
+);
+return;
+}
+}
+listener.onFailure(e);
+}
+}
+);
+break;
+case DELETE:
+DeleteRequest deleteRequest=new DeleteRequest((DeleteRequest)result.action(),request);
+deleteAction.execute(deleteRequest,new ActionListener<DeleteResponse>(){
+@Override public void onResponse(DeleteResponse response){
+UpdateResponse update=new UpdateResponse(response.getShardInfo(),response.getIndex(),response.getType(),response.getId(),response.getVersion(),false);
+update.setGetResult(updateHelper.extractGetResult(request,request.concreteIndex(),response.getVersion(),result.updatedSourceAsMap(),result.updateSourceContentType(),null));
+listener.onResponse(update);
+}
+@Override public void onFailure(Throwable e){
+e=ExceptionsHelper.unwrapCause(e);
+if (e instanceof VersionConflictEngineException) {
+if (retryCount < request.retryOnConflict()) {
+threadPool.executor(executor()).execute(new ActionRunnable<UpdateResponse>(listener){
+@Override protected void doRun(){
+shardOperation(request,listener,retryCount + 1);
+}
+}
+);
+return;
+}
+}
+listener.onFailure(e);
+}
+}
+);
+break;
+case NONE:
+UpdateResponse update=result.action();
+IndexService indexServiceOrNull=indicesService.indexService(request.concreteIndex());
+if (indexServiceOrNull != null) {
+IndexShard shard=indexService.shard(request.shardId());
+if (shard != null) {
+shard.indexingService().noopUpdate(request.type());
+}
+}
+listener.onResponse(update);
+break;
+default :
+throw new IllegalStateException("Illegal operation " + result.operation());
+}
+}

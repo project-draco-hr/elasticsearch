@@ -1,0 +1,87 @@
+{
+  DiscoveryNode masterNode=new DiscoveryNode("master",new LocalTransportAddress("master"),Version.CURRENT);
+  DiscoveryNode otherNode=new DiscoveryNode("other",new LocalTransportAddress("other"),Version.CURRENT);
+  DiscoveryNodes discoveryNodes=DiscoveryNodes.builder().put(masterNode).put(otherNode).localNodeId(masterNode.id()).build();
+  ClusterState clusterState=ClusterState.builder(new ClusterName("test")).nodes(discoveryNodes).build();
+  ClusterState clusterStateFromDiffs=ClusterState.Builder.fromBytes(ClusterState.Builder.toBytes(clusterState),otherNode);
+  int iterationCount=randomIntBetween(10,300);
+  for (int iteration=0; iteration < iterationCount; iteration++) {
+    ClusterState previousClusterState=clusterState;
+    ClusterState previousClusterStateFromDiffs=clusterStateFromDiffs;
+    int changesCount=randomIntBetween(1,4);
+    ClusterState.Builder builder=null;
+    for (int i=0; i < changesCount; i++) {
+      if (i > 0) {
+        clusterState=builder.build();
+      }
+switch (randomInt(4)) {
+case 0:
+        builder=randomNodes(clusterState);
+      break;
+case 1:
+    builder=randomRoutingTable(clusterState);
+  break;
+case 2:
+builder=randomBlocks(clusterState);
+break;
+case 3:
+builder=randomClusterStateCustoms(clusterState);
+break;
+case 4:
+builder=randomMetaDataChanges(clusterState);
+break;
+default :
+throw new IllegalArgumentException("Shouldn't be here");
+}
+}
+clusterState=builder.incrementVersion().build();
+if (randomIntBetween(0,10) < 1) {
+clusterStateFromDiffs=ClusterState.Builder.fromBytes(ClusterState.Builder.toBytes(clusterState),previousClusterStateFromDiffs.nodes().localNode());
+}
+ else {
+Diff<ClusterState> diffBeforeSerialization=clusterState.diff(previousClusterState);
+BytesStreamOutput os=new BytesStreamOutput();
+diffBeforeSerialization.writeTo(os);
+byte[] diffBytes=os.bytes().toBytes();
+Diff<ClusterState> diff;
+try (StreamInput input=StreamInput.wrap(diffBytes)){
+diff=previousClusterStateFromDiffs.readDiffFrom(input);
+clusterStateFromDiffs=diff.apply(previousClusterStateFromDiffs);
+}
+ }
+try {
+assertThat(clusterStateFromDiffs.version(),equalTo(clusterState.version()));
+assertThat(clusterStateFromDiffs.stateUUID(),equalTo(clusterState.stateUUID()));
+assertThat(clusterStateFromDiffs.nodes().nodes(),equalTo(clusterState.nodes().nodes()));
+assertThat(clusterStateFromDiffs.nodes().localNodeId(),equalTo(previousClusterStateFromDiffs.nodes().localNodeId()));
+assertThat(clusterStateFromDiffs.nodes().nodes(),equalTo(clusterState.nodes().nodes()));
+for (ObjectCursor<String> node : clusterStateFromDiffs.nodes().nodes().keys()) {
+DiscoveryNode node1=clusterState.nodes().get(node.value);
+DiscoveryNode node2=clusterStateFromDiffs.nodes().get(node.value);
+assertThat(node1.version(),equalTo(node2.version()));
+assertThat(node1.address(),equalTo(node2.address()));
+assertThat(node1.attributes(),equalTo(node2.attributes()));
+}
+assertThat(clusterStateFromDiffs.routingTable().version(),equalTo(clusterState.routingTable().version()));
+assertThat(clusterStateFromDiffs.routingTable().indicesRouting(),equalTo(clusterState.routingTable().indicesRouting()));
+assertThat(clusterStateFromDiffs.blocks().global(),equalTo(clusterStateFromDiffs.blocks().global()));
+assertThat(clusterStateFromDiffs.blocks().indices(),equalTo(clusterStateFromDiffs.blocks().indices()));
+assertThat(clusterStateFromDiffs.blocks().disableStatePersistence(),equalTo(clusterStateFromDiffs.blocks().disableStatePersistence()));
+assertThat(clusterStateFromDiffs.metaData().version(),equalTo(clusterState.metaData().version()));
+assertThat(clusterStateFromDiffs.metaData().clusterUUID(),equalTo(clusterState.metaData().clusterUUID()));
+assertThat(clusterStateFromDiffs.metaData().transientSettings(),equalTo(clusterState.metaData().transientSettings()));
+assertThat(clusterStateFromDiffs.metaData().persistentSettings(),equalTo(clusterState.metaData().persistentSettings()));
+assertThat(clusterStateFromDiffs.metaData().indices(),equalTo(clusterState.metaData().indices()));
+assertThat(clusterStateFromDiffs.metaData().templates(),equalTo(clusterState.metaData().templates()));
+assertThat(clusterStateFromDiffs.metaData().customs(),equalTo(clusterState.metaData().customs()));
+assertThat(clusterStateFromDiffs.metaData().equalsAliases(clusterState.metaData()),is(true));
+assertThat(mapsEqualIgnoringArrayOrder(convertToMap(clusterStateFromDiffs),convertToMap(clusterState)),equalTo(true));
+assertThat(ClusterState.Builder.toBytes(clusterStateFromDiffs).length,equalTo(ClusterState.Builder.toBytes(clusterState).length));
+}
+ catch (AssertionError error) {
+logger.error("Cluster state:\n{}\nCluster state from diffs:\n{}",clusterState.toString(),clusterStateFromDiffs.toString());
+throw error;
+}
+}
+logger.info("Final cluster state:[{}]",clusterState.toString());
+}

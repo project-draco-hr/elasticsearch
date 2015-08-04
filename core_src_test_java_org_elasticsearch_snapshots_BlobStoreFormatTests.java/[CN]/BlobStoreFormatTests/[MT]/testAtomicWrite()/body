@@ -1,0 +1,40 @@
+{
+  final BlobStore blobStore=createTestBlobStore();
+  final BlobContainer blobContainer=blobStore.blobContainer(BlobPath.cleanPath());
+  String testString=randomAsciiOfLength(randomInt(10000));
+  final CountDownLatch block=new CountDownLatch(1);
+  final CountDownLatch unblock=new CountDownLatch(1);
+  final BlobObj blobObj=new BlobObj(testString){
+    @Override public XContentBuilder toXContent(    XContentBuilder builder,    ToXContent.Params params) throws IOException {
+      super.toXContent(builder,params);
+      try {
+        block.countDown();
+        unblock.await(5,TimeUnit.SECONDS);
+      }
+ catch (      InterruptedException ex) {
+        Thread.currentThread().interrupt();
+      }
+      return builder;
+    }
+  }
+;
+  final ChecksumBlobStoreFormat<BlobObj> checksumFormat=new ChecksumBlobStoreFormat<>(BLOB_CODEC,"%s",BlobObj.PROTO,parseFieldMatcher,randomBoolean(),randomBoolean() ? XContentType.SMILE : XContentType.JSON);
+  ExecutorService threadPool=Executors.newFixedThreadPool(1);
+  try {
+    Future<Void> future=threadPool.submit(new Callable<Void>(){
+      @Override public Void call() throws Exception {
+        checksumFormat.writeAtomic(blobObj,blobContainer,"test-blob");
+        return null;
+      }
+    }
+);
+    block.await(5,TimeUnit.SECONDS);
+    assertFalse(blobContainer.blobExists("test-blob"));
+    unblock.countDown();
+    future.get();
+    assertTrue(blobContainer.blobExists("test-blob"));
+  }
+  finally {
+    threadPool.shutdown();
+  }
+}

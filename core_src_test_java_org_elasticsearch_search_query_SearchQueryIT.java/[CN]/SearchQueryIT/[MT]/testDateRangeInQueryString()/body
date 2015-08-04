@@ -1,0 +1,19 @@
+{
+  assertAcked(prepareCreate("test").addMapping("type","past","type=date","future","type=date"));
+  String aMonthAgo=ISODateTimeFormat.yearMonthDay().print(new DateTime(DateTimeZone.UTC).minusMonths(1));
+  String aMonthFromNow=ISODateTimeFormat.yearMonthDay().print(new DateTime(DateTimeZone.UTC).plusMonths(1));
+  client().prepareIndex("test","type","1").setSource("past",aMonthAgo,"future",aMonthFromNow).get();
+  refresh();
+  SearchResponse searchResponse=client().prepareSearch().setQuery(queryStringQuery("past:[now-2M/d TO now/d]")).get();
+  assertHitCount(searchResponse,1l);
+  searchResponse=client().prepareSearch().setQuery(queryStringQuery("future:[now/d TO now+2M/d]").lowercaseExpandedTerms(false)).get();
+  assertHitCount(searchResponse,1l);
+  try {
+    client().prepareSearch().setQuery(queryStringQuery("future:[now/D TO now+2M/d]").lowercaseExpandedTerms(false)).get();
+    fail("expected SearchPhaseExecutionException (total failure)");
+  }
+ catch (  SearchPhaseExecutionException e) {
+    assertThat(e.status(),equalTo(RestStatus.BAD_REQUEST));
+    assertThat(e.toString(),containsString("unit [D] not supported for date math"));
+  }
+}

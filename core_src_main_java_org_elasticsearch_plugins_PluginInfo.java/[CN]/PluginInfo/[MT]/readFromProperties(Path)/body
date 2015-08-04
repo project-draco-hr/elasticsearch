@@ -1,0 +1,49 @@
+{
+  Path descriptor=dir.resolve(ES_PLUGIN_PROPERTIES);
+  Properties props=new Properties();
+  try (InputStream stream=Files.newInputStream(descriptor)){
+    props.load(stream);
+  }
+   String name=dir.getFileName().toString();
+  String description=props.getProperty("description");
+  if (description == null) {
+    throw new IllegalArgumentException("Property [description] is missing for plugin [" + name + "]");
+  }
+  String version=props.getProperty("version");
+  if (version == null) {
+    throw new IllegalArgumentException("Property [version] is missing for plugin [" + name + "]");
+  }
+  boolean jvm=Boolean.parseBoolean(props.getProperty("jvm"));
+  boolean site=Boolean.parseBoolean(props.getProperty("site"));
+  if (jvm == false && site == false) {
+    throw new IllegalArgumentException("Plugin [" + name + "] must be at least a jvm or site plugin");
+  }
+  boolean isolated=true;
+  String classname="NA";
+  if (jvm) {
+    String esVersionString=props.getProperty("elasticsearch.version");
+    if (esVersionString == null) {
+      throw new IllegalArgumentException("Property [elasticsearch.version] is missing for jvm plugin [" + name + "]");
+    }
+    Version esVersion=Version.fromString(esVersionString);
+    if (esVersion.equals(Version.CURRENT) == false) {
+      throw new IllegalArgumentException("Elasticsearch version [" + esVersionString + "] is too old for plugin ["+ name+ "]");
+    }
+    String javaVersionString=props.getProperty("java.version");
+    if (javaVersionString == null) {
+      throw new IllegalArgumentException("Property [java.version] is missing for jvm plugin [" + name + "]");
+    }
+    JarHell.checkJavaVersion(name,javaVersionString);
+    isolated=Boolean.parseBoolean(props.getProperty("isolated","true"));
+    classname=props.getProperty("classname");
+    if (classname == null) {
+      throw new IllegalArgumentException("Property [classname] is missing for jvm plugin [" + name + "]");
+    }
+  }
+  if (site) {
+    if (!Files.exists(dir.resolve("_site"))) {
+      throw new IllegalArgumentException("Plugin [" + name + "] is a site plugin but has no '_site/' directory");
+    }
+  }
+  return new PluginInfo(name,description,site,version,jvm,classname,isolated);
+}

@@ -1,0 +1,54 @@
+{
+  DiscoveryNodes.Builder nodesBuilder=DiscoveryNodes.builder(clusterService.state().nodes()).masterNodeId(null);
+  clusterService.setState(ClusterState.builder(clusterService.state()).nodes(nodesBuilder));
+  nodeJoinController.startAccumulatingJoins();
+  Thread[] threads=new Thread[3 + randomInt(5)];
+  final int requiredJoins=randomInt(threads.length);
+  ArrayList<DiscoveryNode> nodes=new ArrayList<>();
+  nodes.add(clusterService.localNode());
+  final CyclicBarrier barrier=new CyclicBarrier(threads.length + 1);
+  final List<Throwable> backgroundExceptions=new CopyOnWriteArrayList<>();
+  for (int i=0; i < threads.length; i++) {
+    final DiscoveryNode node=newNode(i,true);
+    final int iterations=rarely() ? randomIntBetween(1,4) : 1;
+    nodes.add(node);
+    threads[i]=new Thread(new AbstractRunnable(){
+      @Override public void onFailure(      Throwable t){
+        logger.error("unexpected error in join thread",t);
+        backgroundExceptions.add(t);
+      }
+      @Override protected void doRun() throws Exception {
+        barrier.await();
+        for (int i=0; i < iterations; i++) {
+          logger.debug("{} joining",node);
+          joinNode(node);
+        }
+      }
+    }
+,"t_" + i);
+    threads[i].start();
+  }
+  barrier.await();
+  logger.info("--> waiting to be elected as master (required joins [{}])",requiredJoins);
+  final AtomicReference<Throwable> failure=new AtomicReference<>();
+  final CountDownLatch latch=new CountDownLatch(1);
+  nodeJoinController.waitToBeElectedAsMaster(requiredJoins,TimeValue.timeValueHours(30),new NodeJoinController.ElectionCallback(){
+    @Override public void onElectedAsMaster(    ClusterState state){
+      assertThat("callback called with elected as master, but state disagrees",state.nodes().localNodeMaster(),equalTo(true));
+      latch.countDown();
+    }
+    @Override public void onFailure(    Throwable t){
+      logger.error("unexpected error while waiting to be elected as master",t);
+      failure.set(t);
+      latch.countDown();
+    }
+  }
+);
+  latch.await();
+  ExceptionsHelper.reThrowIfNotNull(failure.get());
+  logger.info("--> waiting for joins to complete");
+  for (  Thread thread : threads) {
+    thread.join();
+  }
+  assertNodesInCurrentState(nodes);
+}

@@ -1,0 +1,49 @@
+{
+  List<String> nodes=internalCluster().startNodesAsync(2).get();
+  final String masterNode=internalCluster().getMasterName();
+  final String nonMasterNode=nodes.get(0).equals(masterNode) ? nodes.get(1) : nodes.get(0);
+  final String masterId=internalCluster().clusterService(masterNode).localNode().id();
+  final String nonMasterId=internalCluster().clusterService(nonMasterNode).localNode().id();
+  final int numShards=scaledRandomIntBetween(2,10);
+  assertAcked(prepareCreate("test").setSettings(Settings.builder().put(IndexMetaData.SETTING_NUMBER_OF_REPLICAS,0).put(IndexMetaData.SETTING_NUMBER_OF_SHARDS,numShards)));
+  ensureGreen("test");
+  waitNoPendingTasksOnAll();
+  ClusterStateResponse stateResponse=client().admin().cluster().prepareState().get();
+  RoutingNode routingNode=stateResponse.getState().routingNodes().node(nonMasterId);
+  final int[] node2Shards=new int[routingNode.numberOfOwningShards()];
+  int i=0;
+  for (  ShardRouting shardRouting : routingNode) {
+    node2Shards[i]=shardRouting.shardId().id();
+    i++;
+  }
+  logger.info("Node [{}] has shards: {}",nonMasterNode,Arrays.toString(node2Shards));
+  final long shardVersions[]=new long[numShards];
+  final int shardIds[]=new int[numShards];
+  i=0;
+  for (  ShardRouting shardRouting : stateResponse.getState().getRoutingTable().allShards("test")) {
+    shardVersions[i]=shardRouting.version();
+    shardIds[i]=shardRouting.getId();
+    i++;
+  }
+  client().admin().cluster().prepareUpdateSettings().setTransientSettings(settingsBuilder().put(EnableAllocationDecider.CLUSTER_ROUTING_REBALANCE_ENABLE,EnableAllocationDecider.Rebalance.NONE)).get();
+  internalCluster().getInstance(ClusterService.class,nonMasterNode).submitStateUpdateTask("test",Priority.IMMEDIATE,new ClusterStateUpdateTask(){
+    @Override public ClusterState execute(    ClusterState currentState) throws Exception {
+      IndexRoutingTable.Builder indexRoutingTableBuilder=IndexRoutingTable.builder("test");
+      for (int i=0; i < numShards; i++) {
+        indexRoutingTableBuilder.addIndexShard(new IndexShardRoutingTable.Builder(new ShardId("test",i)).addShard(TestShardRouting.newShardRouting("test",i,masterId,true,ShardRoutingState.STARTED,shardVersions[shardIds[i]])).build());
+      }
+      return ClusterState.builder(currentState).routingTable(RoutingTable.builder().add(indexRoutingTableBuilder).build()).build();
+    }
+    @Override public boolean runOnlyOnMaster(){
+      return false;
+    }
+    @Override public void onFailure(    String source,    Throwable t){
+    }
+  }
+);
+  waitNoPendingTasksOnAll();
+  logger.info("Checking if shards aren't removed");
+  for (  int shard : node2Shards) {
+    assertTrue(waitForShardDeletion(nonMasterNode,"test",shard));
+  }
+}

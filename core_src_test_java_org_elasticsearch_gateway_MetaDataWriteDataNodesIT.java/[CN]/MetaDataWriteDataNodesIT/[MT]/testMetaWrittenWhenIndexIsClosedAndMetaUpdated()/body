@@ -1,0 +1,31 @@
+{
+  String masterNode=internalCluster().startMasterOnlyNode(Settings.EMPTY);
+  final String dataNode=internalCluster().startDataOnlyNode(Settings.EMPTY);
+  final String index="index";
+  assertAcked(prepareCreate(index).setSettings(Settings.builder().put("index.number_of_replicas",0)));
+  logger.info("--> wait for green index");
+  ensureGreen();
+  logger.info("--> wait for meta state written for index");
+  assertIndexInMetaState(dataNode,index);
+  assertIndexInMetaState(masterNode,index);
+  logger.info("--> close index");
+  client().admin().indices().prepareClose(index).get();
+  ClusterStateResponse clusterStateResponse=client().admin().cluster().prepareState().get();
+  assertThat(clusterStateResponse.getState().getMetaData().index(index).getState().name(),equalTo(IndexMetaData.State.CLOSE.name()));
+  client().admin().indices().preparePutMapping(index).setType("doc").setSource(jsonBuilder().startObject().startObject("properties").startObject("integer_field").field("type","integer").endObject().endObject().endObject()).get();
+  GetMappingsResponse getMappingsResponse=client().admin().indices().prepareGetMappings(index).addTypes("doc").get();
+  assertNotNull(((LinkedHashMap)(getMappingsResponse.getMappings().get(index).get("doc").getSourceAsMap().get("properties"))).get("integer_field"));
+  ImmutableOpenMap<String,IndexMetaData> indicesMetaData=getIndicesMetaDataOnNode(dataNode);
+  assertNotNull(((LinkedHashMap)(indicesMetaData.get(index).getMappings().get("doc").getSourceAsMap().get("properties"))).get("integer_field"));
+  assertThat(indicesMetaData.get(index).state(),equalTo(IndexMetaData.State.CLOSE));
+  internalCluster().restartNode(dataNode,new RestartCallback());
+  client().admin().indices().preparePutMapping(index).setType("doc").setSource(jsonBuilder().startObject().startObject("properties").startObject("float_field").field("type","float").endObject().endObject().endObject()).get();
+  getMappingsResponse=client().admin().indices().prepareGetMappings(index).addTypes("doc").get();
+  assertNotNull(((LinkedHashMap)(getMappingsResponse.getMappings().get(index).get("doc").getSourceAsMap().get("properties"))).get("float_field"));
+  indicesMetaData=getIndicesMetaDataOnNode(dataNode);
+  assertNotNull(((LinkedHashMap)(indicesMetaData.get(index).getMappings().get("doc").getSourceAsMap().get("properties"))).get("float_field"));
+  assertThat(indicesMetaData.get(index).state(),equalTo(IndexMetaData.State.CLOSE));
+  assertAcked(client().admin().indices().prepareOpen(index).get());
+  indicesMetaData=getIndicesMetaDataOnNode(dataNode);
+  assertThat(indicesMetaData.get(index).state(),equalTo(IndexMetaData.State.OPEN));
+}

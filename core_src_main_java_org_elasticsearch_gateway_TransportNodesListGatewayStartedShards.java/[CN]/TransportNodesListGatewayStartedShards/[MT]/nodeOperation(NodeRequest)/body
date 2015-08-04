@@ -6,9 +6,19 @@
     ShardStateMetaData shardStateMetaData=ShardStateMetaData.FORMAT.loadLatestState(logger,nodeEnv.availableShardPaths(request.shardId));
     if (shardStateMetaData != null) {
       final IndexMetaData metaData=clusterService.state().metaData().index(shardId.index().name());
-      if (metaData != null && canOpenIndex(request.getShardId(),metaData) == false) {
-        logger.trace("{} can't open index for shard [{}]",shardId,shardStateMetaData);
-        return new NodeGatewayStartedShards(clusterService.localNode(),-1);
+      if (metaData != null) {
+        ShardPath shardPath=null;
+        try {
+          shardPath=ShardPath.loadShardPath(logger,nodeEnv,shardId,metaData.settings());
+          if (shardPath == null) {
+            throw new IllegalStateException(shardId + " no shard path found");
+          }
+          Store.tryOpenIndex(shardPath.resolveIndex());
+        }
+ catch (        Exception exception) {
+          logger.trace("{} can't open index for shard [{}] in path [{}]",exception,shardId,shardStateMetaData,(shardPath != null) ? shardPath.resolveIndex() : "");
+          return new NodeGatewayStartedShards(clusterService.localNode(),shardStateMetaData.version,exception);
+        }
       }
       if (indexUUID.equals(shardStateMetaData.indexUUID) == false && IndexMetaData.INDEX_UUID_NA_VALUE.equals(shardStateMetaData.indexUUID) == false) {
         logger.warn("{} shard state info found but indexUUID didn't match expected [{}] actual [{}]",shardId,indexUUID,shardStateMetaData.indexUUID);

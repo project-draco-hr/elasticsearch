@@ -1,0 +1,32 @@
+{
+  int numDocs=scaledRandomIntBetween(100,1000);
+  internalCluster().ensureAtLeastNumDataNodes(2);
+  assertAcked(prepareCreate("test").setSettings(Settings.builder().put(PrimaryShardAllocator.INDEX_RECOVERY_INITIAL_SHARDS,"one").put(IndexMetaData.SETTING_NUMBER_OF_REPLICAS,cluster().numDataNodes() - 1).put(MergePolicyConfig.INDEX_MERGE_ENABLED,false).put(MockFSDirectoryService.CHECK_INDEX_ON_CLOSE,false).put(TranslogService.INDEX_TRANSLOG_DISABLE_FLUSH,true).put("indices.recovery.concurrent_streams",10)));
+  ensureGreen();
+  IndexRequestBuilder[] builders=new IndexRequestBuilder[numDocs];
+  for (int i=0; i < builders.length; i++) {
+    builders[i]=client().prepareIndex("test","type").setSource("field","value");
+  }
+  indexRandom(true,builders);
+  ensureGreen();
+  assertAllSuccessful(client().admin().indices().prepareFlush().setForce(true).setWaitIfOngoing(true).execute().actionGet());
+  CountResponse countResponse=client().prepareCount().get();
+  assertHitCount(countResponse,numDocs);
+  final Map<String,List<Path>> filesToCorrupt=findFilesToCorruptForReplica();
+  internalCluster().fullRestart(new InternalTestCluster.RestartCallback(){
+    @Override public Settings onNodeStopped(    String nodeName) throws Exception {
+      List<Path> paths=filesToCorrupt.get(nodeName);
+      if (paths != null) {
+        for (        Path path : paths) {
+          try (OutputStream os=Files.newOutputStream(path)){
+            os.write(0);
+          }
+           logger.info("corrupting file {} on node {}",path,nodeName);
+        }
+      }
+      return null;
+    }
+  }
+);
+  ensureGreen();
+}

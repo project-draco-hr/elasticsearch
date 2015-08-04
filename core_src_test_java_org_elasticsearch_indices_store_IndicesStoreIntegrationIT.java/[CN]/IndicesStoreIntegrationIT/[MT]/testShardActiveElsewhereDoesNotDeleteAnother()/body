@@ -1,0 +1,39 @@
+{
+  Future<String> masterFuture=internalCluster().startNodeAsync(Settings.builder().put("node.master",true,"node.data",false).build());
+  Future<List<String>> nodesFutures=internalCluster().startNodesAsync(4,Settings.builder().put("node.master",false,"node.data",true).build());
+  final String masterNode=masterFuture.get();
+  final String node1=nodesFutures.get().get(0);
+  final String node2=nodesFutures.get().get(1);
+  final String node3=nodesFutures.get().get(2);
+  final String node4=nodesFutures.get().get(3);
+  assertAcked(prepareCreate("test").setSettings(Settings.builder().put(IndexMetaData.SETTING_NUMBER_OF_SHARDS,3).put(IndexMetaData.SETTING_NUMBER_OF_REPLICAS,1).put(FilterAllocationDecider.INDEX_ROUTING_EXCLUDE_GROUP + "_name",node4)));
+  assertFalse(client().admin().cluster().prepareHealth().setWaitForRelocatingShards(0).setWaitForGreenStatus().setWaitForNodes("5").get().isTimedOut());
+  assertAcked(client().admin().cluster().prepareUpdateSettings().setTransientSettings(Settings.builder().put(EnableAllocationDecider.CLUSTER_ROUTING_ALLOCATION_ENABLE,"none")));
+  logger.debug("--> shutting down two random nodes");
+  internalCluster().stopRandomNode(InternalTestCluster.nameFilter(node1,node2,node3));
+  internalCluster().stopRandomNode(InternalTestCluster.nameFilter(node1,node2,node3));
+  logger.debug("--> verifying index is red");
+  ClusterHealthResponse health=client().admin().cluster().prepareHealth().setWaitForNodes("3").get();
+  if (health.getStatus() != ClusterHealthStatus.RED) {
+    logClusterState();
+    fail("cluster didn't become red, despite of shutting 2 of 3 nodes");
+  }
+  logger.debug("--> allowing index to be assigned to node [{}]",node4);
+  assertAcked(client().admin().indices().prepareUpdateSettings("test").setSettings(Settings.builder().put(FilterAllocationDecider.INDEX_ROUTING_EXCLUDE_GROUP + "_name","NONE")));
+  assertAcked(client().admin().cluster().prepareUpdateSettings().setTransientSettings(Settings.builder().put(EnableAllocationDecider.CLUSTER_ROUTING_ALLOCATION_ENABLE,"all")));
+  logger.debug("--> waiting for shards to recover on [{}]",node4);
+  assertBusy(new Runnable(){
+    @Override public void run(){
+      assertTrue(internalCluster().getInstance(IndicesService.class,node4).hasIndex("test"));
+    }
+  }
+);
+  assertFalse(client().admin().cluster().prepareHealth().setWaitForActiveShards(4).get().isTimedOut());
+  assertAcked(client().admin().cluster().prepareUpdateSettings().setTransientSettings(Settings.builder().put(EnableAllocationDecider.CLUSTER_ROUTING_ALLOCATION_ENABLE,"none")));
+  logger.debug("--> starting the two old nodes back");
+  internalCluster().startNodesAsync(2,Settings.builder().put("node.master",false,"node.data",true).build());
+  assertFalse(client().admin().cluster().prepareHealth().setWaitForNodes("5").get().isTimedOut());
+  assertAcked(client().admin().cluster().prepareUpdateSettings().setTransientSettings(Settings.builder().put(EnableAllocationDecider.CLUSTER_ROUTING_ALLOCATION_ENABLE,"all")));
+  logger.debug("--> waiting for the lost shard to be recovered");
+  ensureGreen("test");
+}

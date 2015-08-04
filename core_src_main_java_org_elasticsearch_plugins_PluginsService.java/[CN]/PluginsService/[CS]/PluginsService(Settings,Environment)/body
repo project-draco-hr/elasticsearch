@@ -1,43 +1,41 @@
 {
   super(settings);
-  this.environment=environment;
-  this.checkLucene=settings.getAsBoolean(PLUGINS_CHECK_LUCENE_KEY,true);
-  this.esPluginPropertiesFile=settings.get(ES_PLUGIN_PROPERTIES_FILE_KEY,ES_PLUGIN_PROPERTIES);
-  this.loadClasspathPlugins=settings.getAsBoolean(LOAD_PLUGIN_FROM_CLASSPATH,true);
   ImmutableList.Builder<Tuple<PluginInfo,Plugin>> tupleBuilder=ImmutableList.builder();
   String[] defaultPluginsClasses=settings.getAsArray("plugin.types");
   for (  String pluginClass : defaultPluginsClasses) {
     Plugin plugin=loadPlugin(pluginClass,settings);
-    PluginInfo pluginInfo=new PluginInfo(plugin.name(),plugin.description(),hasSite(plugin.name()),true,PluginInfo.VERSION_NOT_AVAILABLE);
+    PluginInfo pluginInfo=new PluginInfo(plugin.name(),plugin.description(),false,"NA",true,pluginClass,false);
     if (logger.isTraceEnabled()) {
       logger.trace("plugin loaded from settings [{}]",pluginInfo);
     }
     tupleBuilder.add(new Tuple<>(pluginInfo,plugin));
   }
-  if (loadClasspathPlugins) {
-    tupleBuilder.addAll(loadPluginsFromClasspath(settings));
-  }
-  this.plugins=tupleBuilder.build();
-  Map<String,Plugin> jvmPlugins=Maps.newHashMap();
-  List<String> sitePlugins=Lists.newArrayList();
-  for (  Tuple<PluginInfo,Plugin> tuple : this.plugins) {
-    jvmPlugins.put(tuple.v2().name(),tuple.v2());
-    if (tuple.v1().isSite()) {
-      sitePlugins.add(tuple.v1().getName());
-    }
-  }
   try {
-    ImmutableList<Tuple<PluginInfo,Plugin>> tuples=loadSitePlugins();
-    for (    Tuple<PluginInfo,Plugin> tuple : tuples) {
-      sitePlugins.add(tuple.v1().getName());
-    }
+    List<Bundle> bundles=getPluginBundles(environment);
+    tupleBuilder.addAll(loadBundles(bundles));
   }
  catch (  IOException ex) {
-    throw new IllegalStateException("Can't load site  plugins",ex);
+    throw new IllegalStateException(ex);
+  }
+  plugins=tupleBuilder.build();
+  info=new PluginsInfo();
+  for (  Tuple<PluginInfo,Plugin> tuple : plugins) {
+    info.add(tuple.v1());
+  }
+  Map<String,Plugin> jvmPlugins=new HashMap<>();
+  List<String> sitePlugins=new ArrayList<>();
+  for (  Tuple<PluginInfo,Plugin> tuple : plugins) {
+    PluginInfo info=tuple.v1();
+    if (info.isJvm()) {
+      jvmPlugins.put(tuple.v2().name(),tuple.v2());
+    }
+    if (info.isSite()) {
+      sitePlugins.add(info.getName());
+    }
   }
   String[] mandatoryPlugins=settings.getAsArray("plugin.mandatory",null);
   if (mandatoryPlugins != null) {
-    Set<String> missingPlugins=Sets.newHashSet();
+    Set<String> missingPlugins=new HashSet<>();
     for (    String mandatoryPlugin : mandatoryPlugins) {
       if (!jvmPlugins.containsKey(mandatoryPlugin) && !sitePlugins.contains(mandatoryPlugin) && !missingPlugins.contains(mandatoryPlugin)) {
         missingPlugins.add(mandatoryPlugin);
@@ -50,8 +48,8 @@
   logger.info("loaded {}, sites {}",jvmPlugins.keySet(),sitePlugins);
   MapBuilder<Plugin,List<OnModuleReference>> onModuleReferences=MapBuilder.newMapBuilder();
   for (  Plugin plugin : jvmPlugins.values()) {
-    List<OnModuleReference> list=Lists.newArrayList();
-    for (    Method method : plugin.getClass().getDeclaredMethods()) {
+    List<OnModuleReference> list=new ArrayList<>();
+    for (    Method method : plugin.getClass().getMethods()) {
       if (!method.getName().equals("onModule")) {
         continue;
       }
@@ -64,7 +62,6 @@
         logger.warn("Plugin: {} implementing onModule by the type is not of Module type {}",plugin.name(),moduleClass);
         continue;
       }
-      method.setAccessible(true);
       list.add(new OnModuleReference(moduleClass,method));
     }
     if (!list.isEmpty()) {
@@ -72,5 +69,4 @@
     }
   }
   this.onModuleReferences=onModuleReferences.immutableMap();
-  this.refreshInterval=settings.getAsTime(PLUGINS_INFO_REFRESH_INTERVAL_KEY,TimeValue.timeValueSeconds(10));
 }

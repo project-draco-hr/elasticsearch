@@ -1,0 +1,22 @@
+{
+  final IndexMetaData metaData=clusterState.getMetaData().indices().get(shardId.getIndex());
+  final Settings indexSettings=buildIndexSettings(metaData);
+  if (canDeleteShardContent(shardId,indexSettings) == false) {
+    throw new IllegalStateException("Can't delete shard " + shardId);
+  }
+  nodeEnv.deleteShardDirectorySafe(shardId,indexSettings);
+  logger.debug("{} deleted shard reason [{}]",shardId,reason);
+  if (clusterState.nodes().localNode().isMasterNode() == false && canDeleteIndexContents(shardId.index(),indexSettings)) {
+    if (nodeEnv.findAllShardIds(shardId.index()).isEmpty()) {
+      try {
+        deleteIndexStore("no longer used",metaData,clusterState);
+      }
+ catch (      Exception e) {
+        throw new ElasticsearchException("failed to delete unused index after deleting its last shard (" + shardId + ")",e);
+      }
+    }
+ else {
+      logger.trace("[{}] still has shard stores, leaving as is",shardId.index());
+    }
+  }
+}
