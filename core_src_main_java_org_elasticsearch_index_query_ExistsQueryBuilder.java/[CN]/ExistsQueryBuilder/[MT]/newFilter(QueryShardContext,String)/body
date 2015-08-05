@@ -1,0 +1,37 @@
+{
+  final FieldNamesFieldMapper.FieldNamesFieldType fieldNamesFieldType=(FieldNamesFieldMapper.FieldNamesFieldType)context.mapperService().fullName(FieldNamesFieldMapper.NAME);
+  if (fieldNamesFieldType == null) {
+    return Queries.newMatchNoDocsQuery();
+  }
+  ObjectMapper objectMapper=context.getObjectMapper(fieldPattern);
+  if (objectMapper != null) {
+    fieldPattern=fieldPattern + ".*";
+  }
+  Collection<String> fields=context.simpleMatchToIndexNames(fieldPattern);
+  if (fields.isEmpty()) {
+    return Queries.newMatchNoDocsQuery();
+  }
+  BooleanQuery boolFilter=new BooleanQuery();
+  for (  String field : fields) {
+    MappedFieldType fieldType=context.fieldMapper(field);
+    Query filter=null;
+    if (fieldNamesFieldType.isEnabled()) {
+      final String f;
+      if (fieldType != null) {
+        f=fieldType.names().indexName();
+      }
+ else {
+        f=field;
+      }
+      filter=fieldNamesFieldType.termQuery(f,context);
+    }
+    if (filter == null && fieldType != null) {
+      filter=fieldType.rangeQuery(null,null,true,true);
+    }
+    if (filter == null) {
+      filter=new TermRangeQuery(field,null,null,true,true);
+    }
+    boolFilter.add(filter,BooleanClause.Occur.SHOULD);
+  }
+  return new ConstantScoreQuery(boolFilter);
+}

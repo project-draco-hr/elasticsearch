@@ -1,0 +1,114 @@
+{
+  QueryParseContext parseContext=context.parseContext();
+  XContentParser parser=parseContext.parser();
+  Query query=null;
+  Query filter=null;
+  float boost=AbstractQueryBuilder.DEFAULT_BOOST;
+  String queryName=null;
+  FiltersFunctionScoreQuery.ScoreMode scoreMode=FiltersFunctionScoreQuery.ScoreMode.Multiply;
+  ArrayList<FiltersFunctionScoreQuery.FilterFunction> filterFunctions=new ArrayList<>();
+  Float maxBoost=null;
+  Float minScore=null;
+  String currentFieldName=null;
+  XContentParser.Token token;
+  CombineFunction combineFunction=CombineFunction.MULT;
+  boolean functionArrayFound=false;
+  boolean singleFunctionFound=false;
+  String singleFunctionName=null;
+  while ((token=parser.nextToken()) != XContentParser.Token.END_OBJECT) {
+    if (token == XContentParser.Token.FIELD_NAME) {
+      currentFieldName=parser.currentName();
+    }
+ else     if ("query".equals(currentFieldName)) {
+      query=parseContext.parseInnerQuery();
+    }
+ else     if (parseContext.parseFieldMatcher().match(currentFieldName,FILTER_FIELD)) {
+      filter=parseContext.parseInnerFilter();
+    }
+ else     if ("score_mode".equals(currentFieldName) || "scoreMode".equals(currentFieldName)) {
+      scoreMode=parseScoreMode(parseContext,parser);
+    }
+ else     if ("boost_mode".equals(currentFieldName) || "boostMode".equals(currentFieldName)) {
+      combineFunction=parseBoostMode(parseContext,parser);
+    }
+ else     if ("max_boost".equals(currentFieldName) || "maxBoost".equals(currentFieldName)) {
+      maxBoost=parser.floatValue();
+    }
+ else     if ("boost".equals(currentFieldName)) {
+      boost=parser.floatValue();
+    }
+ else     if ("_name".equals(currentFieldName)) {
+      queryName=parser.text();
+    }
+ else     if ("min_score".equals(currentFieldName) || "minScore".equals(currentFieldName)) {
+      minScore=parser.floatValue();
+    }
+ else     if ("functions".equals(currentFieldName)) {
+      if (singleFunctionFound) {
+        String errorString="already found [" + singleFunctionName + "], now encountering [functions].";
+        handleMisplacedFunctionsDeclaration(errorString,singleFunctionName);
+      }
+      currentFieldName=parseFiltersAndFunctions(context,parser,filterFunctions,currentFieldName);
+      functionArrayFound=true;
+    }
+ else {
+      ScoreFunction scoreFunction;
+      if (currentFieldName.equals("weight")) {
+        scoreFunction=new WeightFactorFunction(parser.floatValue());
+      }
+ else {
+        scoreFunction=functionParserMapper.get(parseContext,currentFieldName).parse(context,parser);
+      }
+      if (functionArrayFound) {
+        String errorString="already found [functions] array, now encountering [" + currentFieldName + "].";
+        handleMisplacedFunctionsDeclaration(errorString,currentFieldName);
+      }
+      if (filterFunctions.size() > 0) {
+        throw new ElasticsearchParseException("failed to parse [{}] query. already found function [{}], now encountering [{}]. use [functions] array if you want to define several functions.",NAME,singleFunctionName,currentFieldName);
+      }
+      filterFunctions.add(new FiltersFunctionScoreQuery.FilterFunction(null,scoreFunction));
+      singleFunctionFound=true;
+      singleFunctionName=currentFieldName;
+    }
+  }
+  if (query == null && filter == null) {
+    query=Queries.newMatchAllQuery();
+  }
+ else   if (query == null && filter != null) {
+    query=new ConstantScoreQuery(filter);
+  }
+ else   if (query != null && filter != null) {
+    final BooleanQuery filtered=new BooleanQuery();
+    filtered.add(query,Occur.MUST);
+    filtered.add(filter,Occur.FILTER);
+    query=filtered;
+  }
+  if (filterFunctions.isEmpty() && combineFunction == null) {
+    return query;
+  }
+  if (maxBoost == null) {
+    maxBoost=Float.MAX_VALUE;
+  }
+  Query result;
+  if (filterFunctions.size() == 0 || filterFunctions.size() == 1 && (filterFunctions.get(0).filter == null || Queries.isConstantMatchAllQuery(filterFunctions.get(0).filter))) {
+    ScoreFunction function=filterFunctions.size() == 0 ? null : filterFunctions.get(0).function;
+    FunctionScoreQuery theQuery=new FunctionScoreQuery(query,function,minScore);
+    if (combineFunction != null) {
+      theQuery.setCombineFunction(combineFunction);
+    }
+    theQuery.setMaxBoost(maxBoost);
+    result=theQuery;
+  }
+ else {
+    FiltersFunctionScoreQuery functionScoreQuery=new FiltersFunctionScoreQuery(query,scoreMode,filterFunctions.toArray(new FiltersFunctionScoreQuery.FilterFunction[filterFunctions.size()]),maxBoost,minScore);
+    if (combineFunction != null) {
+      functionScoreQuery.setCombineFunction(combineFunction);
+    }
+    result=functionScoreQuery;
+  }
+  result.setBoost(boost);
+  if (queryName != null) {
+    context.addNamedQuery(queryName,query);
+  }
+  return result;
+}
