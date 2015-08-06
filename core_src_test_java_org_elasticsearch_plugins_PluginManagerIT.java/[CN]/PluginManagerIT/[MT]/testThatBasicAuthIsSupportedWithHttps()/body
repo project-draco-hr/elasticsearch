@@ -1,0 +1,31 @@
+{
+  assumeTrue("test requires security manager to be disabled",System.getSecurityManager() == null);
+  SSLSocketFactory defaultSocketFactory=HttpsURLConnection.getDefaultSSLSocketFactory();
+  ServerBootstrap serverBootstrap=new ServerBootstrap(new NioServerSocketChannelFactory());
+  SelfSignedCertificate ssc=new SelfSignedCertificate("localhost");
+  try {
+    SSLContext sc=SSLContext.getInstance("SSL");
+    sc.init(null,InsecureTrustManagerFactory.INSTANCE.getTrustManagers(),null);
+    HttpsURLConnection.setDefaultSSLSocketFactory(sc.getSocketFactory());
+    final List<HttpRequest> requests=new ArrayList<>();
+    final SslContext sslContext=SslContext.newServerContext(ssc.certificate(),ssc.privateKey());
+    serverBootstrap.setPipelineFactory(new ChannelPipelineFactory(){
+      @Override public ChannelPipeline getPipeline() throws Exception {
+        return Channels.pipeline(new SslHandler(sslContext.newEngine()),new HttpRequestDecoder(),new HttpResponseEncoder(),new LoggingServerHandler(requests));
+      }
+    }
+);
+    Channel channel=serverBootstrap.bind(new InetSocketAddress("localhost",0));
+    int port=((InetSocketAddress)channel.getLocalAddress()).getPort();
+    assertStatus(String.format(Locale.ROOT,"install foo --url https://user:pass@localhost:%s/foo.zip --verbose --timeout 1s",port),ExitStatus.IO_ERROR);
+    assertThat(requests,hasSize(1));
+    String msg=String.format(Locale.ROOT,"Request header did not contain Authorization header, terminal output was: %s",terminal.getTerminalOutput());
+    assertThat(msg,requests.get(0).headers().contains("Authorization"),is(true));
+    assertThat(msg,requests.get(0).headers().get("Authorization"),is("Basic " + Base64.encodeBytes("user:pass".getBytes(Charsets.UTF_8))));
+  }
+  finally {
+    HttpsURLConnection.setDefaultSSLSocketFactory(defaultSocketFactory);
+    serverBootstrap.releaseExternalResources();
+    ssc.delete();
+  }
+}
