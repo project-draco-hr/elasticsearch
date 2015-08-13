@@ -2,6 +2,7 @@
   Path pluginFile=pluginHandle.newDistroFile(environment);
   HttpDownloadHelper downloadHelper=new HttpDownloadHelper();
   boolean downloaded=false;
+  boolean verified=false;
   HttpDownloadHelper.DownloadProgress progress;
   if (outputMode == OutputMode.SILENT) {
     progress=new HttpDownloadHelper.NullProgress();
@@ -20,8 +21,13 @@
     try {
       downloadHelper.download(pluginUrl,pluginFile,progress,this.timeout);
       downloaded=true;
+      terminal.println("Verifying %s checksums if available ...",pluginUrl.toExternalForm());
+      Tuple<URL,Path> sha1Info=pluginHandle.newChecksumUrlAndFile(environment,pluginUrl,"sha1");
+      verified=downloadHelper.downloadAndVerifyChecksum(sha1Info.v1(),pluginFile,sha1Info.v2(),progress,this.timeout,HttpDownloadHelper.SHA1_CHECKSUM);
+      Tuple<URL,Path> md5Info=pluginHandle.newChecksumUrlAndFile(environment,pluginUrl,"md5");
+      verified=verified || downloadHelper.downloadAndVerifyChecksum(md5Info.v1(),pluginFile,md5Info.v2(),progress,this.timeout,HttpDownloadHelper.MD5_CHECKSUM);
     }
- catch (    ElasticsearchTimeoutException e) {
+ catch (    ElasticsearchTimeoutException|ElasticsearchCorruptionException e) {
       throw e;
     }
 catch (    Exception e) {
@@ -39,9 +45,14 @@ catch (    Exception e) {
       try {
         downloadHelper.download(url,pluginFile,progress,this.timeout);
         downloaded=true;
+        terminal.println("Verifying %s checksums if available ...",url.toExternalForm());
+        Tuple<URL,Path> sha1Info=pluginHandle.newChecksumUrlAndFile(environment,url,"sha1");
+        verified=downloadHelper.downloadAndVerifyChecksum(sha1Info.v1(),pluginFile,sha1Info.v2(),progress,this.timeout,HttpDownloadHelper.SHA1_CHECKSUM);
+        Tuple<URL,Path> md5Info=pluginHandle.newChecksumUrlAndFile(environment,url,"md5");
+        verified=verified || downloadHelper.downloadAndVerifyChecksum(md5Info.v1(),pluginFile,md5Info.v2(),progress,this.timeout,HttpDownloadHelper.MD5_CHECKSUM);
         break;
       }
- catch (      ElasticsearchTimeoutException e) {
+ catch (      ElasticsearchTimeoutException|ElasticsearchCorruptionException e) {
         throw e;
       }
 catch (      Exception e) {
@@ -52,6 +63,9 @@ catch (      Exception e) {
   if (!downloaded) {
     IOUtils.deleteFilesIgnoringExceptions(pluginFile);
     throw new IOException("failed to download out of all possible locations..., use --verbose to get detailed information");
+  }
+  if (verified == false) {
+    terminal.println("NOTE: Unable to verify checksum for downloaded plugin (unable to find .sha1 or .md5 file to verify)");
   }
   return pluginFile;
 }
