@@ -1,0 +1,52 @@
+{
+  final long byteSize=randomIntBetween(0,Integer.MAX_VALUE);
+  final AllocationService allocation=createAllocationService(Settings.EMPTY,new ClusterInfoService(){
+    @Override public ClusterInfo getClusterInfo(){
+      return new ClusterInfo(Collections.EMPTY_MAP,Collections.EMPTY_MAP){
+        @Override public Long getShardSize(        ShardRouting shardRouting){
+          if (shardRouting.index().equals("test") && shardRouting.shardId().getId() == 0) {
+            return byteSize;
+          }
+          return null;
+        }
+      }
+;
+    }
+    @Override public void addListener(    Listener listener){
+    }
+  }
+);
+  logger.info("creating an index with 1 shard, no replica");
+  MetaData metaData=MetaData.builder().put(IndexMetaData.builder("test").settings(settings(Version.CURRENT)).numberOfShards(1).numberOfReplicas(0)).build();
+  RoutingTable routingTable=RoutingTable.builder().addAsNew(metaData.index("test")).build();
+  ClusterState clusterState=ClusterState.builder(org.elasticsearch.cluster.ClusterName.DEFAULT).metaData(metaData).routingTable(routingTable).build();
+  logger.info("adding two nodes and performing rerouting");
+  clusterState=ClusterState.builder(clusterState).nodes(DiscoveryNodes.builder().put(newNode("node1")).put(newNode("node2"))).build();
+  RoutingAllocation.Result rerouteResult=allocation.reroute(clusterState);
+  clusterState=ClusterState.builder(clusterState).routingTable(rerouteResult.routingTable()).build();
+  logger.info("start primary shard");
+  rerouteResult=allocation.applyStartedShards(clusterState,clusterState.getRoutingNodes().shardsWithState(INITIALIZING));
+  clusterState=ClusterState.builder(clusterState).routingTable(rerouteResult.routingTable()).build();
+  logger.info("move the shard");
+  String existingNodeId=clusterState.routingTable().index("test").shard(0).primaryShard().currentNodeId();
+  String toNodeId;
+  if ("node1".equals(existingNodeId)) {
+    toNodeId="node2";
+  }
+ else {
+    toNodeId="node1";
+  }
+  rerouteResult=allocation.reroute(clusterState,new AllocationCommands(new MoveAllocationCommand(new ShardId("test",0),existingNodeId,toNodeId)));
+  assertThat(rerouteResult.changed(),equalTo(true));
+  clusterState=ClusterState.builder(clusterState).routingTable(rerouteResult.routingTable()).build();
+  assertEquals(clusterState.getRoutingNodes().node(existingNodeId).get(0).state(),ShardRoutingState.RELOCATING);
+  assertEquals(clusterState.getRoutingNodes().node(toNodeId).get(0).state(),ShardRoutingState.INITIALIZING);
+  assertEquals(clusterState.getRoutingNodes().node(existingNodeId).get(0).getExpectedShardSize(),byteSize);
+  assertEquals(clusterState.getRoutingNodes().node(toNodeId).get(0).getExpectedShardSize(),byteSize);
+  logger.info("finish moving the shard");
+  rerouteResult=allocation.applyStartedShards(clusterState,clusterState.getRoutingNodes().shardsWithState(INITIALIZING));
+  clusterState=ClusterState.builder(clusterState).routingTable(rerouteResult.routingTable()).build();
+  assertThat(clusterState.getRoutingNodes().node(existingNodeId).isEmpty(),equalTo(true));
+  assertThat(clusterState.getRoutingNodes().node(toNodeId).get(0).state(),equalTo(ShardRoutingState.STARTED));
+  assertEquals(clusterState.getRoutingNodes().node(toNodeId).get(0).getExpectedShardSize(),-1);
+}
