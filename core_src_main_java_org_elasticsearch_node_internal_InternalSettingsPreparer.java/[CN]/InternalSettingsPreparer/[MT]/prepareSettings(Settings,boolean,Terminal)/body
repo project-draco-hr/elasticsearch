@@ -12,23 +12,23 @@
     if (useSystemProperties) {
       if (Strings.hasText(System.getProperty("es.default.config"))) {
         loadFromEnv=true;
-        settingsBuilder.loadFromUrl(environment.resolveConfig(System.getProperty("es.default.config")));
+        settingsBuilder.loadFromPath(environment.configFile().resolve(System.getProperty("es.default.config")));
       }
       if (Strings.hasText(System.getProperty("es.config"))) {
         loadFromEnv=false;
-        settingsBuilder.loadFromUrl(environment.resolveConfig(System.getProperty("es.config")));
+        settingsBuilder.loadFromPath(environment.configFile().resolve(System.getProperty("es.config")));
       }
       if (Strings.hasText(System.getProperty("elasticsearch.config"))) {
         loadFromEnv=false;
-        settingsBuilder.loadFromUrl(environment.resolveConfig(System.getProperty("elasticsearch.config")));
+        settingsBuilder.loadFromPath(environment.configFile().resolve(System.getProperty("elasticsearch.config")));
       }
     }
     if (loadFromEnv) {
       for (      String allowedSuffix : ALLOWED_SUFFIXES) {
         try {
-          settingsBuilder.loadFromUrl(environment.resolveConfig("elasticsearch" + allowedSuffix));
+          settingsBuilder.loadFromPath(environment.configFile().resolve("elasticsearch" + allowedSuffix));
         }
- catch (        FailedToResolveConfigException e) {
+ catch (        SettingsException e) {
         }
       }
     }
@@ -61,13 +61,24 @@
   }
   Settings settings=replacePromptPlaceholders(settingsBuilder.build(),terminal);
   if (settings.get("name") == null) {
-    final String name=settings.get("node.name");
+    String name=settings.get("node.name");
     if (name == null || name.isEmpty()) {
-      settings=settingsBuilder().put(settings).put("name",Names.randomNodeName(environment.resolveConfig("names.txt"))).build();
-    }
+      InputStream input;
+      Path namesPath=environment.configFile().resolve("names.txt");
+      if (Files.exists(namesPath)) {
+        try {
+          input=Files.newInputStream(namesPath);
+        }
+ catch (        IOException e) {
+          throw new RuntimeException("Failed to load custom names.txt from " + namesPath,e);
+        }
+      }
  else {
-      settings=settingsBuilder().put(settings).put("name",name).build();
+        input=InternalSettingsPreparer.class.getResourceAsStream("/config/names.txt");
+      }
+      name=Names.randomNodeName(input);
     }
+    settings=settingsBuilder().put(settings).put("name",name).build();
   }
   environment=new Environment(settings);
   settingsBuilder=settingsBuilder().put(settings);
