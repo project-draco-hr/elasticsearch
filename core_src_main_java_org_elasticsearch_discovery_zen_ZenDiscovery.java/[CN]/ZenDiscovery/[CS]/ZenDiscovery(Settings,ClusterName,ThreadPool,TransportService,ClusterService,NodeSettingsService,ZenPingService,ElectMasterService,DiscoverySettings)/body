@@ -1,0 +1,39 @@
+{
+  super(settings);
+  this.clusterName=clusterName;
+  this.clusterService=clusterService;
+  this.transportService=transportService;
+  this.discoverySettings=discoverySettings;
+  this.pingService=pingService;
+  this.electMaster=electMasterService;
+  TimeValue pingTimeout=this.settings.getAsTime("discovery.zen.initial_ping_timeout",timeValueSeconds(3));
+  pingTimeout=this.settings.getAsTime("discovery.zen.ping_timeout",pingTimeout);
+  pingTimeout=settings.getAsTime("discovery.zen.ping_timeout",pingTimeout);
+  this.pingTimeout=settings.getAsTime(SETTING_PING_TIMEOUT,pingTimeout);
+  this.joinTimeout=settings.getAsTime(SETTING_JOIN_TIMEOUT,TimeValue.timeValueMillis(pingTimeout.millis() * 20));
+  this.joinRetryAttempts=settings.getAsInt(SETTING_JOIN_RETRY_ATTEMPTS,3);
+  this.joinRetryDelay=settings.getAsTime(SETTING_JOIN_RETRY_DELAY,TimeValue.timeValueMillis(100));
+  this.maxPingsFromAnotherMaster=settings.getAsInt(SETTING_MAX_PINGS_FROM_ANOTHER_MASTER,3);
+  this.sendLeaveRequest=settings.getAsBoolean(SETTING_SEND_LEAVE_REQUEST,true);
+  this.masterElectionFilterClientNodes=settings.getAsBoolean(SETTING_MASTER_ELECTION_FILTER_CLIENT,true);
+  this.masterElectionFilterDataNodes=settings.getAsBoolean(SETTING_MASTER_ELECTION_FILTER_DATA,false);
+  this.masterElectionWaitForJoinsTimeout=settings.getAsTime(SETTING_MASTER_ELECTION_WAIT_FOR_JOINS_TIMEOUT,TimeValue.timeValueMillis(joinTimeout.millis() / 2));
+  this.rejoinOnMasterGone=settings.getAsBoolean(SETTING_REJOIN_ON_MASTER_GONE,true);
+  if (this.joinRetryAttempts < 1) {
+    throw new IllegalArgumentException("'" + SETTING_JOIN_RETRY_ATTEMPTS + "' must be a positive number. got ["+ SETTING_JOIN_RETRY_ATTEMPTS+ "]");
+  }
+  if (this.maxPingsFromAnotherMaster < 1) {
+    throw new IllegalArgumentException("'" + SETTING_MAX_PINGS_FROM_ANOTHER_MASTER + "' must be a positive number. got ["+ this.maxPingsFromAnotherMaster+ "]");
+  }
+  logger.debug("using ping.timeout [{}], join.timeout [{}], master_election.filter_client [{}], master_election.filter_data [{}]",pingTimeout,joinTimeout,masterElectionFilterClientNodes,masterElectionFilterDataNodes);
+  nodeSettingsService.addListener(new ApplySettings());
+  this.masterFD=new MasterFaultDetection(settings,threadPool,transportService,clusterName,clusterService);
+  this.masterFD.addListener(new MasterNodeFailureListener());
+  this.nodesFD=new NodesFaultDetection(settings,threadPool,transportService,clusterName);
+  this.nodesFD.addListener(new NodeFaultDetectionListener());
+  this.publishClusterState=new PublishClusterStateAction(settings,transportService,this,new NewClusterStateListener(),discoverySettings);
+  this.pingService.setPingContextProvider(this);
+  this.membership=new MembershipAction(settings,clusterService,transportService,this,new MembershipListener());
+  this.joinThreadControl=new JoinThreadControl(threadPool);
+  transportService.registerRequestHandler(DISCOVERY_REJOIN_ACTION_NAME,RejoinClusterRequest.class,ThreadPool.Names.SAME,new RejoinClusterRequestHandler());
+}
