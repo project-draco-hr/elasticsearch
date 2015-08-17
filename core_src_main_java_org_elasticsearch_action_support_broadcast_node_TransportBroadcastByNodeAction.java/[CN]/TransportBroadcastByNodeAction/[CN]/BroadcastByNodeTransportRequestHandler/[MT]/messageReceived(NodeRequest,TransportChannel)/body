@@ -1,0 +1,22 @@
+{
+  List<ShardRouting> shards=request.getShards();
+  final int totalShards=shards.size();
+  logger.trace("[{}] executing operation on [{}] shards",actionName,totalShards);
+  final Object[] shardResultOrExceptions=new Object[totalShards];
+  int shardIndex=-1;
+  for (  final ShardRouting shardRouting : shards) {
+    shardIndex++;
+    onShardOperation(request,shardResultOrExceptions,shardIndex,shardRouting);
+  }
+  List<BroadcastShardOperationFailedException> accumulatedExceptions=new ArrayList<>();
+  List<ShardOperationResult> results=new ArrayList<>();
+  for (int i=0; i < totalShards; i++) {
+    if (shardResultOrExceptions[i] instanceof BroadcastShardOperationFailedException) {
+      accumulatedExceptions.add((BroadcastShardOperationFailedException)shardResultOrExceptions[i]);
+    }
+ else {
+      results.add((ShardOperationResult)shardResultOrExceptions[i]);
+    }
+  }
+  channel.sendResponse(new NodeResponse(request.getNodeId(),totalShards,results,accumulatedExceptions));
+}

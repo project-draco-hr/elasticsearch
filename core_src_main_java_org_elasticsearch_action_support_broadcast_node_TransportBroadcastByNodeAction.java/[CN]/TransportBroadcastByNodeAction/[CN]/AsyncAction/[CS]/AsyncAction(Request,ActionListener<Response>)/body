@@ -1,0 +1,31 @@
+{
+  this.request=request;
+  this.listener=listener;
+  clusterState=clusterService.state();
+  nodes=clusterState.nodes();
+  ClusterBlockException globalBlockException=checkGlobalBlock(clusterState,request);
+  if (globalBlockException != null) {
+    throw globalBlockException;
+  }
+  String[] concreteIndices=indexNameExpressionResolver.concreteIndices(clusterState,request);
+  ClusterBlockException requestBlockException=checkRequestBlock(clusterState,request,concreteIndices);
+  if (requestBlockException != null) {
+    throw requestBlockException;
+  }
+  logger.trace("resolving shards for [{}] based on cluster state version [{}]",actionName,clusterState.version());
+  ShardsIterator shardIt=shards(clusterState,request,concreteIndices);
+  nodeIds=Maps.newHashMap();
+  for (  ShardRouting shard : shardIt.asUnordered()) {
+    if (shard.assignedToNode()) {
+      String nodeId=shard.currentNodeId();
+      if (!nodeIds.containsKey(nodeId)) {
+        nodeIds.put(nodeId,new ArrayList<ShardRouting>());
+      }
+      nodeIds.get(nodeId).add(shard);
+    }
+ else {
+      unavailableShardExceptions.add(new NoShardAvailableActionException(shard.shardId()," no shards available for shard " + shard.toString() + " while executing "+ actionName));
+    }
+  }
+  responses=new AtomicReferenceArray<>(nodeIds.size());
+}
