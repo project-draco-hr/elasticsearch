@@ -44,18 +44,16 @@
   if (randomBoolean()) {
     logger.info("checking snapshot completion using status");
     client().admin().cluster().prepareCreateSnapshot("test-repo","test-snap-2").setIndices("test-idx-all","test-idx-none","test-idx-some").setWaitForCompletion(false).setPartial(true).execute().actionGet();
-    awaitBusy(new Predicate<Object>(){
-      @Override public boolean apply(      Object o){
+    assertBusy(new Runnable(){
+      @Override public void run(){
         SnapshotsStatusResponse snapshotsStatusResponse=client().admin().cluster().prepareSnapshotStatus("test-repo").setSnapshots("test-snap-2").get();
         ImmutableList<SnapshotStatus> snapshotStatuses=snapshotsStatusResponse.getSnapshots();
-        if (snapshotStatuses.size() == 1) {
-          logger.trace("current snapshot status [{}]",snapshotStatuses.get(0));
-          return snapshotStatuses.get(0).getState().completed();
-        }
-        return false;
+        assertEquals(snapshotStatuses.size(),1);
+        logger.trace("current snapshot status [{}]",snapshotStatuses.get(0));
+        assertTrue(snapshotStatuses.get(0).getState().completed());
       }
     }
-);
+,1,TimeUnit.MINUTES);
     SnapshotsStatusResponse snapshotsStatusResponse=client().admin().cluster().prepareSnapshotStatus("test-repo").setSnapshots("test-snap-2").get();
     ImmutableList<SnapshotStatus> snapshotStatuses=snapshotsStatusResponse.getSnapshots();
     assertThat(snapshotStatuses.size(),equalTo(1));
@@ -64,19 +62,16 @@
     assertThat(snapshotStatus.getShardsStats().getTotalShards(),equalTo(18));
     assertThat(snapshotStatus.getShardsStats().getDoneShards(),lessThan(12));
     assertThat(snapshotStatus.getShardsStats().getDoneShards(),greaterThan(6));
-    awaitBusy(new Predicate<Object>(){
-      @Override public boolean apply(      Object o){
+    assertBusy(new Runnable(){
+      @Override public void run(){
         GetSnapshotsResponse response=client().admin().cluster().prepareGetSnapshots("test-repo").setSnapshots("test-snap-2").get();
         assertThat(response.getSnapshots().size(),equalTo(1));
         SnapshotInfo snapshotInfo=response.getSnapshots().get(0);
-        if (snapshotInfo.state().completed()) {
-          assertThat(snapshotInfo.state(),equalTo(SnapshotState.PARTIAL));
-          return true;
-        }
-        return false;
+        assertTrue(snapshotInfo.state().completed());
+        assertEquals(SnapshotState.PARTIAL,snapshotInfo.state());
       }
     }
-);
+,1,TimeUnit.MINUTES);
   }
  else {
     logger.info("checking snapshot completion using wait_for_completion flag");
