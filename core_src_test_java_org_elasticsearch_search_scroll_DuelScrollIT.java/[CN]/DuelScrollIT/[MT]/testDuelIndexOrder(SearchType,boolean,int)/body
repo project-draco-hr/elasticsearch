@@ -1,0 +1,33 @@
+{
+  final int size=scaledRandomIntBetween(5,numDocs + 5);
+  final SearchResponse control=client().prepareSearch("test").setSearchType(searchType).setSize(numDocs).setQuery(QueryBuilders.matchQuery("foo","true")).addSort(SortBuilders.fieldSort("_doc")).setTrackScores(trackScores).get();
+  assertNoFailures(control);
+  SearchResponse scroll=client().prepareSearch("test").setSearchType(searchType).setSize(size).setQuery(QueryBuilders.matchQuery("foo","true")).addSort(SortBuilders.fieldSort("_doc")).setTrackScores(trackScores).setScroll("10m").get();
+  int scrollDocs=0;
+  try {
+    while (true) {
+      assertNoFailures(scroll);
+      assertEquals(control.getHits().getTotalHits(),scroll.getHits().getTotalHits());
+      assertEquals(control.getHits().getMaxScore(),scroll.getHits().getMaxScore(),0.01f);
+      if (scroll.getHits().hits().length == 0) {
+        break;
+      }
+      for (int i=0; i < scroll.getHits().hits().length; ++i) {
+        SearchHit controlHit=control.getHits().getAt(scrollDocs + i);
+        SearchHit scrollHit=scroll.getHits().getAt(i);
+        assertEquals(controlHit.getId(),scrollHit.getId());
+      }
+      scrollDocs+=scroll.getHits().hits().length;
+      scroll=client().prepareSearchScroll(scroll.getScrollId()).setScroll("10m").get();
+    }
+    assertEquals(control.getHits().getTotalHits(),scrollDocs);
+  }
+ catch (  AssertionError e) {
+    logger.info("Control:\n" + control);
+    logger.info("Scroll size=" + size + ", from="+ scrollDocs+ ":\n"+ scroll);
+    throw e;
+  }
+ finally {
+    clearScroll(scroll.getScrollId());
+  }
+}
