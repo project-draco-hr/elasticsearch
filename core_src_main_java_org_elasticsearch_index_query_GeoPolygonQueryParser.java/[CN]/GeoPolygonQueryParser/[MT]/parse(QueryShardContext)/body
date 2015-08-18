@@ -3,9 +3,10 @@
   XContentParser parser=parseContext.parser();
   String fieldName=null;
   List<GeoPoint> shell=Lists.newArrayList();
-  boolean normalizeLon=true;
-  boolean normalizeLat=true;
   float boost=AbstractQueryBuilder.DEFAULT_BOOST;
+  final boolean indexCreatedBeforeV2_0=parseContext.shardContext().indexVersionCreated().before(Version.V_2_0_0);
+  boolean coerce=false;
+  boolean ignoreMalformed=false;
   String queryName=null;
   String currentFieldName=null;
   XContentParser.Token token;
@@ -46,9 +47,14 @@
  else       if ("boost".equals(currentFieldName)) {
         boost=parser.floatValue();
       }
- else       if ("normalize".equals(currentFieldName)) {
-        normalizeLat=parser.booleanValue();
-        normalizeLon=parser.booleanValue();
+ else       if ("coerce".equals(currentFieldName) || (indexCreatedBeforeV2_0 && "normalize".equals(currentFieldName))) {
+        coerce=parser.booleanValue();
+        if (coerce == true) {
+          ignoreMalformed=true;
+        }
+      }
+ else       if ("ignore_malformed".equals(currentFieldName) && coerce == false) {
+        ignoreMalformed=parser.booleanValue();
       }
  else {
         throw new QueryParsingException(parseContext,"[geo_polygon] query does not support [" + currentFieldName + "]");
@@ -73,9 +79,19 @@
       throw new QueryParsingException(parseContext,"too few points defined for geo_polygon query");
     }
   }
-  if (normalizeLat || normalizeLon) {
+  if (!indexCreatedBeforeV2_0 && !ignoreMalformed) {
     for (    GeoPoint point : shell) {
-      GeoUtils.normalizePoint(point,normalizeLat,normalizeLon);
+      if (point.lat() > 90.0 || point.lat() < -90.0) {
+        throw new QueryParsingException(parseContext,"illegal latitude value [{}] for [{}]",point.lat(),GeoPolygonQueryBuilder.NAME);
+      }
+      if (point.lon() > 180.0 || point.lon() < -180) {
+        throw new QueryParsingException(parseContext,"illegal longitude value [{}] for [{}]",point.lon(),GeoPolygonQueryBuilder.NAME);
+      }
+    }
+  }
+  if (coerce) {
+    for (    GeoPoint point : shell) {
+      GeoUtils.normalizePoint(point,coerce,coerce);
     }
   }
   MappedFieldType fieldType=context.fieldMapper(fieldName);
