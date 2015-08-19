@@ -1,11 +1,11 @@
 {
   try {
     final SearchRequest scanRequest=new SearchRequest(request.indices()).types(request.types()).indicesOptions(request.indicesOptions());
-    scanRequest.searchType(SearchType.SCAN).scroll(request.scroll());
+    scanRequest.scroll(request.scroll());
     if (request.routing() != null) {
       scanRequest.routing(request.routing());
     }
-    SearchSourceBuilder source=new SearchSourceBuilder().query(request.source()).fields("_routing","_parent").fetchSource(false).version(true);
+    SearchSourceBuilder source=new SearchSourceBuilder().query(request.source()).fields("_routing","_parent").sort("_doc").fetchSource(false).version(true);
     if (request.size() > 0) {
       source.size(request.size());
     }
@@ -17,15 +17,9 @@
     searchAction.execute(scanRequest,new ActionListener<SearchResponse>(){
       @Override public void onResponse(      SearchResponse searchResponse){
         long hits=searchResponse.getHits().getTotalHits();
-        logger.trace("scan request executed: found [{}] document(s) to delete",hits);
-        addShardFailures(searchResponse.getShardFailures());
-        if (hits == 0) {
-          finishHim(searchResponse.getScrollId(),false,null);
-          return;
-        }
+        logger.trace("first request executed: found [{}] document(s) to delete",hits);
         total.set(hits);
-        logger.trace("start scrolling [{}] document(s)",hits);
-        executeScroll(searchResponse.getScrollId());
+        deleteHits(null,searchResponse);
       }
       @Override public void onFailure(      Throwable e){
         listener.onFailure(e);
