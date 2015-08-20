@@ -1,29 +1,18 @@
 {
-  MockNode nodeA=createMockNode("nodeA",Settings.EMPTY,Version.CURRENT,new PublishClusterStateAction.NewClusterStateListener(){
-    @Override public void onNewClusterState(    ClusterState clusterState,    NewStateProcessed newStateProcessed){
+  MockNode nodeA=createMockNode("nodeA",Settings.EMPTY,Version.CURRENT,new ClusterStateListener(){
+    @Override public void clusterChanged(    ClusterChangedEvent event){
       fail("Shouldn't send cluster state to myself");
     }
   }
 );
-  MockNewClusterStateListener mockListenerB=new MockNewClusterStateListener();
-  MockNode nodeB=createMockNode("nodeB",Settings.EMPTY,Version.CURRENT,mockListenerB);
+  MockNode nodeB=createMockNode("nodeB",Settings.EMPTY,Version.CURRENT);
   DiscoveryNodes discoveryNodes=DiscoveryNodes.builder().put(nodeA.discoveryNode).put(nodeB.discoveryNode).localNodeId(nodeA.discoveryNode.id()).build();
   ClusterState previousClusterState=ClusterState.builder(ClusterName.DEFAULT).nodes(discoveryNodes).build();
   ClusterState clusterState=ClusterState.builder(previousClusterState).incrementVersion().build();
-  mockListenerB.add(new NewClusterStateExpectation(){
-    @Override public void check(    ClusterState clusterState,    PublishClusterStateAction.NewClusterStateListener.NewStateProcessed newStateProcessed){
-      assertFalse(clusterState.wasReadFromDiff());
-    }
-  }
-);
   publishStateDiffAndWait(nodeA.action,clusterState,previousClusterState);
+  assertSameStateFromFull(nodeB.clusterState,clusterState);
   previousClusterState=clusterState;
   clusterState=ClusterState.builder(clusterState).blocks(ClusterBlocks.builder().addGlobalBlock(MetaData.CLUSTER_READ_ONLY_BLOCK)).incrementVersion().build();
-  mockListenerB.add(new NewClusterStateExpectation(){
-    @Override public void check(    ClusterState clusterState,    PublishClusterStateAction.NewClusterStateListener.NewStateProcessed newStateProcessed){
-      assertTrue(clusterState.wasReadFromDiff());
-    }
-  }
-);
   publishStateDiffAndWait(nodeA.action,clusterState,previousClusterState);
+  assertSameStateFromDiff(nodeB.clusterState,clusterState);
 }
