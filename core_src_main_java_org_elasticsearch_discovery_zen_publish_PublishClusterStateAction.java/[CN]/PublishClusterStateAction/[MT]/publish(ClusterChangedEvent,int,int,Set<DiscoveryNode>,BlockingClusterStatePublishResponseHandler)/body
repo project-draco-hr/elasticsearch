@@ -6,6 +6,7 @@
   final TimeValue publishTimeout=discoverySettings.getPublishTimeout();
   final boolean sendFullVersion=!discoverySettings.getPublishDiff() || previousState == null;
   final SendingController sendingController=new SendingController(clusterChangedEvent.state(),minMasterNodes,totalMasterNodes,publishResponseHandler);
+  final long publishingStartInNanos=System.nanoTime();
   buildDiffAndSerializeStates(clusterState,previousState,nodesToPublishTo,sendFullVersion,serializedStates,serializedDiffs);
   for (  final DiscoveryNode node : nodesToPublishTo) {
     if (sendFullVersion || !previousState.nodes().nodeExists(node.id())) {
@@ -16,18 +17,17 @@
     }
   }
   sendingController.waitForCommit(discoverySettings.getCommitTimeout());
-  if (publishTimeout.millis() > 0) {
-    try {
-      sendingController.setPublishingTimedOut(!publishResponseHandler.awaitAllNodes(publishTimeout));
-      if (sendingController.getPublishingTimedOut()) {
-        DiscoveryNode[] pendingNodes=publishResponseHandler.pendingNodes();
-        if (pendingNodes.length > 0) {
-          logger.warn("timed out waiting for all nodes to process published state [{}] (timeout [{}], pending nodes: {})",clusterState.version(),publishTimeout,pendingNodes);
-        }
+  try {
+    long timeLeftInNanos=Math.max(0,publishTimeout.nanos() - (System.nanoTime() - publishingStartInNanos));
+    sendingController.setPublishingTimedOut(!publishResponseHandler.awaitAllNodes(TimeValue.timeValueNanos(timeLeftInNanos)));
+    if (sendingController.getPublishingTimedOut()) {
+      DiscoveryNode[] pendingNodes=publishResponseHandler.pendingNodes();
+      if (pendingNodes.length > 0) {
+        logger.warn("timed out waiting for all nodes to process published state [{}] (timeout [{}], pending nodes: {})",clusterState.version(),publishTimeout,pendingNodes);
       }
     }
- catch (    InterruptedException e) {
-      Thread.currentThread().interrupt();
-    }
+  }
+ catch (  InterruptedException e) {
+    Thread.currentThread().interrupt();
   }
 }
