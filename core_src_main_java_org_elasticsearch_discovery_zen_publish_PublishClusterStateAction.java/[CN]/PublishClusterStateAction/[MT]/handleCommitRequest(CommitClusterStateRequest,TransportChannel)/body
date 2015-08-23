@@ -1,0 +1,36 @@
+{
+  ClusterState committedClusterState;
+synchronized (lastSeenClusterStateMutex) {
+    committedClusterState=lastSeenClusterState;
+  }
+  String lastSeenUUID=committedClusterState == null ? null : committedClusterState.stateUUID();
+  if (request.stateUUID.equals(lastSeenUUID) == false) {
+    throw new IllegalStateException("tried to commit cluster state UUID [" + request.stateUUID + "], but last seen UUID is ["+ lastSeenUUID+ "]");
+  }
+  try {
+    listener.onNewClusterState(committedClusterState,new NewClusterStateListener.NewStateProcessed(){
+      @Override public void onNewClusterStateProcessed(){
+        try {
+          channel.sendResponse(TransportResponse.Empty.INSTANCE);
+        }
+ catch (        Throwable e) {
+          logger.debug("failed to send response on cluster state processed",e);
+          onNewClusterStateFailed(e);
+        }
+      }
+      @Override public void onNewClusterStateFailed(      Throwable t){
+        try {
+          channel.sendResponse(t);
+        }
+ catch (        Throwable e) {
+          logger.debug("failed to send response on cluster state processed",e);
+        }
+      }
+    }
+);
+  }
+ catch (  Exception e) {
+    logger.warn("unexpected error while processing cluster state version [{}]",e,lastSeenClusterState.version());
+    throw e;
+  }
+}

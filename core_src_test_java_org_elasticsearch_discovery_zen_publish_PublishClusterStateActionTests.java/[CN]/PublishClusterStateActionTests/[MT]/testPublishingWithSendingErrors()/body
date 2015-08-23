@@ -1,0 +1,74 @@
+{
+  int goodNodes=randomIntBetween(2,5);
+  int errorNodes=randomIntBetween(1,5);
+  int timeOutNodes=randomBoolean() ? 0 : randomIntBetween(1,5);
+  final int numberOfMasterNodes=goodNodes + errorNodes + timeOutNodes+ 1;
+  final boolean expectingToCommit=randomBoolean();
+  Settings.Builder settings=Settings.builder();
+  settings.put(DiscoverySettings.COMMIT_TIMEOUT,expectingToCommit == false && timeOutNodes > 0 ? "100ms" : "1h").put(DiscoverySettings.PUBLISH_TIMEOUT,"5ms");
+  MockNode master=createMockNode("master",settings.build());
+  int[] nodeTypes=new int[goodNodes + errorNodes + timeOutNodes];
+  for (int i=0; i < goodNodes; i++) {
+    nodeTypes[i]=0;
+  }
+  for (int i=goodNodes; i < goodNodes + errorNodes; i++) {
+    nodeTypes[i]=1;
+  }
+  for (int i=goodNodes + errorNodes; i < nodeTypes.length; i++) {
+    nodeTypes[i]=2;
+  }
+  Collections.shuffle(Arrays.asList(nodeTypes),random());
+  DiscoveryNodes.Builder discoveryNodesBuilder=DiscoveryNodes.builder().put(master.discoveryNode);
+  for (int i=0; i < nodeTypes.length; i++) {
+    final MockNode mockNode=createMockNode("node" + i);
+    discoveryNodesBuilder.put(mockNode.discoveryNode);
+switch (nodeTypes[i]) {
+case 1:
+      mockNode.action.errorOnSend.set(true);
+    break;
+case 2:
+  mockNode.action.timeoutOnSend.set(true);
+break;
+}
+}
+final int dataNodes=randomIntBetween(0,3);
+for (int i=0; i < dataNodes; i++) {
+final MockNode mockNode=createMockNode("data_" + i,Settings.builder().put("node.master",false).build());
+discoveryNodesBuilder.put(mockNode.discoveryNode);
+if (randomBoolean()) {
+mockNode.action.errorOnCommit.set(randomBoolean());
+mockNode.action.errorOnSend.set(randomBoolean());
+mockNode.action.timeoutOnCommit.set(randomBoolean());
+mockNode.action.timeoutOnSend.set(randomBoolean());
+}
+}
+final int minMasterNodes;
+final String expectedBehavior;
+if (expectingToCommit) {
+minMasterNodes=randomIntBetween(0,goodNodes + 1);
+expectedBehavior="succeed";
+}
+ else {
+minMasterNodes=randomIntBetween(goodNodes + 2,numberOfMasterNodes);
+expectedBehavior=timeOutNodes > 0 ? "timeout" : "fail";
+}
+logger.info("--> expecting commit to {}. good nodes [{}], errors [{}], timeouts [{}]. min_master_nodes [{}]",expectedBehavior,goodNodes + 1,errorNodes,timeOutNodes,minMasterNodes);
+discoveryNodesBuilder.localNodeId(master.discoveryNode.id()).masterNodeId(master.discoveryNode.id());
+DiscoveryNodes discoveryNodes=discoveryNodesBuilder.build();
+MetaData metaData=MetaData.EMPTY_META_DATA;
+ClusterState clusterState=ClusterState.builder(ClusterName.DEFAULT).metaData(metaData).nodes(discoveryNodes).build();
+ClusterState previousState=master.clusterState;
+try {
+publishState(master.action,clusterState,previousState,minMasterNodes);
+if (expectingToCommit == false) {
+fail("cluster state publishing didn't fail despite of not have enough nodes");
+}
+}
+ catch (PublishClusterStateAction.FailedToCommitException exception) {
+logger.debug("failed to publish as expected",exception);
+if (expectingToCommit) {
+throw exception;
+}
+assertThat(exception.getMessage(),containsString(timeOutNodes > 0 ? "timed out" : "failed"));
+}
+}

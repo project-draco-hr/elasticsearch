@@ -1,0 +1,39 @@
+{
+  MockNode nodeA=createMockNode("nodeA",Settings.EMPTY,Version.CURRENT,new ClusterStateListener(){
+    @Override public void clusterChanged(    ClusterChangedEvent event){
+      fail("Shouldn't send cluster state to myself");
+    }
+  }
+);
+  MockNode nodeB=createMockNode("nodeB",Settings.EMPTY,Version.CURRENT);
+  DiscoveryNodes discoveryNodes=DiscoveryNodes.builder().put(nodeA.discoveryNode).put(nodeB.discoveryNode).localNodeId(nodeA.discoveryNode.id()).build();
+  ClusterState previousClusterState=ClusterState.builder(ClusterName.DEFAULT).nodes(discoveryNodes).build();
+  ClusterState clusterState=ClusterState.builder(previousClusterState).incrementVersion().build();
+  publishStateAndWait(nodeA.action,clusterState,previousClusterState);
+  assertSameStateFromFull(nodeB.clusterState,clusterState);
+  previousClusterState=clusterState;
+  clusterState=ClusterState.builder(clusterState).blocks(ClusterBlocks.builder().addGlobalBlock(MetaData.CLUSTER_READ_ONLY_BLOCK)).incrementVersion().build();
+  ClusterState unserializableClusterState=new ClusterState(clusterState.version(),clusterState.stateUUID(),clusterState){
+    @Override public Diff<ClusterState> diff(    ClusterState previousState){
+      return new Diff<ClusterState>(){
+        @Override public ClusterState apply(        ClusterState part){
+          fail("this diff shouldn't be applied");
+          return part;
+        }
+        @Override public void writeTo(        StreamOutput out) throws IOException {
+          throw new IOException("Simulated failure of diff serialization");
+        }
+      }
+;
+    }
+  }
+;
+  try {
+    publishStateAndWait(nodeA.action,unserializableClusterState,previousClusterState);
+    fail("cluster state published despite of diff errors");
+  }
+ catch (  ElasticsearchException e) {
+    assertThat(e.getCause(),notNullValue());
+    assertThat(e.getCause().getMessage(),containsString("Simulated"));
+  }
+}

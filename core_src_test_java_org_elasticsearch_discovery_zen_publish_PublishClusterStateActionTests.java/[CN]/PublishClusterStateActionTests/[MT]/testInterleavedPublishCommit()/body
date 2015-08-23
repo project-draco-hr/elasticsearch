@@ -1,0 +1,32 @@
+{
+  MockNode node=createMockNode("node");
+  final ClusterState state1=ClusterState.builder(node.clusterState).incrementVersion().build();
+  final ClusterState state2=ClusterState.builder(state1).incrementVersion().build();
+  final BytesReference state1Bytes=PublishClusterStateAction.serializeFullClusterState(state1,Version.CURRENT);
+  final BytesReference state2Bytes=PublishClusterStateAction.serializeFullClusterState(state2,Version.CURRENT);
+  final CapturingTransportChannel channel=new CapturingTransportChannel();
+  node.action.handleIncomingClusterStateRequest(new BytesTransportRequest(state1Bytes,Version.CURRENT),channel);
+  assertThat(channel.response.get(),equalTo((TransportResponse)TransportResponse.Empty.INSTANCE));
+  assertThat(channel.error.get(),nullValue());
+  channel.clear();
+  node.action.handleIncomingClusterStateRequest(new BytesTransportRequest(state2Bytes,Version.CURRENT),channel);
+  assertThat(channel.response.get(),equalTo((TransportResponse)TransportResponse.Empty.INSTANCE));
+  assertThat(channel.error.get(),nullValue());
+  channel.clear();
+  try {
+    node.action.handleCommitRequest(new PublishClusterStateAction.CommitClusterStateRequest(state1.stateUUID()),channel);
+    assertThat(channel.response.get(),nullValue());
+    assertThat(channel.error.get(),notNullValue());
+    if (channel.error.get() instanceof IllegalStateException == false) {
+      throw channel.error.get();
+    }
+  }
+ catch (  IllegalStateException OK) {
+  }
+  channel.clear();
+  node.action.handleCommitRequest(new PublishClusterStateAction.CommitClusterStateRequest(state2.stateUUID()),channel);
+  assertThat(channel.response.get(),equalTo((TransportResponse)TransportResponse.Empty.INSTANCE));
+  assertThat(channel.error.get(),nullValue());
+  channel.clear();
+  assertSameState(node.clusterState,state2);
+}

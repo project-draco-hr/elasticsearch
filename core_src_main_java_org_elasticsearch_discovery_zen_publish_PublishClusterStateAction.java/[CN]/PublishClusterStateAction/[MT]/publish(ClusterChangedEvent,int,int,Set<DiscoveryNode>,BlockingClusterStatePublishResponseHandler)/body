@@ -3,27 +3,23 @@
   Map<Version,BytesReference> serializedDiffs=Maps.newHashMap();
   final ClusterState clusterState=clusterChangedEvent.state();
   final ClusterState previousState=clusterChangedEvent.previousState();
-  final AtomicBoolean timedOutWaitingForNodes=new AtomicBoolean(false);
   final TimeValue publishTimeout=discoverySettings.getPublishTimeout();
   final boolean sendFullVersion=!discoverySettings.getPublishDiff() || previousState == null;
   final SendingController sendingController=new SendingController(clusterChangedEvent.state(),minMasterNodes,totalMasterNodes,publishResponseHandler);
-  Diff<ClusterState> diff=null;
+  buildDiffAndSerializeStates(clusterState,previousState,nodesToPublishTo,sendFullVersion,serializedStates,serializedDiffs);
   for (  final DiscoveryNode node : nodesToPublishTo) {
     if (sendFullVersion || !previousState.nodes().nodeExists(node.id())) {
-      sendFullClusterState(clusterState,serializedStates,node,timedOutWaitingForNodes,publishTimeout,sendingController);
+      sendFullClusterState(clusterState,serializedStates,node,publishTimeout,sendingController);
     }
  else {
-      if (diff == null) {
-        diff=clusterState.diff(previousState);
-      }
-      sendClusterStateDiff(clusterState,diff,serializedDiffs,node,timedOutWaitingForNodes,publishTimeout,sendingController);
+      sendClusterStateDiff(clusterState,serializedDiffs,serializedStates,node,publishTimeout,sendingController);
     }
   }
   sendingController.waitForCommit(discoverySettings.getCommitTimeout());
   if (publishTimeout.millis() > 0) {
     try {
-      timedOutWaitingForNodes.set(!publishResponseHandler.awaitAllNodes(publishTimeout));
-      if (timedOutWaitingForNodes.get()) {
+      sendingController.setPublishingTimedOut(!publishResponseHandler.awaitAllNodes(publishTimeout));
+      if (sendingController.getPublishingTimedOut()) {
         DiscoveryNode[] pendingNodes=publishResponseHandler.pendingNodes();
         if (pendingNodes.length > 0) {
           logger.warn("timed out waiting for all nodes to process published state [{}] (timeout [{}], pending nodes: {})",clusterState.version(),publishTimeout,pendingNodes);

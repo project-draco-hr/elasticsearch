@@ -1,0 +1,23 @@
+{
+  try {
+    logger.trace("sending commit for cluster state (uuid: [{}], version [{}]) to [{}]",clusterState.stateUUID(),clusterState.version(),node);
+    TransportRequestOptions options=TransportRequestOptions.options().withType(TransportRequestOptions.Type.STATE).withCompress(false);
+    transportService.sendRequest(node,COMMIT_ACTION_NAME,new CommitClusterStateRequest(clusterState.stateUUID()),options,new EmptyTransportResponseHandler(ThreadPool.Names.SAME){
+      @Override public void handleResponse(      TransportResponse.Empty response){
+        if (sendingController.getPublishingTimedOut()) {
+          logger.debug("node {} responded to cluster state commit [{}]",node,clusterState.version());
+        }
+        sendingController.getPublishResponseHandler().onResponse(node);
+      }
+      @Override public void handleException(      TransportException exp){
+        logger.debug("failed to commit cluster state (uuid [{}], version [{}]) to {}",exp,clusterState.stateUUID(),clusterState.version(),node);
+        sendingController.getPublishResponseHandler().onFailure(node,exp);
+      }
+    }
+);
+  }
+ catch (  Throwable t) {
+    logger.warn("error sending cluster state commit (uuid [{}], version [{}]) to {}",t,clusterState.stateUUID(),clusterState.version(),node);
+    sendingController.getPublishResponseHandler().onFailure(node,t);
+  }
+}
