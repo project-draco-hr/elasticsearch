@@ -1,0 +1,26 @@
+{
+  int numberOfNodes=2;
+  DiscoveryNodes.Builder discoBuilder=DiscoveryNodes.builder();
+  for (int i=0; i < numberOfNodes + 1; i++) {
+    final DiscoveryNode node=newNode(i);
+    discoBuilder=discoBuilder.put(node);
+  }
+  discoBuilder.localNodeId(newNode(0).id());
+  discoBuilder.masterNodeId(newNode(1).id());
+  IndexMetaData indexMetaData=IndexMetaData.builder(index).settings(Settings.builder().put(SETTING_VERSION_CREATED,Version.CURRENT).put(SETTING_NUMBER_OF_SHARDS,1).put(SETTING_NUMBER_OF_REPLICAS,1).put(SETTING_CREATION_DATE,System.currentTimeMillis())).build();
+  ClusterState.Builder state=ClusterState.builder(new ClusterName("test"));
+  state.nodes(discoBuilder);
+  state.metaData(MetaData.builder().put(indexMetaData,false).generateClusterUuidIfNeeded());
+  IndexRoutingTable.Builder indexRoutingTableBuilder=IndexRoutingTable.builder(index);
+  for (int i=0; i < numberOfShards; i++) {
+    RoutingTable.Builder routing=new RoutingTable.Builder();
+    routing.addAsNew(indexMetaData);
+    final ShardId shardId=new ShardId(index,i);
+    IndexShardRoutingTable.Builder indexShardRoutingBuilder=new IndexShardRoutingTable.Builder(shardId);
+    indexShardRoutingBuilder.addShard(TestShardRouting.newShardRouting(index,i,newNode(0).id(),null,null,true,ShardRoutingState.STARTED,0,null));
+    indexShardRoutingBuilder.addShard(TestShardRouting.newShardRouting(index,i,newNode(1).id(),null,null,false,ShardRoutingState.STARTED,0,null));
+    indexRoutingTableBuilder.addIndexShard(indexShardRoutingBuilder.build());
+  }
+  state.routingTable(RoutingTable.builder().add(indexRoutingTableBuilder));
+  return state.build();
+}
