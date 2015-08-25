@@ -1,0 +1,19 @@
+{
+  final ClusterName incomingClusterName=incomingState.getClusterName();
+  if (!incomingClusterName.equals(PublishClusterStateAction.this.clusterName)) {
+    logger.warn("received cluster state from [{}] which is also master but with a different cluster name [{}]",incomingState.nodes().masterNode(),incomingClusterName);
+    throw new IllegalStateException("received state from a node that is not part of the cluster");
+  }
+  final DiscoveryNodes currentNodes=nodesProvider.nodes();
+  if (currentNodes.localNode().equals(incomingState.nodes().localNode()) == false) {
+    logger.warn("received a cluster state from [{}] and not part of the cluster, should not happen",incomingState.nodes().masterNode());
+    throw new IllegalStateException("received state from a node that is not part of the cluster");
+  }
+  if (currentNodes.localNodeMaster() == false) {
+    ZenDiscovery.validateStateIsFromCurrentMaster(logger,currentNodes,incomingState);
+  }
+  if (lastSeenClusterState != null && Objects.equals(lastSeenClusterState.nodes().masterNodeId(),incomingState.nodes().masterNodeId()) && lastSeenClusterState.version() > incomingState.version()) {
+    logger.debug("received an older cluster state from master, rejecting (received version [{}], last version is [{}])",incomingState.version(),lastSeenClusterState.version());
+    throw new IllegalStateException("cluster state version [" + incomingState.version() + "] is old (last seen version ["+ lastSeenClusterState.version()+ "])");
+  }
+}
