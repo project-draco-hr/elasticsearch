@@ -1,0 +1,41 @@
+def download_and_verify(version, hash, files, base_url='http://download.elasticsearch.org/elasticsearch/staging', plugins=DEFAULT_PLUGINS, verbose=False):
+    base_url = ('%s/%s-%s' % (base_url, version, hash))
+    print ('Downloading and verifying release %s from %s' % (version, base_url))
+    tmp_dir = tempfile.mkdtemp()
+    try:
+        downloaded_files = []
+        print ('  ' + ('*' * 80))
+        for file in files:
+            name = os.path.basename(file)
+            print ('  Smoketest file: %s' % name)
+            url = ('%s/%s' % (base_url, file))
+            print ('  Downloading %s' % url)
+            artifact_path = os.path.join(tmp_dir, file)
+            downloaded_files.append(artifact_path)
+            current_artifact_dir = os.path.dirname(artifact_path)
+            os.makedirs(current_artifact_dir)
+            urllib.request.urlretrieve(url, os.path.join(tmp_dir, file))
+            sha1_url = ''.join([url, '.sha1'])
+            checksum_file = (artifact_path + '.sha1')
+            print ('  Downloading %s' % sha1_url)
+            urllib.request.urlretrieve(sha1_url, checksum_file)
+            print ('  Verifying checksum %s' % checksum_file)
+            expected = read_fully(checksum_file)
+            actual = sha1(artifact_path)
+            if (expected != actual):
+                raise RuntimeError(("sha1 hash for %s doesn't match %s != %s" % (name, expected, actual)))
+            gpg_url = ''.join([url, '.asc'])
+            gpg_file = (artifact_path + '.asc')
+            print ('  Downloading %s' % gpg_url)
+            urllib.request.urlretrieve(gpg_url, gpg_file)
+            print ('  Verifying gpg signature %s' % gpg_file)
+            gpg_home_dir = os.path.join(current_artifact_dir, 'gpg_home_dir')
+            os.makedirs(gpg_home_dir, 448)
+            run(('gpg --homedir %s --keyserver pgp.mit.edu --recv-key D88E42B4' % gpg_home_dir), verbose=verbose)
+            run(('cd %s && gpg --homedir %s --verify %s' % (current_artifact_dir, gpg_home_dir, os.path.basename(gpg_file))), verbose=verbose)
+            print ('  ' + ('*' * 80))
+            print ()
+        smoke_test_release(version, downloaded_files, hash, plugins, verbose=verbose)
+        print '  SUCCESS'
+    finally:
+        shutil.rmtree(tmp_dir)
