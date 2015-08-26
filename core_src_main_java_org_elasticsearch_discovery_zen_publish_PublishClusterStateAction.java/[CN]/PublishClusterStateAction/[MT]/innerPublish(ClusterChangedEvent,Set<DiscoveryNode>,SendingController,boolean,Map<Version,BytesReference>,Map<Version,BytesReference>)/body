@@ -1,13 +1,8 @@
 {
-  Map<Version,BytesReference> serializedStates=Maps.newHashMap();
-  Map<Version,BytesReference> serializedDiffs=Maps.newHashMap();
   final ClusterState clusterState=clusterChangedEvent.state();
   final ClusterState previousState=clusterChangedEvent.previousState();
   final TimeValue publishTimeout=discoverySettings.getPublishTimeout();
-  final boolean sendFullVersion=!discoverySettings.getPublishDiff() || previousState == null;
-  final SendingController sendingController=new SendingController(clusterChangedEvent.state(),minMasterNodes,totalMasterNodes,publishResponseHandler);
   final long publishingStartInNanos=System.nanoTime();
-  buildDiffAndSerializeStates(clusterState,previousState,nodesToPublishTo,sendFullVersion,serializedStates,serializedDiffs);
   for (  final DiscoveryNode node : nodesToPublishTo) {
     if (sendFullVersion || !previousState.nodes().nodeExists(node.id())) {
       sendFullClusterState(clusterState,serializedStates,node,publishTimeout,sendingController);
@@ -19,6 +14,7 @@
   sendingController.waitForCommit(discoverySettings.getCommitTimeout());
   try {
     long timeLeftInNanos=Math.max(0,publishTimeout.nanos() - (System.nanoTime() - publishingStartInNanos));
+    final BlockingClusterStatePublishResponseHandler publishResponseHandler=sendingController.getPublishResponseHandler();
     sendingController.setPublishingTimedOut(!publishResponseHandler.awaitAllNodes(TimeValue.timeValueNanos(timeLeftInNanos)));
     if (sendingController.getPublishingTimedOut()) {
       DiscoveryNode[] pendingNodes=publishResponseHandler.pendingNodes();
