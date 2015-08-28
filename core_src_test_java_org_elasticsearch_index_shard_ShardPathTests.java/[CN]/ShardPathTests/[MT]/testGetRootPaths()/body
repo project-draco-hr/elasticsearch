@@ -1,0 +1,54 @@
+{
+  boolean useCustomDataPath=randomBoolean();
+  final Settings indexSetttings;
+  final Settings nodeSettings;
+  Settings.Builder indexSettingsBuilder=settingsBuilder().put(IndexMetaData.SETTING_INDEX_UUID,"0xDEADBEEF");
+  final Path customPath;
+  if (useCustomDataPath) {
+    final Path path=createTempDir();
+    final boolean includeNodeId=randomBoolean();
+    indexSetttings=indexSettingsBuilder.put(IndexMetaData.SETTING_DATA_PATH,"custom").build();
+    nodeSettings=settingsBuilder().put("path.shared_data",path.toAbsolutePath().toAbsolutePath()).put(NodeEnvironment.ADD_NODE_ID_TO_CUSTOM_PATH,includeNodeId).build();
+    if (includeNodeId) {
+      customPath=path.resolve("custom").resolve("0");
+    }
+ else {
+      customPath=path.resolve("custom");
+    }
+  }
+ else {
+    customPath=null;
+    indexSetttings=indexSettingsBuilder.build();
+    nodeSettings=Settings.EMPTY;
+  }
+  try (final NodeEnvironment env=newNodeEnvironment(nodeSettings)){
+    ShardId shardId=new ShardId("foo",0);
+    Path[] paths=env.availableShardPaths(shardId);
+    Path path=randomFrom(paths);
+    ShardStateMetaData.FORMAT.write(new ShardStateMetaData(2,true,"0xDEADBEEF"),2,path);
+    ShardPath shardPath=ShardPath.loadShardPath(logger,env,shardId,indexSetttings);
+    boolean found=false;
+    for (    Path p : env.nodeDataPaths()) {
+      if (p.equals(shardPath.getRootStatePath())) {
+        found=true;
+        break;
+      }
+    }
+    assertTrue("root state paths must be a node path but wasn't: " + shardPath.getRootStatePath(),found);
+    found=false;
+    if (useCustomDataPath) {
+      assertNotEquals(shardPath.getRootDataPath(),shardPath.getRootStatePath());
+      assertEquals(customPath,shardPath.getRootDataPath());
+    }
+ else {
+      assertNull(customPath);
+      for (      Path p : env.nodeDataPaths()) {
+        if (p.equals(shardPath.getRootDataPath())) {
+          found=true;
+          break;
+        }
+      }
+      assertTrue("root state paths must be a node path but wasn't: " + shardPath.getRootDataPath(),found);
+    }
+  }
+ }
