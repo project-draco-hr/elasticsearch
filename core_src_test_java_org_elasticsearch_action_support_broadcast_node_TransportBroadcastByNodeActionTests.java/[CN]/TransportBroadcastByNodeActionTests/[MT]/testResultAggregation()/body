@@ -1,0 +1,49 @@
+{
+  Request request=new Request(new String[]{TEST_INDEX});
+  PlainActionFuture<Response> listener=new PlainActionFuture<>();
+  action.new AsyncAction(request,listener).start();
+  Map<String,List<CapturingTransport.CapturedRequest>> capturedRequests=transport.capturedRequestsByTargetNode();
+  transport.clear();
+  ShardsIterator shardIt=clusterService.state().getRoutingTable().allShards(new String[]{TEST_INDEX});
+  Map<String,List<ShardRouting>> map=new HashMap<>();
+  for (  ShardRouting shard : shardIt.asUnordered()) {
+    if (!map.containsKey(shard.currentNodeId())) {
+      map.put(shard.currentNodeId(),new ArrayList<ShardRouting>());
+    }
+    map.get(shard.currentNodeId()).add(shard);
+  }
+  int totalShards=0;
+  int totalSuccessfulShards=0;
+  int totalFailedShards=0;
+  for (  Map.Entry<String,List<CapturingTransport.CapturedRequest>> entry : capturedRequests.entrySet()) {
+    List<BroadcastShardOperationFailedException> exceptions=new ArrayList<>();
+    long requestId=entry.getValue().get(0).requestId;
+    if (rarely()) {
+      totalShards+=map.get(entry.getKey()).size();
+      totalFailedShards+=map.get(entry.getKey()).size();
+      transport.handleResponse(requestId,new Exception());
+    }
+ else {
+      List<ShardRouting> shards=map.get(entry.getKey());
+      List<TransportBroadcastByNodeAction.EmptyResult> shardResults=new ArrayList<>();
+      for (      ShardRouting shard : shards) {
+        totalShards++;
+        if (rarely()) {
+          totalFailedShards++;
+          exceptions.add(new BroadcastShardOperationFailedException(shard.shardId(),"operation indices:admin/test failed"));
+        }
+ else {
+          shardResults.add(TransportBroadcastByNodeAction.EmptyResult.INSTANCE);
+        }
+      }
+      totalSuccessfulShards+=shardResults.size();
+      TransportBroadcastByNodeAction.NodeResponse nodeResponse=action.new NodeResponse(entry.getKey(),shards.size(),shardResults,exceptions);
+      transport.handleResponse(requestId,nodeResponse);
+    }
+  }
+  Response response=listener.get();
+  assertEquals("total shards",totalShards,response.getTotalShards());
+  assertEquals("successful shards",totalSuccessfulShards,response.getSuccessfulShards());
+  assertEquals("failed shards",totalFailedShards,response.getFailedShards());
+  assertEquals("accumulated exceptions",totalFailedShards,response.getShardFailures().length);
+}
