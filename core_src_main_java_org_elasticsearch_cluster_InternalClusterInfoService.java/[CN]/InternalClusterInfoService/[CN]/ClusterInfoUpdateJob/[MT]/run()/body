@@ -49,16 +49,11 @@
   CountDownLatch indicesLatch=updateIndicesStats(new ActionListener<IndicesStatsResponse>(){
     @Override public void onResponse(    IndicesStatsResponse indicesStatsResponse){
       ShardStats[] stats=indicesStatsResponse.getShards();
-      HashMap<String,Long> newShardSizes=new HashMap<>();
-      for (      ShardStats s : stats) {
-        long size=s.getStats().getStore().sizeInBytes();
-        String sid=ClusterInfo.shardIdentifierFromRouting(s.getShardRouting());
-        if (logger.isTraceEnabled()) {
-          logger.trace("shard: {} size: {}",sid,size);
-        }
-        newShardSizes.put(sid,size);
-      }
+      final HashMap<String,Long> newShardSizes=new HashMap<>();
+      final HashMap<ShardRouting,String> newShardRoutingToDataPath=new HashMap<>();
+      buildShardLevelInfo(logger,stats,newShardSizes,newShardRoutingToDataPath);
       shardSizes=Collections.unmodifiableMap(newShardSizes);
+      shardRoutingToDataPath=Collections.unmodifiableMap(newShardRoutingToDataPath);
     }
     @Override public void onFailure(    Throwable e){
       if (e instanceof ReceiveTimeoutTransportException) {
@@ -74,6 +69,7 @@
           logger.warn("Failed to execute IndicesStatsAction for ClusterInfoUpdateJob",e);
         }
         shardSizes=Collections.emptyMap();
+        shardRoutingToDataPath=Collections.emptyMap();
       }
     }
   }
