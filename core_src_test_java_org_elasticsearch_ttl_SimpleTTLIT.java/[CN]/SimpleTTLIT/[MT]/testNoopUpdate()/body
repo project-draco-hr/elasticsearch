@@ -1,0 +1,19 @@
+{
+  assertAcked(prepareCreate("test").addMapping("type1",XContentFactory.jsonBuilder().startObject().startObject("type1").startObject("_timestamp").field("enabled",true).endObject().startObject("_ttl").field("enabled",true).endObject().endObject().endObject()));
+  ensureYellow("test");
+  long aLongTime=10000000;
+  long firstTtl=aLongTime * 3;
+  long secondTtl=aLongTime * 2;
+  long thirdTtl=aLongTime * 1;
+  IndexResponse indexResponse=client().prepareIndex("test","type1","1").setSource("field1","value1").setTTL(firstTtl).setRefresh(true).get();
+  assertTrue(indexResponse.isCreated());
+  assertThat(getTtl("type1",1),both(lessThanOrEqualTo(firstTtl)).and(greaterThan(secondTtl)));
+  UpdateRequestBuilder update=client().prepareUpdate("test","type1","1").setDoc("field1","value1").setTtl(secondTtl);
+  assertThat(updateAndGetTtl(update),both(lessThanOrEqualTo(firstTtl)).and(greaterThan(secondTtl)));
+  update=client().prepareUpdate("test","type1","1").setDoc("field1","value2").setTtl(secondTtl);
+  assertThat(updateAndGetTtl(update),both(lessThanOrEqualTo(secondTtl)).and(greaterThan(thirdTtl)));
+  update=client().prepareUpdate("test","type1","1").setDoc("field1","value2").setTtl(secondTtl).setDetectNoop(true);
+  assertThat(updateAndGetTtl(update),both(lessThanOrEqualTo(secondTtl)).and(greaterThan(thirdTtl)));
+  update=client().prepareUpdate("test","type1","1").setDoc("field1","value2").setTtl(thirdTtl).setDetectNoop(false);
+  assertThat(updateAndGetTtl(update),lessThanOrEqualTo(thirdTtl));
+}

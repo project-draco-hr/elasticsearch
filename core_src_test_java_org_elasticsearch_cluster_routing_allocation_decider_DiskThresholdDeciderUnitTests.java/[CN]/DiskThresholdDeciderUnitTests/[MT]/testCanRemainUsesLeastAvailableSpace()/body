@@ -1,0 +1,43 @@
+{
+  NodeSettingsService nss=new NodeSettingsService(Settings.EMPTY);
+  ClusterInfoService cis=EmptyClusterInfoService.INSTANCE;
+  DiskThresholdDecider decider=new DiskThresholdDecider(Settings.EMPTY,nss,cis,null);
+  DiscoveryNode node_0=new DiscoveryNode("node_0",DummyTransportAddress.INSTANCE,Version.CURRENT);
+  DiscoveryNode node_1=new DiscoveryNode("node_1",DummyTransportAddress.INSTANCE,Version.CURRENT);
+  ShardRouting test_0=ShardRouting.newUnassigned("test",0,null,true,new UnassignedInfo(UnassignedInfo.Reason.INDEX_CREATED,"foo"));
+  ShardRoutingHelper.initialize(test_0,node_0.getId());
+  ShardRoutingHelper.moveToStarted(test_0);
+  ShardRouting test_1=ShardRouting.newUnassigned("test",1,null,true,new UnassignedInfo(UnassignedInfo.Reason.INDEX_CREATED,"foo"));
+  ShardRoutingHelper.initialize(test_1,node_1.getId());
+  ShardRoutingHelper.moveToStarted(test_1);
+  MetaData metaData=MetaData.builder().put(IndexMetaData.builder("test").settings(settings(Version.CURRENT)).numberOfShards(1).numberOfReplicas(1)).build();
+  RoutingTable routingTable=RoutingTable.builder().addAsNew(metaData.index("test")).build();
+  ClusterState clusterState=ClusterState.builder(org.elasticsearch.cluster.ClusterName.DEFAULT).metaData(metaData).routingTable(routingTable).build();
+  logger.info("--> adding two nodes");
+  clusterState=ClusterState.builder(clusterState).nodes(DiscoveryNodes.builder().put(node_0).put(node_1)).build();
+  Map<String,DiskUsage> leastAvailableUsages=new HashMap<>();
+  leastAvailableUsages.put("node_0",new DiskUsage("node_0","node_0","_na_",100,10));
+  leastAvailableUsages.put("node_1",new DiskUsage("node_1","node_1","_na_",100,9));
+  Map<String,DiskUsage> mostAvailableUsage=new HashMap<>();
+  mostAvailableUsage.put("node_0",new DiskUsage("node_0","node_0","_na_",100,90));
+  mostAvailableUsage.put("node_1",new DiskUsage("node_1","node_1","_na_",100,90));
+  Map<String,Long> shardSizes=new HashMap<>();
+  shardSizes.put("[test][0][p]",10L);
+  shardSizes.put("[test][1][p]",10L);
+  final ClusterInfo clusterInfo=new ClusterInfo(Collections.unmodifiableMap(leastAvailableUsages),Collections.unmodifiableMap(mostAvailableUsage),Collections.unmodifiableMap(shardSizes));
+  RoutingAllocation allocation=new RoutingAllocation(new AllocationDeciders(Settings.EMPTY,new AllocationDecider[]{decider}),clusterState.getRoutingNodes(),clusterState.nodes(),clusterInfo);
+  assertEquals(Decision.YES,decider.canRemain(test_0,new RoutingNode("node_0",node_0),allocation));
+  assertEquals(Decision.NO,decider.canRemain(test_1,new RoutingNode("node_1",node_1),allocation));
+  try {
+    decider.canRemain(test_0,new RoutingNode("node_1",node_1),allocation);
+    fail("not allocated on this node");
+  }
+ catch (  IllegalArgumentException ex) {
+  }
+  try {
+    decider.canRemain(test_1,new RoutingNode("node_0",node_0),allocation);
+    fail("not allocated on this node");
+  }
+ catch (  IllegalArgumentException ex) {
+  }
+}
