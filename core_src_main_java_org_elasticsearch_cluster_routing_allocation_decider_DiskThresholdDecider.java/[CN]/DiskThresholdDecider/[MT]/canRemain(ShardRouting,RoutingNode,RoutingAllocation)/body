@@ -1,13 +1,22 @@
 {
+  if (shardRouting.currentNodeId().equals(node.nodeId()) == false) {
+    throw new IllegalArgumentException("Shard [" + shardRouting + "] is not allocated on node: ["+ node.nodeId()+ "]");
+  }
   final Decision decision=earlyTerminate(allocation);
   if (decision != null) {
     return decision;
   }
-  DiskUsage usage=getDiskUsage(node,allocation);
-  double freeDiskPercentage=usage.getFreeDiskAsPercentage();
-  long freeBytes=usage.getFreeBytes();
+  final ClusterInfo clusterInfo=allocation.clusterInfo();
+  final Map<String,DiskUsage> usages=clusterInfo.getNodeLeastAvailableDiskUsages();
+  final DiskUsage usage=getDiskUsage(node,allocation,usages);
+  final String dataPath=clusterInfo.getDataPath(shardRouting);
+  final double freeDiskPercentage=usage.getFreeDiskAsPercentage();
+  final long freeBytes=usage.getFreeBytes();
   if (logger.isDebugEnabled()) {
     logger.debug("node [{}] has {}% free disk ({} bytes)",node.nodeId(),freeDiskPercentage,freeBytes);
+  }
+  if (dataPath == null || usage.getPath().equals(dataPath) == false) {
+    return allocation.decision(Decision.YES,NAME,"shard is not allocated on the most utilized disk");
   }
   if (freeBytes < freeBytesThresholdHigh.bytes()) {
     if (logger.isDebugEnabled()) {
