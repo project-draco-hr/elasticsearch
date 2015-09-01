@@ -1,0 +1,29 @@
+{
+  if (remaining == 0) {
+    return null;
+  }
+  if (shortCircuitFilter != null) {
+    DocIdSet docIdSet=shortCircuitFilter.getDocIdSet(context,null);
+    if (!Lucene.isEmpty(docIdSet)) {
+      DocIdSetIterator iterator=docIdSet.iterator();
+      if (iterator != null) {
+        return ConstantScorer.create(iterator,this,queryWeight);
+      }
+    }
+    return null;
+  }
+  DocIdSet parentDocIdSet=this.parentFilter.getDocIdSet(context,null);
+  if (!Lucene.isEmpty(parentDocIdSet)) {
+    parentDocIdSet=BitsFilteredDocIdSet.wrap(parentDocIdSet,context.reader().getLiveDocs());
+    DocIdSetIterator innerIterator=parentDocIdSet.iterator();
+    if (innerIterator != null) {
+      LongBitSet parentOrds=collector.parentOrds;
+      SortedDocValues globalValues=globalIfd.load(context).getOrdinalsValues(parentType);
+      if (globalValues != null) {
+        DocIdSetIterator parentIdIterator=new ParentOrdIterator(innerIterator,parentOrds,globalValues,this);
+        return ConstantScorer.create(parentIdIterator,this,queryWeight);
+      }
+    }
+  }
+  return null;
+}
