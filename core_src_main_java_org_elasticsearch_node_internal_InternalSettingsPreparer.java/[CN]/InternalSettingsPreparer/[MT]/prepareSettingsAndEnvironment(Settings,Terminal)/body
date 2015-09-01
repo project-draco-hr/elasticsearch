@@ -1,0 +1,42 @@
+{
+  Settings.Builder output=settingsBuilder();
+  initializeSettings(output,input,true);
+  Environment environment=new Environment(output.build());
+  boolean loadFromEnv=true;
+  if (useSystemProperties(input)) {
+    if (Strings.hasText(System.getProperty("es.default.config"))) {
+      loadFromEnv=true;
+      output.loadFromPath(environment.configFile().resolve(System.getProperty("es.default.config")));
+    }
+    if (Strings.hasText(System.getProperty("es.config"))) {
+      loadFromEnv=false;
+      output.loadFromPath(environment.configFile().resolve(System.getProperty("es.config")));
+    }
+    if (Strings.hasText(System.getProperty("elasticsearch.config"))) {
+      loadFromEnv=false;
+      output.loadFromPath(environment.configFile().resolve(System.getProperty("elasticsearch.config")));
+    }
+  }
+  if (loadFromEnv) {
+    boolean settingsFileFound=false;
+    Set<String> foundSuffixes=Sets.newHashSet();
+    for (    String allowedSuffix : ALLOWED_SUFFIXES) {
+      Path path=environment.configFile().resolve("elasticsearch" + allowedSuffix);
+      if (Files.exists(path)) {
+        if (!settingsFileFound) {
+          output.loadFromPath(path);
+        }
+        settingsFileFound=true;
+        foundSuffixes.add(allowedSuffix);
+      }
+    }
+    if (foundSuffixes.size() > 1) {
+      throw new SettingsException("multiple settings files found with suffixes: " + Strings.collectionToDelimitedString(foundSuffixes,","));
+    }
+  }
+  initializeSettings(output,input,false);
+  finalizeSettings(output,terminal,environment.configFile());
+  environment=new Environment(output.build());
+  output.put("path.logs",cleanPath(environment.logsFile().toAbsolutePath().toString()));
+  return new Tuple<>(output.build(),environment);
+}
