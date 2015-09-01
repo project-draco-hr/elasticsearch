@@ -2,9 +2,14 @@
   int numberOfNodes=randomIntBetween(2,10);
   int numberOfIterations=scaledRandomIntBetween(5,50);
   Settings settings=Settings.builder().put(DiscoverySettings.PUBLISH_DIFF_ENABLE,randomBoolean()).build();
-  DiscoveryNodes.Builder discoveryNodesBuilder=DiscoveryNodes.builder();
-  MockNode master=null;
-  for (int i=0; i < numberOfNodes; i++) {
+  MockNode master=createMockNode("node0",settings,Version.CURRENT,new ClusterStateListener(){
+    @Override public void clusterChanged(    ClusterChangedEvent event){
+      assertProperMetaDataForVersion(event.state().metaData(),event.state().version());
+    }
+  }
+).setAsMaster();
+  DiscoveryNodes.Builder discoveryNodesBuilder=DiscoveryNodes.builder(master.nodes());
+  for (int i=1; i < numberOfNodes; i++) {
     final String name="node" + i;
     final MockNode node=createMockNode(name,settings,Version.CURRENT,new ClusterStateListener(){
       @Override public void clusterChanged(      ClusterChangedEvent event){
@@ -12,13 +17,9 @@
       }
     }
 );
-    if (i == 0) {
-      master=node;
-    }
     discoveryNodesBuilder.put(node.discoveryNode);
   }
   AssertingAckListener[] listeners=new AssertingAckListener[numberOfIterations];
-  discoveryNodesBuilder.localNodeId(master.discoveryNode.id());
   DiscoveryNodes discoveryNodes=discoveryNodesBuilder.build();
   MetaData metaData=MetaData.EMPTY_META_DATA;
   ClusterState clusterState=ClusterState.builder(ClusterName.DEFAULT).metaData(metaData).build();
@@ -34,8 +35,7 @@
   }
   master.clusterState=clusterState;
   for (  MockNode node : nodes.values()) {
-    assertThat(node.discoveryNode + " misses a cluster state",node.clusterState,notNullValue());
-    assertThat(node.discoveryNode + " unexpected cluster state: " + node.clusterState,node.clusterState.version(),equalTo(clusterState.version()));
+    assertSameState(node.clusterState,clusterState);
     assertThat(node.clusterState.nodes().localNode(),equalTo(node.discoveryNode));
   }
 }
