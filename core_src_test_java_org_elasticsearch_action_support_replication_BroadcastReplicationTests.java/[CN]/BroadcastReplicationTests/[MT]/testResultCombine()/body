@@ -1,0 +1,29 @@
+{
+  final String index="test";
+  int numShards=randomInt(3);
+  clusterService.setState(stateWithAssignedPrimariesAndOneReplica(index,numShards));
+  logger.debug("--> using initial state:\n{}",clusterService.state().prettyPrint());
+  Future<BroadcastResponse> response=(broadcastReplicationAction.execute(new BroadcastRequest().indices(index)));
+  int succeeded=0;
+  int failed=0;
+  for (  Tuple<ShardId,ActionListener<ActionWriteResponse>> shardRequests : broadcastReplicationAction.capturedShardRequests) {
+    if (randomBoolean()) {
+      ActionWriteResponse.ShardInfo.Failure[] failures=new ActionWriteResponse.ShardInfo.Failure[0];
+      int shardsSucceeded=randomInt(1) + 1;
+      succeeded+=shardsSucceeded;
+      ActionWriteResponse actionWriteResponse=new ActionWriteResponse();
+      if (shardsSucceeded == 1 && randomBoolean()) {
+        failures=new ActionWriteResponse.ShardInfo.Failure[1];
+        failures[0]=new ActionWriteResponse.ShardInfo.Failure(index,shardRequests.v1().id(),null,new Exception("pretend shard failed"),RestStatus.GATEWAY_TIMEOUT,false);
+        failed++;
+      }
+      actionWriteResponse.setShardInfo(new ActionWriteResponse.ShardInfo(2,shardsSucceeded,failures));
+      shardRequests.v2().onResponse(actionWriteResponse);
+    }
+ else {
+      failed+=2;
+      shardRequests.v2().onFailure(new Exception("pretend shard failed"));
+    }
+  }
+  assertBroadcastResponse(2 * numShards,succeeded,failed,response.get(),Exception.class);
+}
