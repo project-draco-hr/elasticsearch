@@ -1,0 +1,107 @@
+{
+  List<BlockClusterStateProcessing> clusterStateBlocks=new ArrayList<>();
+  try {
+    configureUnicastCluster(5,null,1);
+    Future<String> masterNodeFuture=internalCluster().startMasterOnlyNodeAsync();
+    Future<String> node1Future=internalCluster().startDataOnlyNodeAsync();
+    final String masterNode=masterNodeFuture.get();
+    final String node_1=node1Future.get();
+    logger.info("--> creating index [test] with one shard and zero replica");
+    assertAcked(prepareCreate("test").setSettings(Settings.builder().put(indexSettings()).put(IndexMetaData.SETTING_NUMBER_OF_SHARDS,1).put(IndexMetaData.SETTING_NUMBER_OF_REPLICAS,0).put(IndexShard.INDEX_REFRESH_INTERVAL,-1)).addMapping("doc",jsonBuilder().startObject().startObject("doc").startObject("properties").startObject("text").field("type","string").endObject().endObject().endObject().endObject()));
+    ensureGreen("test");
+    logger.info("--> starting three more data nodes");
+    List<String> nodeNamesFuture=internalCluster().startDataOnlyNodesAsync(3).get();
+    final String node_2=nodeNamesFuture.get(0);
+    final String node_3=nodeNamesFuture.get(1);
+    final String node_4=nodeNamesFuture.get(2);
+    logger.info("--> running cluster_health");
+    ClusterHealthResponse clusterHealth=client().admin().cluster().prepareHealth().setWaitForNodes("5").setWaitForRelocatingShards(0).get();
+    assertThat(clusterHealth.isTimedOut(),equalTo(false));
+    logger.info("--> move shard from node_1 to node_2, and wait for relocation to finish");
+    BlockClusterStateProcessing disruptionNode3=new BlockClusterStateProcessing(node_3,getRandom());
+    clusterStateBlocks.add(disruptionNode3);
+    internalCluster().setDisruptionScheme(disruptionNode3);
+    disruptionNode3.startDisrupting();
+    MockTransportService transportServiceNode2=(MockTransportService)internalCluster().getInstance(TransportService.class,node_2);
+    CountDownLatch beginRelocationLatchNode2=new CountDownLatch(1);
+    CountDownLatch endRelocationLatchNode2=new CountDownLatch(1);
+    transportServiceNode2.addTracer(new StartRecoveryToShardStaredTracer(logger,beginRelocationLatchNode2,endRelocationLatchNode2));
+    BlockClusterStateProcessing disruptionNode2=new BlockClusterStateProcessing(node_2,getRandom());
+    clusterStateBlocks.add(disruptionNode2);
+    disruptionNode2.applyToCluster(internalCluster());
+    BlockClusterStateProcessing disruptionNode1=new BlockClusterStateProcessing(node_1,getRandom());
+    clusterStateBlocks.add(disruptionNode1);
+    disruptionNode1.applyToCluster(internalCluster());
+    logger.info("--> move shard from node_1 to node_2");
+    Future<ClusterRerouteResponse> rerouteFuture=internalCluster().client().admin().cluster().prepareReroute().add(new MoveAllocationCommand(new ShardId("test",0),node_1,node_2)).setTimeout(new TimeValue(1000,TimeUnit.MILLISECONDS)).execute();
+    logger.info("--> wait for relocation to start");
+    beginRelocationLatchNode2.await();
+    disruptionNode1.startDisrupting();
+    disruptionNode2.startDisrupting();
+    endRelocationLatchNode2.await();
+    final Client node3Client=internalCluster().client(node_3);
+    final Client node2Client=internalCluster().client(node_2);
+    final Client node1Client=internalCluster().client(node_1);
+    final Client node4Client=internalCluster().client(node_4);
+    logger.info("--> index doc");
+    logLocalClusterStates(node1Client,node2Client,node3Client,node4Client);
+    assertTrue(node3Client.prepareIndex("test","doc").setSource("{\"text\":\"a\"}").get().isCreated());
+    int refreshOrFlushType=randomIntBetween(1,2);
+switch (refreshOrFlushType) {
+case 1:
+{
+        logger.info("--> refresh from node_3");
+        RefreshResponse refreshResponse=node3Client.admin().indices().prepareRefresh().get();
+        assertThat(refreshResponse.getFailedShards(),equalTo(0));
+        assertThat(refreshResponse.getTotalShards(),equalTo(2));
+        assertThat(refreshResponse.getSuccessfulShards(),equalTo(2));
+        break;
+      }
+case 2:
+{
+      logger.info("--> flush from node_3");
+      FlushResponse flushResponse=node3Client.admin().indices().prepareFlush().get();
+      assertThat(flushResponse.getFailedShards(),equalTo(0));
+      assertThat(flushResponse.getTotalShards(),equalTo(2));
+      assertThat(flushResponse.getSuccessfulShards(),equalTo(2));
+      break;
+    }
+default :
+  fail("this is  test bug, number should be between 1 and 2");
+}
+logger.info("--> stop disrupting node_3");
+disruptionNode3.stopDisrupting();
+rerouteFuture.get();
+logger.info("--> wait for node_4 to get new cluster state");
+assertBusy(new Runnable(){
+@Override public void run(){
+  ClusterState clusterState=node4Client.admin().cluster().prepareState().setLocal(true).get().getState();
+  String nodeId=null;
+  for (  RoutingNode node : clusterState.getRoutingNodes()) {
+    if (node.node().name().equals(node_1)) {
+      nodeId=node.nodeId();
+    }
+  }
+  assertNotNull(nodeId);
+  assertFalse(clusterState.getRoutingNodes().routingNodeIter(nodeId).hasNext());
+}
+}
+);
+logger.info("--> run count from node_4");
+logLocalClusterStates(node1Client,node2Client,node3Client,node4Client);
+CountResponse countResponse=node4Client.prepareCount("test").setPreference("local").get();
+assertThat(countResponse.getCount(),equalTo(1l));
+logger.info("--> stop disrupting node_1 and node_2");
+disruptionNode2.stopDisrupting();
+disruptionNode1.stopDisrupting();
+logger.info("--> wait for relocation to finish");
+clusterHealth=client().admin().cluster().prepareHealth().setWaitForRelocatingShards(0).get();
+assertThat(clusterHealth.isTimedOut(),equalTo(false));
+}
+ catch (AssertionError e) {
+for (BlockClusterStateProcessing blockClusterStateProcessing : clusterStateBlocks) {
+blockClusterStateProcessing.stopDisrupting();
+}
+throw e;
+}
+}

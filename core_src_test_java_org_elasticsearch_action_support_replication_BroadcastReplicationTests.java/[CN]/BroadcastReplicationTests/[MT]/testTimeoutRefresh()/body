@@ -1,0 +1,18 @@
+{
+  final String index="test";
+  clusterService.setState(state(index,randomBoolean(),randomBoolean() ? ShardRoutingState.INITIALIZING : ShardRoutingState.UNASSIGNED,ShardRoutingState.UNASSIGNED));
+  logger.debug("--> using initial state:\n{}",clusterService.state().prettyPrint());
+  TransportShardRefreshAction shardrefreshAction=new TransportShardRefreshAction(Settings.EMPTY,transportService,clusterService,null,threadPool,null,null,new ActionFilters(new HashSet<ActionFilter>()),new IndexNameExpressionResolver(Settings.EMPTY));
+  TransportRefreshAction refreshAction=new TransportRefreshAction(Settings.EMPTY,threadPool,clusterService,transportService,new ActionFilters(new HashSet<ActionFilter>()),new IndexNameExpressionResolver(Settings.EMPTY),shardrefreshAction);
+  RefreshResponse refreshResponse=(RefreshResponse)executeAndAssertImmediateResponse(refreshAction,new RefreshRequest(index));
+  assertBroadcastResponse(2,0,0,refreshResponse,UnavailableShardsException.class);
+  ClusterBlocks.Builder block=ClusterBlocks.builder().addGlobalBlock(new ClusterBlock(1,"non retryable",false,true,RestStatus.SERVICE_UNAVAILABLE,ClusterBlockLevel.ALL));
+  clusterService.setState(ClusterState.builder(clusterService.state()).blocks(block));
+  assertFailure("all shards should fail with cluster block",executeAndAssertImmediateResponse(refreshAction,new RefreshRequest(index)),ClusterBlockException.class);
+  block=ClusterBlocks.builder().addGlobalBlock(new ClusterBlock(1,"retryable",true,true,RestStatus.SERVICE_UNAVAILABLE,ClusterBlockLevel.ALL));
+  clusterService.setState(ClusterState.builder(clusterService.state()).blocks(block));
+  assertFailure("all shards should fail with cluster block",executeAndAssertImmediateResponse(refreshAction,new RefreshRequest(index)),ClusterBlockException.class);
+  block=ClusterBlocks.builder().addGlobalBlock(new ClusterBlock(1,"non retryable",false,true,RestStatus.SERVICE_UNAVAILABLE,ClusterBlockLevel.ALL));
+  clusterService.setState(ClusterState.builder(clusterService.state()).blocks(block));
+  assertFailure("all shards should fail with cluster block",executeAndAssertImmediateResponse(refreshAction,new RefreshRequest(index)),ClusterBlockException.class);
+}
