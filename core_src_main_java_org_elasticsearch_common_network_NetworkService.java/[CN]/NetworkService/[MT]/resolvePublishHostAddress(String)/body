@@ -13,5 +13,23 @@
   if (publishHost == null) {
     publishHost=DEFAULT_NETWORK_HOST;
   }
-  return resolveInetAddress(publishHost)[0];
+  InetAddress address=resolveInetAddress(publishHost)[0];
+  if (address != null) {
+    if (address.isMulticastAddress()) {
+      throw new IllegalArgumentException("publish address: {" + NetworkAddress.format(address) + "} is invalid: multicast address");
+    }
+    for (    NetworkInterface nic : NetworkUtils.getInterfaces()) {
+      for (      InterfaceAddress intf : nic.getInterfaceAddresses()) {
+        if (address.equals(intf.getBroadcast())) {
+          throw new IllegalArgumentException("publish address: {" + NetworkAddress.format(address) + "} is invalid: broadcast address");
+        }
+      }
+    }
+    if (address.isAnyLocalAddress()) {
+      InetAddress old=address;
+      address=NetworkUtils.getFirstNonLoopbackAddresses()[0];
+      logger.warn("publish address: {{}} is a wildcard address, falling back to first non-loopback: {{}}",NetworkAddress.format(old),NetworkAddress.format(address));
+    }
+  }
+  return address;
 }
