@@ -1,0 +1,38 @@
+{
+  Directory dir=newDirectory();
+  IndexWriterConfig iwc=newIndexWriterConfig().setMergePolicy(NoMergePolicy.INSTANCE);
+  RandomIndexWriter w=new RandomIndexWriter(getRandom(),dir,iwc);
+  final int numDocs=scaledRandomIntBetween(100,200);
+  for (int i=0; i < numDocs; ++i) {
+    Document doc=new Document();
+    if (randomBoolean()) {
+      doc.add(new StringField("foo","bar",Store.NO));
+    }
+    if (randomBoolean()) {
+      doc.add(new StringField("foo","baz",Store.NO));
+    }
+    if (withDeletions && (rarely() || i == 0)) {
+      doc.add(new StringField("delete","yes",Store.NO));
+    }
+    w.addDocument(doc);
+  }
+  if (withDeletions) {
+    w.deleteDocuments(new Term("delete","yes"));
+  }
+  final IndexReader reader=w.getReader();
+  Query matchAll=new MatchAllDocsQuery();
+  Query matchAllCsq=new ConstantScoreQuery(matchAll);
+  Query tq=new TermQuery(new Term("foo","bar"));
+  Query tCsq=new ConstantScoreQuery(tq);
+  BooleanQuery bq=new BooleanQuery();
+  bq.add(matchAll,Occur.SHOULD);
+  bq.add(tq,Occur.MUST);
+  countTestCase(matchAll,reader,false);
+  countTestCase(matchAllCsq,reader,false);
+  countTestCase(tq,reader,withDeletions);
+  countTestCase(tCsq,reader,withDeletions);
+  countTestCase(bq,reader,true);
+  reader.close();
+  w.close();
+  dir.close();
+}
