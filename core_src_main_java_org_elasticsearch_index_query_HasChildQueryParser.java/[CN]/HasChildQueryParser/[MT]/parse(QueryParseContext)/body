@@ -6,7 +6,6 @@
   ScoreType scoreType=ScoreType.NONE;
   int minChildren=0;
   int maxChildren=0;
-  int shortCircuitParentDocSet=8192;
   String queryName=null;
   InnerHitsSubSearchContext innerHits=null;
   String currentFieldName=null;
@@ -49,9 +48,6 @@
  else       if ("max_children".equals(currentFieldName) || "maxChildren".equals(currentFieldName)) {
         maxChildren=parser.intValue(true);
       }
- else       if ("short_circuit_cutoff".equals(currentFieldName)) {
-        shortCircuitParentDocSet=parser.intValue();
-      }
  else       if ("_name".equals(currentFieldName)) {
         queryName=parser.text();
       }
@@ -93,25 +89,10 @@
   if (maxChildren > 0 && maxChildren < minChildren) {
     throw new QueryParsingException(parseContext,"[has_child] 'max_children' is less than 'min_children'");
   }
-  BitSetProducer nonNestedDocsFilter=null;
-  if (parentDocMapper.hasNestedObjects()) {
-    nonNestedDocsFilter=parseContext.bitsetFilter(Queries.newNonNestedFilter());
-  }
   innerQuery=Queries.filtered(innerQuery,childDocMapper.typeFilter());
   final Query query;
   final ParentChildIndexFieldData parentChildIndexFieldData=parseContext.getForField(parentFieldMapper.fieldType());
-  if (parseContext.indexVersionCreated().onOrAfter(Version.V_2_0_0_beta1)) {
-    query=joinUtilHelper(parentType,parentChildIndexFieldData,parentDocMapper.typeFilter(),scoreType,innerQuery,minChildren,maxChildren);
-  }
- else {
-    Filter parentFilter=new QueryWrapperFilter(parentDocMapper.typeFilter());
-    if (minChildren > 1 || maxChildren > 0 || scoreType != ScoreType.NONE) {
-      query=new ChildrenQuery(parentChildIndexFieldData,parentType,childType,parentFilter,innerQuery,scoreType,minChildren,maxChildren,shortCircuitParentDocSet,nonNestedDocsFilter);
-    }
- else {
-      query=new ChildrenConstantScoreQuery(parentChildIndexFieldData,innerQuery,parentType,childType,parentFilter,shortCircuitParentDocSet,nonNestedDocsFilter);
-    }
-  }
+  query=joinUtilHelper(parentType,parentChildIndexFieldData,parentDocMapper.typeFilter(),scoreType,innerQuery,minChildren,maxChildren);
   if (queryName != null) {
     parseContext.addNamedQuery(queryName,query);
   }
