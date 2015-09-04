@@ -1,0 +1,33 @@
+{
+  SearchResponse response=client().prepareSearch("idx").addAggregation(terms("terms").field("tag").order(Terms.Order.term(true)).subAggregation(histogram("histo").field(SINGLE_VALUED_FIELD_NAME).interval(interval).extendedBounds((long)minRandomValue,(long)maxRandomValue)).subAggregation(percentilesBucket("percentiles_bucket").setBucketsPaths("histo>_count").percents(PERCENTS))).execute().actionGet();
+  assertSearchResponse(response);
+  Terms terms=response.getAggregations().get("terms");
+  assertThat(terms,notNullValue());
+  assertThat(terms.getName(),equalTo("terms"));
+  List<Terms.Bucket> termsBuckets=terms.getBuckets();
+  assertThat(termsBuckets.size(),equalTo(interval));
+  for (int i=0; i < interval; ++i) {
+    Terms.Bucket termsBucket=termsBuckets.get(i);
+    assertThat(termsBucket,notNullValue());
+    assertThat((String)termsBucket.getKey(),equalTo("tag" + (i % interval)));
+    Histogram histo=termsBucket.getAggregations().get("histo");
+    assertThat(histo,notNullValue());
+    assertThat(histo.getName(),equalTo("histo"));
+    List<? extends Histogram.Bucket> buckets=histo.getBuckets();
+    double[] values=new double[numValueBuckets];
+    for (int j=0; j < numValueBuckets; ++j) {
+      Histogram.Bucket bucket=buckets.get(j);
+      assertThat(bucket,notNullValue());
+      assertThat(((Number)bucket.getKey()).longValue(),equalTo((long)j * interval));
+      values[j]=bucket.getDocCount();
+    }
+    Arrays.sort(values);
+    PercentilesBucket percentilesBucketValue=termsBucket.getAggregations().get("percentiles_bucket");
+    assertThat(percentilesBucketValue,notNullValue());
+    assertThat(percentilesBucketValue.getName(),equalTo("percentiles_bucket"));
+    for (    Double p : PERCENTS) {
+      double expected=values[(int)((p / 100) * values.length)];
+      assertThat(percentilesBucketValue.percentile(p),equalTo(expected));
+    }
+  }
+}

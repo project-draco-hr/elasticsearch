@@ -1,0 +1,25 @@
+{
+  SearchResponse response=client().prepareSearch("idx").addAggregation(histogram("histo").field(SINGLE_VALUED_FIELD_NAME).interval(interval).extendedBounds((long)minRandomValue,(long)maxRandomValue)).addAggregation(percentilesBucket("percentiles_bucket").setBucketsPaths("histo>_count").percents(PERCENTS)).execute().actionGet();
+  assertSearchResponse(response);
+  Histogram histo=response.getAggregations().get("histo");
+  assertThat(histo,notNullValue());
+  assertThat(histo.getName(),equalTo("histo"));
+  List<? extends Histogram.Bucket> buckets=histo.getBuckets();
+  assertThat(buckets.size(),equalTo(numValueBuckets));
+  double[] values=new double[numValueBuckets];
+  for (int i=0; i < numValueBuckets; ++i) {
+    Histogram.Bucket bucket=buckets.get(i);
+    assertThat(bucket,notNullValue());
+    assertThat(((Number)bucket.getKey()).longValue(),equalTo((long)i * interval));
+    assertThat(bucket.getDocCount(),equalTo(valueCounts[i]));
+    values[i]=bucket.getDocCount();
+  }
+  Arrays.sort(values);
+  PercentilesBucket percentilesBucketValue=response.getAggregations().get("percentiles_bucket");
+  assertThat(percentilesBucketValue,notNullValue());
+  assertThat(percentilesBucketValue.getName(),equalTo("percentiles_bucket"));
+  for (  Double p : PERCENTS) {
+    double expected=values[(int)((p / 100) * values.length)];
+    assertThat(percentilesBucketValue.percentile(p),equalTo(expected));
+  }
+}
