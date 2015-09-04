@@ -1,0 +1,36 @@
+{
+  final Object coreCacheReader=context.reader().getCoreCacheKey();
+  final ShardId shardId=ShardUtils.extractShardId(context.reader());
+  Cache<Query,Value> filterToFbs=loadedFilters.get(coreCacheReader,new Callable<Cache<Query,Value>>(){
+    @Override public Cache<Query,Value> call() throws Exception {
+      context.reader().addCoreClosedListener(BitsetFilterCache.this);
+      return CacheBuilder.newBuilder().build();
+    }
+  }
+);
+  return filterToFbs.get(query,new Callable<Value>(){
+    @Override public Value call() throws Exception {
+      final IndexReaderContext topLevelContext=ReaderUtil.getTopLevelContext(context);
+      final IndexSearcher searcher=new IndexSearcher(topLevelContext);
+      searcher.setQueryCache(null);
+      final Weight weight=searcher.createNormalizedWeight(query,false);
+      final DocIdSetIterator it=weight.scorer(context);
+      final BitSet bitSet;
+      if (it == null) {
+        bitSet=null;
+      }
+ else {
+        bitSet=BitSet.of(it,context.reader().maxDoc());
+      }
+      Value value=new Value(bitSet,shardId);
+      if (shardId != null) {
+        IndexShard shard=indexService.shard(shardId.id());
+        if (shard != null) {
+          shard.shardBitsetFilterCache().onCached(value.bitset.ramBytesUsed());
+        }
+      }
+      return value;
+    }
+  }
+).bitset;
+}
