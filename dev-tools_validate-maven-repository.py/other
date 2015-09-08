@@ -1,0 +1,59 @@
+import sys
+import os
+import httplib
+import urlparse
+import re
+if (__name__ == '__main__'):
+    if (len(sys.argv) != 3):
+        print ('Usage: %s <localRep> <stagingRepo> [user:pass]' % sys.argv[0])
+        print ''
+        print ('Example: %s /tmp/my-maven-repo/org/elasticsearch https://oss.sonatype.org/service/local/repositories/orgelasticsearch-1012/content/org/elasticsearch' % sys.argv[0])
+    else:
+        sys.argv[1] = re.sub('/$', '', sys.argv[1])
+        sys.argv[2] = re.sub('/$', '', sys.argv[2])
+        localMavenRepo = sys.argv[1]
+        endpoint = sys.argv[2]
+        filesToCheck = []
+        foundSignedFiles = False
+        for (root, dirs, files) in os.walk(localMavenRepo):
+            for file in files:
+                if ((not file.startswith('maven-metadata')) and (not file.endswith('.properties')) and (not file.endswith('.repositories'))):
+                    filesToCheck.append(os.path.join(root, file))
+                if file.endswith('.asc'):
+                    foundSignedFiles = True
+        print ('Need to check %i files' % len(filesToCheck))
+        if (not foundSignedFiles):
+            print '### Warning: No signed .asc files found'
+        parsed_uri = urlparse.urlparse(endpoint)
+        domain = parsed_uri.netloc
+        if (parsed_uri.scheme == 'https'):
+            conn = httplib.HTTPSConnection(domain)
+        else:
+            conn = httplib.HTTPConnection(domain)
+        drawProgressBar(0)
+        errors = []
+        for (idx, file) in enumerate(filesToCheck):
+            request_uri = (parsed_uri.path + file[len(localMavenRepo):])
+            conn.request('HEAD', request_uri)
+            res = conn.getresponse()
+            res.read()
+            absolute_url = (((parsed_uri.scheme + '://') + parsed_uri.netloc) + request_uri)
+            if (res.status == 200):
+                content_length = res.getheader('content-length')
+                local_file_size = os.path.getsize(file)
+                if (int(content_length) != int(local_file_size)):
+                    errors.append(('LENGTH MISMATCH:   %s differs in size. local %s <=> %s remote' % (absolute_url, content_length, local_file_size)))
+            elif (res.status == 404):
+                errors.append(('MISSING:           %s' % absolute_url))
+            elif ((res.status == 301) or (res.status == 302)):
+                errors.append(('REDIRECT:          %s to %s' % (absolute_url, res.getheader('location'))))
+            else:
+                errors.append(('ERROR:             %s http response: %s %s' % (absolute_url, res.status, res.reason)))
+            drawProgressBar(((idx + 1) / float(len(filesToCheck))))
+        print 
+        if (len(errors) != 0):
+            print ('The following errors occured (%s out of %s files)' % (len(errors), len(filesToCheck)))
+            print 
+            for error in errors:
+                print error
+            sys.exit((-1))
