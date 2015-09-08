@@ -1,14 +1,28 @@
 {
-  DocumentMapper parentDocMapper=context.mapperService().documentMapper(parentType);
+  Query innerQuery=query.toQuery(context);
+  if (innerQuery == null) {
+    return null;
+  }
+  innerQuery.setBoost(boost);
+  DocumentMapper parentDocMapper=context.mapperService().documentMapper(type);
   if (parentDocMapper == null) {
-    throw new QueryParsingException(context.parseContext(),"[has_parent] query configured 'parent_type' [" + parentType + "] is not a valid type");
+    throw new QueryParsingException(context.parseContext(),"[has_parent] query configured 'parent_type' [" + type + "] is not a valid type");
   }
-  if (innerHits != null) {
-    ParsedQuery parsedQuery=new ParsedQuery(innerQuery,context.copyNamedQueries());
-    InnerHitsContext.ParentChildInnerHits parentChildInnerHits=new InnerHitsContext.ParentChildInnerHits(innerHits.getSubSearchContext(),parsedQuery,null,context.mapperService(),parentDocMapper);
-    String name=innerHits.getName() != null ? innerHits.getName() : parentType;
-    context.addInnerHits(name,parentChildInnerHits);
-  }
+  if (innerHit != null) {
+    try (XContentParser parser=innerHit.getXcontentParser()){
+      XContentParser.Token token=parser.nextToken();
+      if (token != XContentParser.Token.START_OBJECT) {
+        throw new IllegalStateException("start object expected but was: [" + token + "]");
+      }
+      InnerHitsSubSearchContext innerHits=context.indexQueryParserService().getInnerHitsQueryParserHelper().parse(parser);
+      if (innerHits != null) {
+        ParsedQuery parsedQuery=new ParsedQuery(innerQuery,context.copyNamedQueries());
+        InnerHitsContext.ParentChildInnerHits parentChildInnerHits=new InnerHitsContext.ParentChildInnerHits(innerHits.getSubSearchContext(),parsedQuery,null,context.mapperService(),parentDocMapper);
+        String name=innerHits.getName() != null ? innerHits.getName() : type;
+        context.addInnerHits(name,parentChildInnerHits);
+      }
+    }
+   }
   Set<String> parentTypes=new HashSet<>(5);
   parentTypes.add(parentDocMapper.type());
   ParentChildIndexFieldData parentChildIndexFieldData=null;
@@ -48,8 +62,7 @@
   innerQuery=Queries.filtered(innerQuery,parentDocMapper.typeFilter());
   Filter childrenFilter=new QueryWrapperFilter(Queries.not(parentFilter));
   if (context.indexVersionCreated().onOrAfter(Version.V_2_0_0_beta1)) {
-    ScoreMode scoreMode=score ? ScoreMode.Max : ScoreMode.None;
-    return new HasChildQueryBuilder.LateParsingQuery(childrenFilter,innerQuery,HasChildQueryBuilder.DEFAULT_MIN_CHILDREN,HasChildQueryBuilder.DEFAULT_MAX_CHILDREN,parentType,scoreMode,parentChildIndexFieldData);
+    return new HasChildQueryBuilder.LateParsingQuery(childrenFilter,innerQuery,HasChildQueryBuilder.DEFAULT_MIN_CHILDREN,HasChildQueryBuilder.DEFAULT_MAX_CHILDREN,type,score ? ScoreMode.Max : ScoreMode.None,parentChildIndexFieldData);
   }
  else {
     if (score) {
