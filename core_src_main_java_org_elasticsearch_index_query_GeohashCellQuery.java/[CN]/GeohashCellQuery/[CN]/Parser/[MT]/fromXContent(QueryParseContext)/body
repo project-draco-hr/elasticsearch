@@ -1,12 +1,11 @@
 {
-  QueryParseContext parseContext=context.parseContext();
   XContentParser parser=parseContext.parser();
   String fieldName=null;
   String geohash=null;
-  int levels=-1;
-  boolean neighbors=false;
+  Integer levels=null;
+  Boolean neighbors=null;
   String queryName=null;
-  float boost=AbstractQueryBuilder.DEFAULT_BOOST;
+  Float boost=null;
   XContentParser.Token token;
   if ((token=parser.currentToken()) != Token.START_OBJECT) {
     throw new ElasticsearchParseException("failed to parse [{}] query. expected an object but found [{}] instead",NAME,token);
@@ -16,7 +15,7 @@
       String field=parser.text();
       if (parseContext.isDeprecatedSetting(field)) {
       }
- else       if (PRECISION.equals(field)) {
+ else       if (parseContext.parseFieldMatcher().match(field,PRECISION_FIELD)) {
         token=parser.nextToken();
         if (token == Token.VALUE_NUMBER) {
           levels=parser.intValue();
@@ -26,15 +25,15 @@
           levels=GeoUtils.geoHashLevelsForPrecision(meters);
         }
       }
- else       if (NEIGHBORS.equals(field)) {
+ else       if (parseContext.parseFieldMatcher().match(field,NEIGHBORS_FIELD)) {
         parser.nextToken();
         neighbors=parser.booleanValue();
       }
- else       if ("_name".equals(field)) {
+ else       if (parseContext.parseFieldMatcher().match(field,AbstractQueryBuilder.NAME_FIELD)) {
         parser.nextToken();
         queryName=parser.text();
       }
- else       if ("boost".equals(field)) {
+ else       if (parseContext.parseFieldMatcher().match(field,AbstractQueryBuilder.BOOST_FIELD)) {
         parser.nextToken();
         boost=parser.floatValue();
       }
@@ -59,36 +58,19 @@
       throw new ElasticsearchParseException("failed to parse [{}] query. unexpected token [{}]",NAME,token);
     }
   }
-  if (geohash == null) {
-    throw new QueryParsingException(parseContext,"failed to parse [{}] query. missing geohash value",NAME);
+  Builder builder=new Builder(fieldName);
+  builder.geohash(geohash);
+  if (levels != null) {
+    builder.precision(levels);
   }
-  MappedFieldType fieldType=context.fieldMapper(fieldName);
-  if (fieldType == null) {
-    throw new QueryParsingException(parseContext,"failed to parse [{}] query. missing [{}] field [{}]",NAME,GeoPointFieldMapper.CONTENT_TYPE,fieldName);
-  }
-  if (!(fieldType instanceof GeoPointFieldMapper.GeoPointFieldType)) {
-    throw new QueryParsingException(parseContext,"failed to parse [{}] query. field [{}] is not a geo_point field",NAME,fieldName);
-  }
-  GeoPointFieldMapper.GeoPointFieldType geoFieldType=((GeoPointFieldMapper.GeoPointFieldType)fieldType);
-  if (!geoFieldType.isGeohashPrefixEnabled()) {
-    throw new QueryParsingException(parseContext,"failed to parse [{}] query. [geohash_prefix] is not enabled for field [{}]",NAME,fieldName);
-  }
-  if (levels > 0) {
-    int len=Math.min(levels,geohash.length());
-    geohash=geohash.substring(0,len);
-  }
-  Query filter;
-  if (neighbors) {
-    filter=create(context,geoFieldType,geohash,GeoHashUtils.addNeighbors(geohash,new ArrayList<CharSequence>(8)));
-  }
- else {
-    filter=create(context,geoFieldType,geohash,null);
+  if (neighbors != null) {
+    builder.neighbors(neighbors);
   }
   if (queryName != null) {
-    context.addNamedQuery(queryName,filter);
+    builder.queryName(queryName);
   }
-  if (filter != null) {
-    filter.setBoost(boost);
+  if (boost != null) {
+    builder.boost(boost);
   }
-  return filter;
+  return builder;
 }
