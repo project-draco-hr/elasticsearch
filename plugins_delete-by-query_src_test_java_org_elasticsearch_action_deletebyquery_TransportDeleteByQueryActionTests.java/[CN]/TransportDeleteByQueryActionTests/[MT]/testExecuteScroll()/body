@@ -6,7 +6,7 @@
   client().admin().indices().prepareRefresh("test").get();
   assertHitCount(client().prepareCount("test").get(),numDocs);
   final long limit=randomIntBetween(0,numDocs);
-  SearchResponse searchResponse=client().prepareSearch("test").setSearchType(SearchType.SCAN).setScroll(TimeValue.timeValueSeconds(10)).setQuery(boolQuery().must(rangeQuery("num").lte(limit))).addFields("_routing","_parent").setFetchSource(false).setVersion(true).get();
+  SearchResponse searchResponse=client().prepareSearch("test").setScroll(TimeValue.timeValueSeconds(10)).setQuery(boolQuery().must(rangeQuery("num").lte(limit))).addFields("_routing","_parent").setFetchSource(false).setVersion(true).get();
   String scrollId=searchResponse.getScrollId();
   assertTrue(Strings.hasText(scrollId));
   assertThat(searchResponse.getHits().getTotalHits(),equalTo(limit));
@@ -16,6 +16,7 @@
   waitForCompletion("scroll request should return all documents",listener);
   assertNull(listener.getError());
   assertFalse(listener.getResponse().isTimedOut());
-  assertThat(listener.getResponse().getTotalDeleted(),equalTo(limit));
+  final long expectedDeleted=Math.max(0,limit - searchResponse.getHits().hits().length);
+  assertThat(listener.getResponse().getTotalDeleted(),equalTo(expectedDeleted));
   assertSearchContextsClosed();
 }
