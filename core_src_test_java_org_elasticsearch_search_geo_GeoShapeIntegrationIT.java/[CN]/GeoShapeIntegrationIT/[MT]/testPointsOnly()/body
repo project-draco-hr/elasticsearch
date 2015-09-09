@@ -1,0 +1,16 @@
+{
+  String mapping=XContentFactory.jsonBuilder().startObject().startObject("type1").startObject("properties").startObject("location").field("type","geo_shape").field("tree",randomBoolean() ? "quadtree" : "geohash").field("tree_levels","6").field("distance_error_pct","0.01").field("points_only",true).endObject().endObject().endObject().endObject().string();
+  assertAcked(prepareCreate("geo_points_only").addMapping("type1",mapping));
+  ensureGreen();
+  ShapeBuilder shape=RandomShapeGenerator.createShape(random());
+  try {
+    indexRandom(true,client().prepareIndex("geo_points_only","type1","1").setSource(jsonBuilder().startObject().field("location",shape).endObject()));
+  }
+ catch (  Throwable e) {
+    assertThat(e.getMessage(),containsString("MapperParsingException"));
+    assertThat(e.getMessage(),containsString("is configured for points only"));
+    return;
+  }
+  SearchResponse response=client().prepareSearch().setQuery(geoIntersectionQuery("location",shape)).execute().actionGet();
+  assertEquals(1,response.getHits().getTotalHits());
+}
