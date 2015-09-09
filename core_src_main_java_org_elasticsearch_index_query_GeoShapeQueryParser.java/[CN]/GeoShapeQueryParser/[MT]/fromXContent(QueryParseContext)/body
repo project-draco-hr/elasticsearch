@@ -1,0 +1,105 @@
+{
+  XContentParser parser=parseContext.parser();
+  String fieldName=null;
+  ShapeRelation shapeRelation=null;
+  SpatialStrategy strategy=null;
+  BytesReference shape=null;
+  String id=null;
+  String type=null;
+  String index=null;
+  String shapePath=null;
+  XContentParser.Token token;
+  String currentFieldName=null;
+  float boost=AbstractQueryBuilder.DEFAULT_BOOST;
+  String queryName=null;
+  while ((token=parser.nextToken()) != XContentParser.Token.END_OBJECT) {
+    if (token == XContentParser.Token.FIELD_NAME) {
+      currentFieldName=parser.currentName();
+    }
+ else     if (token == XContentParser.Token.START_OBJECT) {
+      fieldName=currentFieldName;
+      while ((token=parser.nextToken()) != XContentParser.Token.END_OBJECT) {
+        if (token == XContentParser.Token.FIELD_NAME) {
+          currentFieldName=parser.currentName();
+          token=parser.nextToken();
+          if (parseContext.parseFieldMatcher().match(currentFieldName,SHAPE_FIELD)) {
+            XContentBuilder builder=XContentFactory.contentBuilder(parser.contentType()).copyCurrentStructure(parser);
+            shape=builder.bytes();
+          }
+ else           if (parseContext.parseFieldMatcher().match(currentFieldName,STRATEGY_FIELD)) {
+            String strategyName=parser.text();
+            strategy=SpatialStrategy.fromString(strategyName);
+            if (strategy == null) {
+              throw new QueryParsingException(parseContext,"Unknown strategy [" + strategyName + " ]");
+            }
+          }
+ else           if (parseContext.parseFieldMatcher().match(currentFieldName,RELATION_FIELD)) {
+            shapeRelation=ShapeRelation.getRelationByName(parser.text());
+            if (shapeRelation == null) {
+              throw new QueryParsingException(parseContext,"Unknown shape operation [" + parser.text() + " ]");
+            }
+          }
+ else           if (parseContext.parseFieldMatcher().match(currentFieldName,INDEXED_SHAPE_FIELD)) {
+            while ((token=parser.nextToken()) != XContentParser.Token.END_OBJECT) {
+              if (token == XContentParser.Token.FIELD_NAME) {
+                currentFieldName=parser.currentName();
+              }
+ else               if (token.isValue()) {
+                if (parseContext.parseFieldMatcher().match(currentFieldName,SHAPE_ID_FIELD)) {
+                  id=parser.text();
+                }
+ else                 if (parseContext.parseFieldMatcher().match(currentFieldName,SHAPE_TYPE_FIELD)) {
+                  type=parser.text();
+                }
+ else                 if (parseContext.parseFieldMatcher().match(currentFieldName,SHAPE_INDEX_FIELD)) {
+                  index=parser.text();
+                }
+ else                 if (parseContext.parseFieldMatcher().match(currentFieldName,SHAPE_PATH_FIELD)) {
+                  shapePath=parser.text();
+                }
+              }
+            }
+          }
+ else {
+            throw new QueryParsingException(parseContext,"[geo_shape] query does not support [" + currentFieldName + "]");
+          }
+        }
+      }
+    }
+ else     if (token.isValue()) {
+      if (parseContext.parseFieldMatcher().match(currentFieldName,AbstractQueryBuilder.BOOST_FIELD)) {
+        boost=parser.floatValue();
+      }
+ else       if (parseContext.parseFieldMatcher().match(currentFieldName,AbstractQueryBuilder.NAME_FIELD)) {
+        queryName=parser.text();
+      }
+ else {
+        throw new QueryParsingException(parseContext,"[geo_shape] query does not support [" + currentFieldName + "]");
+      }
+    }
+  }
+  GeoShapeQueryBuilder builder;
+  if (shape != null) {
+    builder=new GeoShapeQueryBuilder(fieldName,shape);
+  }
+ else {
+    builder=new GeoShapeQueryBuilder(fieldName,id,type);
+  }
+  if (index != null) {
+    builder.indexedShapeIndex(index);
+  }
+  if (shapePath != null) {
+    builder.indexedShapePath(shapePath);
+  }
+  if (shapeRelation != null) {
+    builder.relation(shapeRelation);
+  }
+  if (strategy != null) {
+    builder.strategy(strategy);
+  }
+  if (queryName != null) {
+    builder.queryName(queryName);
+  }
+  builder.boost(boost);
+  return builder;
+}
