@@ -1,9 +1,11 @@
 {
-  if (!(from() == -1 && size() == -1)) {
-    int numHits=from() + size();
-    if (numHits < 0) {
-      String msg="Result window is too large, from + size must be less than or equal to: [" + Integer.MAX_VALUE + "] but was ["+ (((long)from()) + ((long)size()))+ "]";
-      throw new QueryPhaseExecutionException(this,msg);
+  if (scrollContext == null) {
+    long from=from() == -1 ? 0 : from();
+    long size=size() == -1 ? 10 : size();
+    long resultWindow=from + size;
+    int maxResultWindow=indexService.settingsService().getSettings().getAsInt(MAX_RESULT_WINDOW,Defaults.MAX_RESULT_WINDOW);
+    if (resultWindow > maxResultWindow) {
+      throw new QueryPhaseExecutionException(this,"Result window is too large, from + size must be less than or equal to: [" + maxResultWindow + "] but was ["+ resultWindow+ "]. See the scroll api for a more efficient way to request large data sets. "+ "This limit can be set by changing the ["+ DefaultSearchContext.MAX_RESULT_WINDOW+ "] index level parameter.");
     }
   }
   aliasFilter=indexService.aliasesService().aliasFilter(request.filteringAliases());
@@ -21,9 +23,7 @@
       parsedQuery(new ParsedQuery(q,parsedQuery()));
     }
  else {
-      BooleanQuery filtered=new BooleanQuery();
-      filtered.add(query(),Occur.MUST);
-      filtered.add(searchFilter,Occur.FILTER);
+      BooleanQuery filtered=new BooleanQuery.Builder().add(query(),Occur.MUST).add(searchFilter,Occur.FILTER).build();
       parsedQuery(new ParsedQuery(filtered,parsedQuery()));
     }
   }

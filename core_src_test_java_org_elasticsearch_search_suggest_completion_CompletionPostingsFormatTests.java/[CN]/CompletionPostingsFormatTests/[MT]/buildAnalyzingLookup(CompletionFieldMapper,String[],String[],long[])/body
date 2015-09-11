@@ -1,0 +1,35 @@
+{
+  RAMDirectory dir=new RAMDirectory();
+  Codec codec=new Lucene53Codec(){
+    public PostingsFormat getPostingsFormatForField(    String field){
+      final PostingsFormat in=super.getPostingsFormatForField(field);
+      return mapper.fieldType().postingsFormat(in);
+    }
+  }
+;
+  IndexWriterConfig indexWriterConfig=new IndexWriterConfig(mapper.fieldType().indexAnalyzer());
+  indexWriterConfig.setCodec(codec);
+  IndexWriter writer=new IndexWriter(dir,indexWriterConfig);
+  for (int i=0; i < weights.length; i++) {
+    Document doc=new Document();
+    BytesRef payload=mapper.buildPayload(new BytesRef(surfaces[i]),weights[i],new BytesRef(Long.toString(weights[i])));
+    doc.add(mapper.getCompletionField(ContextMapping.EMPTY_CONTEXT,terms[i],payload));
+    if (randomBoolean()) {
+      writer.commit();
+    }
+    writer.addDocument(doc);
+  }
+  writer.commit();
+  writer.forceMerge(1,true);
+  writer.commit();
+  DirectoryReader reader=DirectoryReader.open(writer,true);
+  assertThat(reader.leaves().size(),equalTo(1));
+  assertThat(reader.leaves().get(0).reader().numDocs(),equalTo(weights.length));
+  LeafReaderContext atomicReaderContext=reader.leaves().get(0);
+  Terms luceneTerms=atomicReaderContext.reader().terms(mapper.fieldType().names().fullName());
+  Lookup lookup=((Completion090PostingsFormat.CompletionTerms)luceneTerms).getLookup(mapper.fieldType(),new CompletionSuggestionContext(null));
+  reader.close();
+  writer.close();
+  dir.close();
+  return lookup;
+}

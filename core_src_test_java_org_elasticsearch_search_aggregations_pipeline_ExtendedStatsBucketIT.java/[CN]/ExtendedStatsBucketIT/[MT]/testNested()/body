@@ -1,0 +1,50 @@
+{
+  SearchResponse response=client().prepareSearch("idx").addAggregation(terms("terms").field("tag").order(Order.term(true)).subAggregation(histogram("histo").field(SINGLE_VALUED_FIELD_NAME).interval(interval).extendedBounds((long)minRandomValue,(long)maxRandomValue)).subAggregation(extendedStatsBucket("avg_histo_bucket").setBucketsPaths("histo>_count"))).addAggregation(extendedStatsBucket("avg_terms_bucket").setBucketsPaths("terms>avg_histo_bucket.avg")).execute().actionGet();
+  assertSearchResponse(response);
+  Terms terms=response.getAggregations().get("terms");
+  assertThat(terms,notNullValue());
+  assertThat(terms.getName(),equalTo("terms"));
+  List<Terms.Bucket> termsBuckets=terms.getBuckets();
+  assertThat(termsBuckets.size(),equalTo(interval));
+  double aggTermsSum=0;
+  int aggTermsCount=0;
+  double min=Double.POSITIVE_INFINITY;
+  double max=Double.NEGATIVE_INFINITY;
+  double sumOfSquares=1;
+  for (int i=0; i < interval; ++i) {
+    Terms.Bucket termsBucket=termsBuckets.get(i);
+    assertThat(termsBucket,notNullValue());
+    assertThat((String)termsBucket.getKey(),equalTo("tag" + (i % interval)));
+    Histogram histo=termsBucket.getAggregations().get("histo");
+    assertThat(histo,notNullValue());
+    assertThat(histo.getName(),equalTo("histo"));
+    List<? extends Bucket> buckets=histo.getBuckets();
+    double aggHistoSum=0;
+    int aggHistoCount=0;
+    for (int j=0; j < numValueBuckets; ++j) {
+      Histogram.Bucket bucket=buckets.get(j);
+      assertThat(bucket,notNullValue());
+      assertThat(((Number)bucket.getKey()).longValue(),equalTo((long)j * interval));
+      aggHistoCount++;
+      aggHistoSum+=bucket.getDocCount();
+    }
+    double avgHistoValue=aggHistoCount == 0 ? Double.NaN : (aggHistoSum / aggHistoCount);
+    ExtendedStatsBucket extendedStatsBucketValue=termsBucket.getAggregations().get("avg_histo_bucket");
+    assertThat(extendedStatsBucketValue,notNullValue());
+    assertThat(extendedStatsBucketValue.getName(),equalTo("avg_histo_bucket"));
+    assertThat(extendedStatsBucketValue.getAvg(),equalTo(avgHistoValue));
+    aggTermsCount++;
+    aggTermsSum+=avgHistoValue;
+    min=Math.min(min,avgHistoValue);
+    max=Math.max(max,avgHistoValue);
+    sumOfSquares+=avgHistoValue * avgHistoValue;
+  }
+  double avgTermsValue=aggTermsCount == 0 ? Double.NaN : (aggTermsSum / aggTermsCount);
+  ExtendedStatsBucket extendedStatsBucketValue=response.getAggregations().get("avg_terms_bucket");
+  assertThat(extendedStatsBucketValue,notNullValue());
+  assertThat(extendedStatsBucketValue.getName(),equalTo("avg_terms_bucket"));
+  assertThat(extendedStatsBucketValue.getAvg(),equalTo(avgTermsValue));
+  assertThat(extendedStatsBucketValue.getMin(),equalTo(min));
+  assertThat(extendedStatsBucketValue.getMax(),equalTo(max));
+  assertThat(extendedStatsBucketValue.getSumOfSquares(),equalTo(sumOfSquares));
+}

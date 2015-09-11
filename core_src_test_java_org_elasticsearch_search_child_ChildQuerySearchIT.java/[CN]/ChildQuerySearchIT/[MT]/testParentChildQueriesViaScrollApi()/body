@@ -6,18 +6,19 @@
     client().prepareIndex("test","child","c" + i).setSource("{}").setParent("p" + i).get();
   }
   refresh();
-  QueryBuilder[] queries=new QueryBuilder[]{hasChildQuery("child",matchAllQuery()),filteredQuery(matchAllQuery(),hasChildQuery("child",matchAllQuery())),hasParentQuery("parent",matchAllQuery()),filteredQuery(matchAllQuery(),hasParentQuery("parent",matchAllQuery()))};
+  QueryBuilder[] queries=new QueryBuilder[]{hasChildQuery("child",matchAllQuery()),boolQuery().must(matchAllQuery()).filter(hasChildQuery("child",matchAllQuery())),hasParentQuery("parent",matchAllQuery()),boolQuery().must(matchAllQuery()).filter(hasParentQuery("parent",matchAllQuery()))};
   for (  QueryBuilder query : queries) {
-    SearchResponse scrollResponse=client().prepareSearch("test").setScroll(TimeValue.timeValueSeconds(30)).setSize(1).addField("_id").setQuery(query).setSearchType("scan").execute().actionGet();
+    SearchResponse scrollResponse=client().prepareSearch("test").setScroll(TimeValue.timeValueSeconds(30)).setSize(1).addField("_id").setQuery(query).execute().actionGet();
     assertNoFailures(scrollResponse);
     assertThat(scrollResponse.getHits().totalHits(),equalTo(10l));
     int scannedDocs=0;
     do {
-      scrollResponse=client().prepareSearchScroll(scrollResponse.getScrollId()).setScroll(TimeValue.timeValueSeconds(30)).get();
       assertThat(scrollResponse.getHits().totalHits(),equalTo(10l));
       scannedDocs+=scrollResponse.getHits().getHits().length;
+      scrollResponse=client().prepareSearchScroll(scrollResponse.getScrollId()).setScroll(TimeValue.timeValueSeconds(30)).get();
     }
  while (scrollResponse.getHits().getHits().length > 0);
+    clearScroll(scrollResponse.getScrollId());
     assertThat(scannedDocs,equalTo(10));
   }
 }

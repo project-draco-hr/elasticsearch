@@ -1,0 +1,30 @@
+{
+  SearchResponse response=client().prepareSearch("idx").addAggregation(histogram("histo").field(SINGLE_VALUED_FIELD_NAME).interval(interval).extendedBounds((long)minRandomValue,(long)maxRandomValue)).addAggregation(statsBucket("stats_bucket").setBucketsPaths("histo>_count")).execute().actionGet();
+  assertSearchResponse(response);
+  Histogram histo=response.getAggregations().get("histo");
+  assertThat(histo,notNullValue());
+  assertThat(histo.getName(),equalTo("histo"));
+  List<? extends Bucket> buckets=histo.getBuckets();
+  assertThat(buckets.size(),equalTo(numValueBuckets));
+  double sum=0;
+  int count=0;
+  double min=Double.POSITIVE_INFINITY;
+  double max=Double.NEGATIVE_INFINITY;
+  for (int i=0; i < numValueBuckets; ++i) {
+    Histogram.Bucket bucket=buckets.get(i);
+    assertThat(bucket,notNullValue());
+    assertThat(((Number)bucket.getKey()).longValue(),equalTo((long)i * interval));
+    assertThat(bucket.getDocCount(),equalTo(valueCounts[i]));
+    count++;
+    sum+=bucket.getDocCount();
+    min=Math.min(min,bucket.getDocCount());
+    max=Math.max(max,bucket.getDocCount());
+  }
+  double avgValue=count == 0 ? Double.NaN : (sum / count);
+  StatsBucket statsBucketValue=response.getAggregations().get("stats_bucket");
+  assertThat(statsBucketValue,notNullValue());
+  assertThat(statsBucketValue.getName(),equalTo("stats_bucket"));
+  assertThat(statsBucketValue.getAvg(),equalTo(avgValue));
+  assertThat(statsBucketValue.getMin(),equalTo(min));
+  assertThat(statsBucketValue.getMax(),equalTo(max));
+}

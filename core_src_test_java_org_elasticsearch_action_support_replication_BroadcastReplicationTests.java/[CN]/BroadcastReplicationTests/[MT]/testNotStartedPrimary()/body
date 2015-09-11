@@ -1,0 +1,17 @@
+{
+  final String index="test";
+  clusterService.setState(state(index,randomBoolean(),randomBoolean() ? ShardRoutingState.INITIALIZING : ShardRoutingState.UNASSIGNED,ShardRoutingState.UNASSIGNED));
+  logger.debug("--> using initial state:\n{}",clusterService.state().prettyPrint());
+  Future<BroadcastResponse> response=(broadcastReplicationAction.execute(new BroadcastRequest().indices(index)));
+  for (  Tuple<ShardId,ActionListener<ActionWriteResponse>> shardRequests : broadcastReplicationAction.capturedShardRequests) {
+    if (randomBoolean()) {
+      shardRequests.v2().onFailure(new NoShardAvailableActionException(shardRequests.v1()));
+    }
+ else {
+      shardRequests.v2().onFailure(new UnavailableShardsException(shardRequests.v1(),"test exception"));
+    }
+  }
+  response.get();
+  logger.info("total shards: {}, ",response.get().getTotalShards());
+  assertBroadcastResponse(2,0,0,response.get(),null);
+}

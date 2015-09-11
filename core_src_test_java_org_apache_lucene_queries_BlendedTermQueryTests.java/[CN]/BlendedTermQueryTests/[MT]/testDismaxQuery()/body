@@ -1,0 +1,66 @@
+{
+  Directory dir=newDirectory();
+  IndexWriter w=new IndexWriter(dir,newIndexWriterConfig(new MockAnalyzer(random())));
+  String[] username=new String[]{"foo fighters","some cool fan","cover band"};
+  String[] song=new String[]{"generator","foo fighers - generator","foo fighters generator"};
+  final boolean omitNorms=random().nextBoolean();
+  FieldType ft=new FieldType(TextField.TYPE_NOT_STORED);
+  ft.setIndexOptions(random().nextBoolean() ? IndexOptions.DOCS : IndexOptions.DOCS_AND_FREQS);
+  ft.setOmitNorms(omitNorms);
+  ft.freeze();
+  FieldType ft1=new FieldType(TextField.TYPE_NOT_STORED);
+  ft1.setIndexOptions(random().nextBoolean() ? IndexOptions.DOCS : IndexOptions.DOCS_AND_FREQS);
+  ft1.setOmitNorms(omitNorms);
+  ft1.freeze();
+  for (int i=0; i < username.length; i++) {
+    Document d=new Document();
+    d.add(new TextField("id",Integer.toString(i),Field.Store.YES));
+    d.add(new Field("username",username[i],ft));
+    d.add(new Field("song",song[i],ft));
+    w.addDocument(d);
+  }
+  int iters=scaledRandomIntBetween(25,100);
+  for (int j=0; j < iters; j++) {
+    Document d=new Document();
+    d.add(new TextField("id",Integer.toString(username.length + j),Field.Store.YES));
+    d.add(new Field("username","foo fighters",ft1));
+    d.add(new Field("song","some bogus text to bump up IDF",ft1));
+    w.addDocument(d);
+  }
+  w.commit();
+  DirectoryReader reader=DirectoryReader.open(w,true);
+  IndexSearcher searcher=setSimilarity(newSearcher(reader));
+{
+    String[] fields=new String[]{"username","song"};
+    BooleanQuery.Builder query=new BooleanQuery.Builder();
+    query.setDisableCoord(true);
+    query.add(BlendedTermQuery.dismaxBlendedQuery(toTerms(fields,"foo"),0.1f),BooleanClause.Occur.SHOULD);
+    query.add(BlendedTermQuery.dismaxBlendedQuery(toTerms(fields,"fighters"),0.1f),BooleanClause.Occur.SHOULD);
+    query.add(BlendedTermQuery.dismaxBlendedQuery(toTerms(fields,"generator"),0.1f),BooleanClause.Occur.SHOULD);
+    TopDocs search=searcher.search(query.build(),10);
+    ScoreDoc[] scoreDocs=search.scoreDocs;
+    assertEquals(Integer.toString(0),reader.document(scoreDocs[0].doc).getField("id").stringValue());
+  }
+{
+    BooleanQuery.Builder query=new BooleanQuery.Builder();
+    query.setDisableCoord(true);
+    DisjunctionMaxQuery uname=new DisjunctionMaxQuery(0.0f);
+    uname.add(new TermQuery(new Term("username","foo")));
+    uname.add(new TermQuery(new Term("song","foo")));
+    DisjunctionMaxQuery s=new DisjunctionMaxQuery(0.0f);
+    s.add(new TermQuery(new Term("username","fighers")));
+    s.add(new TermQuery(new Term("song","fighers")));
+    DisjunctionMaxQuery gen=new DisjunctionMaxQuery(0f);
+    gen.add(new TermQuery(new Term("username","generator")));
+    gen.add(new TermQuery(new Term("song","generator")));
+    query.add(uname,BooleanClause.Occur.SHOULD);
+    query.add(s,BooleanClause.Occur.SHOULD);
+    query.add(gen,BooleanClause.Occur.SHOULD);
+    TopDocs search=searcher.search(query.build(),4);
+    ScoreDoc[] scoreDocs=search.scoreDocs;
+    assertEquals(Integer.toString(1),reader.document(scoreDocs[0].doc).getField("id").stringValue());
+  }
+  reader.close();
+  w.close();
+  dir.close();
+}

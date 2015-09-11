@@ -1,0 +1,36 @@
+{
+  ShardsIterator shardIt=clusterService.state().routingTable().allShards(new String[]{TEST_INDEX});
+  Set<ShardRouting> shards=new HashSet<>();
+  String nodeId=shardIt.asUnordered().iterator().next().currentNodeId();
+  for (  ShardRouting shard : shardIt.asUnordered()) {
+    if (nodeId.equals(shard.currentNodeId())) {
+      shards.add(shard);
+    }
+  }
+  final TransportBroadcastByNodeAction.BroadcastByNodeTransportRequestHandler handler=action.new BroadcastByNodeTransportRequestHandler();
+  TestTransportChannel channel=new TestTransportChannel();
+  handler.messageReceived(action.new NodeRequest(nodeId,new Request(),new ArrayList<>(shards)),channel);
+  assertEquals(shards,action.getResults().keySet());
+  TransportResponse response=channel.getCapturedResponse();
+  assertTrue(response instanceof TransportBroadcastByNodeAction.NodeResponse);
+  TransportBroadcastByNodeAction.NodeResponse nodeResponse=(TransportBroadcastByNodeAction.NodeResponse)response;
+  assertEquals("node id",nodeId,nodeResponse.getNodeId());
+  int successfulShards=0;
+  int failedShards=0;
+  for (  Object result : action.getResults().values()) {
+    if (!(result instanceof ElasticsearchException)) {
+      successfulShards++;
+    }
+ else {
+      failedShards++;
+    }
+  }
+  assertEquals("successful shards",successfulShards,nodeResponse.getSuccessfulShards());
+  assertEquals("total shards",action.getResults().size(),nodeResponse.getTotalShards());
+  assertEquals("failed shards",failedShards,nodeResponse.getExceptions().size());
+  List<BroadcastShardOperationFailedException> exceptions=nodeResponse.getExceptions();
+  for (  BroadcastShardOperationFailedException exception : exceptions) {
+    assertThat(exception.getMessage(),is("operation indices:admin/test failed"));
+    assertThat(exception,hasToString(containsString("operation failed")));
+  }
+}
