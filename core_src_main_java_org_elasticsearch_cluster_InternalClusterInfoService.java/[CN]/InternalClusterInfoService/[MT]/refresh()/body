@@ -2,24 +2,7 @@
   if (logger.isTraceEnabled()) {
     logger.trace("Performing ClusterInfoUpdateJob");
   }
-  if (isMaster && this.reschedule) {
-    if (logger.isTraceEnabled()) {
-      logger.trace("Scheduling next run for updating cluster info in: {}",updateFrequency.toString());
-    }
-    try {
-      threadPool.schedule(updateFrequency,executorName(),new SubmitReschedulingClusterInfoUpdatedJob());
-    }
- catch (    EsRejectedExecutionException ex) {
-      logger.debug("Reschedule cluster info service was rejected",ex);
-    }
-  }
-  if (!enabled) {
-    if (logger.isTraceEnabled()) {
-      logger.trace("Skipping ClusterInfoUpdatedJob since it is disabled");
-    }
-    return;
-  }
-  CountDownLatch nodeLatch=updateNodeStats(new ActionListener<NodesStatsResponse>(){
+  final CountDownLatch nodeLatch=updateNodeStats(new ActionListener<NodesStatsResponse>(){
     @Override public void onResponse(    NodesStatsResponse nodeStatses){
       Map<String,DiskUsage> newLeastAvaiableUsages=new HashMap<>();
       Map<String,DiskUsage> newMostAvaiableUsages=new HashMap<>();
@@ -46,7 +29,7 @@
     }
   }
 );
-  CountDownLatch indicesLatch=updateIndicesStats(new ActionListener<IndicesStatsResponse>(){
+  final CountDownLatch indicesLatch=updateIndicesStats(new ActionListener<IndicesStatsResponse>(){
     @Override public void onResponse(    IndicesStatsResponse indicesStatsResponse){
       ShardStats[] stats=indicesStatsResponse.getShards();
       final HashMap<String,Long> newShardSizes=new HashMap<>();
@@ -79,21 +62,23 @@
   }
  catch (  InterruptedException e) {
     Thread.currentThread().interrupt();
-    logger.warn("Failed to update node information for ClusterInfoUpdateJob within 15s timeout");
+    logger.warn("Failed to update node information for ClusterInfoUpdateJob within {} timeout",fetchTimeout);
   }
   try {
     indicesLatch.await(fetchTimeout.getMillis(),TimeUnit.MILLISECONDS);
   }
  catch (  InterruptedException e) {
     Thread.currentThread().interrupt();
-    logger.warn("Failed to update shard information for ClusterInfoUpdateJob within 15s timeout");
+    logger.warn("Failed to update shard information for ClusterInfoUpdateJob within {} timeout",fetchTimeout);
   }
+  ClusterInfo clusterInfo=getClusterInfo();
   for (  Listener l : listeners) {
     try {
-      l.onNewInfo(getClusterInfo());
+      l.onNewInfo(clusterInfo);
     }
  catch (    Exception e) {
       logger.info("Failed executing ClusterInfoService listener",e);
     }
   }
+  return clusterInfo;
 }
