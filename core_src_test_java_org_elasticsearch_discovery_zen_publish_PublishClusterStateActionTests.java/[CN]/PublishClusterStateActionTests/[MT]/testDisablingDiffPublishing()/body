@@ -1,0 +1,24 @@
+{
+  Settings noDiffPublishingSettings=Settings.builder().put(DiscoverySettings.PUBLISH_DIFF_ENABLE,false).build();
+  MockNode nodeA=createMockNode("nodeA",noDiffPublishingSettings,Version.CURRENT,new ClusterStateListener(){
+    @Override public void clusterChanged(    ClusterChangedEvent event){
+      fail("Shouldn't send cluster state to myself");
+    }
+  }
+);
+  MockNode nodeB=createMockNode("nodeB",noDiffPublishingSettings,Version.CURRENT,new ClusterStateListener(){
+    @Override public void clusterChanged(    ClusterChangedEvent event){
+      assertFalse(event.state().wasReadFromDiff());
+    }
+  }
+);
+  DiscoveryNodes discoveryNodes=DiscoveryNodes.builder().put(nodeA.discoveryNode).localNodeId(nodeA.discoveryNode.id()).masterNodeId(nodeA.discoveryNode.id()).build();
+  ClusterState clusterState=ClusterState.builder(ClusterName.DEFAULT).nodes(discoveryNodes).build();
+  discoveryNodes=DiscoveryNodes.builder(discoveryNodes).put(nodeB.discoveryNode).build();
+  ClusterState previousClusterState=clusterState;
+  clusterState=ClusterState.builder(clusterState).nodes(discoveryNodes).incrementVersion().build();
+  publishStateAndWait(nodeA.action,clusterState,previousClusterState);
+  previousClusterState=clusterState;
+  clusterState=ClusterState.builder(clusterState).blocks(ClusterBlocks.builder().addGlobalBlock(MetaData.CLUSTER_READ_ONLY_BLOCK)).incrementVersion().build();
+  publishStateAndWait(nodeA.action,clusterState,previousClusterState);
+}

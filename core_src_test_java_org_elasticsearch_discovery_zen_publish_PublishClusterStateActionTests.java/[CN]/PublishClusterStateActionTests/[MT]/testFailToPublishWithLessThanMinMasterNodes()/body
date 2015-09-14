@@ -1,0 +1,25 @@
+{
+  final int masterNodes=randomIntBetween(1,10);
+  MockNode master=createMockNode("master");
+  DiscoveryNodes.Builder discoveryNodesBuilder=DiscoveryNodes.builder().put(master.discoveryNode);
+  for (int i=1; i < masterNodes; i++) {
+    discoveryNodesBuilder.put(createMockNode("node" + i).discoveryNode);
+  }
+  final int dataNodes=randomIntBetween(0,5);
+  final Settings dataSettings=Settings.builder().put("node.master",false).build();
+  for (int i=0; i < dataNodes; i++) {
+    discoveryNodesBuilder.put(createMockNode("data_" + i,dataSettings).discoveryNode);
+  }
+  discoveryNodesBuilder.localNodeId(master.discoveryNode.id()).masterNodeId(master.discoveryNode.id());
+  DiscoveryNodes discoveryNodes=discoveryNodesBuilder.build();
+  MetaData metaData=MetaData.EMPTY_META_DATA;
+  ClusterState clusterState=ClusterState.builder(ClusterName.DEFAULT).metaData(metaData).nodes(discoveryNodes).build();
+  ClusterState previousState=master.clusterState;
+  try {
+    publishState(master.action,clusterState,previousState,masterNodes + randomIntBetween(1,5));
+    fail("cluster state publishing didn't fail despite of not having enough nodes");
+  }
+ catch (  Discovery.FailedToCommitClusterStateException expected) {
+    logger.debug("failed to publish as expected",expected);
+  }
+}

@@ -1,0 +1,30 @@
+{
+  List<ClusterState> states=randomStates(scaledRandomIntBetween(10,50),"master1","master2","master3","master4");
+  PendingClusterStatesQueue queue=createQueueWithStates(states);
+  List<ClusterStateContext> committedContexts=randomCommitStates(queue);
+  ClusterState toFail=randomFrom(committedContexts).state;
+  queue.markAsFailed(toFail,new ElasticsearchException("boo!"));
+  final Map<String,ClusterStateContext> committedContextsById=new HashMap<>();
+  for (  ClusterStateContext context : committedContexts) {
+    committedContextsById.put(context.stateUUID(),context);
+  }
+  for (  ClusterStateContext context : queue.pendingStates) {
+    if (context.committed()) {
+      assertFalse("found a committed cluster state, which is superseded by a failed state.\nFound:" + context.state + "\nfailed:"+ toFail,toFail.supersedes(context.state));
+    }
+  }
+  for (  ClusterState state : states) {
+    ClusterStateContext pendingContext=queue.findState(state.stateUUID());
+    if (pendingContext != null) {
+      continue;
+    }
+    if (state.equals(toFail)) {
+      continue;
+    }
+    assertThat("non-committed states should never be removed",committedContextsById,hasKey(state.stateUUID()));
+    final ClusterStateContext context=committedContextsById.get(state.stateUUID());
+    assertThat("removed state is not superseded by failed state. \nRemoved state:" + context + "\nfailed: "+ toFail,toFail.supersedes(context.state),equalTo(true));
+    assertThat("removed state was failed with wrong exception",((MockListener)context.listener).failure,notNullValue());
+    assertThat("removed state was failed with wrong exception",((MockListener)context.listener).failure.getMessage(),containsString("boo"));
+  }
+}

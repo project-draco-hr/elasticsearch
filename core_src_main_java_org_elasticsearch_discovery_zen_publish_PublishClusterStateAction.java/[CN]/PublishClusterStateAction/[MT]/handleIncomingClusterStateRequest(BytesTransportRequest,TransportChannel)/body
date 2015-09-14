@@ -1,0 +1,32 @@
+{
+  Compressor compressor=CompressorFactory.compressor(request.bytes());
+  StreamInput in;
+  if (compressor != null) {
+    in=compressor.streamInput(request.bytes().streamInput());
+  }
+ else {
+    in=request.bytes().streamInput();
+  }
+  in.setVersion(request.version());
+synchronized (lastSeenClusterStateMutex) {
+    final ClusterState incomingState;
+    if (in.readBoolean()) {
+      incomingState=ClusterState.Builder.readFrom(in,nodesProvider.nodes().localNode());
+      logger.debug("received full cluster state version [{}] with size [{}]",incomingState.version(),request.bytes().length());
+    }
+ else     if (lastSeenClusterState != null) {
+      Diff<ClusterState> diff=lastSeenClusterState.readDiffFrom(in);
+      incomingState=diff.apply(lastSeenClusterState);
+      logger.debug("received diff cluster state version [{}] with uuid [{}], diff size [{}]",incomingState.version(),incomingState.stateUUID(),request.bytes().length());
+    }
+ else {
+      logger.debug("received diff for but don't have any local cluster state - requesting full state");
+      throw new IncompatibleClusterStateVersionException("have no local cluster state");
+    }
+    validateIncomingState(incomingState,lastSeenClusterState);
+    pendingStatesQueue.addPending(incomingState);
+    lastSeenClusterState=incomingState;
+    lastSeenClusterState.status(ClusterState.ClusterStateStatus.RECEIVED);
+  }
+  channel.sendResponse(TransportResponse.Empty.INSTANCE);
+}

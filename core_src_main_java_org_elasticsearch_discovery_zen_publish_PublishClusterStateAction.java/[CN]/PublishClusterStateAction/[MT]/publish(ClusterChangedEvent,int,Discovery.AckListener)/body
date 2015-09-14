@@ -1,0 +1,42 @@
+{
+  final DiscoveryNodes nodes;
+  final SendingController sendingController;
+  final Set<DiscoveryNode> nodesToPublishTo;
+  final Map<Version,BytesReference> serializedStates;
+  final Map<Version,BytesReference> serializedDiffs;
+  final boolean sendFullVersion;
+  try {
+    nodes=clusterChangedEvent.state().nodes();
+    nodesToPublishTo=new HashSet<>(nodes.size());
+    DiscoveryNode localNode=nodes.localNode();
+    final int totalMasterNodes=nodes.masterNodes().size();
+    for (    final DiscoveryNode node : nodes) {
+      if (node.equals(localNode) == false) {
+        nodesToPublishTo.add(node);
+      }
+    }
+    sendFullVersion=!discoverySettings.getPublishDiff() || clusterChangedEvent.previousState() == null;
+    serializedStates=new HashMap<>();
+    serializedDiffs=new HashMap<>();
+    buildDiffAndSerializeStates(clusterChangedEvent.state(),clusterChangedEvent.previousState(),nodesToPublishTo,sendFullVersion,serializedStates,serializedDiffs);
+    final BlockingClusterStatePublishResponseHandler publishResponseHandler=new AckClusterStatePublishResponseHandler(nodesToPublishTo,ackListener);
+    sendingController=new SendingController(clusterChangedEvent.state(),minMasterNodes,totalMasterNodes,publishResponseHandler);
+  }
+ catch (  Throwable t) {
+    throw new Discovery.FailedToCommitClusterStateException("unexpected error while preparing to publish",t);
+  }
+  try {
+    innerPublish(clusterChangedEvent,nodesToPublishTo,sendingController,sendFullVersion,serializedStates,serializedDiffs);
+  }
+ catch (  Discovery.FailedToCommitClusterStateException t) {
+    throw t;
+  }
+catch (  Throwable t) {
+    if (sendingController.markAsFailed("unexpected error [" + t.getMessage() + "]")) {
+      throw new Discovery.FailedToCommitClusterStateException("unexpected error [{}]",t,t.getMessage());
+    }
+ else {
+      throw t;
+    }
+  }
+}

@@ -1,0 +1,29 @@
+{
+  MockNode node=createMockNode("node").setAsMaster();
+  final CapturingTransportChannel channel=new CapturingTransportChannel();
+  List<ClusterState> states=new ArrayList<>();
+  final int numOfStates=scaledRandomIntBetween(3,10);
+  for (int i=1; i <= numOfStates; i++) {
+    states.add(ClusterState.builder(node.clusterState).version(i).stateUUID(ClusterState.UNKNOWN_UUID).build());
+  }
+  final ClusterState finalState=states.get(numOfStates - 1);
+  Collections.shuffle(states,random());
+  logger.info("--> publishing states");
+  for (  ClusterState state : states) {
+    node.action.handleIncomingClusterStateRequest(new BytesTransportRequest(PublishClusterStateAction.serializeFullClusterState(state,Version.CURRENT),Version.CURRENT),channel);
+    assertThat(channel.response.get(),equalTo((TransportResponse)TransportResponse.Empty.INSTANCE));
+    assertThat(channel.error.get(),nullValue());
+    channel.clear();
+  }
+  logger.info("--> committing states");
+  Collections.shuffle(states,random());
+  for (  ClusterState state : states) {
+    node.action.handleCommitRequest(new PublishClusterStateAction.CommitClusterStateRequest(state.stateUUID()),channel);
+    assertThat(channel.response.get(),equalTo((TransportResponse)TransportResponse.Empty.INSTANCE));
+    if (channel.error.get() != null) {
+      throw channel.error.get();
+    }
+  }
+  channel.clear();
+  assertSameState(node.clusterState,finalState);
+}

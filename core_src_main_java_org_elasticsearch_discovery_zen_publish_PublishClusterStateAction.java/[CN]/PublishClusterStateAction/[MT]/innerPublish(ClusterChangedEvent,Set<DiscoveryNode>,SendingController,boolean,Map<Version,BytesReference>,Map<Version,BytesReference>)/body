@@ -1,0 +1,29 @@
+{
+  final ClusterState clusterState=clusterChangedEvent.state();
+  final ClusterState previousState=clusterChangedEvent.previousState();
+  final TimeValue publishTimeout=discoverySettings.getPublishTimeout();
+  final long publishingStartInNanos=System.nanoTime();
+  for (  final DiscoveryNode node : nodesToPublishTo) {
+    if (sendFullVersion || !previousState.nodes().nodeExists(node.id())) {
+      sendFullClusterState(clusterState,serializedStates,node,publishTimeout,sendingController);
+    }
+ else {
+      sendClusterStateDiff(clusterState,serializedDiffs,serializedStates,node,publishTimeout,sendingController);
+    }
+  }
+  sendingController.waitForCommit(discoverySettings.getCommitTimeout());
+  try {
+    long timeLeftInNanos=Math.max(0,publishTimeout.nanos() - (System.nanoTime() - publishingStartInNanos));
+    final BlockingClusterStatePublishResponseHandler publishResponseHandler=sendingController.getPublishResponseHandler();
+    sendingController.setPublishingTimedOut(!publishResponseHandler.awaitAllNodes(TimeValue.timeValueNanos(timeLeftInNanos)));
+    if (sendingController.getPublishingTimedOut()) {
+      DiscoveryNode[] pendingNodes=publishResponseHandler.pendingNodes();
+      if (pendingNodes.length > 0) {
+        logger.warn("timed out waiting for all nodes to process published state [{}] (timeout [{}], pending nodes: {})",clusterState.version(),publishTimeout,pendingNodes);
+      }
+    }
+  }
+ catch (  InterruptedException e) {
+    Thread.currentThread().interrupt();
+  }
+}
