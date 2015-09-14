@@ -1,0 +1,84 @@
+{
+  if (logger.isTraceEnabled()) {
+    logger.trace("Performing ClusterInfoUpdateJob");
+  }
+  final CountDownLatch nodeLatch=updateNodeStats(new ActionListener<NodesStatsResponse>(){
+    @Override public void onResponse(    NodesStatsResponse nodeStatses){
+      Map<String,DiskUsage> newLeastAvaiableUsages=new HashMap<>();
+      Map<String,DiskUsage> newMostAvaiableUsages=new HashMap<>();
+      fillDiskUsagePerNode(logger,nodeStatses.getNodes(),newLeastAvaiableUsages,newMostAvaiableUsages);
+      leastAvailableSpaceUsages=Collections.unmodifiableMap(newLeastAvaiableUsages);
+      mostAvailableSpaceUsages=Collections.unmodifiableMap(newMostAvaiableUsages);
+    }
+    @Override public void onFailure(    Throwable e){
+      if (e instanceof ReceiveTimeoutTransportException) {
+        logger.error("NodeStatsAction timed out for ClusterInfoUpdateJob (reason [{}])",e.getMessage());
+      }
+ else {
+        if (e instanceof ClusterBlockException) {
+          if (logger.isTraceEnabled()) {
+            logger.trace("Failed to execute NodeStatsAction for ClusterInfoUpdateJob",e);
+          }
+        }
+ else {
+          logger.warn("Failed to execute NodeStatsAction for ClusterInfoUpdateJob",e);
+        }
+        leastAvailableSpaceUsages=Collections.emptyMap();
+        mostAvailableSpaceUsages=Collections.emptyMap();
+      }
+    }
+  }
+);
+  final CountDownLatch indicesLatch=updateIndicesStats(new ActionListener<IndicesStatsResponse>(){
+    @Override public void onResponse(    IndicesStatsResponse indicesStatsResponse){
+      ShardStats[] stats=indicesStatsResponse.getShards();
+      final HashMap<String,Long> newShardSizes=new HashMap<>();
+      final HashMap<ShardRouting,String> newShardRoutingToDataPath=new HashMap<>();
+      buildShardLevelInfo(logger,stats,newShardSizes,newShardRoutingToDataPath);
+      shardSizes=Collections.unmodifiableMap(newShardSizes);
+      shardRoutingToDataPath=Collections.unmodifiableMap(newShardRoutingToDataPath);
+    }
+    @Override public void onFailure(    Throwable e){
+      if (e instanceof ReceiveTimeoutTransportException) {
+        logger.error("IndicesStatsAction timed out for ClusterInfoUpdateJob (reason [{}])",e.getMessage());
+      }
+ else {
+        if (e instanceof ClusterBlockException) {
+          if (logger.isTraceEnabled()) {
+            logger.trace("Failed to execute IndicesStatsAction for ClusterInfoUpdateJob",e);
+          }
+        }
+ else {
+          logger.warn("Failed to execute IndicesStatsAction for ClusterInfoUpdateJob",e);
+        }
+        shardSizes=Collections.emptyMap();
+        shardRoutingToDataPath=Collections.emptyMap();
+      }
+    }
+  }
+);
+  try {
+    nodeLatch.await(fetchTimeout.getMillis(),TimeUnit.MILLISECONDS);
+  }
+ catch (  InterruptedException e) {
+    Thread.currentThread().interrupt();
+    logger.warn("Failed to update node information for ClusterInfoUpdateJob within {} timeout",fetchTimeout);
+  }
+  try {
+    indicesLatch.await(fetchTimeout.getMillis(),TimeUnit.MILLISECONDS);
+  }
+ catch (  InterruptedException e) {
+    Thread.currentThread().interrupt();
+    logger.warn("Failed to update shard information for ClusterInfoUpdateJob within {} timeout",fetchTimeout);
+  }
+  ClusterInfo clusterInfo=getClusterInfo();
+  for (  Listener l : listeners) {
+    try {
+      l.onNewInfo(clusterInfo);
+    }
+ catch (    Exception e) {
+      logger.info("Failed executing ClusterInfoService listener",e);
+    }
+  }
+  return clusterInfo;
+}
