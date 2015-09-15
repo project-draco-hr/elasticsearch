@@ -1,0 +1,44 @@
+{
+  final String node_1=internalCluster().startNode();
+  logger.info("--> creating index [test] with one shard and on replica");
+  assertAcked(prepareCreate("test").setSettings(Settings.builder().put(indexSettings()).put(IndexMetaData.SETTING_NUMBER_OF_SHARDS,1).put(IndexMetaData.SETTING_NUMBER_OF_REPLICAS,0)));
+  ensureGreen("test");
+  assertThat(Files.exists(shardDirectory(node_1,"test",0)),equalTo(true));
+  assertThat(Files.exists(indexDirectory(node_1,"test")),equalTo(true));
+  final String node_2=internalCluster().startDataOnlyNode(Settings.builder().build());
+  assertFalse(client().admin().cluster().prepareHealth().setWaitForNodes("2").get().isTimedOut());
+  assertThat(Files.exists(shardDirectory(node_1,"test",0)),equalTo(true));
+  assertThat(Files.exists(indexDirectory(node_1,"test")),equalTo(true));
+  assertThat(Files.exists(shardDirectory(node_2,"test",0)),equalTo(false));
+  assertThat(Files.exists(indexDirectory(node_2,"test")),equalTo(false));
+  MockTransportService transportServiceNode_1=(MockTransportService)internalCluster().getInstance(TransportService.class,node_1);
+  String node_2_id=internalCluster().getInstance(DiscoveryService.class,node_2).localNode().id();
+  DiscoveryNode node_2_disco=internalCluster().clusterService().state().getNodes().dataNodes().get(node_2_id);
+  final CountDownLatch shardActiveRequestSent=new CountDownLatch(1);
+  transportServiceNode_1.addDelegate(node_2_disco,new MockTransportService.DelegateTransport(transportServiceNode_1.original()){
+    @Override public void sendRequest(    DiscoveryNode node,    long requestId,    String action,    TransportRequest request,    TransportRequestOptions options) throws IOException, TransportException {
+      if (action.equals("internal:index/shard/exists") && shardActiveRequestSent.getCount() > 0) {
+        shardActiveRequestSent.countDown();
+        logger.info("prevent shard active request from being sent");
+        throw new ConnectTransportException(node,"DISCONNECT: simulated");
+      }
+      super.sendRequest(node,requestId,action,request,options);
+    }
+  }
+);
+  logger.info("--> move shard from {} to {}, and wait for relocation to finish",node_1,node_2);
+  internalCluster().client().admin().cluster().prepareReroute().add(new MoveAllocationCommand(new ShardId("test",0),node_1,node_2)).get();
+  shardActiveRequestSent.await();
+  ClusterHealthResponse clusterHealth=client().admin().cluster().prepareHealth().setWaitForRelocatingShards(0).get();
+  assertThat(clusterHealth.isTimedOut(),equalTo(false));
+  logClusterState();
+  client().admin().indices().prepareDelete("test").get();
+  assertThat(waitForShardDeletion(node_1,"test",0),equalTo(false));
+  assertThat(waitForIndexDeletion(node_1,"test"),equalTo(false));
+  assertThat(Files.exists(shardDirectory(node_1,"test",0)),equalTo(false));
+  assertThat(Files.exists(indexDirectory(node_1,"test")),equalTo(false));
+  assertThat(waitForShardDeletion(node_2,"test",0),equalTo(false));
+  assertThat(waitForIndexDeletion(node_2,"test"),equalTo(false));
+  assertThat(Files.exists(shardDirectory(node_2,"test",0)),equalTo(false));
+  assertThat(Files.exists(indexDirectory(node_2,"test")),equalTo(false));
+}
