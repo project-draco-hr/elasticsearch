@@ -2,6 +2,9 @@
   NewSearchSourceBuilder builder=new NewSearchSourceBuilder();
   XContentParser.Token token;
   String currentFieldName=null;
+  if ((token=parser.nextToken()) != XContentParser.Token.START_OBJECT) {
+    throw new QueryParsingException(context,"Expected [" + XContentParser.Token.START_OBJECT + "] but found ["+ token+ "]",parser.getTokenLocation());
+  }
   while ((token=parser.nextToken()) != XContentParser.Token.END_OBJECT) {
     if (token == XContentParser.Token.FIELD_NAME) {
       currentFieldName=parser.currentName();
@@ -31,6 +34,10 @@
  else       if (context.parseFieldMatcher().match(currentFieldName,TRACK_SCORES_FIELD)) {
         builder.trackScores=parser.booleanValue();
       }
+ else       if (context.parseFieldMatcher().match(currentFieldName,_SOURCE_FIELD)) {
+        FetchSourceContext fetchSourceContext=FetchSourceContext.parse(parser,context);
+        builder.fetchSourceContext=fetchSourceContext;
+      }
  else {
         throw new QueryParsingException(context,"Unknown key for a " + token + " in ["+ currentFieldName+ "].",parser.getTokenLocation());
       }
@@ -42,18 +49,29 @@
  else       if (context.parseFieldMatcher().match(currentFieldName,POST_FILTER_FIELD)) {
         builder.postQueryBuilder=context.parseInnerQueryBuilder();
       }
+ else       if (context.parseFieldMatcher().match(currentFieldName,_SOURCE_FIELD)) {
+        FetchSourceContext fetchSourceContext=FetchSourceContext.parse(parser,context);
+        builder.fetchSourceContext=fetchSourceContext;
+      }
  else       if (context.parseFieldMatcher().match(currentFieldName,SCRIPT_FIELDS_FIELD)) {
         List<ScriptField> scriptFields=new ArrayList<>();
         while ((token=parser.nextToken()) != XContentParser.Token.END_OBJECT) {
-          parser.nextToken();
           String scriptFieldName=parser.currentName();
-          parser.nextToken();
+          token=parser.nextToken();
           if (token == XContentParser.Token.START_OBJECT) {
             while ((token=parser.nextToken()) != XContentParser.Token.END_OBJECT) {
               if (token == XContentParser.Token.FIELD_NAME) {
                 currentFieldName=parser.currentName();
               }
  else               if (token.isValue()) {
+                if (context.parseFieldMatcher().match(currentFieldName,SCRIPT_FIELD)) {
+                  scriptFields.add(new ScriptField(scriptFieldName,Script.parse(parser,context.parseFieldMatcher())));
+                }
+ else {
+                  throw new QueryParsingException(context,"Unknown key for a " + token + " in ["+ currentFieldName+ "].",parser.getTokenLocation());
+                }
+              }
+ else               if (token == XContentParser.Token.START_OBJECT) {
                 if (context.parseFieldMatcher().match(currentFieldName,SCRIPT_FIELD)) {
                   scriptFields.add(new ScriptField(scriptFieldName,Script.parse(parser,context.parseFieldMatcher())));
                 }
@@ -79,12 +97,7 @@
             currentFieldName=parser.currentName();
           }
  else           if (token.isValue()) {
-            if (context.parseFieldMatcher().match(currentFieldName,SCRIPT_FIELD)) {
-              indexBoost.put(currentFieldName,parser.floatValue());
-            }
- else {
-              throw new QueryParsingException(context,"Unknown key for a " + token + " in ["+ currentFieldName+ "].",parser.getTokenLocation());
-            }
+            indexBoost.put(currentFieldName,parser.floatValue());
           }
  else {
             throw new QueryParsingException(context,"Unknown key for a " + token + " in ["+ currentFieldName+ "].",parser.getTokenLocation());
@@ -99,15 +112,17 @@
           token=parser.nextToken();
           if (token == XContentParser.Token.START_OBJECT) {
             XContentBuilder xContentBuilder=XContentFactory.contentBuilder(parser.contentType());
+            xContentBuilder.startObject();
             xContentBuilder.field(currentFieldName);
             xContentBuilder.copyCurrentStructure(parser);
+            xContentBuilder.endObject();
             aggregations.add(xContentBuilder.bytes());
           }
  else {
             throw new QueryParsingException(context,"Unknown key for a " + token + " in ["+ currentFieldName+ "].",parser.getTokenLocation());
           }
         }
-        builder.indexBoost=indexBoost;
+        builder.aggregations=aggregations;
       }
  else       if (context.parseFieldMatcher().match(currentFieldName,HIGHLIGHT_FIELD)) {
         XContentBuilder xContentBuilder=XContentFactory.contentBuilder(parser.contentType()).copyCurrentStructure(parser);
@@ -166,21 +181,21 @@
         }
         builder.rescoreBuilders=rescoreBuilders;
       }
+ else       if (context.parseFieldMatcher().match(currentFieldName,STATS_FIELD)) {
+        List<String> stats=new ArrayList<>();
+        while ((token=parser.nextToken()) != XContentParser.Token.END_ARRAY) {
+          if (token == XContentParser.Token.VALUE_STRING) {
+            stats.add(parser.text());
+          }
+ else {
+            throw new QueryParsingException(context,"Expected [" + XContentParser.Token.VALUE_STRING + "] in ["+ currentFieldName+ "] but found ["+ token+ "]",parser.getTokenLocation());
+          }
+        }
+        builder.stats=stats.toArray(new String[stats.size()]);
+      }
  else {
         throw new QueryParsingException(context,"Unknown key for a " + token + " in ["+ currentFieldName+ "].",parser.getTokenLocation());
       }
-    }
- else     if (context.parseFieldMatcher().match(currentFieldName,STATS_FIELD)) {
-      List<String> stats=new ArrayList<>();
-      while ((token=parser.nextToken()) != XContentParser.Token.END_ARRAY) {
-        if (token == XContentParser.Token.VALUE_STRING) {
-          stats.add(parser.text());
-        }
- else {
-          throw new QueryParsingException(context,"Expected [" + XContentParser.Token.VALUE_STRING + "] in ["+ currentFieldName+ "] but found ["+ token+ "]",parser.getTokenLocation());
-        }
-      }
-      builder.stats=stats.toArray(new String[stats.size()]);
     }
  else {
       throw new QueryParsingException(context,"Unknown key for a " + token + " in ["+ currentFieldName+ "].",parser.getTokenLocation());
