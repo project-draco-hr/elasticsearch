@@ -1,0 +1,67 @@
+{
+  final ShardId shardId=new ShardId(new Index("index"),1);
+  final Directory dir=new RAMDirectory();
+  DirectoryService directoryService=new DirectoryService(shardId,Settings.EMPTY){
+    @Override public long throttleTimeInNanos(){
+      return 0;
+    }
+    @Override public Directory newDirectory() throws IOException {
+      return dir;
+    }
+  }
+;
+  Store store=new Store(shardId,Settings.EMPTY,directoryService,new DummyShardLock(shardId));
+  CorruptIndexException exception=new CorruptIndexException("foo","bar");
+  String uuid=Store.CORRUPTED + Strings.randomBase64UUID();
+  try (IndexOutput output=dir.createOutput(uuid,IOContext.DEFAULT)){
+    CodecUtil.writeHeader(output,Store.CODEC,Store.VERSION_STACK_TRACE);
+    output.writeString(ExceptionsHelper.detailedMessage(exception,true,0));
+    output.writeString(ExceptionsHelper.stackTrace(exception));
+    CodecUtil.writeFooter(output);
+  }
+   try {
+    store.failIfCorrupted();
+    fail("should be corrupted");
+  }
+ catch (  CorruptIndexException e) {
+    assertTrue(e.getMessage().startsWith("[index][1] Preexisting corrupted index [" + uuid + "] caused by: CorruptIndexException[foo (resource=bar)]"));
+    assertTrue(e.getMessage().contains(ExceptionsHelper.stackTrace(exception)));
+  }
+  store.removeCorruptionMarker();
+  try (IndexOutput output=dir.createOutput(uuid,IOContext.DEFAULT)){
+    CodecUtil.writeHeader(output,Store.CODEC,Store.VERSION_START);
+    output.writeString(ExceptionsHelper.detailedMessage(exception,true,0));
+    CodecUtil.writeFooter(output);
+  }
+   try {
+    store.failIfCorrupted();
+    fail("should be corrupted");
+  }
+ catch (  CorruptIndexException e) {
+    assertTrue(e.getMessage().startsWith("[index][1] Preexisting corrupted index [" + uuid + "] caused by: CorruptIndexException[foo (resource=bar)]"));
+    assertFalse(e.getMessage().contains(ExceptionsHelper.stackTrace(exception)));
+  }
+  store.removeCorruptionMarker();
+  try (IndexOutput output=dir.createOutput(uuid,IOContext.DEFAULT)){
+    CodecUtil.writeHeader(output,Store.CODEC,Store.VERSION_START - 1);
+    CodecUtil.writeFooter(output);
+  }
+   try {
+    store.failIfCorrupted();
+    fail("should be too old");
+  }
+ catch (  IndexFormatTooOldException e) {
+  }
+  store.removeCorruptionMarker();
+  try (IndexOutput output=dir.createOutput(uuid,IOContext.DEFAULT)){
+    CodecUtil.writeHeader(output,Store.CODEC,Store.VERSION + 1);
+    CodecUtil.writeFooter(output);
+  }
+   try {
+    store.failIfCorrupted();
+    fail("should be too new");
+  }
+ catch (  IndexFormatTooNewException e) {
+  }
+  store.close();
+}
