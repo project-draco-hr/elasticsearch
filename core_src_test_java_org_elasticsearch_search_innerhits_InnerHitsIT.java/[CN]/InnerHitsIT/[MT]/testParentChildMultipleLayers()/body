@@ -8,7 +8,11 @@
   requests.add(client().prepareIndex("articles","comment","2").setParent("2").setSource("message","elephant captured"));
   requests.add(client().prepareIndex("articles","remark","2").setParent("2").setRouting("2").setSource("message","bad"));
   indexRandom(true,requests);
-  SearchResponse response=client().prepareSearch("articles").setQuery(hasChildQuery("comment",hasChildQuery("remark",matchQuery("message","good")))).addParentChildInnerHits("comment","comment",new InnerHitsBuilder.InnerHit().setQuery(hasChildQuery("remark",matchQuery("message","good"))).addParentChildInnerHits("remark","remark",new InnerHitsBuilder.InnerHit().setQuery(matchQuery("message","good")))).get();
+  InnerHitsBuilder innerInnerHitsBuilder=new InnerHitsBuilder();
+  innerInnerHitsBuilder.addParentChildInnerHits("remark","remark",new InnerHitsBuilder.InnerHit().setQuery(matchQuery("message","good")));
+  InnerHitsBuilder innerHitsBuilder=new InnerHitsBuilder();
+  innerHitsBuilder.addParentChildInnerHits("comment","comment",new InnerHitsBuilder.InnerHit().setQuery(hasChildQuery("remark",matchQuery("message","good"))).innerHits(innerInnerHitsBuilder));
+  SearchResponse response=client().prepareSearch("articles").setQuery(hasChildQuery("comment",hasChildQuery("remark",matchQuery("message","good")))).innerHits(innerHitsBuilder).get();
   assertNoFailures(response);
   assertHitCount(response,1);
   assertSearchHit(response,1,hasId("1"));
@@ -21,7 +25,12 @@
   assertThat(innerHits.totalHits(),equalTo(1l));
   assertThat(innerHits.getAt(0).getId(),equalTo("1"));
   assertThat(innerHits.getAt(0).type(),equalTo("remark"));
-  response=client().prepareSearch("articles").setQuery(hasChildQuery("comment",hasChildQuery("remark",matchQuery("message","bad")))).addParentChildInnerHits("comment","comment",new InnerHitsBuilder.InnerHit().setQuery(hasChildQuery("remark",matchQuery("message","bad"))).addParentChildInnerHits("remark","remark",new InnerHitsBuilder.InnerHit().setQuery(matchQuery("message","bad")))).get();
+  innerInnerHitsBuilder=new InnerHitsBuilder();
+  innerInnerHitsBuilder.addParentChildInnerHits("remark","remark",new InnerHitsBuilder.InnerHit().setQuery(matchQuery("message","bad")));
+  innerInnerHitsBuilder.addParentChildInnerHits("remark","remark",new InnerHitsBuilder.InnerHit().setQuery(matchQuery("message","good")));
+  innerHitsBuilder=new InnerHitsBuilder();
+  innerHitsBuilder.addParentChildInnerHits("comment","comment",new InnerHitsBuilder.InnerHit().setQuery(hasChildQuery("remark",matchQuery("message","bad"))).innerHits(innerInnerHitsBuilder));
+  response=client().prepareSearch("articles").setQuery(hasChildQuery("comment",hasChildQuery("remark",matchQuery("message","bad")))).innerHits(innerHitsBuilder).get();
   assertNoFailures(response);
   assertHitCount(response,1);
   assertSearchHit(response,1,hasId("2"));
