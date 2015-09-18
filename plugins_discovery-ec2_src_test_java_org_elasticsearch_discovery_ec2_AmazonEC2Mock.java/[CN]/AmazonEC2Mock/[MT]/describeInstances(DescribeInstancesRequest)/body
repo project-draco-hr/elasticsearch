@@ -1,0 +1,67 @@
+{
+  Collection<Instance> filteredInstances=new ArrayList<>();
+  logger.debug("--> mocking describeInstances");
+  for (  Instance instance : instances) {
+    boolean tagFiltered=false;
+    boolean instanceFound=false;
+    Map<String,List<String>> expectedTags=new HashMap<>();
+    Map<String,List<String>> instanceTags=new HashMap<>();
+    for (    Tag tag : instance.getTags()) {
+      List<String> tags=instanceTags.get(tag.getKey());
+      if (tags == null) {
+        tags=new ArrayList<>();
+        instanceTags.put(tag.getKey(),tags);
+      }
+      tags.add(tag.getValue());
+    }
+    for (    Filter filter : describeInstancesRequest.getFilters()) {
+      if (filter.getName().startsWith("tag:")) {
+        tagFiltered=true;
+        String tagName=filter.getName().substring(4);
+        Pattern p=Pattern.compile("\\.\\d+",Pattern.DOTALL);
+        Matcher m=p.matcher(tagName);
+        if (m.find()) {
+          int i=tagName.lastIndexOf(".");
+          tagName=tagName.substring(0,i);
+        }
+        List<String> tags=expectedTags.get(tagName);
+        if (tags == null) {
+          tags=new ArrayList<>();
+          expectedTags.put(tagName,tags);
+        }
+        tags.addAll(filter.getValues());
+      }
+    }
+    if (tagFiltered) {
+      logger.debug("--> expected tags: [{}]",expectedTags);
+      logger.debug("--> instance tags: [{}]",instanceTags);
+      instanceFound=true;
+      for (      Map.Entry<String,List<String>> expectedTagsEntry : expectedTags.entrySet()) {
+        List<String> instanceTagValues=instanceTags.get(expectedTagsEntry.getKey());
+        if (instanceTagValues == null) {
+          instanceFound=false;
+          break;
+        }
+        for (        String expectedValue : expectedTagsEntry.getValue()) {
+          boolean valueFound=false;
+          for (          String instanceTagValue : instanceTagValues) {
+            if (instanceTagValue.equals(expectedValue)) {
+              valueFound=true;
+            }
+          }
+          if (valueFound == false) {
+            instanceFound=false;
+          }
+        }
+      }
+    }
+    if (tagFiltered == false || instanceFound) {
+      logger.debug("--> instance added");
+      filteredInstances.add(instance);
+    }
+ else {
+      logger.debug("--> instance filtered");
+    }
+  }
+  return new DescribeInstancesResult().withReservations(new Reservation().withInstances(filteredInstances));
+}
