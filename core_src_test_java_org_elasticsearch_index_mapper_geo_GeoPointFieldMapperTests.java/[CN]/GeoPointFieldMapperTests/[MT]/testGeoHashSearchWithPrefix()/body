@@ -1,0 +1,15 @@
+{
+  int precision=randomIntBetween(1,12);
+  String mapping=XContentFactory.jsonBuilder().startObject().startObject("pin").startObject("properties").startObject("location").field("type","geo_point").field("geohash_prefix",true).field("geohash_precision",precision).field("store",true).endObject().endObject().endObject().endObject().string();
+  CreateIndexRequestBuilder mappingRequest=client().admin().indices().prepareCreate("test").addMapping("pin",mapping);
+  mappingRequest.execute().actionGet();
+  client().admin().cluster().prepareHealth().setWaitForEvents(Priority.LANGUID).setWaitForGreenStatus().execute().actionGet();
+  client().prepareIndex("test","pin","1").setSource(jsonBuilder().startObject().startObject("location").field("lat",40.7143528).field("lon",-74.0059731).endObject().endObject()).setRefresh(true).execute().actionGet();
+  SearchResponse searchResponse=client().prepareSearch().addField("location.geohash").setQuery(matchAllQuery()).execute().actionGet();
+  Map<String,SearchHitField> m=searchResponse.getHits().getAt(0).getFields();
+  List<Object> hashes=m.get("location.geohash").values();
+  final int numHashes=hashes.size();
+  for (int i=0; i < numHashes; ++i) {
+    assertEquals("dr5regy6rc6y".substring(0,numHashes - i),hashes.get(i));
+  }
+}
