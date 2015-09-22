@@ -3,14 +3,22 @@
   CountRequest countRequest=new CountRequest(indices);
   String source=request.param("source");
   if (source != null) {
-    countRequest.source(source);
+    try (XContentParser requestParser=XContentFactory.xContent(source).createParser(source)){
+      QueryParseContext context=new QueryParseContext(indicesQueriesRegistry);
+      context.reset(requestParser);
+      final SearchSourceBuilder builder=SearchSourceBuilder.PROTOTYPE.fromXContent(requestParser,context);
+      countRequest.searchSource(builder);
+    }
+ catch (    IOException e) {
+      throw new ElasticsearchException("failed to parse source",e);
+    }
   }
  else {
     QueryBuilder<?> queryBuilder=RestActions.parseQuerySource(request);
     if (queryBuilder != null) {
       QuerySourceBuilder querySourceBuilder=new QuerySourceBuilder();
       querySourceBuilder.setQuery(queryBuilder);
-      countRequest.source(querySourceBuilder.buildAsBytes());
+      countRequest.query(queryBuilder);
     }
   }
   client.count(countRequest,new RestResponseListener<CountResponse>(channel){

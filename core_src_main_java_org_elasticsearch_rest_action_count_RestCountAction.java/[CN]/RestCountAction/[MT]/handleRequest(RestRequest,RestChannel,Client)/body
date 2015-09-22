@@ -2,14 +2,21 @@
   CountRequest countRequest=new CountRequest(Strings.splitStringByCommaToArray(request.param("index")));
   countRequest.indicesOptions(IndicesOptions.fromRequest(request,countRequest.indicesOptions()));
   if (RestActions.hasBodyContent(request)) {
-    countRequest.source(RestActions.getRestContent(request));
+    BytesReference restContent=RestActions.getRestContent(request);
+    try (XContentParser requestParser=XContentFactory.xContent(restContent).createParser(restContent)){
+      QueryParseContext context=new QueryParseContext(indicesQueriesRegistry);
+      context.reset(requestParser);
+      final SearchSourceBuilder builder=SearchSourceBuilder.PROTOTYPE.fromXContent(requestParser,context);
+      countRequest.searchSource(builder);
+    }
+ catch (    IOException e) {
+      throw new ElasticsearchException("failed to parse source",e);
+    }
   }
  else {
     QueryBuilder<?> queryBuilder=RestActions.parseQuerySource(request);
     if (queryBuilder != null) {
-      QuerySourceBuilder querySourceBuilder=new QuerySourceBuilder();
-      querySourceBuilder.setQuery(queryBuilder);
-      countRequest.source(querySourceBuilder.buildAsBytes());
+      countRequest.query(queryBuilder);
     }
   }
   countRequest.routing(request.param("routing"));
