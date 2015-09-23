@@ -1,0 +1,44 @@
+{
+  XContentParser.Token token;
+  String parameterName=null;
+  String scaleString=null;
+  String originString=null;
+  String offsetString="0d";
+  double decay=0.5;
+  while ((token=parser.nextToken()) != XContentParser.Token.END_OBJECT) {
+    if (token == XContentParser.Token.FIELD_NAME) {
+      parameterName=parser.currentName();
+    }
+ else     if (DecayFunctionBuilder.SCALE.equals(parameterName)) {
+      scaleString=parser.text();
+    }
+ else     if (DecayFunctionBuilder.ORIGIN.equals(parameterName)) {
+      originString=parser.text();
+    }
+ else     if (DecayFunctionBuilder.DECAY.equals(parameterName)) {
+      decay=parser.doubleValue();
+    }
+ else     if (DecayFunctionBuilder.OFFSET.equals(parameterName)) {
+      offsetString=parser.text();
+    }
+ else {
+      throw new ElasticsearchParseException("parameter [{}] not supported!",parameterName);
+    }
+  }
+  long origin;
+  if (originString == null) {
+    origin=context.nowInMillis();
+  }
+ else {
+    origin=dateFieldType.parseToMilliseconds(originString,false,null,null);
+  }
+  if (scaleString == null) {
+    throw new ElasticsearchParseException("[{}] must be set for date fields.",DecayFunctionBuilder.SCALE);
+  }
+  TimeValue val=TimeValue.parseTimeValue(scaleString,TimeValue.timeValueHours(24),DecayFunctionParser.class.getSimpleName() + ".scale");
+  double scale=val.getMillis();
+  val=TimeValue.parseTimeValue(offsetString,TimeValue.timeValueHours(24),DecayFunctionParser.class.getSimpleName() + ".offset");
+  double offset=val.getMillis();
+  IndexNumericFieldData numericFieldData=context.getForField(dateFieldType);
+  return new NumericFieldDataScoreFunction(origin,scale,decay,offset,getDecayFunction(),numericFieldData,mode);
+}

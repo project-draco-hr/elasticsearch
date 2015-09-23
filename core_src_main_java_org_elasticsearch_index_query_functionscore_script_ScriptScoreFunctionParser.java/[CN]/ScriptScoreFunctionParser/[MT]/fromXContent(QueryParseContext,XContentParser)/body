@@ -1,0 +1,44 @@
+{
+  ScriptParameterParser scriptParameterParser=new ScriptParameterParser();
+  Script script=null;
+  Map<String,Object> vars=null;
+  String currentFieldName=null;
+  XContentParser.Token token;
+  while ((token=parser.nextToken()) != XContentParser.Token.END_OBJECT) {
+    if (token == XContentParser.Token.FIELD_NAME) {
+      currentFieldName=parser.currentName();
+    }
+ else     if (token == XContentParser.Token.START_OBJECT) {
+      if (parseContext.parseFieldMatcher().match(currentFieldName,ScriptField.SCRIPT)) {
+        script=Script.parse(parser,parseContext.parseFieldMatcher());
+      }
+ else       if ("params".equals(currentFieldName)) {
+        vars=parser.map();
+      }
+ else {
+        throw new ParsingException(parser.getTokenLocation(),NAMES[0] + " query does not support [" + currentFieldName+ "]");
+      }
+    }
+ else     if (token.isValue()) {
+      if (!scriptParameterParser.token(currentFieldName,token,parser,parseContext.parseFieldMatcher())) {
+        throw new ParsingException(parser.getTokenLocation(),NAMES[0] + " query does not support [" + currentFieldName+ "]");
+      }
+    }
+  }
+  if (script == null) {
+    ScriptParameterValue scriptValue=scriptParameterParser.getDefaultScriptParameterValue();
+    if (scriptValue != null) {
+      if (vars == null) {
+        vars=new HashMap<>();
+      }
+      script=new Script(scriptValue.script(),scriptValue.scriptType(),scriptParameterParser.lang(),vars);
+    }
+  }
+ else   if (vars != null) {
+    throw new ParsingException(parser.getTokenLocation(),"script params must be specified inside script object");
+  }
+  if (script == null) {
+    throw new ParsingException(parser.getTokenLocation(),NAMES[0] + " requires 'script' field");
+  }
+  return new ScriptScoreFunctionBuilder(script);
+}

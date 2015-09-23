@@ -7,13 +7,14 @@
   ScoreFunctionBuilder[] scoreFunctionBuilders=getScoreFunctionBuilders();
   float[] weights=createRandomWeights(scoreFunctionBuilders.length);
   float[] scores=getScores(scoreFunctionBuilders);
-  String scoreMode=getRandomScoreMode();
-  FunctionScoreQueryBuilder withWeights=functionScoreQuery(constantScoreQuery(termQuery(TEXT_FIELD,"value"))).scoreMode(scoreMode);
   int weightscounter=0;
+  FunctionScoreQueryBuilder.FilterFunctionBuilder[] filterFunctionBuilders=new FunctionScoreQueryBuilder.FilterFunctionBuilder[scoreFunctionBuilders.length];
   for (  ScoreFunctionBuilder builder : scoreFunctionBuilders) {
-    withWeights.add(builder.setWeight(weights[weightscounter]));
+    filterFunctionBuilders[weightscounter]=new FunctionScoreQueryBuilder.FilterFunctionBuilder(builder.setWeight(weights[weightscounter]));
     weightscounter++;
   }
+  FiltersFunctionScoreQuery.ScoreMode scoreMode=randomFrom(FiltersFunctionScoreQuery.ScoreMode.AVG,FiltersFunctionScoreQuery.ScoreMode.SUM,FiltersFunctionScoreQuery.ScoreMode.MIN,FiltersFunctionScoreQuery.ScoreMode.MAX,FiltersFunctionScoreQuery.ScoreMode.MULTIPLY);
+  FunctionScoreQueryBuilder withWeights=functionScoreQuery(constantScoreQuery(termQuery(TEXT_FIELD,"value")),filterFunctionBuilders).scoreMode(scoreMode);
   SearchResponse responseWithWeights=client().search(searchRequest().source(searchSource().query(withWeights))).actionGet();
   double expectedScore=computeExpectedScore(weights,scores,scoreMode);
   assertThat((float)expectedScore / responseWithWeights.getHits().getAt(0).getScore(),is(1.0f));
