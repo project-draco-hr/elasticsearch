@@ -1,0 +1,26 @@
+{
+  RestoreSource restoreSource=indexShard.routingEntry().restoreSource();
+  final RecoveryState.Translog translogState=indexShard.recoveryState().getTranslog();
+  if (restoreSource == null) {
+    throw new IndexShardRestoreFailedException(shardId,"empty restore source");
+  }
+  if (logger.isTraceEnabled()) {
+    logger.trace("[{}] restoring shard [{}]",restoreSource.snapshotId(),shardId);
+  }
+  try {
+    translogState.totalOperations(0);
+    translogState.totalOperationsOnStart(0);
+    indexShard.prepareForIndexRecovery();
+    ShardId snapshotShardId=shardId;
+    if (!shardId.getIndex().equals(restoreSource.index())) {
+      snapshotShardId=new ShardId(restoreSource.index(),shardId.id());
+    }
+    indexShardRepository.restore(restoreSource.snapshotId(),restoreSource.version(),shardId,snapshotShardId,indexShard.recoveryState());
+    indexShard.skipTranslogRecovery();
+    indexShard.finalizeRecovery();
+    indexShard.postRecovery("restore done");
+  }
+ catch (  Throwable t) {
+    throw new IndexShardRestoreFailedException(shardId,"restore failed",t);
+  }
+}
