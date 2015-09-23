@@ -1,22 +1,27 @@
 {
   if (shouldFlush()) {
     if (asyncFlushRunning.compareAndSet(false,true)) {
-      final AbstractRunnable abstractRunnable=new AbstractRunnable(){
-        @Override public void onFailure(        Throwable t){
-          if (state != IndexShardState.CLOSED) {
-            logger.warn("failed to flush index",t);
+      if (shouldFlush() == false) {
+        asyncFlushRunning.compareAndSet(true,false);
+      }
+ else {
+        final AbstractRunnable abstractRunnable=new AbstractRunnable(){
+          @Override public void onFailure(          Throwable t){
+            if (state != IndexShardState.CLOSED) {
+              logger.warn("failed to flush index",t);
+            }
+          }
+          @Override protected void doRun() throws Exception {
+            flush(new FlushRequest());
+          }
+          @Override public void onAfter(){
+            asyncFlushRunning.compareAndSet(true,false);
           }
         }
-        @Override protected void doRun() throws Exception {
-          flush(new FlushRequest());
-        }
-        @Override public void onAfter(){
-          asyncFlushRunning.compareAndSet(true,false);
-        }
-      }
 ;
-      threadPool.executor(ThreadPool.Names.FLUSH).execute(abstractRunnable);
-      return true;
+        threadPool.executor(ThreadPool.Names.FLUSH).execute(abstractRunnable);
+        return true;
+      }
     }
   }
   return false;
