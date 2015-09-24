@@ -1,0 +1,14 @@
+{
+  QueryShardContext queryShardContext=new QueryShardContext(new Index("test"),queryParser);
+  queryShardContext.setAllowUnmappedFields(true);
+  Query parsedQuery=multiMatchQuery("banon").field("name.first",2).field("name.last",3).field("foobar").type(MultiMatchQueryBuilder.Type.CROSS_FIELDS).toQuery(queryShardContext);
+  try (Engine.Searcher searcher=indexService.shardSafe(0).acquireSearcher("test")){
+    Query rewrittenQuery=searcher.searcher().rewrite(parsedQuery);
+    BooleanQuery.Builder expected=new BooleanQuery.Builder();
+    expected.add(new TermQuery(new Term("foobar","banon")),BooleanClause.Occur.SHOULD);
+    Query tq1=new BoostQuery(new TermQuery(new Term("name.first","banon")),2);
+    Query tq2=new BoostQuery(new TermQuery(new Term("name.last","banon")),3);
+    expected.add(new DisjunctionMaxQuery(Arrays.<Query>asList(tq1,tq2),0f),BooleanClause.Occur.SHOULD);
+    assertEquals(expected.build(),rewrittenQuery);
+  }
+ }
