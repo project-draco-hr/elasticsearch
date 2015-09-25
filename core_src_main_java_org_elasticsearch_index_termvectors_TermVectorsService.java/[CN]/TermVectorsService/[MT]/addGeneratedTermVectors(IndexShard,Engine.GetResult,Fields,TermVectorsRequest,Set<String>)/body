@@ -1,0 +1,24 @@
+{
+  Set<String> validFields=new HashSet<>();
+  for (  String field : selectedFields) {
+    MappedFieldType fieldType=indexShard.mapperService().smartNameFieldType(field);
+    if (!isValidField(fieldType)) {
+      continue;
+    }
+    if (fieldType.storeTermVectors() && (request.perFieldAnalyzer() == null || !request.perFieldAnalyzer().containsKey(field))) {
+      continue;
+    }
+    validFields.add(field);
+  }
+  if (validFields.isEmpty()) {
+    return termVectorsByField;
+  }
+  GetResult getResult=indexShard.getService().get(get,request.id(),request.type(),validFields.toArray(Strings.EMPTY_ARRAY),null,false);
+  Fields generatedTermVectors=generateTermVectors(indexShard,getResult.getFields().values(),request.offsets(),request.perFieldAnalyzer(),validFields);
+  if (termVectorsByField == null) {
+    return generatedTermVectors;
+  }
+ else {
+    return mergeFields(termVectorsByField,generatedTermVectors);
+  }
+}
