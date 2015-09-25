@@ -1,0 +1,47 @@
+{
+  ObjectMapper nestedObjectMapper=context.getObjectMapper(path);
+  if (nestedObjectMapper == null) {
+    throw new IllegalStateException("[" + NAME + "] failed to find nested object under path ["+ path+ "]");
+  }
+  if (!nestedObjectMapper.nested().isNested()) {
+    throw new IllegalStateException("[" + NAME + "] nested object under path ["+ path+ "] is not of nested type");
+  }
+  final BitSetProducer parentFilter;
+  final Filter childFilter;
+  final ObjectMapper parentObjectMapper;
+  final Query innerQuery;
+  ObjectMapper objectMapper=context.nestedScope().getObjectMapper();
+  try {
+    if (objectMapper == null) {
+      parentFilter=context.bitsetFilter(Queries.newNonNestedFilter());
+    }
+ else {
+      parentFilter=context.bitsetFilter(objectMapper.nestedTypeFilter());
+    }
+    childFilter=nestedObjectMapper.nestedTypeFilter();
+    parentObjectMapper=context.nestedScope().nextLevel(nestedObjectMapper);
+    innerQuery=this.query.toQuery(context);
+    if (innerQuery == null) {
+      return null;
+    }
+  }
+  finally {
+    context.nestedScope().previousLevel();
+  }
+  if (queryInnerHits != null) {
+    try (XContentParser parser=queryInnerHits.getXcontentParser()){
+      XContentParser.Token token=parser.nextToken();
+      if (token != XContentParser.Token.START_OBJECT) {
+        throw new IllegalStateException("start object expected but was: [" + token + "]");
+      }
+      InnerHitsSubSearchContext innerHits=context.indexQueryParserService().getInnerHitsQueryParserHelper().parse(parser);
+      if (innerHits != null) {
+        ParsedQuery parsedQuery=new ParsedQuery(innerQuery,context.copyNamedQueries());
+        InnerHitsContext.NestedInnerHits nestedInnerHits=new InnerHitsContext.NestedInnerHits(innerHits.getSubSearchContext(),parsedQuery,null,parentObjectMapper,nestedObjectMapper);
+        String name=innerHits.getName() != null ? innerHits.getName() : path;
+        context.addInnerHits(name,nestedInnerHits);
+      }
+    }
+   }
+  return new ToParentBlockJoinQuery(Queries.filtered(innerQuery,childFilter),parentFilter,scoreMode);
+}

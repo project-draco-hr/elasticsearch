@@ -1,0 +1,55 @@
+{
+  XContentParser parser=parseContext.parser();
+  ScriptParameterParser scriptParameterParser=new ScriptParameterParser();
+  Script script=null;
+  Map<String,Object> params=null;
+  float boost=AbstractQueryBuilder.DEFAULT_BOOST;
+  String queryName=null;
+  XContentParser.Token token;
+  String currentFieldName=null;
+  while ((token=parser.nextToken()) != XContentParser.Token.END_OBJECT) {
+    if (token == XContentParser.Token.FIELD_NAME) {
+      currentFieldName=parser.currentName();
+    }
+ else     if (parseContext.isDeprecatedSetting(currentFieldName)) {
+    }
+ else     if (token == XContentParser.Token.START_OBJECT) {
+      if (parseContext.parseFieldMatcher().match(currentFieldName,ScriptField.SCRIPT)) {
+        script=Script.parse(parser,parseContext.parseFieldMatcher());
+      }
+ else       if ("params".equals(currentFieldName)) {
+        params=parser.map();
+      }
+ else {
+        throw new ParsingException(parser.getTokenLocation(),"[script] query does not support [" + currentFieldName + "]");
+      }
+    }
+ else     if (token.isValue()) {
+      if ("_name".equals(currentFieldName)) {
+        queryName=parser.text();
+      }
+ else       if ("boost".equals(currentFieldName)) {
+        boost=parser.floatValue();
+      }
+ else       if (!scriptParameterParser.token(currentFieldName,token,parser,parseContext.parseFieldMatcher())) {
+        throw new ParsingException(parser.getTokenLocation(),"[script] query does not support [" + currentFieldName + "]");
+      }
+    }
+  }
+  if (script == null) {
+    ScriptParameterValue scriptValue=scriptParameterParser.getDefaultScriptParameterValue();
+    if (scriptValue != null) {
+      if (params == null) {
+        params=new HashMap<>();
+      }
+      script=new Script(scriptValue.script(),scriptValue.scriptType(),scriptParameterParser.lang(),params);
+    }
+  }
+ else   if (params != null) {
+    throw new ParsingException(parser.getTokenLocation(),"script params must be specified inside script object in a [script] filter");
+  }
+  if (script == null) {
+    throw new ParsingException(parser.getTokenLocation(),"script must be provided with a [script] filter");
+  }
+  return new ScriptQueryBuilder(script).boost(boost).queryName(queryName);
+}

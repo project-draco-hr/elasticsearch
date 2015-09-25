@@ -1,0 +1,82 @@
+{
+  QueryParserSettings qpSettings;
+  if (this.escape) {
+    qpSettings=new QueryParserSettings(org.apache.lucene.queryparser.classic.QueryParser.escape(this.queryString));
+  }
+ else {
+    qpSettings=new QueryParserSettings(this.queryString);
+  }
+  qpSettings.defaultField(this.defaultField == null ? context.defaultField() : this.defaultField);
+  Map<String,Float> resolvedFields=new TreeMap<>();
+  for (  Map.Entry<String,Float> fieldsEntry : fieldsAndWeights.entrySet()) {
+    String fieldName=fieldsEntry.getKey();
+    Float weight=fieldsEntry.getValue();
+    if (Regex.isSimpleMatchPattern(fieldName)) {
+      for (      String resolvedFieldName : context.mapperService().simpleMatchToIndexNames(fieldName)) {
+        resolvedFields.put(resolvedFieldName,weight);
+      }
+    }
+ else {
+      resolvedFields.put(fieldName,weight);
+    }
+  }
+  qpSettings.fieldsAndWeights(resolvedFields);
+  qpSettings.defaultOperator(defaultOperator.toQueryParserOperator());
+  if (analyzer == null) {
+    qpSettings.defaultAnalyzer(context.mapperService().searchAnalyzer());
+  }
+ else {
+    NamedAnalyzer namedAnalyzer=context.analysisService().analyzer(analyzer);
+    if (namedAnalyzer == null) {
+      throw new QueryShardException(context,"[query_string] analyzer [" + analyzer + "] not found");
+    }
+    qpSettings.forceAnalyzer(namedAnalyzer);
+  }
+  if (quoteAnalyzer != null) {
+    NamedAnalyzer namedAnalyzer=context.analysisService().analyzer(quoteAnalyzer);
+    if (namedAnalyzer == null) {
+      throw new QueryShardException(context,"[query_string] quote_analyzer [" + quoteAnalyzer + "] not found");
+    }
+    qpSettings.forceQuoteAnalyzer(namedAnalyzer);
+  }
+ else   if (analyzer != null) {
+    qpSettings.forceQuoteAnalyzer(qpSettings.analyzer());
+  }
+ else {
+    qpSettings.defaultQuoteAnalyzer(context.mapperService().searchQuoteAnalyzer());
+  }
+  qpSettings.quoteFieldSuffix(quoteFieldSuffix);
+  qpSettings.autoGeneratePhraseQueries(autoGeneratePhraseQueries);
+  qpSettings.allowLeadingWildcard(allowLeadingWildcard == null ? context.queryStringAllowLeadingWildcard() : allowLeadingWildcard);
+  qpSettings.analyzeWildcard(analyzeWildcard == null ? context.queryStringAnalyzeWildcard() : analyzeWildcard);
+  qpSettings.lowercaseExpandedTerms(lowercaseExpandedTerms);
+  qpSettings.enablePositionIncrements(enablePositionIncrements);
+  qpSettings.locale(locale);
+  qpSettings.fuzziness(fuzziness);
+  qpSettings.fuzzyPrefixLength(fuzzyPrefixLength);
+  qpSettings.fuzzyMaxExpansions(fuzzyMaxExpansions);
+  qpSettings.fuzzyRewriteMethod(QueryParsers.parseRewriteMethod(context.parseFieldMatcher(),this.fuzzyRewrite));
+  qpSettings.phraseSlop(phraseSlop);
+  qpSettings.useDisMax(useDisMax);
+  qpSettings.tieBreaker(tieBreaker);
+  qpSettings.rewriteMethod(QueryParsers.parseRewriteMethod(context.parseFieldMatcher(),this.rewrite));
+  qpSettings.lenient(lenient == null ? context.queryStringLenient() : lenient);
+  qpSettings.timeZone(timeZone);
+  qpSettings.maxDeterminizedStates(maxDeterminizedStates);
+  MapperQueryParser queryParser=context.queryParser(qpSettings);
+  Query query;
+  try {
+    query=queryParser.parse(queryString);
+  }
+ catch (  org.apache.lucene.queryparser.classic.ParseException e) {
+    throw new QueryShardException(context,"Failed to parse query [" + this.queryString + "]",e);
+  }
+  if (query == null) {
+    return null;
+  }
+  query=Queries.fixNegativeQueryIfNeeded(query);
+  if (query instanceof BooleanQuery) {
+    query=Queries.applyMinimumShouldMatch((BooleanQuery)query,this.minimumShouldMatch());
+  }
+  return query;
+}

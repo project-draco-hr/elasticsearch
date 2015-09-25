@@ -1,0 +1,39 @@
+{
+  String functionScoreQuery="{\n" + "    \"function_score\":{\n" + "        \"query\":{\n"+ "            \"term\":{\n"+ "                \"field1\":\"value1\"\n"+ "            }\n"+ "        },\n"+ "        \"functions\":  [\n"+ "            {\n"+ "                \"random_score\":  {\n"+ "                    \"seed\":123456\n"+ "                },\n"+ "                \"weight\": 3,\n"+ "                \"filter\": {\n"+ "                    \"term\":{\n"+ "                        \"field2\":\"value2\"\n"+ "                    }\n"+ "                }\n"+ "            },\n"+ "            {\n"+ "                \"filter\": {\n"+ "                    \"term\":{\n"+ "                        \"field3\":\"value3\"\n"+ "                    }\n"+ "                },\n"+ "                \"weight\": 9\n"+ "            },\n"+ "            {\n"+ "                \"gauss\":  {\n"+ "                    \"field_name\":  {\n"+ "                        \"origin\":0.5,\n"+ "                        \"scale\":0.6\n"+ "                    }\n"+ "                }\n"+ "            }\n"+ "        ],\n"+ "        \"boost\" : 3,\n"+ "        \"score_mode\" : \"avg\",\n"+ "        \"boost_mode\" : \"replace\",\n"+ "        \"max_boost\" : 10\n"+ "    }\n"+ "}";
+  QueryBuilder<?> queryBuilder=parseQuery(functionScoreQuery);
+  for (int i=0; i <= XContentType.values().length; i++) {
+    assertThat(queryBuilder,instanceOf(FunctionScoreQueryBuilder.class));
+    FunctionScoreQueryBuilder functionScoreQueryBuilder=(FunctionScoreQueryBuilder)queryBuilder;
+    assertThat(functionScoreQueryBuilder.query(),instanceOf(TermQueryBuilder.class));
+    TermQueryBuilder termQueryBuilder=(TermQueryBuilder)functionScoreQueryBuilder.query();
+    assertThat(termQueryBuilder.fieldName(),equalTo("field1"));
+    assertThat(termQueryBuilder.value(),equalTo("value1"));
+    assertThat(functionScoreQueryBuilder.filterFunctionBuilders().length,equalTo(3));
+    assertThat(functionScoreQueryBuilder.filterFunctionBuilders()[0].getFilter(),instanceOf(TermQueryBuilder.class));
+    termQueryBuilder=(TermQueryBuilder)functionScoreQueryBuilder.filterFunctionBuilders()[0].getFilter();
+    assertThat(termQueryBuilder.fieldName(),equalTo("field2"));
+    assertThat(termQueryBuilder.value(),equalTo("value2"));
+    assertThat(functionScoreQueryBuilder.filterFunctionBuilders()[1].getFilter(),instanceOf(TermQueryBuilder.class));
+    termQueryBuilder=(TermQueryBuilder)functionScoreQueryBuilder.filterFunctionBuilders()[1].getFilter();
+    assertThat(termQueryBuilder.fieldName(),equalTo("field3"));
+    assertThat(termQueryBuilder.value(),equalTo("value3"));
+    assertThat(functionScoreQueryBuilder.filterFunctionBuilders()[2].getFilter(),instanceOf(MatchAllQueryBuilder.class));
+    assertThat(functionScoreQueryBuilder.filterFunctionBuilders()[0].getScoreFunction(),instanceOf(RandomScoreFunctionBuilder.class));
+    RandomScoreFunctionBuilder randomScoreFunctionBuilder=(RandomScoreFunctionBuilder)functionScoreQueryBuilder.filterFunctionBuilders()[0].getScoreFunction();
+    assertThat(randomScoreFunctionBuilder.getSeed(),equalTo(123456));
+    assertThat(randomScoreFunctionBuilder.getWeight(),equalTo(3f));
+    assertThat(functionScoreQueryBuilder.filterFunctionBuilders()[1].getScoreFunction(),instanceOf(WeightBuilder.class));
+    WeightBuilder weightBuilder=(WeightBuilder)functionScoreQueryBuilder.filterFunctionBuilders()[1].getScoreFunction();
+    assertThat(weightBuilder.getWeight(),equalTo(9f));
+    assertThat(functionScoreQueryBuilder.filterFunctionBuilders()[2].getScoreFunction(),instanceOf(GaussDecayFunctionBuilder.class));
+    GaussDecayFunctionBuilder gaussDecayFunctionBuilder=(GaussDecayFunctionBuilder)functionScoreQueryBuilder.filterFunctionBuilders()[2].getScoreFunction();
+    assertThat(gaussDecayFunctionBuilder.getFieldName(),equalTo("field_name"));
+    assertThat(functionScoreQueryBuilder.boost(),equalTo(3f));
+    assertThat(functionScoreQueryBuilder.scoreMode(),equalTo(FiltersFunctionScoreQuery.ScoreMode.AVG));
+    assertThat(functionScoreQueryBuilder.boostMode(),equalTo(CombineFunction.REPLACE));
+    assertThat(functionScoreQueryBuilder.maxBoost(),equalTo(10f));
+    if (i < XContentType.values().length) {
+      queryBuilder=parseQuery(((AbstractQueryBuilder)queryBuilder).buildAsBytes(XContentType.values()[i]));
+    }
+  }
+}

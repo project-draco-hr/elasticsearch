@@ -1,0 +1,97 @@
+{
+  XContentParser parser=parseContext.parser();
+  QueryBuilder query=null;
+  QueryBuilder filter=null;
+  float boost=AbstractQueryBuilder.DEFAULT_BOOST;
+  String queryName=null;
+  FiltersFunctionScoreQuery.ScoreMode scoreMode=FunctionScoreQueryBuilder.DEFAULT_SCORE_MODE;
+  float maxBoost=FunctionScoreQuery.DEFAULT_MAX_BOOST;
+  Float minScore=null;
+  String currentFieldName=null;
+  XContentParser.Token token;
+  CombineFunction combineFunction=null;
+  boolean functionArrayFound=false;
+  boolean singleFunctionFound=false;
+  String singleFunctionName=null;
+  List<FunctionScoreQueryBuilder.FilterFunctionBuilder> filterFunctionBuilders=new ArrayList<>();
+  while ((token=parser.nextToken()) != XContentParser.Token.END_OBJECT) {
+    if (token == XContentParser.Token.FIELD_NAME) {
+      currentFieldName=parser.currentName();
+    }
+ else     if ("query".equals(currentFieldName)) {
+      query=parseContext.parseInnerQueryBuilder();
+    }
+ else     if (parseContext.parseFieldMatcher().match(currentFieldName,FILTER_FIELD)) {
+      filter=parseContext.parseInnerQueryBuilder();
+    }
+ else     if ("score_mode".equals(currentFieldName) || "scoreMode".equals(currentFieldName)) {
+      scoreMode=FiltersFunctionScoreQuery.ScoreMode.fromString(parser.text());
+    }
+ else     if ("boost_mode".equals(currentFieldName) || "boostMode".equals(currentFieldName)) {
+      combineFunction=CombineFunction.fromString(parser.text());
+    }
+ else     if ("max_boost".equals(currentFieldName) || "maxBoost".equals(currentFieldName)) {
+      maxBoost=parser.floatValue();
+    }
+ else     if ("boost".equals(currentFieldName)) {
+      boost=parser.floatValue();
+    }
+ else     if ("_name".equals(currentFieldName)) {
+      queryName=parser.text();
+    }
+ else     if ("min_score".equals(currentFieldName) || "minScore".equals(currentFieldName)) {
+      minScore=parser.floatValue();
+    }
+ else     if ("functions".equals(currentFieldName)) {
+      if (singleFunctionFound) {
+        String errorString="already found [" + singleFunctionName + "], now encountering [functions].";
+        handleMisplacedFunctionsDeclaration(parser.getTokenLocation(),errorString);
+      }
+      functionArrayFound=true;
+      currentFieldName=parseFiltersAndFunctions(parseContext,parser,filterFunctionBuilders);
+    }
+ else {
+      if (singleFunctionFound) {
+        throw new ParsingException(parser.getTokenLocation(),"failed to parse [{}] query. already found function [{}], now encountering [{}]. use [functions] array if you want to define several functions.",FunctionScoreQueryBuilder.NAME,singleFunctionName,currentFieldName);
+      }
+      if (functionArrayFound) {
+        String errorString="already found [functions] array, now encountering [" + currentFieldName + "].";
+        handleMisplacedFunctionsDeclaration(parser.getTokenLocation(),errorString);
+      }
+      singleFunctionFound=true;
+      singleFunctionName=currentFieldName;
+      ScoreFunctionBuilder<?> scoreFunction;
+      if (parseContext.parseFieldMatcher().match(currentFieldName,WEIGHT_FIELD)) {
+        scoreFunction=new WeightBuilder().setWeight(parser.floatValue());
+      }
+ else {
+        scoreFunction=functionParserMapper.get(parser.getTokenLocation(),currentFieldName).fromXContent(parseContext,parser);
+      }
+      filterFunctionBuilders.add(new FunctionScoreQueryBuilder.FilterFunctionBuilder(scoreFunction));
+    }
+  }
+  if (query == null && filter == null) {
+    query=new MatchAllQueryBuilder();
+  }
+ else   if (query == null && filter != null) {
+    query=new ConstantScoreQueryBuilder(filter);
+  }
+ else   if (query != null && filter != null) {
+    final BoolQueryBuilder boolQueryBuilder=new BoolQueryBuilder();
+    boolQueryBuilder.must(query);
+    boolQueryBuilder.filter(filter);
+    query=boolQueryBuilder;
+  }
+  FunctionScoreQueryBuilder functionScoreQueryBuilder=new FunctionScoreQueryBuilder(query,filterFunctionBuilders.toArray(new FunctionScoreQueryBuilder.FilterFunctionBuilder[filterFunctionBuilders.size()]));
+  if (combineFunction != null) {
+    functionScoreQueryBuilder.boostMode(combineFunction);
+  }
+  functionScoreQueryBuilder.scoreMode(scoreMode);
+  functionScoreQueryBuilder.maxBoost(maxBoost);
+  if (minScore != null) {
+    functionScoreQueryBuilder.setMinScore(minScore);
+  }
+  functionScoreQueryBuilder.boost(boost);
+  functionScoreQueryBuilder.queryName(queryName);
+  return functionScoreQueryBuilder;
+}

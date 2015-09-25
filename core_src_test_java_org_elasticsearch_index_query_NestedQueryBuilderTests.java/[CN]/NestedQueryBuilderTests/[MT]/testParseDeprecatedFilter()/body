@@ -1,0 +1,30 @@
+{
+  XContentBuilder builder=XContentFactory.jsonBuilder().prettyPrint();
+  builder.startObject();
+  builder.startObject("nested");
+  builder.startObject("filter");
+  builder.startObject("terms").array(STRING_FIELD_NAME,"a","b").endObject();
+  builder.endObject();
+  builder.field("path","foo.bar");
+  builder.endObject();
+  builder.endObject();
+  QueryShardContext shardContext=createShardContext();
+  QueryParseContext context=shardContext.parseContext();
+  XContentParser parser=XContentFactory.xContent(XContentType.JSON).createParser(builder.string());
+  context.reset(parser);
+  context.parseFieldMatcher(ParseFieldMatcher.STRICT);
+  try {
+    context.parseInnerQueryBuilder();
+    fail("filter is deprecated");
+  }
+ catch (  IllegalArgumentException ex) {
+    assertEquals("Deprecated field [filter] used, replaced by [query]",ex.getMessage());
+  }
+  parser=XContentFactory.xContent(XContentType.JSON).createParser(builder.string());
+  context.reset(parser);
+  NestedQueryBuilder queryBuilder=(NestedQueryBuilder)context.parseInnerQueryBuilder();
+  QueryBuilder query=queryBuilder.query();
+  assertTrue(query instanceof TermsQueryBuilder);
+  TermsQueryBuilder tqb=(TermsQueryBuilder)query;
+  assertEquals(tqb.values(),Arrays.asList("a","b"));
+}

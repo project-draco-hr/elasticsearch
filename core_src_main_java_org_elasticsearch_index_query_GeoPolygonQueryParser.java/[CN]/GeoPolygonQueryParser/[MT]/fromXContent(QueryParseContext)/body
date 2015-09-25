@@ -1,0 +1,81 @@
+{
+  XContentParser parser=parseContext.parser();
+  String fieldName=null;
+  List<GeoPoint> shell=null;
+  Float boost=null;
+  boolean coerce=GeoValidationMethod.DEFAULT_LENIENT_PARSING;
+  boolean ignoreMalformed=GeoValidationMethod.DEFAULT_LENIENT_PARSING;
+  GeoValidationMethod validationMethod=null;
+  String queryName=null;
+  String currentFieldName=null;
+  XContentParser.Token token;
+  while ((token=parser.nextToken()) != XContentParser.Token.END_OBJECT) {
+    if (token == XContentParser.Token.FIELD_NAME) {
+      currentFieldName=parser.currentName();
+    }
+ else     if (parseContext.isDeprecatedSetting(currentFieldName)) {
+    }
+ else     if (token == XContentParser.Token.START_OBJECT) {
+      fieldName=currentFieldName;
+      while ((token=parser.nextToken()) != XContentParser.Token.END_OBJECT) {
+        if (token == XContentParser.Token.FIELD_NAME) {
+          currentFieldName=parser.currentName();
+        }
+ else         if (token == XContentParser.Token.START_ARRAY) {
+          if (parseContext.parseFieldMatcher().match(currentFieldName,POINTS_FIELD)) {
+            shell=new ArrayList<GeoPoint>();
+            while ((token=parser.nextToken()) != Token.END_ARRAY) {
+              shell.add(GeoUtils.parseGeoPoint(parser));
+            }
+          }
+ else {
+            throw new ParsingException(parser.getTokenLocation(),"[geo_polygon] query does not support [" + currentFieldName + "]");
+          }
+        }
+ else {
+          throw new ParsingException(parser.getTokenLocation(),"[geo_polygon] query does not support token type [" + token.name() + "] under ["+ currentFieldName+ "]");
+        }
+      }
+    }
+ else     if (token.isValue()) {
+      if ("_name".equals(currentFieldName)) {
+        queryName=parser.text();
+      }
+ else       if ("boost".equals(currentFieldName)) {
+        boost=parser.floatValue();
+      }
+ else       if (parseContext.parseFieldMatcher().match(currentFieldName,COERCE_FIELD)) {
+        coerce=parser.booleanValue();
+        if (coerce == true) {
+          ignoreMalformed=true;
+        }
+      }
+ else       if (parseContext.parseFieldMatcher().match(currentFieldName,IGNORE_MALFORMED_FIELD)) {
+        ignoreMalformed=parser.booleanValue();
+      }
+ else       if (parseContext.parseFieldMatcher().match(currentFieldName,VALIDATION_METHOD)) {
+        validationMethod=GeoValidationMethod.fromString(parser.text());
+      }
+ else {
+        throw new ParsingException(parser.getTokenLocation(),"[geo_polygon] query does not support [" + currentFieldName + "]");
+      }
+    }
+ else {
+      throw new ParsingException(parser.getTokenLocation(),"[geo_polygon] unexpected token type [" + token.name() + "]");
+    }
+  }
+  GeoPolygonQueryBuilder builder=new GeoPolygonQueryBuilder(fieldName,shell);
+  if (validationMethod != null) {
+    builder.setValidationMethod(validationMethod);
+  }
+ else {
+    builder.setValidationMethod(GeoValidationMethod.infer(coerce,ignoreMalformed));
+  }
+  if (queryName != null) {
+    builder.queryName(queryName);
+  }
+  if (boost != null) {
+    builder.boost(boost);
+  }
+  return builder;
+}

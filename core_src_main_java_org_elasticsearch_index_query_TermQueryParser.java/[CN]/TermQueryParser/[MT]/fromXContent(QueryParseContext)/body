@@ -1,0 +1,68 @@
+{
+  XContentParser parser=parseContext.parser();
+  String queryName=null;
+  String fieldName=null;
+  Object value=null;
+  float boost=AbstractQueryBuilder.DEFAULT_BOOST;
+  String currentFieldName=null;
+  XContentParser.Token token;
+  while ((token=parser.nextToken()) != XContentParser.Token.END_OBJECT) {
+    if (token == XContentParser.Token.FIELD_NAME) {
+      currentFieldName=parser.currentName();
+    }
+ else     if (parseContext.isDeprecatedSetting(currentFieldName)) {
+    }
+ else     if (token == XContentParser.Token.START_OBJECT) {
+      if (fieldName != null) {
+        throw new ParsingException(parser.getTokenLocation(),"[term] query does not support different field names, use [bool] query instead");
+      }
+      fieldName=currentFieldName;
+      while ((token=parser.nextToken()) != XContentParser.Token.END_OBJECT) {
+        if (token == XContentParser.Token.FIELD_NAME) {
+          currentFieldName=parser.currentName();
+        }
+ else {
+          if ("term".equals(currentFieldName)) {
+            value=parser.objectBytes();
+          }
+ else           if ("value".equals(currentFieldName)) {
+            value=parser.objectBytes();
+          }
+ else           if ("_name".equals(currentFieldName)) {
+            queryName=parser.text();
+          }
+ else           if ("boost".equals(currentFieldName)) {
+            boost=parser.floatValue();
+          }
+ else {
+            throw new ParsingException(parser.getTokenLocation(),"[term] query does not support [" + currentFieldName + "]");
+          }
+        }
+      }
+    }
+ else     if (token.isValue()) {
+      if (parseContext.parseFieldMatcher().match(currentFieldName,NAME_FIELD)) {
+        queryName=parser.text();
+      }
+ else       if (parseContext.parseFieldMatcher().match(currentFieldName,BOOST_FIELD)) {
+        boost=parser.floatValue();
+      }
+ else {
+        if (fieldName != null) {
+          throw new ParsingException(parser.getTokenLocation(),"[term] query does not support different field names, use [bool] query instead");
+        }
+        fieldName=currentFieldName;
+        value=parser.objectBytes();
+      }
+    }
+ else     if (token == XContentParser.Token.START_ARRAY) {
+      throw new ParsingException(parser.getTokenLocation(),"[term] query does not support array of values");
+    }
+  }
+  TermQueryBuilder termQuery=new TermQueryBuilder(fieldName,value);
+  termQuery.boost(boost);
+  if (queryName != null) {
+    termQuery.queryName(queryName);
+  }
+  return termQuery;
+}

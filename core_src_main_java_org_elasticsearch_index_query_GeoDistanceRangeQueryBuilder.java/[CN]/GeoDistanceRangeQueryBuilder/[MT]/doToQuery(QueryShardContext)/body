@@ -1,0 +1,44 @@
+{
+  final boolean indexCreatedBeforeV2_0=context.indexVersionCreated().before(Version.V_2_0_0);
+  if (!indexCreatedBeforeV2_0 && !GeoValidationMethod.isIgnoreMalformed(validationMethod)) {
+    if (!GeoUtils.isValidLatitude(point.lat())) {
+      throw new QueryShardException(context,"illegal latitude value [{}] for [{}]",point.lat(),NAME);
+    }
+    if (!GeoUtils.isValidLongitude(point.lon())) {
+      throw new QueryShardException(context,"illegal longitude value [{}] for [{}]",point.lon(),NAME);
+    }
+  }
+  if (GeoValidationMethod.isCoerce(validationMethod)) {
+    GeoUtils.normalizePoint(point,true,true);
+  }
+  Double fromValue=null;
+  Double toValue=null;
+  if (from != null) {
+    if (from instanceof Number) {
+      fromValue=unit.toMeters(((Number)from).doubleValue());
+    }
+ else {
+      fromValue=DistanceUnit.parse((String)from,unit,DistanceUnit.DEFAULT);
+    }
+    fromValue=geoDistance.normalize(fromValue,DistanceUnit.DEFAULT);
+  }
+  if (to != null) {
+    if (to instanceof Number) {
+      toValue=unit.toMeters(((Number)to).doubleValue());
+    }
+ else {
+      toValue=DistanceUnit.parse((String)to,unit,DistanceUnit.DEFAULT);
+    }
+    toValue=geoDistance.normalize(toValue,DistanceUnit.DEFAULT);
+  }
+  MappedFieldType fieldType=context.fieldMapper(fieldName);
+  if (fieldType == null) {
+    throw new QueryShardException(context,"failed to find geo_point field [" + fieldName + "]");
+  }
+  if (!(fieldType instanceof GeoPointFieldMapper.GeoPointFieldType)) {
+    throw new QueryShardException(context,"field [" + fieldName + "] is not a geo_point field");
+  }
+  GeoPointFieldMapper.GeoPointFieldType geoFieldType=((GeoPointFieldMapper.GeoPointFieldType)fieldType);
+  IndexGeoPointFieldData indexFieldData=context.getForField(fieldType);
+  return new GeoDistanceRangeQuery(point,fromValue,toValue,includeLower,includeUpper,geoDistance,geoFieldType,indexFieldData,optimizeBbox);
+}

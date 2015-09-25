@@ -1,0 +1,58 @@
+{
+  XContentParser parser=parseContext.parser();
+  QueryBuilder positiveQuery=null;
+  boolean positiveQueryFound=false;
+  QueryBuilder negativeQuery=null;
+  boolean negativeQueryFound=false;
+  float boost=AbstractQueryBuilder.DEFAULT_BOOST;
+  float negativeBoost=-1;
+  String queryName=null;
+  String currentFieldName=null;
+  XContentParser.Token token;
+  while ((token=parser.nextToken()) != XContentParser.Token.END_OBJECT) {
+    if (token == XContentParser.Token.FIELD_NAME) {
+      currentFieldName=parser.currentName();
+    }
+ else     if (token == XContentParser.Token.START_OBJECT) {
+      if ("positive".equals(currentFieldName)) {
+        positiveQuery=parseContext.parseInnerQueryBuilder();
+        positiveQueryFound=true;
+      }
+ else       if ("negative".equals(currentFieldName)) {
+        negativeQuery=parseContext.parseInnerQueryBuilder();
+        negativeQueryFound=true;
+      }
+ else {
+        throw new ParsingException(parser.getTokenLocation(),"[boosting] query does not support [" + currentFieldName + "]");
+      }
+    }
+ else     if (token.isValue()) {
+      if ("negative_boost".equals(currentFieldName) || "negativeBoost".equals(currentFieldName)) {
+        negativeBoost=parser.floatValue();
+      }
+ else       if ("_name".equals(currentFieldName)) {
+        queryName=parser.text();
+      }
+ else       if ("boost".equals(currentFieldName)) {
+        boost=parser.floatValue();
+      }
+ else {
+        throw new ParsingException(parser.getTokenLocation(),"[boosting] query does not support [" + currentFieldName + "]");
+      }
+    }
+  }
+  if (!positiveQueryFound) {
+    throw new ParsingException(parser.getTokenLocation(),"[boosting] query requires 'positive' query to be set'");
+  }
+  if (!negativeQueryFound) {
+    throw new ParsingException(parser.getTokenLocation(),"[boosting] query requires 'negative' query to be set'");
+  }
+  if (negativeBoost < 0) {
+    throw new ParsingException(parser.getTokenLocation(),"[boosting] query requires 'negative_boost' to be set to be a positive value'");
+  }
+  BoostingQueryBuilder boostingQuery=new BoostingQueryBuilder(positiveQuery,negativeQuery);
+  boostingQuery.negativeBoost(negativeBoost);
+  boostingQuery.boost(boost);
+  boostingQuery.queryName(queryName);
+  return boostingQuery;
+}
