@@ -1,5 +1,5 @@
 {
-  String port=settings.get("port");
+  String port=profileSettings.get("port");
   PortsRange portsRange=new PortsRange(port);
   final AtomicReference<Exception> lastException=new AtomicReference<>();
   final AtomicReference<InetSocketAddress> boundSocket=new AtomicReference<>();
@@ -28,12 +28,37 @@ synchronized (serverChannels) {
   if (!success) {
     throw new BindTransportException("Failed to bind to [" + port + "]",lastException.get());
   }
+  InetSocketAddress boundAddress=boundSocket.get();
   if (!DEFAULT_PROFILE.equals(name)) {
-    InetSocketAddress boundAddress=boundSocket.get();
-    int publishPort=settings.getAsInt("publish_port",boundAddress.getPort());
-    String publishHost=settings.get("publish_host",boundAddress.getHostString());
-    InetSocketAddress publishAddress=createPublishAddress(publishHost,publishPort);
-    profileBoundAddresses.putIfAbsent(name,new BoundTransportAddress(new InetSocketTransportAddress(boundAddress),new InetSocketTransportAddress(publishAddress)));
+    BoundTransportAddress boundTransportAddress=profileBoundAddresses().get(name);
+    if (boundTransportAddress == null) {
+      int publishPort=profileSettings.getAsInt("publish_port",boundAddress.getPort());
+      String publishHost=profileSettings.get("publish_host",boundAddress.getHostString());
+      InetSocketAddress publishAddress=createPublishAddress(publishHost,publishPort);
+      profileBoundAddresses.put(name,new BoundTransportAddress(new TransportAddress[]{new InetSocketTransportAddress(boundAddress)},new InetSocketTransportAddress(publishAddress)));
+    }
+ else {
+      TransportAddress[] existingBoundAddress=boundTransportAddress.boundAddresses();
+      TransportAddress[] updatedBoundAddresses=Arrays.copyOf(existingBoundAddress,existingBoundAddress.length + 1);
+      updatedBoundAddresses[updatedBoundAddresses.length - 1]=new InetSocketTransportAddress(boundAddress);
+      profileBoundAddresses.put(name,new BoundTransportAddress(updatedBoundAddresses,boundTransportAddress.publishAddress()));
+    }
   }
-  logger.info("Bound profile [{}] to address {{}}",name,NetworkAddress.format(boundSocket.get()));
+ else {
+    if (this.boundAddress == null) {
+      int publishPort=settings.getAsInt("transport.netty.publish_port",settings.getAsInt("transport.publish_port",boundAddress.getPort()));
+      String publishHost=settings.get("transport.netty.publish_host",settings.get("transport.publish_host",settings.get("transport.host")));
+      InetSocketAddress publishAddress=createPublishAddress(publishHost,publishPort);
+      this.boundAddress=new BoundTransportAddress(new TransportAddress[]{new InetSocketTransportAddress(boundAddress)},new InetSocketTransportAddress(publishAddress));
+    }
+ else {
+      TransportAddress[] existingBoundAddress=this.boundAddress.boundAddresses();
+      TransportAddress[] updatedBoundAddresses=Arrays.copyOf(existingBoundAddress,existingBoundAddress.length + 1);
+      updatedBoundAddresses[updatedBoundAddresses.length - 1]=new InetSocketTransportAddress(boundAddress);
+      this.boundAddress=new BoundTransportAddress(updatedBoundAddresses,this.boundAddress.publishAddress());
+    }
+  }
+  if (logger.isDebugEnabled()) {
+    logger.debug("Bound profile [{}] to address {{}}",name,NetworkAddress.format(boundSocket.get()));
+  }
 }

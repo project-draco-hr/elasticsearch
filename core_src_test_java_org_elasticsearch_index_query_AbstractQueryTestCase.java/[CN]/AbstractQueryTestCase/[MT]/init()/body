@@ -11,7 +11,34 @@
       bindQueryParsersExtension();
     }
   }
-,new ScriptModule(settings),new IndexSettingsModule(index,indexSettings),new IndexCacheModule(indexSettings),new AnalysisModule(indexSettings,new IndicesAnalysisService(indexSettings)),new SimilarityModule(indexSettings),new IndexNameModule(index),new AbstractModule(){
+,new ScriptModule(settings){
+    @Override protected void configure(){
+      Settings settings=Settings.builder().put("path.home",createTempDir()).put(ScriptService.SCRIPT_AUTO_RELOAD_ENABLED_SETTING,false).build();
+      MockScriptEngine mockScriptEngine=new MockScriptEngine();
+      Multibinder<ScriptEngineService> multibinder=Multibinder.newSetBinder(binder(),ScriptEngineService.class);
+      multibinder.addBinding().toInstance(mockScriptEngine);
+      try {
+        Class.forName("com.github.mustachejava.Mustache");
+      }
+ catch (      ClassNotFoundException e) {
+        throw new IllegalStateException("error while loading mustache",e);
+      }
+      MustacheScriptEngineService mustacheScriptEngineService=new MustacheScriptEngineService(settings);
+      Set<ScriptEngineService> engines=new HashSet<>();
+      engines.add(mockScriptEngine);
+      engines.add(mustacheScriptEngineService);
+      List<ScriptContext.Plugin> customContexts=new ArrayList<>();
+      bind(ScriptContextRegistry.class).toInstance(new ScriptContextRegistry(customContexts));
+      try {
+        ScriptService scriptService=new ScriptService(settings,new Environment(settings),engines,null,new ScriptContextRegistry(customContexts));
+        bind(ScriptService.class).toInstance(scriptService);
+      }
+ catch (      IOException e) {
+        throw new IllegalStateException("error while binding ScriptService",e);
+      }
+    }
+  }
+,new IndexSettingsModule(index,indexSettings),new IndexCacheModule(indexSettings),new AnalysisModule(indexSettings,new IndicesAnalysisService(indexSettings)),new SimilarityModule(indexSettings),new IndexNameModule(index),new AbstractModule(){
     @Override protected void configure(){
       bind(Client.class).toInstance(proxy);
       Multibinder.newSetBinder(binder(),ScoreFunctionParser.class);
