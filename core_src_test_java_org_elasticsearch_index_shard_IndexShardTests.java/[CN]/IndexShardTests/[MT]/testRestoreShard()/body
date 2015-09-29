@@ -1,0 +1,52 @@
+{
+  createIndex("test");
+  createIndex("test_target");
+  ensureGreen();
+  IndicesService indicesService=getInstanceFromNode(IndicesService.class);
+  IndexService test=indicesService.indexService("test");
+  IndexService test_target=indicesService.indexService("test_target");
+  final IndexShard test_shard=test.shard(0);
+  client().prepareIndex("test","test","0").setSource("{}").setRefresh(randomBoolean()).get();
+  client().prepareIndex("test_target","test","1").setSource("{}").setRefresh(true).get();
+  assertHitCount(client().prepareSearch("test_target").get(),1);
+  assertSearchHits(client().prepareSearch("test_target").get(),"1");
+  client().admin().indices().prepareFlush("test").get();
+  final ShardRouting origRouting=test_target.shard(0).routingEntry();
+  ShardRouting routing=new ShardRouting(origRouting);
+  ShardRoutingHelper.reinit(routing);
+  routing=ShardRoutingHelper.newWithRestoreSource(routing,new RestoreSource(new SnapshotId("foo","bar"),Version.CURRENT,"test"));
+  test_target.removeShard(0,"just do it man!");
+  final IndexShard test_target_shard=test_target.createShard(0,routing);
+  Store sourceStore=test_shard.store();
+  Store targetStore=test_target_shard.store();
+  test_target_shard.updateRoutingEntry(routing,false);
+  assertTrue(test_target_shard.restoreFromRepository(routing,new IndexShardRepository(){
+    @Override public void snapshot(    SnapshotId snapshotId,    ShardId shardId,    IndexCommit snapshotIndexCommit,    IndexShardSnapshotStatus snapshotStatus){
+    }
+    @Override public void restore(    SnapshotId snapshotId,    Version version,    ShardId shardId,    ShardId snapshotShardId,    RecoveryState recoveryState){
+      try {
+        Lucene.cleanLuceneIndex(targetStore.directory());
+        for (        String file : sourceStore.directory().listAll()) {
+          if (file.equals("write.lock") || file.startsWith("extra")) {
+            continue;
+          }
+          targetStore.directory().copyFrom(sourceStore.directory(),file,file,IOContext.DEFAULT);
+        }
+      }
+ catch (      Exception ex) {
+        throw new RuntimeException(ex);
+      }
+    }
+    @Override public IndexShardSnapshotStatus snapshotStatus(    SnapshotId snapshotId,    Version version,    ShardId shardId){
+      return null;
+    }
+    @Override public void verify(    String verificationToken){
+    }
+  }
+));
+  routing=new ShardRouting(routing);
+  ShardRoutingHelper.moveToStarted(routing);
+  test_target_shard.updateRoutingEntry(routing,true);
+  assertHitCount(client().prepareSearch("test_target").get(),1);
+  assertSearchHits(client().prepareSearch("test_target").get(),"0");
+}
