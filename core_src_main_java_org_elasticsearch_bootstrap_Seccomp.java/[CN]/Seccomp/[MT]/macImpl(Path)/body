@@ -1,0 +1,32 @@
+{
+  boolean supported=Constants.MAC_OS_X;
+  if (supported == false) {
+    throw new IllegalStateException("bug: should not be trying to initialize seccomp for an unsupported OS");
+  }
+  if (libc_mac == null) {
+    throw new UnsupportedOperationException("seatbelt unavailable: could not link methods. requires Leopard or above.");
+  }
+  Path rules=Files.createTempFile(tmpFile,"es","sb");
+  Files.write(rules,Collections.singleton(SANDBOX_RULES));
+  boolean success=false;
+  try {
+    PointerByReference errorRef=new PointerByReference();
+    int ret=libc_mac.sandbox_init(rules.toAbsolutePath().toString(),SANDBOX_NAMED,errorRef);
+    if (ret != 0) {
+      Pointer errorBuf=errorRef.getValue();
+      RuntimeException e=new UnsupportedOperationException("sandbox_init(): " + errorBuf.getString(0));
+      libc_mac.sandbox_free_error(errorBuf);
+      throw e;
+    }
+    logger.debug("OS X seatbelt initialization successful");
+    success=true;
+  }
+  finally {
+    if (success) {
+      Files.delete(rules);
+    }
+ else {
+      IOUtils.deleteFilesIgnoringExceptions(rules);
+    }
+  }
+}
