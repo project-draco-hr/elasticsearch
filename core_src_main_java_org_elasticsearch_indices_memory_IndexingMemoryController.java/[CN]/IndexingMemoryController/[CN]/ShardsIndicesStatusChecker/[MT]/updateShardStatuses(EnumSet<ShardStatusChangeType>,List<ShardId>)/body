@@ -1,0 +1,32 @@
+{
+  int activeShards=0;
+  for (  ShardId shardId : availableShards()) {
+    final ShardIndexingStatus currentStatus=getTranslogStatus(shardId);
+    if (currentStatus == null) {
+      continue;
+    }
+    ShardIndexingStatus status=shardsIndicesStatus.get(shardId);
+    if (status == null) {
+      status=currentStatus;
+      shardsIndicesStatus.put(shardId,status);
+      changes.add(ShardStatusChangeType.ADDED);
+    }
+ else {
+      final boolean lastActiveIndexing=status.activeIndexing;
+      status.updateWith(currentTimeInNanos(),currentStatus,inactiveTime.nanos());
+      if (lastActiveIndexing && (status.activeIndexing == false)) {
+        activeToInactiveIndexingShards.add(shardId);
+        changes.add(ShardStatusChangeType.BECAME_INACTIVE);
+        logger.debug("marking shard {} as inactive (inactive_time[{}]) indexing wise, setting size to [{}]",shardId,inactiveTime,EngineConfig.INACTIVE_SHARD_INDEXING_BUFFER);
+      }
+ else       if ((lastActiveIndexing == false) && status.activeIndexing) {
+        changes.add(ShardStatusChangeType.BECAME_ACTIVE);
+        logger.debug("marking shard {} as active indexing wise",shardId);
+      }
+    }
+    if (status.activeIndexing) {
+      activeShards++;
+    }
+  }
+  return activeShards;
+}
