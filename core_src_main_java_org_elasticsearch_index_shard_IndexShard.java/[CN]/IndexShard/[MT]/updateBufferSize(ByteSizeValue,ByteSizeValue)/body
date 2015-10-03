@@ -5,21 +5,20 @@
   Engine engine=engineUnsafe();
   if (engine == null) {
     logger.debug("updateBufferSize: engine is closed; skipping");
-    return;
+    return false;
   }
   if (preValue.bytes() != shardIndexingBufferSize.bytes()) {
     engine.onSettingsChanged();
-    if (shardIndexingBufferSize == EngineConfig.INACTIVE_SHARD_INDEXING_BUFFER) {
-      logger.debug("updating index_buffer_size from [{}] to (inactive) [{}]",preValue,shardIndexingBufferSize);
+    logger.debug("updating index_buffer_size from [{}] to [{}]",preValue,shardIndexingBufferSize);
+    long iwBytesUsed=engine.indexWriterRAMBytesUsed();
+    if (shardIndexingBufferSize.bytes() < iwBytesUsed) {
+      logger.debug("refresh because index buffer decreased to [{}] and IndexWriter is now using [{}] bytes",shardIndexingBufferSize,iwBytesUsed);
       try {
         refresh("update index buffer");
       }
  catch (      Throwable e) {
-        logger.warn("failed to refresh after setting shard to inactive",e);
+        logger.warn("failed to refresh after decreasing index buffer",e);
       }
-    }
- else {
-      logger.debug("updating index_buffer_size from [{}] to [{}]",preValue,shardIndexingBufferSize);
     }
   }
   engine.getTranslog().updateBuffer(shardTranslogBufferSize);
