@@ -1,0 +1,22 @@
+{
+  try (ReleasableLock lock=readLock.acquire()){
+    ensureOpen();
+    if (get.realtime()) {
+      VersionValue versionValue=versionMap.getUnderLock(get.uid().bytes());
+      if (versionValue != null) {
+        if (versionValue.delete()) {
+          return GetResult.NOT_EXISTS;
+        }
+        if (get.versionType().isVersionConflictForReads(versionValue.version(),get.version())) {
+          Uid uid=Uid.createUid(get.uid().text());
+          throw new VersionConflictEngineException(shardId,uid.type(),uid.id(),versionValue.version(),get.version());
+        }
+        Translog.Operation op=translog.read(versionValue.translogLocation());
+        if (op != null) {
+          return new GetResult(true,versionValue.version(),op.getSource());
+        }
+      }
+    }
+    return getFromSearcher(get,searcherFactory);
+  }
+ }
