@@ -1,15 +1,24 @@
 {
-  Map<String,Pipeline> pipelines=new HashMap<>();
-  SearchResponse searchResponse=client.prepareSearch(INDEX).setScroll(TimeValue.timeValueMinutes(1)).addSort("_doc",SortOrder.ASC).setIndicesOptions(IndicesOptions.lenientExpandOpen()).get();
-  logger.info("Loading [{}] pipelines",searchResponse.getHits().totalHits());
-  do {
-    for (    SearchHit hit : searchResponse.getHits()) {
-      logger.info("Loading pipeline [{}] with source [{}]",hit.getId(),hit.sourceAsString());
-      Pipeline.Builder builder=new Pipeline.Builder(hit.sourceAsMap());
-      pipelines.put(hit.getId(),builder.build());
+  int changed=0;
+  Map<String,PipelineReference> newPipelines=new HashMap<>(pipelines);
+  for (  SearchHit hit : configDocReader.readAll()) {
+    String pipelineId=hit.getId();
+    BytesReference pipelineSource=hit.getSourceRef();
+    PipelineReference previous=newPipelines.get(pipelineId);
+    if (previous != null) {
+      if (previous.getSource().equals(pipelineSource)) {
+        continue;
+      }
     }
-    searchResponse=client.prepareSearchScroll(searchResponse.getScrollId()).get();
+    changed++;
+    Pipeline.Builder builder=new Pipeline.Builder(hit.sourceAsMap(),processorFactoryRegistry);
+    newPipelines.put(pipelineId,new PipelineReference(builder.build(),hit.getVersion(),pipelineSource));
   }
- while (searchResponse.getHits().getHits().length != 0);
-  PipelineStore.this.pipelines=PipelineStore.this.pipelines.copyAndPutAll(pipelines);
+  if (changed != 0) {
+    logger.debug("adding or updating [{}] pipelines",changed);
+    pipelines=newPipelines;
+  }
+ else {
+    logger.debug("adding no new pipelines");
+  }
 }
