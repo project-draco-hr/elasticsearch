@@ -1,34 +1,17 @@
 {
-  Version version=randomBoolean() ? Version.CURRENT : VersionUtils.randomVersionBetween(random(),Version.V_2_0_0_beta1,Version.CURRENT);
-  Settings settings=Settings.settingsBuilder().put("name",AbstractQueryTestCase.class.toString()).put("path.home",createTempDir()).build();
-  Settings indexSettings=Settings.settingsBuilder().put(IndexMetaData.SETTING_VERSION_CREATED,version).build();
-  index=new Index(randomAsciiOfLengthBetween(1,10));
-  final TestClusterService clusterService=new TestClusterService();
-  clusterService.setState(new ClusterState.Builder(clusterService.state()).metaData(new MetaData.Builder().put(new IndexMetaData.Builder(index.name()).settings(indexSettings).numberOfShards(1).numberOfReplicas(0))));
-  final Client proxy=(Client)Proxy.newProxyInstance(Client.class.getClassLoader(),new Class[]{Client.class},clientInvocationHandler);
-  injector=new ModulesBuilder().add(new EnvironmentModule(new Environment(settings)),new SettingsModule(settings),new ThreadPoolModule(new ThreadPool(settings)),new IndicesModule(settings){
+  Settings settings=Settings.settingsBuilder().put("name",SearchSourceBuilderTests.class.toString()).put("path.home",createTempDir()).build();
+  injector=new ModulesBuilder().add(new SettingsModule(settings),new ThreadPoolModule(new ThreadPool(settings)),new IndicesModule(settings){
     @Override public void configure(){
       bindQueryParsersExtension();
     }
   }
-,new ScriptModule(settings),new IndexSettingsModule(index,indexSettings),new IndexCacheModule(indexSettings),new AnalysisModule(indexSettings,new IndicesAnalysisService(indexSettings)),new SimilarityModule(indexSettings),new IndexNameModule(index),new AbstractModule(){
+,new AbstractModule(){
     @Override protected void configure(){
-      bind(Client.class).toInstance(proxy);
       Multibinder.newSetBinder(binder(),ScoreFunctionParser.class);
-      bind(ClusterService.class).toProvider(Providers.of(clusterService));
-      bind(CircuitBreakerService.class).to(NoneCircuitBreakerService.class);
       bind(NamedWriteableRegistry.class).asEagerSingleton();
     }
   }
 ).createInjector();
-  queryParserService=injector.getInstance(IndexQueryParserService.class);
-  MapperService mapperService=injector.getInstance(MapperService.class);
-  currentTypes=new String[randomIntBetween(0,5)];
-  for (int i=0; i < currentTypes.length; i++) {
-    String type=randomAsciiOfLengthBetween(1,10);
-    mapperService.merge(type,new CompressedXContent(PutMappingRequest.buildFromSimplifiedDef(type,STRING_FIELD_NAME,"type=string",STRING_FIELD_NAME_2,"type=string",INT_FIELD_NAME,"type=integer",DOUBLE_FIELD_NAME,"type=double",BOOLEAN_FIELD_NAME,"type=boolean",DATE_FIELD_NAME,"type=date",OBJECT_FIELD_NAME,"type=object",GEO_POINT_FIELD_NAME,"type=geo_point,lat_lon=true,geohash=true,geohash_prefix=true",GEO_SHAPE_FIELD_NAME,"type=geo_shape").string()),false,false);
-    mapperService.merge(type,new CompressedXContent("{\"properties\":{\"" + OBJECT_FIELD_NAME + "\":{\"type\":\"object\","+ "\"properties\":{\""+ DATE_FIELD_NAME+ "\":{\"type\":\"date\"},\""+ INT_FIELD_NAME+ "\":{\"type\":\"integer\"}}}}}"),false,false);
-    currentTypes[i]=type;
-  }
+  indicesQueriesRegistry=injector.getInstance(IndicesQueriesRegistry.class);
   namedWriteableRegistry=injector.getInstance(NamedWriteableRegistry.class);
 }
