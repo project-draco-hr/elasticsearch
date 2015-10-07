@@ -1,0 +1,27 @@
+{
+  if (!requests.hasNext()) {
+    chain.proceed(action,bulkRequest,listener);
+    return;
+  }
+  ActionRequest actionRequest=requests.next();
+  if (!(actionRequest instanceof IndexRequest)) {
+    processBulkIndexRequest(action,listener,chain,bulkRequest,pipelineId,requests);
+    return;
+  }
+  IndexRequest indexRequest=(IndexRequest)actionRequest;
+  Map<String,Object> sourceAsMap=indexRequest.sourceAsMap();
+  Data data=new Data(indexRequest.index(),indexRequest.type(),indexRequest.id(),sourceAsMap);
+  executionService.execute(data,pipelineId,new PipelineExecutionService.Listener(){
+    @Override public void executed(    Data data){
+      if (data.isModified()) {
+        indexRequest.source(data.getDocument());
+      }
+      processBulkIndexRequest(action,listener,chain,bulkRequest,pipelineId,requests);
+    }
+    @Override public void failed(    Exception e){
+      logger.error("failed to execute pipeline [{}]",e,pipelineId);
+      listener.onFailure(e);
+    }
+  }
+);
+}
