@@ -1,0 +1,31 @@
+{
+  Request request=new Request().index("test").timeout(new TimeValue(0,TimeUnit.MILLISECONDS));
+  request.shardId=0;
+  PlainActionFuture<Response> listener=new PlainActionFuture<>();
+  clusterService.setState(ClusterStateCreationUtils.state("test",randomBoolean(),ShardRoutingState.STARTED));
+  action.new AsyncSingleAction(request,listener).start();
+  assertThat(transport.capturedRequests().length,equalTo(1));
+  long requestId=transport.capturedRequests()[0].requestId;
+  transport.clear();
+  DiscoveryNode node=clusterService.state().getNodes().getLocalNode();
+  transport.handleResponse(requestId,new ConnectTransportException(node,"test exception"));
+  assertBusy(new Runnable(){
+    @Override public void run(){
+      assertThat(transport.capturedRequests().length,equalTo(1));
+    }
+  }
+);
+  requestId=transport.capturedRequests()[0].requestId;
+  transport.handleResponse(requestId,new ConnectTransportException(node,"test exception"));
+  try {
+    assertTrue(listener.isDone());
+    listener.get();
+    fail("this should fail with a transport exception");
+  }
+ catch (  ExecutionException t) {
+    if (ExceptionsHelper.unwrap(t,ConnectTransportException.class) == null) {
+      logger.info("expected ConnectTransportException  but got ",t);
+      fail("expected and ConnectTransportException");
+    }
+  }
+}
