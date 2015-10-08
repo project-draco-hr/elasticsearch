@@ -1,0 +1,25 @@
+{
+  super(index,indexSettings);
+  Map<String,SimilarityProvider> providers=new HashMap<>(similarities.size());
+  Map<String,Settings> similaritySettings=indexSettings.getGroups(SimilarityModule.SIMILARITY_SETTINGS_PREFIX);
+  for (  Map.Entry<String,Settings> entry : similaritySettings.entrySet()) {
+    String name=entry.getKey();
+    Settings settings=entry.getValue();
+    String typeName=settings.get("type");
+    if (typeName == null) {
+      throw new IllegalArgumentException("Similarity [" + name + "] must have an associated type");
+    }
+ else     if ((similarities.containsKey(typeName) || BUILT_IN.containsKey(typeName)) == false) {
+      throw new IllegalArgumentException("Unknown Similarity type [" + typeName + "] for ["+ name+ "]");
+    }
+    BiFunction<String,Settings,SimilarityProvider> factory=similarities.getOrDefault(typeName,BUILT_IN.get(typeName));
+    if (settings == null) {
+      settings=Settings.Builder.EMPTY_SETTINGS;
+    }
+    providers.put(name,factory.apply(name,settings));
+  }
+  addSimilarities(similaritySettings,providers,DEFAULTS);
+  this.similarities=providers;
+  defaultSimilarity=providers.get(SimilarityService.DEFAULT_SIMILARITY).get();
+  baseSimilarity=(providers.get("base") != null) ? providers.get("base").get() : defaultSimilarity;
+}
