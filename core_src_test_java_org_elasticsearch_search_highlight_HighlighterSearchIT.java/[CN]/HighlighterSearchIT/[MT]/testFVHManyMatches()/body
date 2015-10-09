@@ -5,9 +5,13 @@
   String value=new String(new char[1024 * 256 / pattern.length()]).replace("\0",pattern);
   client().prepareIndex("test","type1").setSource("field1",value).get();
   refresh();
-  logger.info("--> highlighting and searching on field1");
+  logger.info("--> highlighting and searching on field1 with default phrase limit");
   SearchSourceBuilder source=searchSource().query(termQuery("field1","t")).highlighter(highlight().highlighterType("fvh").field("field1",20,1).order("score").preTags("<xxx>").postTags("</xxx>"));
-  SearchResponse searchResponse=client().search(searchRequest("test").source(source)).actionGet();
-  assertHighlight(searchResponse,0,"field1",0,1,containsString("<xxx>t</xxx>"));
-  logger.info("--> done");
+  SearchResponse defaultPhraseLimit=client().search(searchRequest("test").source(source)).actionGet();
+  assertHighlight(defaultPhraseLimit,0,"field1",0,1,containsString("<xxx>t</xxx>"));
+  logger.info("--> highlighting and searching on field1 with large phrase limit");
+  source=searchSource().query(termQuery("field1","t")).highlighter(highlight().highlighterType("fvh").field("field1",20,1).order("score").preTags("<xxx>").postTags("</xxx>").phraseLimit(30000));
+  SearchResponse largePhraseLimit=client().search(searchRequest("test").source(source)).actionGet();
+  assertHighlight(largePhraseLimit,0,"field1",0,1,containsString("<xxx>t</xxx>"));
+  assertThat(defaultPhraseLimit.getTookInMillis(),lessThan(largePhraseLimit.getTookInMillis()));
 }
