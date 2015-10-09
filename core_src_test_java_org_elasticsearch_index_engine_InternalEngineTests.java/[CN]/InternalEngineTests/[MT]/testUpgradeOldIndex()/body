@@ -8,10 +8,6 @@
    Collections.shuffle(indexes,random());
   for (  Path indexFile : indexes.subList(0,scaledRandomIntBetween(1,indexes.size() / 2))) {
     final String indexName=indexFile.getFileName().toString().replace(".zip","").toLowerCase(Locale.ROOT);
-    Version version=Version.fromString(indexName.replace("index-",""));
-    if (version.onOrAfter(Version.V_2_0_0_beta1)) {
-      continue;
-    }
     Path unzipDir=createTempDir();
     Path unzipDataDir=unzipDir.resolve("data");
     try (InputStream stream=Files.newInputStream(indexFile)){
@@ -27,10 +23,9 @@
     assertTrue("[" + indexFile + "] missing index dir: "+ src.toString(),Files.exists(src));
     assertTrue("[" + indexFile + "] missing translog dir: "+ translog.toString(),Files.exists(translog));
     Path[] tlogFiles=filterExtraFSFiles(FileSystemUtils.files(translog));
-    assertEquals(Arrays.toString(tlogFiles),tlogFiles.length,1);
+    assertEquals(Arrays.toString(tlogFiles),tlogFiles.length,2);
+    Path tlogFile=tlogFiles[0].getFileName().toString().endsWith("tlog") ? tlogFiles[0] : tlogFiles[1];
     final long size=Files.size(tlogFiles[0]);
-    final long generation=TranslogTests.parseLegacyTranslogFile(tlogFiles[0]);
-    assertTrue(generation >= 1);
     logger.debug("upgrading index {} file: {} size: {}",indexName,tlogFiles[0].getFileName(),size);
     Directory directory=newFSDirectory(src.resolve("0").resolve("index"));
     Store store=createStore(directory);
@@ -62,8 +57,8 @@
       final int numExtraDocs=randomIntBetween(1,10);
       for (int i=0; i < numExtraDocs; i++) {
         ParsedDocument doc=testParsedDocument("extra" + Integer.toString(i),"extra" + Integer.toString(i),"test",null,-1,-1,testDocument(),new BytesArray("{}"),null);
-        Engine.Create firstIndexRequest=new Engine.Create(newUid(Integer.toString(i)),doc,Versions.MATCH_ANY,VersionType.INTERNAL,PRIMARY,System.nanoTime());
-        engine.create(firstIndexRequest);
+        Engine.Index firstIndexRequest=new Engine.Index(newUid(Integer.toString(i)),doc,Versions.MATCH_DELETED,VersionType.INTERNAL,PRIMARY,System.nanoTime());
+        engine.index(firstIndexRequest);
         assertThat(firstIndexRequest.version(),equalTo(1l));
       }
       engine.refresh("test");
