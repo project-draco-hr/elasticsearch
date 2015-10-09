@@ -28,7 +28,7 @@
       copyBinDirectory(sourcePluginBinDirectory,destPluginBinDirectory,pluginHandle.name,terminal);
     }
  catch (    IOException e) {
-      terminal.printError("Error copying bin directory [%s] to [%s], cleaning up, reason: %s",sourcePluginBinDirectory,destPluginBinDirectory,e.getMessage());
+      terminal.printError("Error copying bin directory [%s] to [%s], cleaning up, reason: %s",sourcePluginBinDirectory,destPluginBinDirectory,ExceptionsHelper.detailedMessage(e));
       tryToDeletePath(terminal,extractLocation,pluginHandle.binDir(environment));
       throw e;
     }
@@ -44,12 +44,52 @@
     try {
       terminal.println(VERBOSE,"Found config, moving to %s",destConfigDirectory.toAbsolutePath());
       moveFilesWithoutOverwriting(sourceConfigDirectory,destConfigDirectory,".new");
-      terminal.println(VERBOSE,"Installed %s into %s",pluginHandle.name,destConfigDirectory.toAbsolutePath());
+      if (Environment.getFileStore(destConfigDirectory).supportsFileAttributeView(PosixFileAttributeView.class)) {
+        PosixFileAttributes parentDirAttributes=Files.getFileAttributeView(destConfigDirectory.getParent(),PosixFileAttributeView.class).readAttributes();
+        Set<PosixFilePermission> baseFilePermissions=new HashSet<>();
+        for (        PosixFilePermission posixFilePermission : parentDirAttributes.permissions()) {
+switch (posixFilePermission) {
+case OWNER_EXECUTE:
+case GROUP_EXECUTE:
+case OTHERS_EXECUTE:
+            break;
+default :
+          baseFilePermissions.add(posixFilePermission);
+      }
     }
- catch (    IOException e) {
-      terminal.printError("Error copying config directory [%s] to [%s], cleaning up, reason: %s",sourceConfigDirectory,destConfigDirectory,e.getMessage());
-      tryToDeletePath(terminal,extractLocation,destPluginBinDirectory,destConfigDirectory);
-      throw e;
+    Files.walkFileTree(destConfigDirectory,new SimpleFileVisitor<Path>(){
+      @Override public FileVisitResult visitFile(      Path file,      BasicFileAttributes attrs) throws IOException {
+        if (attrs.isRegularFile()) {
+          Set<PosixFilePermission> newFilePermissions=new HashSet<>(baseFilePermissions);
+          Set<PosixFilePermission> currentFilePermissions=Files.getPosixFilePermissions(file);
+          for (          PosixFilePermission posixFilePermission : currentFilePermissions) {
+switch (posixFilePermission) {
+case OWNER_EXECUTE:
+case GROUP_EXECUTE:
+case OTHERS_EXECUTE:
+              newFilePermissions.add(posixFilePermission);
+          }
+        }
+        setPosixFileAttributes(file,parentDirAttributes.owner(),parentDirAttributes.group(),newFilePermissions);
+      }
+      return FileVisitResult.CONTINUE;
+    }
+    @Override public FileVisitResult preVisitDirectory(    Path dir,    BasicFileAttributes attrs) throws IOException {
+      setPosixFileAttributes(dir,parentDirAttributes.owner(),parentDirAttributes.group(),parentDirAttributes.permissions());
+      return FileVisitResult.CONTINUE;
     }
   }
+);
+}
+ else {
+  terminal.println(VERBOSE,"Skipping posix permissions - filestore doesn't support posix permission");
+}
+terminal.println(VERBOSE,"Installed %s into %s",pluginHandle.name,destConfigDirectory.toAbsolutePath());
+}
+ catch (IOException e) {
+terminal.printError("Error copying config directory [%s] to [%s], cleaning up, reason: %s",sourceConfigDirectory,destConfigDirectory,ExceptionsHelper.detailedMessage(e));
+tryToDeletePath(terminal,extractLocation,destPluginBinDirectory,destConfigDirectory);
+throw e;
+}
+}
 }
