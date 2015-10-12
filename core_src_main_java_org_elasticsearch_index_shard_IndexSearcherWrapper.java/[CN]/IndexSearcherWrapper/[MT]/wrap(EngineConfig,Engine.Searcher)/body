@@ -1,0 +1,31 @@
+{
+  final ElasticsearchDirectoryReader elasticsearchDirectoryReader=ElasticsearchDirectoryReader.getElasticsearchDirectoryReader(engineSearcher.reader());
+  if (elasticsearchDirectoryReader == null) {
+    throw new IllegalStateException("Can't wrap non elasticsearch directory reader");
+  }
+  DirectoryReader reader=wrap((DirectoryReader)engineSearcher.reader());
+  IndexSearcher innerIndexSearcher=new IndexSearcher(new CacheFriendlyReaderWrapper(reader,elasticsearchDirectoryReader));
+  innerIndexSearcher.setQueryCache(engineConfig.getQueryCache());
+  innerIndexSearcher.setQueryCachingPolicy(engineConfig.getQueryCachingPolicy());
+  innerIndexSearcher.setSimilarity(engineConfig.getSimilarity());
+  IndexSearcher indexSearcher=wrap(engineConfig,innerIndexSearcher);
+  if (reader == engineSearcher.reader() && indexSearcher == innerIndexSearcher) {
+    return engineSearcher;
+  }
+ else {
+    return new Engine.Searcher(engineSearcher.source(),indexSearcher){
+      @Override public void close() throws ElasticsearchException {
+        try {
+          reader().close();
+        }
+ catch (        IOException e) {
+          throw new ElasticsearchException("failed to close reader",e);
+        }
+ finally {
+          engineSearcher.close();
+        }
+      }
+    }
+;
+  }
+}
