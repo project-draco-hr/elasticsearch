@@ -1,2 +1,41 @@
 {
+  final ElasticsearchDirectoryReader elasticsearchDirectoryReader=ElasticsearchDirectoryReader.getElasticsearchDirectoryReader(engineSearcher.getDirectoryReader());
+  if (elasticsearchDirectoryReader == null) {
+    throw new IllegalStateException("Can't wrap non elasticsearch directory reader");
+  }
+  NonClosingReaderWrapper nonClosingReaderWrapper=new NonClosingReaderWrapper(engineSearcher.getDirectoryReader());
+  DirectoryReader reader=wrap(nonClosingReaderWrapper);
+  if (reader != nonClosingReaderWrapper) {
+    if (reader.getCoreCacheKey() != elasticsearchDirectoryReader.getCoreCacheKey()) {
+      throw new IllegalStateException("wrapped directory reader doesn't delegate IndexReader#getCoreCacheKey, wrappers must override this method and delegate" + " to the original readers core cache key. Wrapped readers can't used as cache keys since their are used only per request which would lead to subtile bugs");
+    }
+    if (ElasticsearchDirectoryReader.getElasticsearchDirectoryReader(reader) != elasticsearchDirectoryReader) {
+      throw new IllegalStateException("wrapped directory reader hides actual ElasticsearchDirectoryReader but shouldn't");
+    }
+  }
+  IndexSearcher innerIndexSearcher=new IndexSearcher(reader);
+  innerIndexSearcher.setQueryCache(engineConfig.getQueryCache());
+  innerIndexSearcher.setQueryCachingPolicy(engineConfig.getQueryCachingPolicy());
+  innerIndexSearcher.setSimilarity(engineConfig.getSimilarity());
+  IndexSearcher indexSearcher=wrap(engineConfig,innerIndexSearcher);
+  if (reader == nonClosingReaderWrapper && indexSearcher == innerIndexSearcher) {
+    return engineSearcher;
+  }
+ else {
+    final Engine.Searcher newSearcher=new Engine.Searcher(engineSearcher.source(),indexSearcher){
+      @Override public void close() throws ElasticsearchException {
+        try {
+          reader().close();
+        }
+ catch (        IOException e) {
+          throw new ElasticsearchException("failed to close reader",e);
+        }
+ finally {
+          engineSearcher.close();
+        }
+      }
+    }
+;
+    return newSearcher;
+  }
 }
