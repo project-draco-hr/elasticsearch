@@ -1,0 +1,25 @@
+{
+  Map<String,PermissionCollection> map=new HashMap<>();
+  if (Files.exists(environment.pluginsFile())) {
+    try (DirectoryStream<Path> stream=Files.newDirectoryStream(environment.pluginsFile())){
+      for (      Path plugin : stream) {
+        Path policyFile=plugin.resolve(PluginInfo.ES_PLUGIN_POLICY);
+        if (Files.exists(policyFile)) {
+          Policy policy=Policy.getInstance("JavaPolicy",new URIParameter(policyFile.toUri()));
+          PermissionCollection permissions=policy.getPermissions(Security.class.getProtectionDomain());
+          if (permissions == Policy.UNSUPPORTED_EMPTY_COLLECTION) {
+            throw new UnsupportedOperationException("JavaPolicy implementation does not support retrieving permissions");
+          }
+          try (DirectoryStream<Path> jarStream=Files.newDirectoryStream(plugin,"*.jar")){
+            for (            Path jar : jarStream) {
+              if (map.put(jar.toUri().toURL().getFile(),permissions) != null) {
+                throw new IllegalStateException("per-plugin permissions already granted for jar file: " + jar);
+              }
+            }
+          }
+         }
+      }
+    }
+   }
+  return Collections.unmodifiableMap(map);
+}
