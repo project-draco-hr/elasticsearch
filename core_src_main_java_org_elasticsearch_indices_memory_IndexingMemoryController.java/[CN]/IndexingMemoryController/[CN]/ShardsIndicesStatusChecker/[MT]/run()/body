@@ -1,7 +1,25 @@
 {
-  EnumSet<ShardStatusChangeType> changes=purgeDeletedAndClosedShards();
-  updateShardStatuses(changes);
-  if (changes.isEmpty() == false) {
-    calcAndSetShardBuffers("[" + changes + "]");
+  long totalBytesUsed=0;
+  for (  ShardId shardId : availableShards()) {
+    long shardBytesUsed=getIndexBufferRAMBytesUsed(shardId);
+    if (shardBytesUsed > 0) {
+      totalBytesUsed+=shardBytesUsed;
+    }
+  }
+  if (totalBytesUsed > indexingBuffer.bytes()) {
+    logger.debug("now refreshing some shards: total indexing bytes used [{}] vs index_buffer_size [{}]",new ByteSizeValue(totalBytesUsed),indexingBuffer);
+    PriorityQueue<ShardAndBytesUsed> queue=new PriorityQueue<>();
+    for (    ShardId shardId : availableShards()) {
+      long shardBytesUsed=getIndexBufferRAMBytesUsed(shardId);
+      if (shardBytesUsed > 0) {
+        queue.add(new ShardAndBytesUsed(shardBytesUsed,shardId));
+      }
+    }
+    while (totalBytesUsed > indexingBuffer.bytes() && queue.isEmpty() == false) {
+      ShardAndBytesUsed largest=queue.poll();
+      logger.debug("refresh shard [{}] to free up its [{}] indexing buffer",largest.shardId,new ByteSizeValue(largest.bytesUsed));
+      refreshShardAsync(largest.shardId);
+      totalBytesUsed-=largest.bytesUsed;
+    }
   }
 }
