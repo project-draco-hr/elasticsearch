@@ -1,0 +1,25 @@
+{
+  final boolean retryableBlock=randomBoolean();
+  final boolean unblockBeforeTimeout=randomBoolean();
+  Request request=new Request().masterNodeTimeout(TimeValue.timeValueSeconds(unblockBeforeTimeout ? 60 : 0));
+  PlainActionFuture<Response> listener=new PlainActionFuture<>();
+  ClusterBlock block=new ClusterBlock(1,"",retryableBlock,true,randomFrom(RestStatus.values()),ClusterBlockLevel.ALL);
+  ClusterState stateWithBlock=ClusterState.builder(ClusterStateCreationUtils.state(localNode,localNode,allNodes)).blocks(ClusterBlocks.builder().addGlobalBlock(block)).build();
+  clusterService.setState(stateWithBlock);
+  new Action(Settings.EMPTY,"testAction",transportService,clusterService,threadPool){
+    @Override protected ClusterBlockException checkBlock(    Request request,    ClusterState state){
+      Set<ClusterBlock> blocks=state.blocks().global();
+      return blocks.isEmpty() ? null : new ClusterBlockException(blocks);
+    }
+  }
+.execute(request,listener);
+  if (retryableBlock && unblockBeforeTimeout) {
+    assertFalse(listener.isDone());
+    clusterService.setState(ClusterState.builder(ClusterStateCreationUtils.state(localNode,localNode,allNodes)).blocks(ClusterBlocks.EMPTY_CLUSTER_BLOCK).build());
+    assertTrue(listener.isDone());
+    listener.get();
+    return;
+  }
+  assertTrue(listener.isDone());
+  assertListenerThrows("ClusterBlockException should be thrown",listener,ClusterBlockException.class);
+}

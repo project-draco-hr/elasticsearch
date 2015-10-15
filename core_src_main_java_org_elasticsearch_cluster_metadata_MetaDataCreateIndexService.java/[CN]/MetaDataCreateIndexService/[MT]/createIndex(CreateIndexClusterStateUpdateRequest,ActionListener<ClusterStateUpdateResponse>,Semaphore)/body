@@ -175,19 +175,17 @@
           removalReason="failed to build index metadata";
           throw e;
         }
-        indexService.indicesLifecycle().beforeIndexAddedToCluster(new Index(request.index()),indexMetaData.settings());
+        indexService.indicesLifecycle().beforeIndexAddedToCluster(new Index(request.index()),indexMetaData.getSettings());
         MetaData newMetaData=MetaData.builder(currentState.metaData()).put(indexMetaData,false).build();
-        String maybeShadowIndicator=IndexMetaData.isIndexUsingShadowReplicas(indexMetaData.settings()) ? "s" : "";
-        logger.info("[{}] creating index, cause [{}], templates {}, shards [{}]/[{}{}], mappings {}",request.index(),request.cause(),templateNames,indexMetaData.numberOfShards(),indexMetaData.numberOfReplicas(),maybeShadowIndicator,mappings.keySet());
+        String maybeShadowIndicator=IndexMetaData.isIndexUsingShadowReplicas(indexMetaData.getSettings()) ? "s" : "";
+        logger.info("[{}] creating index, cause [{}], templates {}, shards [{}]/[{}{}], mappings {}",request.index(),request.cause(),templateNames,indexMetaData.getNumberOfShards(),indexMetaData.getNumberOfReplicas(),maybeShadowIndicator,mappings.keySet());
         ClusterBlocks.Builder blocks=ClusterBlocks.builder().blocks(currentState.blocks());
         if (!request.blocks().isEmpty()) {
           for (          ClusterBlock block : request.blocks()) {
             blocks.addIndexBlock(request.index(),block);
           }
         }
-        if (request.state() == State.CLOSE) {
-          blocks.addIndexBlock(request.index(),MetaDataIndexStateService.INDEX_CLOSED_BLOCK);
-        }
+        blocks.updateBlocks(indexMetaData);
         ClusterState updatedState=ClusterState.builder(currentState).blocks(blocks).metaData(newMetaData).build();
         if (request.state() == State.OPEN) {
           RoutingTable.Builder routingTableBuilder=RoutingTable.builder(updatedState.routingTable()).addAsNew(updatedState.metaData().index(request.index()));
