@@ -1,0 +1,53 @@
+{
+  createIndex("test");
+  final AtomicInteger indexVersion=new AtomicInteger(0);
+  final Object indexVersionLock=new Object();
+  final CountDownLatch latch=new CountDownLatch(1);
+  int numDocs=randomIntBetween(1,10);
+  for (int i=0; i < numDocs; i++) {
+    client().prepareIndex("test","test").setSource("index_version",indexVersion.get()).get();
+  }
+synchronized (indexVersionLock) {
+    indexVersion.incrementAndGet();
+  }
+  client().admin().indices().prepareDelete("test").execute(new ActionListener<DeleteIndexResponse>(){
+    @Override public void onResponse(    DeleteIndexResponse deleteIndexResponse){
+      Thread thread=new Thread(){
+        public void run(){
+          try {
+            client().prepareIndex("test","test").setSource("index_version",indexVersion.get()).get();
+synchronized (indexVersionLock) {
+              indexVersion.incrementAndGet();
+            }
+            assertAcked(client().admin().indices().prepareDelete("test").get());
+          }
+  finally {
+            latch.countDown();
+          }
+        }
+      }
+;
+      thread.start();
+    }
+    @Override public void onFailure(    Throwable e){
+      throw new RuntimeException(e);
+    }
+  }
+);
+  numDocs=randomIntBetween(100,200);
+  for (int i=0; i < numDocs; i++) {
+    try {
+synchronized (indexVersionLock) {
+        client().prepareIndex("test","test").setSource("index_version",indexVersion.get()).get();
+      }
+    }
+ catch (    IndexNotFoundException inf) {
+    }
+  }
+  latch.await();
+  refresh();
+  SearchResponse expected=client().prepareSearch("test").setIndicesOptions(IndicesOptions.lenientExpandOpen()).setQuery(new RangeQueryBuilder("index_version").from(indexVersion.get(),true)).get();
+  SearchResponse all=client().prepareSearch("test").setIndicesOptions(IndicesOptions.lenientExpandOpen()).get();
+  assertEquals(expected + " vs. " + all,expected.getHits().getTotalHits(),all.getHits().getTotalHits());
+  logger.info("total: {}",expected.getHits().getTotalHits());
+}
