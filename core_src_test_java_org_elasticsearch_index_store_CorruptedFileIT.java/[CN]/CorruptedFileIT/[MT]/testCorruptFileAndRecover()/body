@@ -5,7 +5,7 @@
     logger.info("--> cluster has [3] data nodes, corrupted primary will be overwritten");
   }
   assertThat(cluster().numDataNodes(),greaterThanOrEqualTo(3));
-  assertAcked(prepareCreate("test").setSettings(Settings.builder().put(IndexMetaData.SETTING_NUMBER_OF_SHARDS,"1").put(IndexMetaData.SETTING_NUMBER_OF_REPLICAS,"1").put(MergePolicyConfig.INDEX_MERGE_ENABLED,false).put(MockFSDirectoryService.CHECK_INDEX_ON_CLOSE,false).put(IndexShard.INDEX_TRANSLOG_DISABLE_FLUSH,true).put("indices.recovery.concurrent_streams",10)));
+  assertAcked(prepareCreate("test").setSettings(Settings.builder().put(IndexMetaData.SETTING_NUMBER_OF_SHARDS,"1").put(IndexMetaData.SETTING_NUMBER_OF_REPLICAS,"1").put(MergePolicyConfig.INDEX_MERGE_ENABLED,false).put(MockFSIndexStore.CHECK_INDEX_ON_CLOSE,false).put(IndexShard.INDEX_TRANSLOG_DISABLE_FLUSH,true).put("indices.recovery.concurrent_streams",10)));
   ensureGreen();
   disableAllocation("test");
   IndexRequestBuilder[] builders=new IndexRequestBuilder[numDocs];
@@ -36,7 +36,7 @@
   }
   final CountDownLatch latch=new CountDownLatch(numShards * 3);
   final CopyOnWriteArrayList<Throwable> exception=new CopyOnWriteArrayList<>();
-  final IndicesLifecycle.Listener listener=new IndicesLifecycle.Listener(){
+  final IndexEventListener listener=new IndexEventListener(){
     @Override public void afterIndexShardClosed(    ShardId sid,    @Nullable IndexShard indexShard,    @IndexSettings Settings indexSettings){
       if (indexShard != null) {
         Store store=indexShard.store();
@@ -68,8 +68,8 @@
     }
   }
 ;
-  for (  IndicesService service : internalCluster().getDataNodeInstances(IndicesService.class)) {
-    service.indicesLifecycle().addListener(listener);
+  for (  MockIndexEventListener.TestEventListener eventListener : internalCluster().getDataNodeInstances(MockIndexEventListener.TestEventListener.class)) {
+    eventListener.setNewDelegate(listener);
   }
   try {
     client().admin().indices().prepareDelete("test").get();
@@ -77,8 +77,8 @@
     assertThat(exception,empty());
   }
   finally {
-    for (    IndicesService service : internalCluster().getDataNodeInstances(IndicesService.class)) {
-      service.indicesLifecycle().removeListener(listener);
+    for (    MockIndexEventListener.TestEventListener eventListener : internalCluster().getDataNodeInstances(MockIndexEventListener.TestEventListener.class)) {
+      eventListener.setNewDelegate(null);
     }
   }
 }
