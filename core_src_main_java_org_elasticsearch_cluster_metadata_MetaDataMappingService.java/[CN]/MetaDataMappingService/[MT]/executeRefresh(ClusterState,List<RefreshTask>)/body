@@ -1,0 +1,68 @@
+{
+  if (allTasks.isEmpty()) {
+    return currentState;
+  }
+  Map<String,List<RefreshTask>> tasksPerIndex=new HashMap<>();
+  for (  RefreshTask task : allTasks) {
+    if (task.index == null) {
+      logger.debug("ignoring a mapping task of type [{}] with a null index.",task);
+    }
+    List<RefreshTask> indexTasks=tasksPerIndex.get(task.index);
+    if (indexTasks == null) {
+      indexTasks=new ArrayList<>();
+      tasksPerIndex.put(task.index,indexTasks);
+    }
+    indexTasks.add(task);
+  }
+  boolean dirty=false;
+  MetaData.Builder mdBuilder=MetaData.builder(currentState.metaData());
+  for (  Map.Entry<String,List<RefreshTask>> entry : tasksPerIndex.entrySet()) {
+    String index=entry.getKey();
+    IndexMetaData indexMetaData=mdBuilder.get(index);
+    if (indexMetaData == null) {
+      logger.debug("[{}] ignoring tasks - index meta data doesn't exist",index);
+      continue;
+    }
+    List<RefreshTask> allIndexTasks=entry.getValue();
+    List<RefreshTask> tasks=new ArrayList<>();
+    for (    RefreshTask task : allIndexTasks) {
+      if (!indexMetaData.isSameUUID(task.indexUUID)) {
+        logger.debug("[{}] ignoring task [{}] - index meta data doesn't match task uuid",index,task);
+        continue;
+      }
+      tasks.add(task);
+    }
+    boolean removeIndex=false;
+    IndexService indexService=indicesService.indexService(index);
+    if (indexService == null) {
+      indexService=indicesService.createIndex(nodeServicesProvider,indexMetaData,Collections.EMPTY_LIST);
+      removeIndex=true;
+      Set<String> typesToIntroduce=new HashSet<>();
+      for (      RefreshTask task : tasks) {
+        Collections.addAll(typesToIntroduce,task.types);
+      }
+      for (      String type : typesToIntroduce) {
+        if (indexMetaData.getMappings().containsKey(type)) {
+          indexService.mapperService().merge(type,indexMetaData.getMappings().get(type).source(),false,true);
+        }
+      }
+    }
+    IndexMetaData.Builder builder=IndexMetaData.builder(indexMetaData);
+    try {
+      boolean indexDirty=processIndexMappingTasks(tasks,indexService,builder);
+      if (indexDirty) {
+        mdBuilder.put(builder);
+        dirty=true;
+      }
+    }
+  finally {
+      if (removeIndex) {
+        indicesService.removeIndex(index,"created for mapping processing");
+      }
+    }
+  }
+  if (!dirty) {
+    return currentState;
+  }
+  return ClusterState.builder(currentState).metaData(mdBuilder).build();
+}
