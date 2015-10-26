@@ -11,5 +11,22 @@
   bind(IndexServicesProvider.class).asEagerSingleton();
   bind(MapperService.class).asEagerSingleton();
   bind(IndexFieldDataService.class).asEagerSingleton();
-  bind(IndexSettings.class).toInstance(new IndexSettings(indexSettings.getIndexMetaData(),indexSettings.getNodeSettings(),settingsConsumers));
+  final IndexSettings settings=new IndexSettings(indexSettings.getIndexMetaData(),indexSettings.getNodeSettings(),settingsConsumers);
+  bind(IndexSettings.class).toInstance(settings);
+  final String storeType=settings.getSettings().get(STORE_TYPE);
+  final IndexStore store;
+  if (storeType == null || isBuiltinType(storeType)) {
+    store=new IndexStore(settings,indicesStore);
+  }
+ else {
+    BiFunction<IndexSettings,IndicesStore,IndexStore> factory=storeTypes.get(storeType);
+    if (factory == null) {
+      throw new IllegalArgumentException("Unknown store type [" + storeType + "]");
+    }
+    store=factory.apply(settings,indicesStore);
+    if (store == null) {
+      throw new IllegalStateException("store must not be null");
+    }
+  }
+  bind(IndexStore.class).toInstance(store);
 }
