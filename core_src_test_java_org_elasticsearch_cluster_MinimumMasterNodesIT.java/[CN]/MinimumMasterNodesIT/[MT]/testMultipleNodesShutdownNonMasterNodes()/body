@@ -1,0 +1,52 @@
+{
+  Settings settings=settingsBuilder().put("discovery.type","zen").put("discovery.zen.minimum_master_nodes",3).put(ZenDiscovery.SETTING_PING_TIMEOUT,"1s").put("discovery.initial_state_timeout","500ms").build();
+  logger.info("--> start first 2 nodes");
+  internalCluster().startNodesAsync(2,settings).get();
+  ClusterState state;
+  assertBusy(new Runnable(){
+    @Override public void run(){
+      for (      Client client : clients()) {
+        ClusterState state=client.admin().cluster().prepareState().setLocal(true).execute().actionGet().getState();
+        assertThat(state.blocks().hasGlobalBlock(DiscoverySettings.NO_MASTER_BLOCK_ID),equalTo(true));
+      }
+    }
+  }
+);
+  logger.info("--> start two more nodes");
+  internalCluster().startNodesAsync(2,settings).get();
+  ensureGreen();
+  ClusterHealthResponse clusterHealthResponse=client().admin().cluster().prepareHealth().setWaitForEvents(Priority.LANGUID).setWaitForNodes("4").execute().actionGet();
+  assertThat(clusterHealthResponse.isTimedOut(),equalTo(false));
+  state=client().admin().cluster().prepareState().execute().actionGet().getState();
+  assertThat(state.nodes().size(),equalTo(4));
+  createIndex("test");
+  NumShards numShards=getNumShards("test");
+  logger.info("--> indexing some data");
+  for (int i=0; i < 100; i++) {
+    client().prepareIndex("test","type1",Integer.toString(i)).setSource("field","value").execute().actionGet();
+  }
+  ensureGreen();
+  assertThat(client().admin().cluster().prepareHealth("test").setWaitForActiveShards(numShards.totalNumShards).execute().actionGet().isTimedOut(),equalTo(false));
+  client().admin().indices().prepareFlush().execute().actionGet();
+  refresh();
+  logger.info("--> verify we the data back");
+  for (int i=0; i < 10; i++) {
+    assertHitCount(client().prepareSearch().setSize(0).setQuery(QueryBuilders.matchAllQuery()).execute().actionGet(),100);
+  }
+  internalCluster().stopRandomNonMasterNode();
+  internalCluster().stopRandomNonMasterNode();
+  logger.info("--> verify that there is no master anymore on remaining nodes");
+  assertNoMasterBlockOnAllNodes();
+  logger.info("--> start back the 2 nodes ");
+  String[] newNodes=internalCluster().startNodesAsync(2,settings).get().toArray(Strings.EMPTY_ARRAY);
+  ensureGreen();
+  clusterHealthResponse=client().admin().cluster().prepareHealth().setWaitForNodes("4").execute().actionGet();
+  assertThat(clusterHealthResponse.isTimedOut(),equalTo(false));
+  state=client().admin().cluster().prepareState().execute().actionGet().getState();
+  assertThat(state.nodes().size(),equalTo(4));
+  assertThat(state.nodes().masterNodeId(),not(isOneOf(newNodes)));
+  logger.info("--> verify we the data back");
+  for (int i=0; i < 10; i++) {
+    assertHitCount(client().prepareSearch().setSize(0).setQuery(QueryBuilders.matchAllQuery()).execute().actionGet(),100);
+  }
+}

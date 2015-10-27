@@ -1,0 +1,38 @@
+{
+  boolean snapshotChanged=false;
+  ImmutableOpenMap.Builder<ShardId,ShardSnapshotStatus> shards=ImmutableOpenMap.builder();
+  for (  ObjectObjectCursor<ShardId,ShardSnapshotStatus> shardEntry : snapshotShards) {
+    ShardSnapshotStatus shardStatus=shardEntry.value;
+    ShardId shardId=shardEntry.key;
+    if (shardStatus.state() == State.WAITING) {
+      IndexRoutingTable indexShardRoutingTable=routingTable.index(shardId.getIndex());
+      if (indexShardRoutingTable != null) {
+        IndexShardRoutingTable shardRouting=indexShardRoutingTable.shard(shardId.id());
+        if (shardRouting != null && shardRouting.primaryShard() != null) {
+          if (shardRouting.primaryShard().started()) {
+            snapshotChanged=true;
+            logger.trace("starting shard that we were waiting for [{}] on node [{}]",shardId,shardStatus.nodeId());
+            shards.put(shardId,new ShardSnapshotStatus(shardRouting.primaryShard().currentNodeId()));
+            continue;
+          }
+ else           if (shardRouting.primaryShard().initializing() || shardRouting.primaryShard().relocating()) {
+            shards.put(shardId,shardStatus);
+            continue;
+          }
+        }
+      }
+      snapshotChanged=true;
+      logger.warn("failing snapshot of shard [{}] on unassigned shard [{}]",shardId,shardStatus.nodeId());
+      shards.put(shardId,new ShardSnapshotStatus(shardStatus.nodeId(),State.FAILED,"shard is unassigned"));
+    }
+ else {
+      shards.put(shardId,shardStatus);
+    }
+  }
+  if (snapshotChanged) {
+    return shards.build();
+  }
+ else {
+    return null;
+  }
+}

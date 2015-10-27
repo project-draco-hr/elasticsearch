@@ -1,0 +1,21 @@
+{
+  verify(client().admin().indices().prepareDeleteWarmer().setIndices("_all").setNames("test1"),true);
+  SearchSourceBuilder source=new SearchSourceBuilder();
+  source.query(QueryBuilders.matchAllQuery());
+  IndexWarmersMetaData.Entry entry=new IndexWarmersMetaData.Entry("test1",new String[]{"type1"},false,new IndexWarmersMetaData.SearchSource(source));
+  assertAcked(prepareCreate("foo").addCustom(new IndexWarmersMetaData(entry)));
+  assertAcked(prepareCreate("foobar").addCustom(new IndexWarmersMetaData(entry)));
+  assertAcked(prepareCreate("bar").addCustom(new IndexWarmersMetaData(entry)));
+  assertAcked(prepareCreate("barbaz").addCustom(new IndexWarmersMetaData(entry)));
+  ensureYellow();
+  verify(client().admin().indices().prepareDeleteWarmer().setIndices("foo*").setNames("test1"),false);
+  assertThat(client().admin().indices().prepareGetWarmers("foo").setWarmers("test1").get().getWarmers().size(),equalTo(0));
+  assertThat(client().admin().indices().prepareGetWarmers("foobar").setWarmers("test1").get().getWarmers().size(),equalTo(0));
+  assertThat(client().admin().indices().prepareGetWarmers("bar").setWarmers("test1").get().getWarmers().size(),equalTo(1));
+  assertThat(client().admin().indices().prepareGetWarmers("barbaz").setWarmers("test1").get().getWarmers().size(),equalTo(1));
+  assertAcked(client().admin().indices().prepareDelete("foo*"));
+  verify(client().admin().indices().prepareDeleteWarmer().setIndices("foo*").setNames("test1"),true);
+  verify(client().admin().indices().prepareDeleteWarmer().setIndices("_all").setNames("test1"),false);
+  assertThat(client().admin().indices().prepareGetWarmers("bar").setWarmers("test1").get().getWarmers().size(),equalTo(0));
+  assertThat(client().admin().indices().prepareGetWarmers("barbaz").setWarmers("test1").get().getWarmers().size(),equalTo(0));
+}

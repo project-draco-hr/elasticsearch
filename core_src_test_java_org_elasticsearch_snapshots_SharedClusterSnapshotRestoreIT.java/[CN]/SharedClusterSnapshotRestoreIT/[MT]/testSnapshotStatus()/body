@@ -1,0 +1,72 @@
+{
+  Client client=client();
+  Path repositoryLocation=randomRepoPath();
+  logger.info("-->  creating repository");
+  PutRepositoryResponse putRepositoryResponse=client.admin().cluster().preparePutRepository("test-repo").setType("mock").setSettings(Settings.settingsBuilder().put("location",repositoryLocation).put("random",randomAsciiOfLength(10)).put("wait_after_unblock",200)).get();
+  assertThat(putRepositoryResponse.isAcknowledged(),equalTo(true));
+  assertAcked(prepareCreate("test-idx",2,Settings.builder().put("number_of_replicas",0)));
+  logger.info("--> indexing some data");
+  for (int i=0; i < 100; i++) {
+    index("test-idx","doc",Integer.toString(i),"foo","bar" + i);
+  }
+  refresh();
+  assertThat(client.prepareSearch("test-idx").setSize(0).get().getHits().totalHits(),equalTo(100L));
+  String blockedNode=blockNodeWithIndex("test-idx");
+  logger.info("--> snapshot");
+  client.admin().cluster().prepareCreateSnapshot("test-repo","test-snap").setWaitForCompletion(false).setIndices("test-idx").get();
+  logger.info("--> waiting for block to kick in");
+  waitForBlock(blockedNode,"test-repo",TimeValue.timeValueSeconds(60));
+  logger.info("--> execution was blocked on node [{}], checking snapshot status with specified repository and snapshot",blockedNode);
+  SnapshotsStatusResponse response=client.admin().cluster().prepareSnapshotStatus("test-repo").execute().actionGet();
+  assertThat(response.getSnapshots().size(),equalTo(1));
+  SnapshotStatus snapshotStatus=response.getSnapshots().get(0);
+  assertThat(snapshotStatus.getState(),equalTo(SnapshotsInProgress.State.STARTED));
+  assertThat(snapshotStatus.getShardsStats().getStartedShards(),greaterThan(0));
+  for (  SnapshotIndexShardStatus shardStatus : snapshotStatus.getIndices().get("test-idx")) {
+    if (shardStatus.getStage() == SnapshotIndexShardStage.STARTED) {
+      assertThat(shardStatus.getNodeId(),notNullValue());
+    }
+  }
+  logger.info("--> checking snapshot status for all currently running and snapshot with empty repository",blockedNode);
+  response=client.admin().cluster().prepareSnapshotStatus().execute().actionGet();
+  assertThat(response.getSnapshots().size(),equalTo(1));
+  snapshotStatus=response.getSnapshots().get(0);
+  assertThat(snapshotStatus.getState(),equalTo(SnapshotsInProgress.State.STARTED));
+  assertThat(snapshotStatus.getShardsStats().getStartedShards(),greaterThan(0));
+  for (  SnapshotIndexShardStatus shardStatus : snapshotStatus.getIndices().get("test-idx")) {
+    if (shardStatus.getStage() == SnapshotIndexShardStage.STARTED) {
+      assertThat(shardStatus.getNodeId(),notNullValue());
+    }
+  }
+  logger.info("--> checking that _current returns the currently running snapshot",blockedNode);
+  GetSnapshotsResponse getResponse=client.admin().cluster().prepareGetSnapshots("test-repo").setCurrentSnapshot().execute().actionGet();
+  assertThat(getResponse.getSnapshots().size(),equalTo(1));
+  SnapshotInfo snapshotInfo=getResponse.getSnapshots().get(0);
+  assertThat(snapshotInfo.state(),equalTo(SnapshotState.IN_PROGRESS));
+  logger.info("--> unblocking blocked node");
+  unblockNode(blockedNode);
+  snapshotInfo=waitForCompletion("test-repo","test-snap",TimeValue.timeValueSeconds(600));
+  logger.info("Number of failed shards [{}]",snapshotInfo.shardFailures().size());
+  logger.info("--> done");
+  logger.info("--> checking snapshot status again after snapshot is done",blockedNode);
+  response=client.admin().cluster().prepareSnapshotStatus("test-repo").addSnapshots("test-snap").execute().actionGet();
+  snapshotStatus=response.getSnapshots().get(0);
+  assertThat(snapshotStatus.getIndices().size(),equalTo(1));
+  SnapshotIndexStatus indexStatus=snapshotStatus.getIndices().get("test-idx");
+  assertThat(indexStatus,notNullValue());
+  assertThat(indexStatus.getShardsStats().getInitializingShards(),equalTo(0));
+  assertThat(indexStatus.getShardsStats().getFailedShards(),equalTo(snapshotInfo.failedShards()));
+  assertThat(indexStatus.getShardsStats().getDoneShards(),equalTo(snapshotInfo.successfulShards()));
+  assertThat(indexStatus.getShards().size(),equalTo(snapshotInfo.totalShards()));
+  logger.info("--> checking snapshot status after it is done with empty repository",blockedNode);
+  response=client.admin().cluster().prepareSnapshotStatus().execute().actionGet();
+  assertThat(response.getSnapshots().size(),equalTo(0));
+  logger.info("--> checking that _current no longer returns the snapshot",blockedNode);
+  assertThat(client.admin().cluster().prepareGetSnapshots("test-repo").addSnapshots("_current").execute().actionGet().getSnapshots().isEmpty(),equalTo(true));
+  try {
+    client.admin().cluster().prepareSnapshotStatus("test-repo").addSnapshots("test-snap-doesnt-exist").execute().actionGet();
+    fail();
+  }
+ catch (  SnapshotMissingException ex) {
+  }
+}

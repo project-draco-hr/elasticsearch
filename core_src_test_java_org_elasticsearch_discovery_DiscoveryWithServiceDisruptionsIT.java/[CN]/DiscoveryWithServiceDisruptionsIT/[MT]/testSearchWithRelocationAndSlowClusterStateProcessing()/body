@@ -1,0 +1,28 @@
+{
+  configureUnicastCluster(3,null,1);
+  InternalTestCluster.Async<String> masterNodeFuture=internalCluster().startMasterOnlyNodeAsync();
+  InternalTestCluster.Async<String> node_1Future=internalCluster().startDataOnlyNodeAsync();
+  final String node_1=node_1Future.get();
+  final String masterNode=masterNodeFuture.get();
+  logger.info("--> creating index [test] with one shard and on replica");
+  assertAcked(prepareCreate("test").setSettings(Settings.builder().put(indexSettings()).put(IndexMetaData.SETTING_NUMBER_OF_SHARDS,1).put(IndexMetaData.SETTING_NUMBER_OF_REPLICAS,0)));
+  ensureGreen("test");
+  InternalTestCluster.Async<String> node_2Future=internalCluster().startDataOnlyNodeAsync();
+  final String node_2=node_2Future.get();
+  List<IndexRequestBuilder> indexRequestBuilderList=new ArrayList<>();
+  for (int i=0; i < 100; i++) {
+    indexRequestBuilderList.add(client().prepareIndex().setIndex("test").setType("doc").setSource("{\"int_field\":1}"));
+  }
+  indexRandom(true,indexRequestBuilderList);
+  SingleNodeDisruption disruption=new BlockClusterStateProcessing(node_2,getRandom());
+  internalCluster().setDisruptionScheme(disruption);
+  MockTransportService transportServiceNode2=(MockTransportService)internalCluster().getInstance(TransportService.class,node_2);
+  CountDownLatch beginRelocationLatch=new CountDownLatch(1);
+  CountDownLatch endRelocationLatch=new CountDownLatch(1);
+  transportServiceNode2.addTracer(new IndicesStoreIntegrationIT.ReclocationStartEndTracer(logger,beginRelocationLatch,endRelocationLatch));
+  internalCluster().client().admin().cluster().prepareReroute().add(new MoveAllocationCommand(new ShardId("test",0),node_1,node_2)).get();
+  beginRelocationLatch.await();
+  disruption.startDisrupting();
+  endRelocationLatch.await();
+  assertThat(client().prepareSearch().setSize(0).get().getHits().totalHits(),equalTo(100l));
+}

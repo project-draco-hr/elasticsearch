@@ -1,0 +1,41 @@
+{
+  createIndex("test");
+  ensureGreen();
+  IndicesService indicesService=getInstanceFromNode(IndicesService.class);
+  IndexService indexService=indicesService.indexService("test");
+  IndexShard shard=indexService.getShardOrNull(0);
+  client().prepareIndex("test","test","0").setSource("{\"foo\" : \"bar\"}").setRefresh(true).get();
+  client().prepareIndex("test","test","1").setSource("{\"foobar\" : \"bar\"}").setRefresh(true).get();
+  IndexSearcherWrapper wrapper=new IndexSearcherWrapper(){
+    @Override public DirectoryReader wrap(    DirectoryReader reader) throws IOException {
+      return new FieldMaskingReader("foo",reader);
+    }
+    @Override public IndexSearcher wrap(    EngineConfig engineConfig,    IndexSearcher searcher) throws EngineException {
+      return searcher;
+    }
+  }
+;
+  IndexShard newShard=reinitWithWrapper(indexService,shard,wrapper);
+  try {
+    MappedFieldType foo=newShard.mapperService().indexName("foo");
+    IndexFieldData.Global ifd=shard.indexFieldDataService().getForField(foo);
+    FieldDataStats before=shard.fieldData().stats("foo");
+    FieldDataStats after=null;
+    try (Engine.Searcher searcher=newShard.acquireSearcher("test")){
+      assumeTrue("we have to have more than one segment",searcher.getDirectoryReader().leaves().size() > 1);
+      IndexFieldData indexFieldData=ifd.loadGlobal(searcher.getDirectoryReader());
+      after=shard.fieldData().stats("foo");
+      assertEquals(after.getEvictions(),before.getEvictions());
+      assertTrue(indexFieldData.toString(),after.getMemorySizeInBytes() > before.getMemorySizeInBytes());
+    }
+     assertEquals(shard.fieldData().stats("foo").getEvictions(),before.getEvictions());
+    assertEquals(shard.fieldData().stats("foo").getMemorySizeInBytes(),after.getMemorySizeInBytes());
+    newShard.flush(new FlushRequest().force(true).waitIfOngoing(true));
+    newShard.refresh("test");
+    assertEquals(shard.fieldData().stats("foo").getMemorySizeInBytes(),before.getMemorySizeInBytes());
+    assertEquals(shard.fieldData().stats("foo").getEvictions(),before.getEvictions());
+  }
+  finally {
+    newShard.close("just do it",randomBoolean());
+  }
+}

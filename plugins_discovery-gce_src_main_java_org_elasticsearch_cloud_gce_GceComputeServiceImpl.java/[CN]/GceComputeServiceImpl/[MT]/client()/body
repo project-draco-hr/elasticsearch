@@ -1,0 +1,51 @@
+{
+  if (refreshInterval != null && refreshInterval.millis() != 0) {
+    if (client != null && (refreshInterval.millis() < 0 || (System.currentTimeMillis() - lastRefresh) < refreshInterval.millis())) {
+      if (logger.isTraceEnabled())       logger.trace("using cache to retrieve client");
+      return client;
+    }
+    lastRefresh=System.currentTimeMillis();
+  }
+  try {
+    gceJsonFactory=new JacksonFactory();
+    logger.info("starting GCE discovery service");
+    ComputeCredential credential=new ComputeCredential.Builder(getGceHttpTransport(),gceJsonFactory).setTokenServerEncodedUrl(TOKEN_SERVER_ENCODED_URL).build();
+    SecurityManager sm=System.getSecurityManager();
+    if (sm != null) {
+      sm.checkPermission(new SpecialPermission());
+    }
+    AccessController.doPrivileged(new PrivilegedExceptionAction<Void>(){
+      @Override public Void run() throws IOException {
+        credential.refreshToken();
+        return null;
+      }
+    }
+);
+    logger.debug("token [{}] will expire in [{}] s",credential.getAccessToken(),credential.getExpiresInSeconds());
+    if (credential.getExpiresInSeconds() != null) {
+      refreshInterval=TimeValue.timeValueSeconds(credential.getExpiresInSeconds() - 1);
+    }
+    boolean ifRetry=settings.getAsBoolean(Fields.RETRY,true);
+    Compute.Builder builder=new Compute.Builder(getGceHttpTransport(),gceJsonFactory,null).setApplicationName(Fields.VERSION);
+    if (ifRetry) {
+      int maxWait=settings.getAsInt(Fields.MAXWAIT,-1);
+      RetryHttpInitializerWrapper retryHttpInitializerWrapper;
+      if (maxWait > 0) {
+        retryHttpInitializerWrapper=new RetryHttpInitializerWrapper(credential,maxWait);
+      }
+ else {
+        retryHttpInitializerWrapper=new RetryHttpInitializerWrapper(credential);
+      }
+      builder.setHttpRequestInitializer(retryHttpInitializerWrapper);
+    }
+ else {
+      builder.setHttpRequestInitializer(credential);
+    }
+    this.client=builder.build();
+  }
+ catch (  Exception e) {
+    logger.warn("unable to start GCE discovery service",e);
+    throw new IllegalArgumentException("unable to start GCE discovery service",e);
+  }
+  return this.client;
+}

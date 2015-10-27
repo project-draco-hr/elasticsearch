@@ -1,0 +1,36 @@
+{
+  if (publishHosts == null) {
+    publishHosts=settings.getAsArray(GLOBAL_NETWORK_PUBLISHHOST_SETTING,settings.getAsArray(GLOBAL_NETWORK_HOST_SETTING,null));
+  }
+  if (publishHosts == null) {
+    for (    CustomNameResolver customNameResolver : customNameResolvers) {
+      InetAddress addresses[]=customNameResolver.resolveDefault();
+      if (addresses != null) {
+        return addresses[0];
+      }
+    }
+  }
+  if (publishHosts == null) {
+    publishHosts=new String[]{DEFAULT_NETWORK_HOST};
+  }
+  InetAddress addresses[]=resolveInetAddresses(publishHosts);
+  if (addresses.length == 1 && addresses[0].isAnyLocalAddress()) {
+    HashSet<InetAddress> all=new HashSet<>(Arrays.asList(NetworkUtils.getAllAddresses()));
+    addresses=all.toArray(new InetAddress[all.size()]);
+  }
+  for (  InetAddress address : addresses) {
+    if (address.isMulticastAddress()) {
+      throw new IllegalArgumentException("publish address: {" + NetworkAddress.format(address) + "} is invalid: multicast address");
+    }
+    if (address.isAnyLocalAddress()) {
+      throw new IllegalArgumentException("publish address: {" + NetworkAddress.format(address) + "} is wildcard, but multiple addresses specified: this makes no sense");
+    }
+  }
+  if (addresses.length > 1) {
+    List<InetAddress> sorted=new ArrayList<>(Arrays.asList(addresses));
+    NetworkUtils.sortAddresses(sorted);
+    addresses=new InetAddress[]{sorted.get(0)};
+    logger.warn("publish host: {} resolves to multiple addresses, auto-selecting {{}} as single publish address",Arrays.toString(publishHosts),NetworkAddress.format(addresses[0]));
+  }
+  return addresses[0];
+}

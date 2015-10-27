@@ -1,0 +1,45 @@
+{
+  createIndex("test");
+  ensureGreen();
+  IndicesService indicesService=getInstanceFromNode(IndicesService.class);
+  IndexService indexService=indicesService.indexService("test");
+  IndexShard shard=indexService.getShardOrNull(0);
+  client().prepareIndex("test","test","0").setSource("{\"foo\" : \"bar\"}").setRefresh(true).get();
+  client().prepareIndex("test","test","1").setSource("{\"foobar\" : \"bar\"}").setRefresh(true).get();
+  Engine.GetResult getResult=shard.get(new Engine.Get(false,new Term(UidFieldMapper.NAME,Uid.createUid("test","1"))));
+  assertTrue(getResult.exists());
+  assertNotNull(getResult.searcher());
+  getResult.release();
+  try (Engine.Searcher searcher=shard.acquireSearcher("test")){
+    TopDocs search=searcher.searcher().search(new TermQuery(new Term("foo","bar")),10);
+    assertEquals(search.totalHits,1);
+    search=searcher.searcher().search(new TermQuery(new Term("foobar","bar")),10);
+    assertEquals(search.totalHits,1);
+  }
+   IndexSearcherWrapper wrapper=new IndexSearcherWrapper(){
+    @Override public DirectoryReader wrap(    DirectoryReader reader) throws IOException {
+      return new FieldMaskingReader("foo",reader);
+    }
+    @Override public IndexSearcher wrap(    EngineConfig engineConfig,    IndexSearcher searcher) throws EngineException {
+      return searcher;
+    }
+  }
+;
+  IndexShard newShard=reinitWithWrapper(indexService,shard,wrapper);
+  try {
+    try (Engine.Searcher searcher=newShard.acquireSearcher("test")){
+      TopDocs search=searcher.searcher().search(new TermQuery(new Term("foo","bar")),10);
+      assertEquals(search.totalHits,0);
+      search=searcher.searcher().search(new TermQuery(new Term("foobar","bar")),10);
+      assertEquals(search.totalHits,1);
+    }
+     getResult=newShard.get(new Engine.Get(false,new Term(UidFieldMapper.NAME,Uid.createUid("test","1"))));
+    assertTrue(getResult.exists());
+    assertNotNull(getResult.searcher());
+    assertTrue(getResult.searcher().reader() instanceof FieldMaskingReader);
+    getResult.release();
+  }
+  finally {
+    newShard.close("just do it",randomBoolean());
+  }
+}

@@ -1,0 +1,44 @@
+{
+  Client client=client();
+  logger.info("-->  creating repository");
+  Path repositoryLocation=randomRepoPath();
+  boolean throttleSnapshot=randomBoolean();
+  boolean throttleRestore=randomBoolean();
+  assertAcked(client.admin().cluster().preparePutRepository("test-repo").setType("fs").setSettings(Settings.settingsBuilder().put("location",repositoryLocation).put("compress",randomBoolean()).put("chunk_size",randomIntBetween(1000,10000),ByteSizeUnit.BYTES).put("max_restore_bytes_per_sec",throttleRestore ? "0.5k" : "0").put("max_snapshot_bytes_per_sec",throttleSnapshot ? "0.5k" : "0")));
+  createIndex("test-idx");
+  ensureGreen();
+  logger.info("--> indexing some data");
+  for (int i=0; i < 100; i++) {
+    index("test-idx","doc",Integer.toString(i),"foo","bar" + i);
+  }
+  refresh();
+  assertThat(client.prepareSearch("test-idx").setSize(0).get().getHits().totalHits(),equalTo(100L));
+  logger.info("--> snapshot");
+  CreateSnapshotResponse createSnapshotResponse=client.admin().cluster().prepareCreateSnapshot("test-repo","test-snap").setWaitForCompletion(true).setIndices("test-idx").get();
+  assertThat(createSnapshotResponse.getSnapshotInfo().successfulShards(),greaterThan(0));
+  assertThat(createSnapshotResponse.getSnapshotInfo().successfulShards(),equalTo(createSnapshotResponse.getSnapshotInfo().totalShards()));
+  logger.info("--> delete index");
+  cluster().wipeIndices("test-idx");
+  logger.info("--> restore index");
+  RestoreSnapshotResponse restoreSnapshotResponse=client.admin().cluster().prepareRestoreSnapshot("test-repo","test-snap").setWaitForCompletion(true).execute().actionGet();
+  assertThat(restoreSnapshotResponse.getRestoreInfo().totalShards(),greaterThan(0));
+  assertThat(client.prepareSearch("test-idx").setSize(0).get().getHits().totalHits(),equalTo(100L));
+  long snapshotPause=0L;
+  long restorePause=0L;
+  for (  RepositoriesService repositoriesService : internalCluster().getDataNodeInstances(RepositoriesService.class)) {
+    snapshotPause+=repositoriesService.repository("test-repo").snapshotThrottleTimeInNanos();
+    restorePause+=repositoriesService.repository("test-repo").restoreThrottleTimeInNanos();
+  }
+  if (throttleSnapshot) {
+    assertThat(snapshotPause,greaterThan(0L));
+  }
+ else {
+    assertThat(snapshotPause,equalTo(0L));
+  }
+  if (throttleRestore) {
+    assertThat(restorePause,greaterThan(0L));
+  }
+ else {
+    assertThat(restorePause,equalTo(0L));
+  }
+}

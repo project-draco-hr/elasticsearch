@@ -1,0 +1,41 @@
+{
+  final int numberOfSnapshots=between(5,15);
+  Client client=client();
+  Path repo=randomRepoPath();
+  logger.info("-->  creating repository at " + repo.toAbsolutePath());
+  assertAcked(client.admin().cluster().preparePutRepository("test-repo").setType("fs").setSettings(Settings.settingsBuilder().put("location",repo).put("compress",false).put("chunk_size",randomIntBetween(100,1000),ByteSizeUnit.BYTES)));
+  createIndex("test-idx");
+  ensureGreen();
+  int[] numberOfFiles=new int[numberOfSnapshots];
+  logger.info("--> creating {} snapshots ",numberOfSnapshots);
+  for (int i=0; i < numberOfSnapshots; i++) {
+    for (int j=0; j < 10; j++) {
+      index("test-idx","doc",Integer.toString(i * 10 + j),"foo","bar" + i * 10 + j);
+    }
+    refresh();
+    logger.info("--> snapshot {}",i);
+    CreateSnapshotResponse createSnapshotResponse=client.admin().cluster().prepareCreateSnapshot("test-repo","test-snap-" + i).setWaitForCompletion(true).setIndices("test-idx").get();
+    assertThat(createSnapshotResponse.getSnapshotInfo().successfulShards(),greaterThan(0));
+    assertThat(createSnapshotResponse.getSnapshotInfo().successfulShards(),equalTo(createSnapshotResponse.getSnapshotInfo().totalShards()));
+    numberOfFiles[i]=numberOfFiles(repo);
+  }
+  assertThat(client.prepareSearch("test-idx").setSize(0).get().getHits().totalHits(),equalTo(10L * numberOfSnapshots));
+  int numberOfFilesBeforeDeletion=numberOfFiles(repo);
+  logger.info("--> delete all snapshots except the first one and last one");
+  for (int i=1; i < numberOfSnapshots - 1; i++) {
+    client.admin().cluster().prepareDeleteSnapshot("test-repo","test-snap-" + i).get();
+  }
+  int numberOfFilesAfterDeletion=numberOfFiles(repo);
+  assertThat(numberOfFilesAfterDeletion,lessThan(numberOfFilesBeforeDeletion));
+  logger.info("--> delete index");
+  cluster().wipeIndices("test-idx");
+  logger.info("--> restore index");
+  String lastSnapshot="test-snap-" + (numberOfSnapshots - 1);
+  RestoreSnapshotResponse restoreSnapshotResponse=client.admin().cluster().prepareRestoreSnapshot("test-repo",lastSnapshot).setWaitForCompletion(true).execute().actionGet();
+  assertThat(restoreSnapshotResponse.getRestoreInfo().totalShards(),greaterThan(0));
+  assertThat(client.prepareSearch("test-idx").setSize(0).get().getHits().totalHits(),equalTo(10L * numberOfSnapshots));
+  logger.info("--> delete the last snapshot");
+  client.admin().cluster().prepareDeleteSnapshot("test-repo",lastSnapshot).get();
+  logger.info("--> make sure that number of files is back to what it was when the first snapshot was made");
+  assertThat(numberOfFiles(repo),equalTo(numberOfFiles[0]));
+}

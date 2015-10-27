@@ -1,11 +1,15 @@
 {
 synchronized (dirtyLock(index.uid())) {
+    lastWriteNanos=index.startTime();
     final long currentVersion;
+    final boolean deleted;
     VersionValue versionValue=versionMap.getUnderLock(index.uid().bytes());
     if (versionValue == null) {
       currentVersion=loadCurrentVersionFromIndex(index.uid());
+      deleted=currentVersion == Versions.NOT_FOUND;
     }
  else {
+      deleted=versionValue.delete();
       if (engineConfig.isEnableGcDeletes() && versionValue.delete() && (engineConfig.getThreadPool().estimatedTimeInMillis() - versionValue.time()) > engineConfig.getGcDeletesInMillis()) {
         currentVersion=Versions.NOT_FOUND;
       }
@@ -13,17 +17,16 @@ synchronized (dirtyLock(index.uid())) {
         currentVersion=versionValue.version();
       }
     }
-    long updatedVersion;
     long expectedVersion=index.version();
-    if (index.versionType().isVersionConflictForWrites(currentVersion,expectedVersion)) {
+    if (index.versionType().isVersionConflictForWrites(currentVersion,expectedVersion,deleted)) {
       if (index.origin() == Operation.Origin.RECOVERY) {
         return false;
       }
  else {
-        throw new VersionConflictEngineException(shardId,index.type(),index.id(),currentVersion,expectedVersion);
+        throw new VersionConflictEngineException(shardId,index.type(),index.id(),index.versionType().explainConflictForWrites(currentVersion,expectedVersion,deleted));
       }
     }
-    updatedVersion=index.versionType().updateVersion(currentVersion,expectedVersion);
+    long updatedVersion=index.versionType().updateVersion(currentVersion,expectedVersion);
     final boolean created;
     index.updateVersion(updatedVersion);
     if (currentVersion == Versions.NOT_FOUND) {

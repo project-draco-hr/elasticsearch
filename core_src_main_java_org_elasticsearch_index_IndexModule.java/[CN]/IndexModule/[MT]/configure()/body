@@ -1,3 +1,33 @@
 {
+  bind(EngineFactory.class).to(engineFactoryImpl).asEagerSingleton();
+  if (indexSearcherWrapper == null) {
+    bind(IndexSearcherWrapper.class).toProvider(Providers.of(null));
+  }
+ else {
+    bind(IndexSearcherWrapper.class).to(indexSearcherWrapper).asEagerSingleton();
+  }
+  bind(IndexEventListener.class).toInstance(freeze());
   bind(IndexService.class).asEagerSingleton();
+  bind(IndexServicesProvider.class).asEagerSingleton();
+  bind(MapperService.class).asEagerSingleton();
+  bind(IndexFieldDataService.class).asEagerSingleton();
+  final IndexSettings settings=new IndexSettings(indexSettings.getIndexMetaData(),indexSettings.getNodeSettings(),settingsConsumers);
+  bind(IndexSettings.class).toInstance(settings);
+  final String storeType=settings.getSettings().get(STORE_TYPE);
+  final IndexStore store;
+  if (storeType == null || isBuiltinType(storeType)) {
+    store=new IndexStore(settings,indexStoreConfig);
+  }
+ else {
+    BiFunction<IndexSettings,IndexStoreConfig,IndexStore> factory=storeTypes.get(storeType);
+    if (factory == null) {
+      throw new IllegalArgumentException("Unknown store type [" + storeType + "]");
+    }
+    store=factory.apply(settings,indexStoreConfig);
+    if (store == null) {
+      throw new IllegalStateException("store must not be null");
+    }
+  }
+  bind(IndexStore.class).toInstance(store);
+  bind(SimilarityService.class).toInstance(new SimilarityService(settings,similarities));
 }

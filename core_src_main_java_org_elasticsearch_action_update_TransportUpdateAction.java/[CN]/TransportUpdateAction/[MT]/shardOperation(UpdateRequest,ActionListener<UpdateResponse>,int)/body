@@ -1,10 +1,10 @@
 {
   IndexService indexService=indicesService.indexServiceSafe(request.concreteIndex());
-  IndexShard indexShard=indexService.shardSafe(request.shardId());
+  IndexShard indexShard=indexService.getShard(request.shardId());
   final UpdateHelper.Result result=updateHelper.prepare(request,indexShard);
 switch (result.operation()) {
 case UPSERT:
-    IndexRequest upsertRequest=new IndexRequest((IndexRequest)result.action(),request);
+    IndexRequest upsertRequest=new IndexRequest(result.action(),request);
   final BytesReference upsertSourceBytes=upsertRequest.source();
 indexAction.execute(upsertRequest,new ActionListener<IndexResponse>(){
   @Override public void onResponse(  IndexResponse response){
@@ -20,7 +20,7 @@ indexAction.execute(upsertRequest,new ActionListener<IndexResponse>(){
   }
   @Override public void onFailure(  Throwable e){
     e=ExceptionsHelper.unwrapCause(e);
-    if (e instanceof VersionConflictEngineException || e instanceof DocumentAlreadyExistsException) {
+    if (e instanceof VersionConflictEngineException) {
       if (retryCount < request.retryOnConflict()) {
         threadPool.executor(executor()).execute(new ActionRunnable<UpdateResponse>(listener){
           @Override protected void doRun(){
@@ -37,7 +37,7 @@ indexAction.execute(upsertRequest,new ActionListener<IndexResponse>(){
 );
 break;
 case INDEX:
-IndexRequest indexRequest=new IndexRequest((IndexRequest)result.action(),request);
+IndexRequest indexRequest=new IndexRequest(result.action(),request);
 final BytesReference indexSourceBytes=indexRequest.source();
 indexAction.execute(indexRequest,new ActionListener<IndexResponse>(){
 @Override public void onResponse(IndexResponse response){
@@ -64,7 +64,7 @@ listener.onFailure(e);
 );
 break;
 case DELETE:
-DeleteRequest deleteRequest=new DeleteRequest((DeleteRequest)result.action(),request);
+DeleteRequest deleteRequest=new DeleteRequest(result.action(),request);
 deleteAction.execute(deleteRequest,new ActionListener<DeleteResponse>(){
 @Override public void onResponse(DeleteResponse response){
 UpdateResponse update=new UpdateResponse(response.getShardInfo(),response.getIndex(),response.getType(),response.getId(),response.getVersion(),false);
@@ -93,7 +93,7 @@ case NONE:
 UpdateResponse update=result.action();
 IndexService indexServiceOrNull=indicesService.indexService(request.concreteIndex());
 if (indexServiceOrNull != null) {
-IndexShard shard=indexService.shard(request.shardId());
+IndexShard shard=indexService.getShardOrNull(request.shardId());
 if (shard != null) {
 shard.indexingService().noopUpdate(request.type());
 }

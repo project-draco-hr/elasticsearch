@@ -1,0 +1,25 @@
+{
+  ThreadPool threadPool=new ThreadPool(Settings.settingsBuilder().put("threadpool.search.type","cached").put("name","testCachedExecutorType").build());
+  final CountDownLatch latch=new CountDownLatch(1);
+  ThreadPoolExecutor oldExecutor=(ThreadPoolExecutor)threadPool.executor(Names.SEARCH);
+  threadPool.executor(Names.SEARCH).execute(new Runnable(){
+    @Override public void run(){
+      try {
+        new CountDownLatch(1).await();
+      }
+ catch (      InterruptedException ex) {
+        latch.countDown();
+        Thread.currentThread().interrupt();
+      }
+    }
+  }
+);
+  threadPool.updateSettings(settingsBuilder().put("threadpool.search.type","fixed").build());
+  assertThat(threadPool.executor(Names.SEARCH),not(sameInstance(oldExecutor)));
+  assertThat(oldExecutor.isShutdown(),equalTo(true));
+  assertThat(oldExecutor.isTerminating(),equalTo(true));
+  assertThat(oldExecutor.isTerminated(),equalTo(false));
+  threadPool.shutdownNow();
+  latch.await(3,TimeUnit.SECONDS);
+  terminate(threadPool);
+}
