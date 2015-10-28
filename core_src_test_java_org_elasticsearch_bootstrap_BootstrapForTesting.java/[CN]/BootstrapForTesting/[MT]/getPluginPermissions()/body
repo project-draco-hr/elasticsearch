@@ -1,0 +1,28 @@
+{
+  List<URL> pluginPolicies=Collections.list(BootstrapForTesting.class.getClassLoader().getResources(PluginInfo.ES_PLUGIN_POLICY));
+  if (pluginPolicies.isEmpty()) {
+    return Collections.emptyMap();
+  }
+  Set<URL> codebases=new HashSet<>(Arrays.asList(JarHell.parseClassPath()));
+  Set<URL> excluded=new HashSet<>(Arrays.asList(Bootstrap.class.getProtectionDomain().getCodeSource().getLocation(),BootstrapForTesting.class.getProtectionDomain().getCodeSource().getLocation(),LuceneTestCase.class.getProtectionDomain().getCodeSource().getLocation(),RandomizedRunner.class.getProtectionDomain().getCodeSource().getLocation(),Assert.class.getProtectionDomain().getCodeSource().getLocation()));
+  codebases.removeAll(excluded);
+  final List<Policy> policies=new ArrayList<>();
+  for (  URL policyFile : pluginPolicies) {
+    policies.add(Security.readPolicy(policyFile,codebases.toArray(new URL[codebases.size()])));
+  }
+  Map<String,Policy> map=new HashMap<>();
+  for (  URL url : codebases) {
+    map.put(url.getFile(),new Policy(){
+      @Override public boolean implies(      ProtectionDomain domain,      Permission permission){
+        for (        Policy p : policies) {
+          if (p.implies(domain,permission)) {
+            return true;
+          }
+        }
+        return false;
+      }
+    }
+);
+  }
+  return Collections.unmodifiableMap(map);
+}
