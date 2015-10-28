@@ -1,48 +1,46 @@
 {
   ValidateQueryRequest validateQueryRequest=new ValidateQueryRequest(Strings.splitStringByCommaToArray(request.param("index")));
   validateQueryRequest.indicesOptions(IndicesOptions.fromRequest(request,validateQueryRequest.indicesOptions()));
+  validateQueryRequest.explain(request.paramAsBoolean("explain",false));
   if (RestActions.hasBodyContent(request)) {
-    validateQueryRequest.source(RestActions.getRestContent(request));
+    try {
+      validateQueryRequest.query(RestActions.getQueryContent(RestActions.getRestContent(request),indicesQueriesRegistry,parseFieldMatcher));
+    }
+ catch (    ParsingException e) {
+      channel.sendResponse(buildErrorResponse(channel.newBuilder(),e.getDetailedMessage(),validateQueryRequest.explain()));
+      return;
+    }
+catch (    Exception e) {
+      channel.sendResponse(buildErrorResponse(channel.newBuilder(),e.getMessage(),validateQueryRequest.explain()));
+      return;
+    }
   }
  else {
     QueryBuilder<?> queryBuilder=RestActions.urlParamsToQueryBuilder(request);
     if (queryBuilder != null) {
-      QuerySourceBuilder querySourceBuilder=new QuerySourceBuilder();
-      querySourceBuilder.setQuery(queryBuilder);
-      validateQueryRequest.source(querySourceBuilder);
+      validateQueryRequest.query(queryBuilder);
     }
   }
   validateQueryRequest.types(Strings.splitStringByCommaToArray(request.param("type")));
-  if (request.paramAsBoolean("explain",false)) {
-    validateQueryRequest.explain(true);
-  }
- else {
-    validateQueryRequest.explain(false);
-  }
-  if (request.paramAsBoolean("rewrite",false)) {
-    validateQueryRequest.rewrite(true);
-  }
- else {
-    validateQueryRequest.rewrite(false);
-  }
+  validateQueryRequest.rewrite(request.paramAsBoolean("rewrite",false));
   client.admin().indices().validateQuery(validateQueryRequest,new RestBuilderListener<ValidateQueryResponse>(channel){
     @Override public RestResponse buildResponse(    ValidateQueryResponse response,    XContentBuilder builder) throws Exception {
       builder.startObject();
-      builder.field("valid",response.isValid());
+      builder.field(VALID_FIELD,response.isValid());
       buildBroadcastShardsHeader(builder,request,response);
       if (response.getQueryExplanation() != null && !response.getQueryExplanation().isEmpty()) {
-        builder.startArray("explanations");
+        builder.startArray(EXPLANATIONS_FIELD);
         for (        QueryExplanation explanation : response.getQueryExplanation()) {
           builder.startObject();
           if (explanation.getIndex() != null) {
-            builder.field("index",explanation.getIndex(),XContentBuilder.FieldCaseConversion.NONE);
+            builder.field(INDEX_FIELD,explanation.getIndex(),XContentBuilder.FieldCaseConversion.NONE);
           }
-          builder.field("valid",explanation.isValid());
+          builder.field(VALID_FIELD,explanation.isValid());
           if (explanation.getError() != null) {
-            builder.field("error",explanation.getError());
+            builder.field(ERROR_FIELD,explanation.getError());
           }
           if (explanation.getExplanation() != null) {
-            builder.field("explanation",explanation.getExplanation());
+            builder.field(EXPLANATION_FIELD,explanation.getExplanation());
           }
           builder.endObject();
         }
