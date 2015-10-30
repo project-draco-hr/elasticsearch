@@ -1,0 +1,48 @@
+{
+  super(indexSettings,name,settings);
+  Reader rulesReader=null;
+  if (settings.getAsArray("synonyms",null) != null) {
+    List<String> rules=Analysis.getWordList(env,settings,"synonyms");
+    StringBuilder sb=new StringBuilder();
+    for (    String line : rules) {
+      sb.append(line).append(System.getProperty("line.separator"));
+    }
+    rulesReader=new FastStringReader(sb.toString());
+  }
+ else   if (settings.get("synonyms_path") != null) {
+    rulesReader=Analysis.getReaderFromFile(env,settings,"synonyms_path");
+  }
+ else {
+    throw new IllegalArgumentException("synonym requires either `synonyms` or `synonyms_path` to be configured");
+  }
+  this.ignoreCase=settings.getAsBoolean("ignore_case",false);
+  boolean expand=settings.getAsBoolean("expand",true);
+  String tokenizerName=settings.get("tokenizer","whitespace");
+  final TokenizerFactory tokenizerFactory=tokenizerFactories.get(tokenizerName);
+  if (tokenizerFactory == null) {
+    throw new IllegalArgumentException("failed to find tokenizer [" + tokenizerName + "] for synonym token filter");
+  }
+  Analyzer analyzer=new Analyzer(){
+    @Override protected TokenStreamComponents createComponents(    String fieldName){
+      Tokenizer tokenizer=tokenizerFactory == null ? new WhitespaceTokenizer() : tokenizerFactory.create();
+      TokenStream stream=ignoreCase ? new LowerCaseFilter(tokenizer) : tokenizer;
+      return new TokenStreamComponents(tokenizer,stream);
+    }
+  }
+;
+  try {
+    SynonymMap.Builder parser=null;
+    if ("wordnet".equalsIgnoreCase(settings.get("format"))) {
+      parser=new WordnetSynonymParser(true,expand,analyzer);
+      ((WordnetSynonymParser)parser).parse(rulesReader);
+    }
+ else {
+      parser=new SolrSynonymParser(true,expand,analyzer);
+      ((SolrSynonymParser)parser).parse(rulesReader);
+    }
+    synonymMap=parser.build();
+  }
+ catch (  Exception e) {
+    throw new IllegalArgumentException("failed to build synonyms",e);
+  }
+}

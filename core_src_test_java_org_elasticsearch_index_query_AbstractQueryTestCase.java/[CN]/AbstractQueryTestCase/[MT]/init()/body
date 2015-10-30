@@ -3,6 +3,7 @@
   Settings settings=Settings.settingsBuilder().put("name",AbstractQueryTestCase.class.toString()).put("path.home",createTempDir()).build();
   Settings indexSettings=Settings.settingsBuilder().put(IndexMetaData.SETTING_VERSION_CREATED,version).build();
   index=new Index(randomAsciiOfLengthBetween(1,10));
+  IndexSettings idxSettings=IndexSettingsModule.newIndexSettings(index,indexSettings,Collections.emptyList());
   final TestClusterService clusterService=new TestClusterService();
   clusterService.setState(new ClusterState.Builder(clusterService.state()).metaData(new MetaData.Builder().put(new IndexMetaData.Builder(index.name()).settings(indexSettings).numberOfShards(1).numberOfReplicas(0))));
   final Client proxy=(Client)Proxy.newProxyInstance(Client.class.getClassLoader(),new Class[]{Client.class},clientInvocationHandler);
@@ -38,9 +39,14 @@
       }
     }
   }
-,new IndexSettingsModule(index,indexSettings),new AnalysisModule(indexSettings,new IndicesAnalysisService(indexSettings)),new AbstractModule(){
+,new IndexSettingsModule(index,indexSettings),new AbstractModule(){
     @Override protected void configure(){
-      IndexSettings idxSettings=IndexSettingsModule.newIndexSettings(index,indexSettings,Collections.emptyList());
+      try {
+        bind(AnalysisService.class).toInstance(new AnalysisRegistry(null,new Environment(settings)).build(idxSettings));
+      }
+ catch (      IOException e) {
+        throw new ElasticsearchException(e);
+      }
       SimilarityService service=new SimilarityService(idxSettings,Collections.emptyMap());
       bind(SimilarityService.class).toInstance(service);
       BitsetFilterCache bitsetFilterCache=new BitsetFilterCache(idxSettings,new IndicesWarmer(idxSettings.getNodeSettings(),null));

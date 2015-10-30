@@ -1,0 +1,80 @@
+{
+  Settings defaultSettings=Settings.builder().put(IndexMetaData.SETTING_VERSION_CREATED,settings.getIndexVersionCreated()).build();
+  Map<String,T> factories=new HashMap<>();
+  for (  Map.Entry<String,Settings> entry : settingsMap.entrySet()) {
+    String name=entry.getKey();
+    Settings currentSettings=entry.getValue();
+    String typeName=currentSettings.get("type");
+    if (analyzer) {
+      T factory;
+      if (typeName == null) {
+        if (currentSettings.get("tokenizer") != null) {
+          factory=(T)new CustomAnalyzerProvider(settings,name,currentSettings);
+        }
+ else {
+          throw new IllegalArgumentException(toBuild + " [" + name+ "] must have a type associated with it");
+        }
+      }
+ else       if (typeName.equals("custom")) {
+        factory=(T)new CustomAnalyzerProvider(settings,name,currentSettings);
+      }
+ else {
+        AnalysisModule.AnalysisProvider<T> type=providerMap.get(typeName);
+        if (type == null) {
+          throw new IllegalArgumentException("Unknown " + toBuild + " type ["+ typeName+ "] for ["+ name+ "]");
+        }
+        factory=type.get(settings,environemnt,name,currentSettings);
+      }
+      factories.put(name,factory);
+    }
+ else {
+      if (typeName == null) {
+        throw new IllegalArgumentException(toBuild + " [" + name+ "] must have a type associated with it");
+      }
+      AnalysisModule.AnalysisProvider<T> type=providerMap.get(typeName);
+      if (type == null) {
+        throw new IllegalArgumentException("Unknown " + toBuild + " type ["+ typeName+ "] for ["+ name+ "]");
+      }
+      final T factory=type.get(settings,environemnt,name,currentSettings);
+      factories.put(name,factory);
+    }
+  }
+  for (  Map.Entry<String,AnalysisModule.AnalysisProvider<T>> entry : providerMap.entrySet()) {
+    String name=entry.getKey();
+    AnalysisModule.AnalysisProvider<T> provider=entry.getValue();
+    if (settingsMap.containsKey(name)) {
+      continue;
+    }
+    if (provider.requiresAnalysisSettings()) {
+      continue;
+    }
+    AnalysisModule.AnalysisProvider<T> defaultProvider=defaultInstance.get(name);
+    final T instance;
+    if (defaultProvider == null) {
+      instance=provider.get(settings,environemnt,name,defaultSettings);
+    }
+ else {
+      instance=defaultProvider.get(settings,environemnt,name,defaultSettings);
+    }
+    factories.put(name,instance);
+    String camelCase=Strings.toCamelCase(name);
+    if (providerMap.containsKey(camelCase) == false && factories.containsKey(camelCase) == false) {
+      factories.put(camelCase,instance);
+    }
+  }
+  for (  Map.Entry<String,AnalysisModule.AnalysisProvider<T>> entry : defaultInstance.entrySet()) {
+    final String name=entry.getKey();
+    final AnalysisModule.AnalysisProvider<T> provider=entry.getValue();
+    final String camelCase=Strings.toCamelCase(name);
+    if (factories.containsKey(name) == false || (defaultInstance.containsKey(camelCase) == false && factories.containsKey(camelCase) == false)) {
+      final T instance=provider.get(settings,environemnt,name,defaultSettings);
+      if (factories.containsKey(name) == false) {
+        factories.put(name,instance);
+      }
+      if ((defaultInstance.containsKey(camelCase) == false && factories.containsKey(camelCase) == false)) {
+        factories.put(camelCase,instance);
+      }
+    }
+  }
+  return factories;
+}
