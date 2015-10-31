@@ -1,0 +1,24 @@
+{
+  LinkedHashMap<String,ContextMapping> map=new LinkedHashMap<>();
+  map.put("cat",ContextBuilder.category("cat").field("cat").build());
+  boolean addAnotherContext=randomBoolean();
+  if (addAnotherContext) {
+    map.put("type",ContextBuilder.category("type").field("type").build());
+  }
+  final CompletionMappingBuilder mapping=new CompletionMappingBuilder().context(map);
+  createIndexAndMapping(mapping);
+  int numDocs=10;
+  List<IndexRequestBuilder> indexRequestBuilders=new ArrayList<>();
+  for (int i=0; i < numDocs; i++) {
+    XContentBuilder source=jsonBuilder().startObject().startObject(FIELD).field("input","suggestion" + i).field("weight",i + 1).endObject().field("cat","cat" + i % 2);
+    if (addAnotherContext) {
+      source.field("type","type" + i % 3);
+    }
+    source.endObject();
+    indexRequestBuilders.add(client().prepareIndex(INDEX,TYPE,"" + i).setSource(source));
+  }
+  indexRandom(true,indexRequestBuilders);
+  ensureYellow(INDEX);
+  CompletionSuggestionBuilder prefix=SuggestBuilders.completionSuggestion("foo").field(FIELD).prefix("sugg");
+  assertSuggestions("foo",prefix,"suggestion9","suggestion8","suggestion7","suggestion6","suggestion5");
+}

@@ -1,0 +1,31 @@
+{
+  LinkedHashMap<String,ContextMapping> map=new LinkedHashMap<>();
+  map.put("cat",ContextBuilder.category("cat").field("cat").build());
+  map.put("type",ContextBuilder.category("type").field("type").build());
+  final CompletionMappingBuilder mapping=new CompletionMappingBuilder().context(map);
+  createIndexAndMapping(mapping);
+  int numDocs=10;
+  List<IndexRequestBuilder> indexRequestBuilders=new ArrayList<>();
+  for (int i=0; i < numDocs; i++) {
+    XContentBuilder source=jsonBuilder().startObject().startObject(FIELD).field("input","suggestion" + i).field("weight",i + 1).endObject().field("cat","cat" + i % 2).field("type","type" + i % 4).endObject();
+    indexRequestBuilders.add(client().prepareIndex(INDEX,TYPE,"" + i).setSource(source));
+  }
+  indexRandom(true,indexRequestBuilders);
+  ensureYellow(INDEX);
+  CompletionSuggestionBuilder catBoostSuggest=SuggestBuilders.completionSuggestion("foo").field(FIELD).prefix("sugg");
+  catBoostSuggest.categoryContexts("cat",new CategoryQueryContext("cat0",3),new CategoryQueryContext("cat1"));
+  assertSuggestions("foo",catBoostSuggest,"suggestion8","suggestion6","suggestion4","suggestion9","suggestion2");
+  CompletionSuggestionBuilder typeBoostSuggest=SuggestBuilders.completionSuggestion("foo").field(FIELD).prefix("sugg");
+  typeBoostSuggest.categoryContexts("type",new CategoryQueryContext("type2",2),new CategoryQueryContext("type1",4));
+  assertSuggestions("foo",typeBoostSuggest,"suggestion9","suggestion5","suggestion6","suggestion1","suggestion2");
+  CompletionSuggestionBuilder multiContextBoostSuggest=SuggestBuilders.completionSuggestion("foo").field(FIELD).prefix("sugg");
+  if (randomBoolean()) {
+    multiContextBoostSuggest.categoryContexts("type",new CategoryQueryContext("type2",2),new CategoryQueryContext("type1",4));
+    multiContextBoostSuggest.categoryContexts("cat",new CategoryQueryContext("cat0",3),new CategoryQueryContext("cat1"));
+  }
+ else {
+    multiContextBoostSuggest.categoryContexts("cat",new CategoryQueryContext("cat0",3),new CategoryQueryContext("cat1"));
+    multiContextBoostSuggest.categoryContexts("type",new CategoryQueryContext("type2",2),new CategoryQueryContext("type1",4));
+  }
+  assertSuggestions("foo",multiContextBoostSuggest,"suggestion9","suggestion6","suggestion5","suggestion2","suggestion1");
+}
