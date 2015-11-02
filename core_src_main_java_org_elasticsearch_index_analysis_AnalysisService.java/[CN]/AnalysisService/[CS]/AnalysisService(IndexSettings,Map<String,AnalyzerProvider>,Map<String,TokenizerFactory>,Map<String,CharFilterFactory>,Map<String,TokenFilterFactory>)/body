@@ -1,0 +1,76 @@
+{
+  super(indexSettings);
+  this.tokenizers=unmodifiableMap(tokenizerFactoryFactories);
+  this.charFilters=unmodifiableMap(charFilterFactoryFactories);
+  this.tokenFilters=unmodifiableMap(tokenFilterFactoryFactories);
+  analyzerProviders=new HashMap<>(analyzerProviders);
+  if (!analyzerProviders.containsKey("default")) {
+    analyzerProviders.put("default",new StandardAnalyzerProvider(indexSettings,null,"default",Settings.Builder.EMPTY_SETTINGS));
+  }
+  if (!analyzerProviders.containsKey("default_search")) {
+    analyzerProviders.put("default_search",analyzerProviders.get("default"));
+  }
+  if (!analyzerProviders.containsKey("default_search_quoted")) {
+    analyzerProviders.put("default_search_quoted",analyzerProviders.get("default_search"));
+  }
+  Map<String,NamedAnalyzer> analyzers=new HashMap<>();
+  for (  Map.Entry<String,AnalyzerProvider> entry : analyzerProviders.entrySet()) {
+    AnalyzerProvider analyzerFactory=entry.getValue();
+    String name=entry.getKey();
+    int overridePositionIncrementGap=StringFieldMapper.Defaults.positionIncrementGap(indexSettings.getIndexVersionCreated());
+    if (analyzerFactory instanceof CustomAnalyzerProvider) {
+      ((CustomAnalyzerProvider)analyzerFactory).build(this);
+      overridePositionIncrementGap=Integer.MIN_VALUE;
+    }
+    Analyzer analyzerF=analyzerFactory.get();
+    if (analyzerF == null) {
+      throw new IllegalArgumentException("analyzer [" + analyzerFactory.name() + "] created null analyzer");
+    }
+    NamedAnalyzer analyzer;
+    if (analyzerF instanceof NamedAnalyzer) {
+      analyzer=(NamedAnalyzer)analyzerF;
+      if (overridePositionIncrementGap >= 0 && analyzer.getPositionIncrementGap(analyzer.name()) != overridePositionIncrementGap) {
+        analyzer=new NamedAnalyzer(analyzer,overridePositionIncrementGap);
+      }
+    }
+ else {
+      analyzer=new NamedAnalyzer(name,analyzerFactory.scope(),analyzerF,overridePositionIncrementGap);
+    }
+    if (analyzers.containsKey(name)) {
+      throw new IllegalStateException("already registered analyzer with name: " + name);
+    }
+    analyzers.put(name,analyzer);
+    String strAliases=this.indexSettings.getSettings().get("index.analysis.analyzer." + analyzerFactory.name() + ".alias");
+    if (strAliases != null) {
+      for (      String alias : Strings.commaDelimitedListToStringArray(strAliases)) {
+        analyzers.put(alias,analyzer);
+      }
+    }
+    String[] aliases=this.indexSettings.getSettings().getAsArray("index.analysis.analyzer." + analyzerFactory.name() + ".alias");
+    for (    String alias : aliases) {
+      analyzers.put(alias,analyzer);
+    }
+  }
+  NamedAnalyzer defaultAnalyzer=analyzers.get("default");
+  if (defaultAnalyzer == null) {
+    throw new IllegalArgumentException("no default analyzer configured");
+  }
+  if (analyzers.containsKey("default_index")) {
+    final Version createdVersion=indexSettings.getIndexVersionCreated();
+    if (createdVersion.onOrAfter(Version.V_3_0_0)) {
+      throw new IllegalArgumentException("setting [index.analysis.analyzer.default_index] is not supported anymore, use [index.analysis.analyzer.default] instead for index [" + index().getName() + "]");
+    }
+ else {
+      deprecationLogger.deprecated("setting [index.analysis.analyzer.default_index] is deprecated, use [index.analysis.analyzer.default] instead for index [{}]",index().getName());
+    }
+  }
+  defaultIndexAnalyzer=analyzers.containsKey("default_index") ? analyzers.get("default_index") : defaultAnalyzer;
+  defaultSearchAnalyzer=analyzers.containsKey("default_search") ? analyzers.get("default_search") : defaultAnalyzer;
+  defaultSearchQuoteAnalyzer=analyzers.containsKey("default_search_quote") ? analyzers.get("default_search_quote") : defaultSearchAnalyzer;
+  for (  Map.Entry<String,NamedAnalyzer> analyzer : analyzers.entrySet()) {
+    if (analyzer.getKey().startsWith("_")) {
+      throw new IllegalArgumentException("analyzer name must not start with '_'. got \"" + analyzer.getKey() + "\"");
+    }
+  }
+  this.analyzers=unmodifiableMap(analyzers);
+}
