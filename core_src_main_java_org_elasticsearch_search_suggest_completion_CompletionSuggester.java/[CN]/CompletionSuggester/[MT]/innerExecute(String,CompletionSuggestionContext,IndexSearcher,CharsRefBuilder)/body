@@ -10,28 +10,29 @@
   TopSuggestDocsCollector collector=new TopDocumentsCollector(suggestionContext.getSize());
   suggest(searcher,suggestionContext.toQuery(),collector);
   int numResult=0;
+  List<LeafReaderContext> leaves=searcher.getIndexReader().leaves();
   for (  TopSuggestDocs.SuggestScoreDoc suggestScoreDoc : collector.get().scoreLookupDocs()) {
     TopDocumentsCollector.SuggestDoc suggestDoc=(TopDocumentsCollector.SuggestDoc)suggestScoreDoc;
     Map<String,Set<CharSequence>> contexts=Collections.emptyMap();
-    if (fieldType.hasContextMappings() && !suggestDoc.getContexts().isEmpty()) {
+    if (fieldType.hasContextMappings() && suggestDoc.getContexts().isEmpty() == false) {
       contexts=fieldType.getContextMappings().getNamedContexts(suggestDoc.getContexts());
     }
     final Map<String,List<Object>> payload=new HashMap<>(0);
     Set<String> payloadFields=suggestionContext.getPayloadFields();
-    if (!payloadFields.isEmpty()) {
-      int readerIndex=ReaderUtil.subIndex(suggestDoc.doc,searcher.getIndexReader().leaves());
-      LeafReaderContext subReaderContext=searcher.getIndexReader().leaves().get(readerIndex);
-      int subDocId=suggestDoc.doc - subReaderContext.docBase;
+    if (payloadFields.isEmpty() == false) {
+      final int readerIndex=ReaderUtil.subIndex(suggestDoc.doc,leaves);
+      final LeafReaderContext subReaderContext=leaves.get(readerIndex);
+      final int subDocId=suggestDoc.doc - subReaderContext.docBase;
       for (      String field : payloadFields) {
         MappedFieldType payloadFieldType=suggestionContext.getMapperService().smartNameFieldType(field);
         if (payloadFieldType != null) {
-          AtomicFieldData data=suggestionContext.getFieldData().getForField(payloadFieldType).load(subReaderContext);
-          ScriptDocValues scriptValues=data.getScriptValues();
+          final AtomicFieldData data=suggestionContext.getIndexFieldDataService().getForField(payloadFieldType).load(subReaderContext);
+          final ScriptDocValues scriptValues=data.getScriptValues();
           scriptValues.setNextDocId(subDocId);
           payload.put(field,new ArrayList<>(scriptValues.getValues()));
         }
  else {
-          throw new ElasticsearchException("payload field [" + field + "] does not exist");
+          throw new IllegalArgumentException("payload field [" + field + "] does not exist");
         }
       }
     }
