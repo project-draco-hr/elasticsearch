@@ -6,26 +6,30 @@
     settings=Settings.Builder.EMPTY_SETTINGS;
   }
   Info previousInfo=previousExecutorHolder != null ? previousExecutorHolder.info : null;
-  String type=settings.get("type",previousInfo != null ? previousInfo.getType() : defaultSettings.get("type"));
+  String type=settings.get("type",previousInfo != null ? previousInfo.getThreadPoolType().getType() : defaultSettings.get("type"));
+  ThreadPoolType threadPoolType=ThreadPoolType.fromType(type);
   ThreadFactory threadFactory=EsExecutors.daemonThreadFactory(this.settings,name);
-  if ("same".equals(type)) {
+  if (ThreadPoolType.DIRECT == threadPoolType) {
     if (previousExecutorHolder != null) {
       logger.debug("updating thread_pool [{}], type [{}]",name,type);
     }
  else {
       logger.debug("creating thread_pool [{}], type [{}]",name,type);
     }
-    return new ExecutorHolder(DIRECT_EXECUTOR,new Info(name,type));
+    return new ExecutorHolder(DIRECT_EXECUTOR,new Info(name,threadPoolType));
   }
- else   if ("cached".equals(type)) {
+ else   if (ThreadPoolType.CACHED == threadPoolType) {
+    if (!Names.GENERIC.equals(name)) {
+      throw new IllegalArgumentException("thread pool type cached is reserved only for the generic thread pool and can not be applied to [" + name + "]");
+    }
     TimeValue defaultKeepAlive=defaultSettings.getAsTime("keep_alive",timeValueMinutes(5));
     if (previousExecutorHolder != null) {
-      if ("cached".equals(previousInfo.getType())) {
+      if (ThreadPoolType.CACHED == previousInfo.getThreadPoolType()) {
         TimeValue updatedKeepAlive=settings.getAsTime("keep_alive",previousInfo.getKeepAlive());
         if (!previousInfo.getKeepAlive().equals(updatedKeepAlive)) {
           logger.debug("updating thread_pool [{}], type [{}], keep_alive [{}]",name,type,updatedKeepAlive);
           ((EsThreadPoolExecutor)previousExecutorHolder.executor()).setKeepAliveTime(updatedKeepAlive.millis(),TimeUnit.MILLISECONDS);
-          return new ExecutorHolder(previousExecutorHolder.executor(),new Info(name,type,-1,-1,updatedKeepAlive,null));
+          return new ExecutorHolder(previousExecutorHolder.executor(),new Info(name,threadPoolType,-1,-1,updatedKeepAlive,null));
         }
         return previousExecutorHolder;
       }
@@ -41,13 +45,13 @@
       logger.debug("creating thread_pool [{}], type [{}], keep_alive [{}]",name,type,keepAlive);
     }
     Executor executor=EsExecutors.newCached(name,keepAlive.millis(),TimeUnit.MILLISECONDS,threadFactory);
-    return new ExecutorHolder(executor,new Info(name,type,-1,-1,keepAlive,null));
+    return new ExecutorHolder(executor,new Info(name,threadPoolType,-1,-1,keepAlive,null));
   }
- else   if ("fixed".equals(type)) {
+ else   if (ThreadPoolType.FIXED == threadPoolType) {
     int defaultSize=defaultSettings.getAsInt("size",EsExecutors.boundedNumberOfProcessors(settings));
     SizeValue defaultQueueSize=getAsSizeOrUnbounded(defaultSettings,"queue",getAsSizeOrUnbounded(defaultSettings,"queue_size",null));
     if (previousExecutorHolder != null) {
-      if ("fixed".equals(previousInfo.getType())) {
+      if (ThreadPoolType.FIXED == previousInfo.getThreadPoolType()) {
         SizeValue updatedQueueSize=getAsSizeOrUnbounded(settings,"capacity",getAsSizeOrUnbounded(settings,"queue",getAsSizeOrUnbounded(settings,"queue_size",previousInfo.getQueueSize())));
         if (Objects.equals(previousInfo.getQueueSize(),updatedQueueSize)) {
           int updatedSize=settings.getAsInt("size",previousInfo.getMax());
@@ -61,7 +65,7 @@
               ((EsThreadPoolExecutor)previousExecutorHolder.executor()).setCorePoolSize(updatedSize);
               ((EsThreadPoolExecutor)previousExecutorHolder.executor()).setMaximumPoolSize(updatedSize);
             }
-            return new ExecutorHolder(previousExecutorHolder.executor(),new Info(name,type,updatedSize,updatedSize,null,updatedQueueSize));
+            return new ExecutorHolder(previousExecutorHolder.executor(),new Info(name,threadPoolType,updatedSize,updatedSize,null,updatedQueueSize));
           }
           return previousExecutorHolder;
         }
@@ -75,14 +79,14 @@
     SizeValue queueSize=getAsSizeOrUnbounded(settings,"capacity",getAsSizeOrUnbounded(settings,"queue",getAsSizeOrUnbounded(settings,"queue_size",defaultQueueSize)));
     logger.debug("creating thread_pool [{}], type [{}], size [{}], queue_size [{}]",name,type,size,queueSize);
     Executor executor=EsExecutors.newFixed(name,size,queueSize == null ? -1 : (int)queueSize.singles(),threadFactory);
-    return new ExecutorHolder(executor,new Info(name,type,size,size,null,queueSize));
+    return new ExecutorHolder(executor,new Info(name,threadPoolType,size,size,null,queueSize));
   }
- else   if ("scaling".equals(type)) {
+ else   if (ThreadPoolType.SCALING == threadPoolType) {
     TimeValue defaultKeepAlive=defaultSettings.getAsTime("keep_alive",timeValueMinutes(5));
     int defaultMin=defaultSettings.getAsInt("min",1);
     int defaultSize=defaultSettings.getAsInt("size",EsExecutors.boundedNumberOfProcessors(settings));
     if (previousExecutorHolder != null) {
-      if ("scaling".equals(previousInfo.getType())) {
+      if (ThreadPoolType.SCALING == previousInfo.getThreadPoolType()) {
         TimeValue updatedKeepAlive=settings.getAsTime("keep_alive",previousInfo.getKeepAlive());
         int updatedMin=settings.getAsInt("min",previousInfo.getMin());
         int updatedSize=settings.getAsInt("max",settings.getAsInt("size",previousInfo.getMax()));
@@ -97,7 +101,7 @@
           if (previousInfo.getMax() != updatedSize) {
             ((EsThreadPoolExecutor)previousExecutorHolder.executor()).setMaximumPoolSize(updatedSize);
           }
-          return new ExecutorHolder(previousExecutorHolder.executor(),new Info(name,type,updatedMin,updatedSize,updatedKeepAlive,null));
+          return new ExecutorHolder(previousExecutorHolder.executor(),new Info(name,threadPoolType,updatedMin,updatedSize,updatedKeepAlive,null));
         }
         return previousExecutorHolder;
       }
@@ -121,7 +125,7 @@
       logger.debug("creating thread_pool [{}], type [{}], min [{}], size [{}], keep_alive [{}]",name,type,min,size,keepAlive);
     }
     Executor executor=EsExecutors.newScaling(name,min,size,keepAlive.millis(),TimeUnit.MILLISECONDS,threadFactory);
-    return new ExecutorHolder(executor,new Info(name,type,min,size,keepAlive,null));
+    return new ExecutorHolder(executor,new Info(name,threadPoolType,min,size,keepAlive,null));
   }
   throw new IllegalArgumentException("No type found [" + type + "], for ["+ name+ "]");
 }
