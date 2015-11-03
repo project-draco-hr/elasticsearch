@@ -1,13 +1,30 @@
 {
-  List<CategoryQueryContext> queryContexts=new ArrayList<>();
+  List<GeoQueryContext> queryContexts=new ArrayList<>();
   Token token=parser.nextToken();
   if (token == Token.START_OBJECT || token == Token.VALUE_STRING) {
-    queryContexts.add(innerParseQueryContext(parser));
+    queryContexts.add(GeoQueryContext.parse(parser));
   }
  else   if (token == Token.START_ARRAY) {
     while (parser.nextToken() != Token.END_ARRAY) {
-      queryContexts.add(innerParseQueryContext(parser));
+      queryContexts.add(GeoQueryContext.parse(parser));
     }
   }
-  return queryContexts;
+  List<QueryContext> queryContextList=new ArrayList<>();
+  for (  GeoQueryContext geoQueryContext : queryContexts) {
+    int minPrecision=Math.min(this.precision,geoQueryContext.precision);
+    int precision=Math.min(minPrecision,geoQueryContext.geoHash.length());
+    String truncatedGeohash=geoQueryContext.geoHash.toString().substring(0,precision);
+    queryContextList.add(new QueryContext(truncatedGeohash,geoQueryContext.boost,truncatedGeohash.length() < this.precision));
+    for (    int neighboursPrecision : geoQueryContext.neighbours) {
+      int neighbourPrecision=Math.min(neighboursPrecision,truncatedGeohash.length());
+      String neighbourGeohash=truncatedGeohash.substring(0,neighbourPrecision);
+      Collection<String> locations=new ArrayList<>();
+      GeoHashUtils.addNeighbors(neighbourGeohash,neighbourPrecision,locations);
+      boolean isPrefix=neighbourPrecision < this.precision;
+      for (      String location : locations) {
+        queryContextList.add(new QueryContext(location,geoQueryContext.boost,isPrefix));
+      }
+    }
+  }
+  return queryContextList;
 }
