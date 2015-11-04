@@ -1,6 +1,6 @@
 {
   Version version=randomBoolean() ? Version.CURRENT : VersionUtils.randomVersionBetween(random(),Version.V_2_0_0_beta1,Version.CURRENT);
-  Settings settings=Settings.settingsBuilder().put("name",AbstractQueryTestCase.class.toString()).put("path.home",createTempDir()).build();
+  Settings settings=Settings.settingsBuilder().put("name",AbstractQueryTestCase.class.toString()).put("path.home",createTempDir()).put(ScriptService.SCRIPT_AUTO_RELOAD_ENABLED_SETTING,false).build();
   Settings indexSettings=Settings.settingsBuilder().put(IndexMetaData.SETTING_VERSION_CREATED,version).build();
   index=new Index(randomAsciiOfLengthBetween(1,10));
   IndexSettings idxSettings=IndexSettingsModule.newIndexSettings(index,indexSettings,Collections.emptyList());
@@ -41,14 +41,6 @@
   }
 ,new IndexSettingsModule(index,indexSettings),new AbstractModule(){
     @Override protected void configure(){
-      try {
-        bind(AnalysisService.class).toInstance(new AnalysisRegistry(null,new Environment(settings)).build(idxSettings));
-      }
- catch (      IOException e) {
-        throw new ElasticsearchException(e);
-      }
-      SimilarityService service=new SimilarityService(idxSettings,Collections.emptyMap());
-      bind(SimilarityService.class).toInstance(service);
       bind(Client.class).toInstance(proxy);
       Multibinder.newSetBinder(binder(),ScoreFunctionParser.class);
       bind(ScoreFunctionParserMapper.class).asEagerSingleton();
@@ -58,10 +50,11 @@
     }
   }
 ).createInjector();
-  SimilarityService similarityService=injector.getInstance(SimilarityService.class);
-  indexFieldDataService=injector.getInstance(IndexFieldDataService.class);
+  AnalysisService analysisService=new AnalysisRegistry(null,new Environment(settings)).build(idxSettings);
   ScriptService scriptService=injector.getInstance(ScriptService.class);
-  MapperService mapperService=injector.getInstance(MapperService.class);
+  SimilarityService similarityService=new SimilarityService(idxSettings,Collections.EMPTY_MAP);
+  MapperService mapperService=new MapperService(idxSettings,analysisService,similarityService);
+  indexFieldDataService=new IndexFieldDataService(idxSettings,injector.getInstance(IndicesFieldDataCache.class),injector.getInstance(CircuitBreakerService.class),mapperService);
   BitsetFilterCache bitsetFilterCache=new BitsetFilterCache(idxSettings,new IndicesWarmer(idxSettings.getNodeSettings(),null),new BitsetFilterCache.Listener(){
     @Override public void onCache(    ShardId shardId,    Accountable accountable){
     }
