@@ -1,10 +1,31 @@
 {
-  String mapping=XContentFactory.jsonBuilder().startObject().startObject("type").startObject("properties").startObject("point").field("type","geo_point").field("coerce",true).field("ignore_malformed",true).endObject().endObject().endObject().endObject().string();
-  DocumentMapper defaultMapper=createIndex("test").mapperService().documentMapperParser().parse(mapping);
+  Version version=VersionUtils.randomVersionBetween(random(),Version.V_1_0_0,Version.CURRENT);
+  XContentBuilder mapping=XContentFactory.jsonBuilder().startObject().startObject("type").startObject("properties").startObject("point").field("type","geo_point");
+  if (version.onOrBefore(Version.CURRENT)) {
+    mapping.field("coerce",true);
+  }
+  mapping.field("ignore_malformed",true).endObject().endObject().endObject().endObject();
+  Settings settings=Settings.settingsBuilder().put(IndexMetaData.SETTING_VERSION_CREATED,version).build();
+  DocumentMapper defaultMapper=createIndex("test",settings).mapperService().documentMapperParser().parse(mapping.string());
   ParsedDocument doc=defaultMapper.parse("test","type","1",XContentFactory.jsonBuilder().startObject().startObject("point").field("lat",91).field("lon",181).endObject().endObject().bytes());
-  assertThat(doc.rootDoc().get("point"),equalTo("89.0,1.0"));
+  if (version.onOrBefore(Version.CURRENT)) {
+    assertThat(doc.rootDoc().get("point"),equalTo("89.0,1.0"));
+  }
+ else {
+    assertThat(Long.parseLong(doc.rootDoc().get("point")),equalTo(GeoUtils.mortonHash(1.0,89.0)));
+  }
   doc=defaultMapper.parse("test","type","1",XContentFactory.jsonBuilder().startObject().startObject("point").field("lat",-91).field("lon",-181).endObject().endObject().bytes());
-  assertThat(doc.rootDoc().get("point"),equalTo("-89.0,-1.0"));
+  if (version.onOrBefore(Version.CURRENT)) {
+    assertThat(doc.rootDoc().get("point"),equalTo("-89.0,-1.0"));
+  }
+ else {
+    assertThat(Long.parseLong(doc.rootDoc().get("point")),equalTo(GeoUtils.mortonHash(-1.0,-89.0)));
+  }
   doc=defaultMapper.parse("test","type","1",XContentFactory.jsonBuilder().startObject().startObject("point").field("lat",181).field("lon",361).endObject().endObject().bytes());
-  assertThat(doc.rootDoc().get("point"),equalTo("-1.0,-179.0"));
+  if (version.onOrBefore(Version.CURRENT)) {
+    assertThat(doc.rootDoc().get("point"),equalTo("-1.0,-179.0"));
+  }
+ else {
+    assertThat(Long.parseLong(doc.rootDoc().get("point")),equalTo(GeoUtils.mortonHash(-179.0,-1.0)));
+  }
 }
