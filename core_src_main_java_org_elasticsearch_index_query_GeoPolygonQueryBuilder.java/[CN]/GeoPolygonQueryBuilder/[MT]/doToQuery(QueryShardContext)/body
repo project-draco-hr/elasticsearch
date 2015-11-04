@@ -3,6 +3,7 @@
   for (  GeoPoint geoPoint : this.shell) {
     shell.add(new GeoPoint(geoPoint));
   }
+  final int shellSize=shell.size();
   final boolean indexCreatedBeforeV2_0=context.indexVersionCreated().before(Version.V_2_0_0);
   if (!indexCreatedBeforeV2_0 && !GeoValidationMethod.isIgnoreMalformed(validationMethod)) {
     for (    GeoPoint point : shell) {
@@ -26,6 +27,17 @@
   if (!(fieldType instanceof GeoPointFieldMapper.GeoPointFieldType)) {
     throw new QueryShardException(context,"field [" + fieldName + "] is not a geo_point field");
   }
-  IndexGeoPointFieldData indexFieldData=context.getForField(fieldType);
-  return new GeoPolygonQuery(indexFieldData,shell.toArray(new GeoPoint[shell.size()]));
+  if (context.indexVersionCreated().onOrBefore(Version.CURRENT)) {
+    IndexGeoPointFieldData indexFieldData=context.getForField(fieldType);
+    return new GeoPolygonQuery(indexFieldData,shell.toArray(new GeoPoint[shellSize]));
+  }
+  double[] lats=new double[shellSize];
+  double[] lons=new double[shellSize];
+  GeoPoint p;
+  for (int i=0; i < shellSize; ++i) {
+    p=new GeoPoint(shell.get(i));
+    lats[i]=p.lat();
+    lons[i]=p.lon();
+  }
+  return new GeoPointInPolygonQuery(fieldType.names().fullName(),lons,lats);
 }
