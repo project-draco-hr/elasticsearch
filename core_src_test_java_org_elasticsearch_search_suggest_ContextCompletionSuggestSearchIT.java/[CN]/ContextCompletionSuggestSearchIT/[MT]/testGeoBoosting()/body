@@ -5,15 +5,17 @@
   createIndexAndMapping(mapping);
   int numDocs=10;
   List<IndexRequestBuilder> indexRequestBuilders=new ArrayList<>();
-  String[] geoHashes=new String[]{"ezs42e44yx96","u4pruydqqvj8"};
+  GeoPoint[] geoPoints=new GeoPoint[]{new GeoPoint("ezs42e44yx96"),new GeoPoint("u4pruydqqvj8")};
   for (int i=0; i < numDocs; i++) {
-    XContentBuilder source=jsonBuilder().startObject().startObject(FIELD).field("input","suggestion" + i).field("weight",i + 1).startObject("contexts").field("geo",(i % 2 == 0) ? geoHashes[0] : geoHashes[1]).endObject().endObject().endObject();
+    XContentBuilder source=jsonBuilder().startObject().startObject(FIELD).field("input","suggestion" + i).field("weight",i + 1).startObject("contexts").field("geo",(i % 2 == 0) ? geoPoints[0].getGeohash() : geoPoints[1].getGeohash()).endObject().endObject().endObject();
     indexRequestBuilders.add(client().prepareIndex(INDEX,TYPE,"" + i).setSource(source));
   }
   indexRandom(true,indexRequestBuilders);
   ensureYellow(INDEX);
   CompletionSuggestionBuilder prefix=SuggestBuilders.completionSuggestion("foo").field(FIELD).prefix("sugg");
   assertSuggestions("foo",prefix,"suggestion9","suggestion8","suggestion7","suggestion6","suggestion5");
-  CompletionSuggestionBuilder geoBoostingPrefix=SuggestBuilders.completionSuggestion("foo").field(FIELD).prefix("sugg").geoContexts("geo",new GeoQueryContext(geoHashes[0],2),new GeoQueryContext(geoHashes[1]));
+  GeoQueryContext context1=GeoQueryContext.builder().setGeoPoint(geoPoints[0]).setBoost(2).build();
+  GeoQueryContext context2=GeoQueryContext.builder().setGeoPoint(geoPoints[1]).build();
+  CompletionSuggestionBuilder geoBoostingPrefix=SuggestBuilders.completionSuggestion("foo").field(FIELD).prefix("sugg").geoContexts("geo",context1,context2);
   assertSuggestions("foo",geoBoostingPrefix,"suggestion8","suggestion6","suggestion4","suggestion9","suggestion7");
 }
