@@ -18,8 +18,12 @@
       }
       for (      DiscoveryNode tribe : tribeState.nodes()) {
         if (currentState.nodes().get(tribe.id()) == null) {
-          ImmutableMap<String,String> tribeAttr=MapBuilder.newMapBuilder(tribe.attributes()).put(TRIBE_NAME,tribeName).immutableMap();
-          DiscoveryNode discoNode=new DiscoveryNode(tribe.name(),tribe.id(),tribe.getHostName(),tribe.getHostAddress(),tribe.address(),tribeAttr,tribe.version());
+          Map<String,String> tribeAttr=new HashMap<>();
+          for (          ObjectObjectCursor<String,String> attr : tribe.attributes()) {
+            tribeAttr.put(attr.key,attr.value);
+          }
+          tribeAttr.put(TRIBE_NAME,tribeName);
+          DiscoveryNode discoNode=new DiscoveryNode(tribe.name(),tribe.id(),tribe.getHostName(),tribe.getHostAddress(),tribe.address(),unmodifiableMap(tribeAttr),tribe.version());
           logger.info("[{}] adding node [{}]",tribeName,discoNode);
           nodes.put(discoNode);
         }
@@ -28,29 +32,29 @@
       MetaData.Builder metaData=MetaData.builder(currentState.metaData());
       RoutingTable.Builder routingTable=RoutingTable.builder(currentState.routingTable());
       for (      IndexMetaData index : currentState.metaData()) {
-        String markedTribeName=index.settings().get(TRIBE_NAME);
+        String markedTribeName=index.getSettings().get(TRIBE_NAME);
         if (markedTribeName != null && markedTribeName.equals(tribeName)) {
-          IndexMetaData tribeIndex=tribeState.metaData().index(index.index());
-          if (tribeIndex == null || tribeIndex.state() == IndexMetaData.State.CLOSE) {
-            logger.info("[{}] removing index [{}]",tribeName,index.index());
+          IndexMetaData tribeIndex=tribeState.metaData().index(index.getIndex());
+          if (tribeIndex == null || tribeIndex.getState() == IndexMetaData.State.CLOSE) {
+            logger.info("[{}] removing index [{}]",tribeName,index.getIndex());
             removeIndex(blocks,metaData,routingTable,index);
           }
  else {
-            routingTable.add(tribeState.routingTable().index(index.index()));
-            Settings tribeSettings=Settings.builder().put(tribeIndex.settings()).put(TRIBE_NAME,tribeName).build();
+            routingTable.add(tribeState.routingTable().index(index.getIndex()));
+            Settings tribeSettings=Settings.builder().put(tribeIndex.getSettings()).put(TRIBE_NAME,tribeName).build();
             metaData.put(IndexMetaData.builder(tribeIndex).settings(tribeSettings));
           }
         }
       }
       for (      IndexMetaData tribeIndex : tribeState.metaData()) {
-        IndexRoutingTable table=tribeState.routingTable().index(tribeIndex.index());
+        IndexRoutingTable table=tribeState.routingTable().index(tribeIndex.getIndex());
         if (table == null) {
           continue;
         }
-        final IndexMetaData indexMetaData=currentState.metaData().index(tribeIndex.index());
+        final IndexMetaData indexMetaData=currentState.metaData().index(tribeIndex.getIndex());
         if (indexMetaData == null) {
-          if (!droppedIndices.contains(tribeIndex.index())) {
-            logger.info("[{}] adding index [{}]",tribeName,tribeIndex.index());
+          if (!droppedIndices.contains(tribeIndex.getIndex())) {
+            logger.info("[{}] adding index [{}]",tribeName,tribeIndex.getIndex());
             addNewIndex(tribeState,blocks,metaData,routingTable,tribeIndex);
           }
         }
@@ -60,14 +64,14 @@
             if (ON_CONFLICT_ANY.equals(onConflict)) {
             }
  else             if (ON_CONFLICT_DROP.equals(onConflict)) {
-              logger.info("[{}] dropping index [{}] due to conflict with [{}]",tribeName,tribeIndex.index(),existingFromTribe);
+              logger.info("[{}] dropping index [{}] due to conflict with [{}]",tribeName,tribeIndex.getIndex(),existingFromTribe);
               removeIndex(blocks,metaData,routingTable,tribeIndex);
-              droppedIndices.add(tribeIndex.index());
+              droppedIndices.add(tribeIndex.getIndex());
             }
  else             if (onConflict.startsWith(ON_CONFLICT_PREFER)) {
               String preferredTribeName=onConflict.substring(ON_CONFLICT_PREFER.length());
               if (tribeName.equals(preferredTribeName)) {
-                logger.info("[{}] adding index [{}], preferred over [{}]",tribeName,tribeIndex.index(),existingFromTribe);
+                logger.info("[{}] adding index [{}], preferred over [{}]",tribeName,tribeIndex.getIndex(),existingFromTribe);
                 removeIndex(blocks,metaData,routingTable,tribeIndex);
                 addNewIndex(tribeState,blocks,metaData,routingTable,tribeIndex);
               }
@@ -75,25 +79,25 @@
           }
         }
       }
-      return ClusterState.builder(currentState).incrementVersion().blocks(blocks).nodes(nodes).metaData(metaData).routingTable(routingTable).build();
+      return ClusterState.builder(currentState).incrementVersion().blocks(blocks).nodes(nodes).metaData(metaData).routingTable(routingTable.build()).build();
     }
     private void removeIndex(    ClusterBlocks.Builder blocks,    MetaData.Builder metaData,    RoutingTable.Builder routingTable,    IndexMetaData index){
-      metaData.remove(index.index());
-      routingTable.remove(index.index());
-      blocks.removeIndexBlocks(index.index());
+      metaData.remove(index.getIndex());
+      routingTable.remove(index.getIndex());
+      blocks.removeIndexBlocks(index.getIndex());
     }
     private void addNewIndex(    ClusterState tribeState,    ClusterBlocks.Builder blocks,    MetaData.Builder metaData,    RoutingTable.Builder routingTable,    IndexMetaData tribeIndex){
-      Settings tribeSettings=Settings.builder().put(tribeIndex.settings()).put(TRIBE_NAME,tribeName).build();
+      Settings tribeSettings=Settings.builder().put(tribeIndex.getSettings()).put(TRIBE_NAME,tribeName).build();
       metaData.put(IndexMetaData.builder(tribeIndex).settings(tribeSettings));
-      routingTable.add(tribeState.routingTable().index(tribeIndex.index()));
-      if (Regex.simpleMatch(blockIndicesMetadata,tribeIndex.index())) {
-        blocks.addIndexBlock(tribeIndex.index(),IndexMetaData.INDEX_METADATA_BLOCK);
+      routingTable.add(tribeState.routingTable().index(tribeIndex.getIndex()));
+      if (Regex.simpleMatch(blockIndicesMetadata,tribeIndex.getIndex())) {
+        blocks.addIndexBlock(tribeIndex.getIndex(),IndexMetaData.INDEX_METADATA_BLOCK);
       }
-      if (Regex.simpleMatch(blockIndicesRead,tribeIndex.index())) {
-        blocks.addIndexBlock(tribeIndex.index(),IndexMetaData.INDEX_READ_BLOCK);
+      if (Regex.simpleMatch(blockIndicesRead,tribeIndex.getIndex())) {
+        blocks.addIndexBlock(tribeIndex.getIndex(),IndexMetaData.INDEX_READ_BLOCK);
       }
-      if (Regex.simpleMatch(blockIndicesWrite,tribeIndex.index())) {
-        blocks.addIndexBlock(tribeIndex.index(),IndexMetaData.INDEX_WRITE_BLOCK);
+      if (Regex.simpleMatch(blockIndicesWrite,tribeIndex.getIndex())) {
+        blocks.addIndexBlock(tribeIndex.getIndex(),IndexMetaData.INDEX_WRITE_BLOCK);
       }
     }
     @Override public void onFailure(    String source,    Throwable t){

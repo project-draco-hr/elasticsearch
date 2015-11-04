@@ -1,0 +1,39 @@
+{
+  boolean failsWithConnectTransportException=randomBoolean();
+  Request request=new Request().masterNodeTimeout(TimeValue.timeValueSeconds(failsWithConnectTransportException ? 60 : 0));
+  clusterService.setState(ClusterStateCreationUtils.state(localNode,remoteNode,allNodes));
+  PlainActionFuture<Response> listener=new PlainActionFuture<>();
+  final AtomicBoolean delegationToMaster=new AtomicBoolean();
+  new Action(Settings.EMPTY,"testAction",transportService,clusterService,threadPool){
+    @Override protected void processBeforeDelegationToMaster(    Request request,    ClusterState state){
+      logger.debug("Delegation to master called");
+      delegationToMaster.set(true);
+    }
+  }
+.execute(request,listener);
+  assertTrue("processBeforeDelegationToMaster not called",delegationToMaster.get());
+  assertThat(transport.capturedRequests().length,equalTo(1));
+  CapturingTransport.CapturedRequest capturedRequest=transport.capturedRequests()[0];
+  assertTrue(capturedRequest.node.isMasterNode());
+  assertThat(capturedRequest.request,equalTo(request));
+  assertThat(capturedRequest.action,equalTo("testAction"));
+  if (failsWithConnectTransportException) {
+    transport.handleResponse(capturedRequest.requestId,new ConnectTransportException(remoteNode,"Fake error"));
+    assertFalse(listener.isDone());
+    clusterService.setState(ClusterStateCreationUtils.state(localNode,localNode,allNodes));
+    assertTrue(listener.isDone());
+    listener.get();
+  }
+ else {
+    Throwable t=new Throwable();
+    transport.handleResponse(capturedRequest.requestId,t);
+    assertTrue(listener.isDone());
+    try {
+      listener.get();
+      fail("Expected exception but returned proper result");
+    }
+ catch (    ExecutionException ex) {
+      assertThat(ex.getCause().getCause(),equalTo(t));
+    }
+  }
+}

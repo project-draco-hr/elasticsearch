@@ -2,24 +2,26 @@
   final EngineConfig config=engineConfig;
   final ByteSizeValue preValue=config.getIndexingBufferSize();
   config.setIndexingBufferSize(shardIndexingBufferSize);
-  Engine engine=engineUnsafe();
+  Engine engine=getEngineOrNull();
   if (engine == null) {
     logger.debug("updateBufferSize: engine is closed; skipping");
     return;
   }
   if (preValue.bytes() != shardIndexingBufferSize.bytes()) {
     engine.onSettingsChanged();
-    if (shardIndexingBufferSize == EngineConfig.INACTIVE_SHARD_INDEXING_BUFFER) {
-      logger.debug("updating index_buffer_size from [{}] to (inactive) [{}]",preValue,shardIndexingBufferSize);
+    long iwBytesUsed=engine.indexWriterRAMBytesUsed();
+    String message=LoggerMessageFormat.format("updating index_buffer_size from [{}] to [{}]; IndexWriter now using [{}] bytes",preValue,shardIndexingBufferSize,iwBytesUsed);
+    if (iwBytesUsed > shardIndexingBufferSize.bytes()) {
+      logger.debug(message + "; now refresh to clear IndexWriter memory");
       try {
         refresh("update index buffer");
       }
  catch (      Throwable e) {
-        logger.warn("failed to refresh after setting shard to inactive",e);
+        logger.warn("failed to refresh after decreasing index buffer",e);
       }
     }
  else {
-      logger.debug("updating index_buffer_size from [{}] to [{}]",preValue,shardIndexingBufferSize);
+      logger.debug(message);
     }
   }
   engine.getTranslog().updateBuffer(shardTranslogBufferSize);

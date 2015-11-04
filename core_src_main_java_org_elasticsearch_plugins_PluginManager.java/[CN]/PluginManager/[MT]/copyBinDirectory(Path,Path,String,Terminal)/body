@@ -1,0 +1,50 @@
+{
+  boolean canCopyFromSource=Files.exists(sourcePluginBinDirectory) && Files.isReadable(sourcePluginBinDirectory) && Files.isDirectory(sourcePluginBinDirectory);
+  if (canCopyFromSource) {
+    terminal.println(VERBOSE,"Found bin, moving to %s",destPluginBinDirectory.toAbsolutePath());
+    if (Files.exists(destPluginBinDirectory)) {
+      IOUtils.rm(destPluginBinDirectory);
+    }
+    try {
+      Files.createDirectories(destPluginBinDirectory.getParent());
+      FileSystemUtils.move(sourcePluginBinDirectory,destPluginBinDirectory);
+    }
+ catch (    IOException e) {
+      throw new IOException("Could not move [" + sourcePluginBinDirectory + "] to ["+ destPluginBinDirectory+ "]",e);
+    }
+    if (Environment.getFileStore(destPluginBinDirectory).supportsFileAttributeView(PosixFileAttributeView.class)) {
+      PosixFileAttributes parentDirAttributes=Files.getFileAttributeView(destPluginBinDirectory.getParent(),PosixFileAttributeView.class).readAttributes();
+      Set<PosixFilePermission> filePermissions=new HashSet<>();
+      for (      PosixFilePermission posixFilePermission : parentDirAttributes.permissions()) {
+switch (posixFilePermission) {
+case OWNER_EXECUTE:
+case GROUP_EXECUTE:
+case OTHERS_EXECUTE:
+          break;
+default :
+        filePermissions.add(posixFilePermission);
+    }
+  }
+  filePermissions.add(PosixFilePermission.OWNER_EXECUTE);
+  filePermissions.add(PosixFilePermission.GROUP_EXECUTE);
+  filePermissions.add(PosixFilePermission.OTHERS_EXECUTE);
+  Files.walkFileTree(destPluginBinDirectory,new SimpleFileVisitor<Path>(){
+    @Override public FileVisitResult visitFile(    Path file,    BasicFileAttributes attrs) throws IOException {
+      if (attrs.isRegularFile()) {
+        setPosixFileAttributes(file,parentDirAttributes.owner(),parentDirAttributes.group(),filePermissions);
+      }
+      return FileVisitResult.CONTINUE;
+    }
+    @Override public FileVisitResult preVisitDirectory(    Path dir,    BasicFileAttributes attrs) throws IOException {
+      setPosixFileAttributes(dir,parentDirAttributes.owner(),parentDirAttributes.group(),parentDirAttributes.permissions());
+      return FileVisitResult.CONTINUE;
+    }
+  }
+);
+}
+ else {
+  terminal.println(VERBOSE,"Skipping posix permissions - filestore doesn't support posix permission");
+}
+terminal.println(VERBOSE,"Installed %s into %s",pluginName,destPluginBinDirectory.toAbsolutePath());
+}
+}

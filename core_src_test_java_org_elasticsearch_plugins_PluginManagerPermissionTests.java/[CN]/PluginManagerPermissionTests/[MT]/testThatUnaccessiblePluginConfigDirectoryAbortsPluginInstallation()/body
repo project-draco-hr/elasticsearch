@@ -1,0 +1,26 @@
+{
+  assumeTrue("File system does not support permissions, skipping",supportsPermissions);
+  URL pluginUrl=createPlugin(randomBoolean(),true);
+  Path path=environment.configFile().resolve(pluginName);
+  Files.createDirectories(path);
+  Files.createFile(path.resolve("my-custom-config.yaml"));
+  Path binPath=environment.binFile().resolve(pluginName);
+  Files.createDirectories(binPath);
+  try {
+    Files.setPosixFilePermissions(path.resolve("my-custom-config.yaml"),PosixFilePermissions.fromString("---------"));
+    Files.setPosixFilePermissions(path,PosixFilePermissions.fromString("---------"));
+    PluginManager pluginManager=new PluginManager(environment,pluginUrl,PluginManager.OutputMode.VERBOSE,TimeValue.timeValueSeconds(10));
+    pluginManager.downloadAndExtract(pluginName,terminal,true);
+    fail("Expected IOException but did not happen, terminal output was " + terminal.getTerminalOutput());
+  }
+ catch (  IOException e) {
+    assertFileNotExists(environment.pluginsFile().resolve(pluginName));
+    assertFileNotExists(environment.binFile().resolve(pluginName));
+    assertDirectoryExists(environment.configFile().resolve(pluginName));
+    assertThat(terminal.getTerminalOutput(),hasItem(containsString("Error copying config directory ")));
+  }
+ finally {
+    Files.setPosixFilePermissions(path,PosixFilePermissions.fromString("rwxrwxrwx"));
+    Files.setPosixFilePermissions(path.resolve("my-custom-config.yaml"),PosixFilePermissions.fromString("rwxrwxrwx"));
+  }
+}

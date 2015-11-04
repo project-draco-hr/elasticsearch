@@ -5,13 +5,13 @@
   IndicesService indicesService=getInstanceFromNode(IndicesService.class);
   IndexService test=indicesService.indexService("test");
   IndexService test_target=indicesService.indexService("test_target");
-  final IndexShard test_shard=test.shard(0);
+  final IndexShard test_shard=test.getShardOrNull(0);
   client().prepareIndex("test","test","0").setSource("{}").setRefresh(randomBoolean()).get();
   client().prepareIndex("test_target","test","1").setSource("{}").setRefresh(true).get();
   assertHitCount(client().prepareSearch("test_target").get(),1);
   assertSearchHits(client().prepareSearch("test_target").get(),"1");
   client().admin().indices().prepareFlush("test").get();
-  final ShardRouting origRouting=test_target.shard(0).routingEntry();
+  final ShardRouting origRouting=test_target.getShardOrNull(0).routingEntry();
   ShardRouting routing=new ShardRouting(origRouting);
   ShardRoutingHelper.reinit(routing);
   routing=ShardRoutingHelper.newWithRestoreSource(routing,new RestoreSource(new SnapshotId("foo","bar"),Version.CURRENT,"test"));
@@ -21,7 +21,8 @@
   Store targetStore=test_target_shard.store();
   test_target_shard.updateRoutingEntry(routing,false);
   DiscoveryNode localNode=new DiscoveryNode("foo",DummyTransportAddress.INSTANCE,Version.CURRENT);
-  assertTrue(test_target_shard.restoreFromRepository(routing,new IndexShardRepository(){
+  test_target_shard.markAsRecovering("store",new RecoveryState(routing.shardId(),routing.primary(),RecoveryState.Type.SNAPSHOT,routing.restoreSource(),localNode));
+  assertTrue(test_target_shard.restoreFromRepository(new IndexShardRepository(){
     @Override public void snapshot(    SnapshotId snapshotId,    ShardId shardId,    IndexCommit snapshotIndexCommit,    IndexShardSnapshotStatus snapshotStatus){
     }
     @Override public void restore(    SnapshotId snapshotId,    Version version,    ShardId shardId,    ShardId snapshotShardId,    RecoveryState recoveryState){

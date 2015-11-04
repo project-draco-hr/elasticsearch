@@ -1,0 +1,97 @@
+{
+  Settings diskSettings=settingsBuilder().put(DiskThresholdDecider.CLUSTER_ROUTING_ALLOCATION_DISK_THRESHOLD_ENABLED,true).put(DiskThresholdDecider.CLUSTER_ROUTING_ALLOCATION_LOW_DISK_WATERMARK,0.7).put(DiskThresholdDecider.CLUSTER_ROUTING_ALLOCATION_HIGH_DISK_WATERMARK,0.8).build();
+  ImmutableOpenMap.Builder<String,DiskUsage> usagesBuilder=ImmutableOpenMap.builder();
+  usagesBuilder.put("node1",new DiskUsage("node1","node1","/dev/null",100,10));
+  usagesBuilder.put("node2",new DiskUsage("node2","node2","/dev/null",100,35));
+  usagesBuilder.put("node3",new DiskUsage("node3","node3","/dev/null",100,60));
+  usagesBuilder.put("node4",new DiskUsage("node4","node4","/dev/null",100,80));
+  ImmutableOpenMap<String,DiskUsage> usages=usagesBuilder.build();
+  ImmutableOpenMap.Builder<String,Long> shardSizesBuilder=ImmutableOpenMap.builder();
+  shardSizesBuilder.put("[test][0][p]",10L);
+  shardSizesBuilder.put("[test][0][r]",10L);
+  ImmutableOpenMap<String,Long> shardSizes=shardSizesBuilder.build();
+  final ClusterInfo clusterInfo=new DevNullClusterInfo(usages,usages,shardSizes);
+  AllocationDeciders deciders=new AllocationDeciders(Settings.EMPTY,new HashSet<>(Arrays.asList(new SameShardAllocationDecider(Settings.EMPTY),new DiskThresholdDecider(diskSettings))));
+  ClusterInfoService cis=new ClusterInfoService(){
+    @Override public ClusterInfo getClusterInfo(){
+      logger.info("--> calling fake getClusterInfo");
+      return clusterInfo;
+    }
+    @Override public void addListener(    Listener listener){
+    }
+  }
+;
+  AllocationService strategy=new AllocationService(settingsBuilder().put("cluster.routing.allocation.concurrent_recoveries",10).put(ClusterRebalanceAllocationDecider.CLUSTER_ROUTING_ALLOCATION_ALLOW_REBALANCE,"always").put("cluster.routing.allocation.cluster_concurrent_rebalance",-1).build(),deciders,makeShardsAllocators(),cis);
+  MetaData metaData=MetaData.builder().put(IndexMetaData.builder("test").settings(settings(Version.CURRENT)).numberOfShards(1).numberOfReplicas(1)).build();
+  RoutingTable routingTable=RoutingTable.builder().addAsNew(metaData.index("test")).build();
+  ClusterState clusterState=ClusterState.builder(org.elasticsearch.cluster.ClusterName.DEFAULT).metaData(metaData).routingTable(routingTable).build();
+  logger.info("--> adding two nodes");
+  clusterState=ClusterState.builder(clusterState).nodes(DiscoveryNodes.builder().put(newNode("node1")).put(newNode("node2"))).build();
+  routingTable=strategy.reroute(clusterState).routingTable();
+  clusterState=ClusterState.builder(clusterState).routingTable(routingTable).build();
+  logShardStates(clusterState);
+  assertThat(clusterState.getRoutingNodes().shardsWithState(INITIALIZING).size(),equalTo(1));
+  logger.info("--> start the shards (primaries)");
+  routingTable=strategy.applyStartedShards(clusterState,clusterState.getRoutingNodes().shardsWithState(INITIALIZING)).routingTable();
+  clusterState=ClusterState.builder(clusterState).routingTable(routingTable).build();
+  logShardStates(clusterState);
+  assertThat(clusterState.getRoutingNodes().shardsWithState(ShardRoutingState.STARTED).size(),equalTo(1));
+  assertThat(clusterState.getRoutingNodes().node("node1").size(),equalTo(0));
+  logger.info("--> start the shards (replicas)");
+  routingTable=strategy.applyStartedShards(clusterState,clusterState.getRoutingNodes().shardsWithState(INITIALIZING)).routingTable();
+  clusterState=ClusterState.builder(clusterState).routingTable(routingTable).build();
+  logShardStates(clusterState);
+  assertThat(clusterState.getRoutingNodes().shardsWithState(ShardRoutingState.STARTED).size(),equalTo(1));
+  logger.info("--> adding node3");
+  clusterState=ClusterState.builder(clusterState).nodes(DiscoveryNodes.builder(clusterState.nodes()).put(newNode("node3"))).build();
+  routingTable=strategy.reroute(clusterState).routingTable();
+  clusterState=ClusterState.builder(clusterState).routingTable(routingTable).build();
+  logShardStates(clusterState);
+  assertThat(clusterState.getRoutingNodes().shardsWithState(ShardRoutingState.STARTED).size(),equalTo(1));
+  assertThat(clusterState.getRoutingNodes().shardsWithState(ShardRoutingState.INITIALIZING).size(),equalTo(1));
+  logger.info("--> start the shards (replicas)");
+  routingTable=strategy.applyStartedShards(clusterState,clusterState.getRoutingNodes().shardsWithState(INITIALIZING)).routingTable();
+  clusterState=ClusterState.builder(clusterState).routingTable(routingTable).build();
+  logShardStates(clusterState);
+  assertThat(clusterState.getRoutingNodes().shardsWithState(ShardRoutingState.STARTED).size(),equalTo(2));
+  assertThat(clusterState.getRoutingNodes().node("node1").size(),equalTo(0));
+  assertThat(clusterState.getRoutingNodes().node("node2").size(),equalTo(1));
+  assertThat(clusterState.getRoutingNodes().node("node3").size(),equalTo(1));
+  logger.info("--> changing decider settings");
+  diskSettings=settingsBuilder().put(DiskThresholdDecider.CLUSTER_ROUTING_ALLOCATION_DISK_THRESHOLD_ENABLED,true).put(DiskThresholdDecider.CLUSTER_ROUTING_ALLOCATION_LOW_DISK_WATERMARK,"60%").put(DiskThresholdDecider.CLUSTER_ROUTING_ALLOCATION_HIGH_DISK_WATERMARK,0.7).build();
+  deciders=new AllocationDeciders(Settings.EMPTY,new HashSet<>(Arrays.asList(new SameShardAllocationDecider(Settings.EMPTY),new DiskThresholdDecider(diskSettings))));
+  strategy=new AllocationService(settingsBuilder().put("cluster.routing.allocation.concurrent_recoveries",10).put(ClusterRebalanceAllocationDecider.CLUSTER_ROUTING_ALLOCATION_ALLOW_REBALANCE,"always").put("cluster.routing.allocation.cluster_concurrent_rebalance",-1).build(),deciders,makeShardsAllocators(),cis);
+  routingTable=strategy.reroute(clusterState).routingTable();
+  clusterState=ClusterState.builder(clusterState).routingTable(routingTable).build();
+  logShardStates(clusterState);
+  assertThat(clusterState.getRoutingNodes().shardsWithState(STARTED).size(),equalTo(2));
+  assertThat(clusterState.getRoutingNodes().node("node1").size(),equalTo(0));
+  assertThat(clusterState.getRoutingNodes().node("node2").size(),equalTo(1));
+  assertThat(clusterState.getRoutingNodes().node("node3").size(),equalTo(1));
+  logger.info("--> changing settings again");
+  diskSettings=settingsBuilder().put(DiskThresholdDecider.CLUSTER_ROUTING_ALLOCATION_DISK_THRESHOLD_ENABLED,true).put(DiskThresholdDecider.CLUSTER_ROUTING_ALLOCATION_LOW_DISK_WATERMARK,0.5).put(DiskThresholdDecider.CLUSTER_ROUTING_ALLOCATION_HIGH_DISK_WATERMARK,0.6).build();
+  deciders=new AllocationDeciders(Settings.EMPTY,new HashSet<>(Arrays.asList(new SameShardAllocationDecider(Settings.EMPTY),new DiskThresholdDecider(diskSettings))));
+  strategy=new AllocationService(settingsBuilder().put("cluster.routing.allocation.concurrent_recoveries",10).put(ClusterRebalanceAllocationDecider.CLUSTER_ROUTING_ALLOCATION_ALLOW_REBALANCE,"always").put("cluster.routing.allocation.cluster_concurrent_rebalance",-1).build(),deciders,makeShardsAllocators(),cis);
+  routingTable=strategy.reroute(clusterState).routingTable();
+  clusterState=ClusterState.builder(clusterState).routingTable(routingTable).build();
+  logShardStates(clusterState);
+  assertThat(clusterState.getRoutingNodes().shardsWithState(STARTED).size(),equalTo(2));
+  assertThat(clusterState.getRoutingNodes().node("node1").size(),equalTo(0));
+  assertThat(clusterState.getRoutingNodes().node("node2").size(),equalTo(1));
+  assertThat(clusterState.getRoutingNodes().node("node3").size(),equalTo(1));
+  logger.info("--> adding node4");
+  clusterState=ClusterState.builder(clusterState).nodes(DiscoveryNodes.builder(clusterState.nodes()).put(newNode("node4"))).build();
+  routingTable=strategy.reroute(clusterState).routingTable();
+  clusterState=ClusterState.builder(clusterState).routingTable(routingTable).build();
+  logShardStates(clusterState);
+  assertThat(clusterState.getRoutingNodes().shardsWithState(STARTED).size(),equalTo(1));
+  assertThat(clusterState.getRoutingNodes().shardsWithState(INITIALIZING).size(),equalTo(1));
+  logger.info("--> apply INITIALIZING shards");
+  routingTable=strategy.applyStartedShards(clusterState,clusterState.getRoutingNodes().shardsWithState(INITIALIZING)).routingTable();
+  clusterState=ClusterState.builder(clusterState).routingTable(routingTable).build();
+  logShardStates(clusterState);
+  assertThat(clusterState.getRoutingNodes().node("node1").size(),equalTo(0));
+  assertThat(clusterState.getRoutingNodes().node("node2").size(),equalTo(0));
+  assertThat(clusterState.getRoutingNodes().node("node3").size(),equalTo(1));
+  assertThat(clusterState.getRoutingNodes().node("node4").size(),equalTo(1));
+}

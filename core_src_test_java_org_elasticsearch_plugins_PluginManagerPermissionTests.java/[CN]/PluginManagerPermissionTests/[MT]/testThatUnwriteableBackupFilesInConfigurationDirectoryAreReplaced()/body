@@ -1,0 +1,28 @@
+{
+  assumeTrue("File system does not support permissions, skipping",supportsPermissions);
+  boolean pluginContainsExecutables=randomBoolean();
+  URL pluginUrl=createPlugin(pluginContainsExecutables,true);
+  Files.createDirectories(environment.configFile().resolve(pluginName));
+  Path configFile=environment.configFile().resolve(pluginName).resolve("my-custom-config.yaml");
+  Files.createFile(configFile);
+  Path backupConfigFile=environment.configFile().resolve(pluginName).resolve("my-custom-config.yaml.new");
+  Files.createFile(backupConfigFile);
+  Files.write(backupConfigFile,"foo".getBytes(Charset.forName("UTF-8")));
+  PluginManager pluginManager=new PluginManager(environment,pluginUrl,PluginManager.OutputMode.VERBOSE,TimeValue.timeValueSeconds(10));
+  try {
+    Files.setPosixFilePermissions(backupConfigFile,PosixFilePermissions.fromString("---------"));
+    pluginManager.downloadAndExtract(pluginName,terminal,true);
+    if (pluginContainsExecutables) {
+      assertDirectoryExists(environment.binFile().resolve(pluginName));
+    }
+    assertDirectoryExists(environment.pluginsFile().resolve(pluginName));
+    assertDirectoryExists(environment.configFile().resolve(pluginName));
+    assertFileExists(backupConfigFile);
+    Files.setPosixFilePermissions(backupConfigFile,PosixFilePermissions.fromString("rw-rw-rw-"));
+    String content=new String(Files.readAllBytes(backupConfigFile),Charset.forName("UTF-8"));
+    assertThat(content,is(not("foo")));
+  }
+  finally {
+    Files.setPosixFilePermissions(backupConfigFile,PosixFilePermissions.fromString("rw-rw-rw-"));
+  }
+}

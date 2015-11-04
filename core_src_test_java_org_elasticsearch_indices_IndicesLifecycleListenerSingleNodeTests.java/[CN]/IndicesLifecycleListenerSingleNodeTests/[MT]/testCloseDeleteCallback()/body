@@ -1,9 +1,12 @@
 {
-  final AtomicInteger counter=new AtomicInteger(1);
+  IndicesService indicesService=getInstanceFromNode(IndicesService.class);
   assertAcked(client().admin().indices().prepareCreate("test").setSettings(SETTING_NUMBER_OF_SHARDS,1,SETTING_NUMBER_OF_REPLICAS,0));
   ensureGreen();
-  getInstanceFromNode(IndicesLifecycle.class).addListener(new IndicesLifecycle.Listener(){
-    @Override public void afterIndexClosed(    Index index,    @IndexSettings Settings indexSettings){
+  IndexMetaData metaData=indicesService.indexService("test").getMetaData();
+  ShardRouting shardRouting=indicesService.indexService("test").getShard(0).routingEntry();
+  final AtomicInteger counter=new AtomicInteger(1);
+  IndexEventListener countingListener=new IndexEventListener(){
+    @Override public void afterIndexClosed(    Index index,    Settings indexSettings){
       assertEquals(counter.get(),5);
       counter.incrementAndGet();
     }
@@ -11,7 +14,7 @@
       assertEquals(counter.get(),1);
       counter.incrementAndGet();
     }
-    @Override public void afterIndexDeleted(    Index index,    @IndexSettings Settings indexSettings){
+    @Override public void afterIndexDeleted(    Index index,    Settings indexSettings){
       assertEquals(counter.get(),6);
       counter.incrementAndGet();
     }
@@ -28,7 +31,25 @@
       counter.incrementAndGet();
     }
   }
-);
-  assertAcked(client().admin().indices().prepareDelete("test").get());
+;
+  indicesService.deleteIndex("test","simon says");
+  try {
+    IndexService index=indicesService.createIndex(metaData,Arrays.asList(countingListener));
+    ShardRouting newRouting=new ShardRouting(shardRouting);
+    String nodeId=newRouting.currentNodeId();
+    ShardRoutingHelper.moveToUnassigned(newRouting,new UnassignedInfo(UnassignedInfo.Reason.INDEX_CREATED,"boom"));
+    ShardRoutingHelper.initialize(newRouting,nodeId);
+    IndexShard shard=index.createShard(0,newRouting);
+    shard.updateRoutingEntry(newRouting,true);
+    final DiscoveryNode localNode=new DiscoveryNode("foo",DummyTransportAddress.INSTANCE,Version.CURRENT);
+    shard.markAsRecovering("store",new RecoveryState(shard.shardId(),newRouting.primary(),RecoveryState.Type.SNAPSHOT,newRouting.restoreSource(),localNode));
+    shard.recoverFromStore(localNode);
+    newRouting=new ShardRouting(newRouting);
+    ShardRoutingHelper.moveToStarted(newRouting);
+    shard.updateRoutingEntry(newRouting,true);
+  }
+  finally {
+    indicesService.deleteIndex("test","simon says");
+  }
   assertEquals(7,counter.get());
 }
