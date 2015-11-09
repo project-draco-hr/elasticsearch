@@ -1,0 +1,45 @@
+{
+  String[] boundAddressesHostStrings=new String[boundAddresses.size()];
+  TransportAddress[] transportBoundAddresses=new TransportAddress[boundAddresses.size()];
+  for (int i=0; i < boundAddresses.size(); i++) {
+    InetSocketAddress boundAddress=boundAddresses.get(i);
+    boundAddressesHostStrings[i]=boundAddress.getHostString();
+    transportBoundAddresses[i]=new InetSocketTransportAddress(boundAddress);
+  }
+  final String[] publishHosts;
+  if (DEFAULT_PROFILE.equals(name)) {
+    publishHosts=settings.getAsArray("transport.netty.publish_host",settings.getAsArray("transport.publish_host",settings.getAsArray("transport.host",null)));
+  }
+ else {
+    publishHosts=profileSettings.getAsArray("publish_host",boundAddressesHostStrings);
+  }
+  final InetAddress publishInetAddress;
+  try {
+    publishInetAddress=networkService.resolvePublishHostAddresses(publishHosts);
+  }
+ catch (  Exception e) {
+    throw new BindTransportException("Failed to resolve publish address",e);
+  }
+  Integer publishPort;
+  if (DEFAULT_PROFILE.equals(name)) {
+    publishPort=settings.getAsInt("transport.netty.publish_port",settings.getAsInt("transport.publish_port",null));
+  }
+ else {
+    publishPort=profileSettings.getAsInt("publish_port",null);
+  }
+  if (publishPort == null) {
+    for (    InetSocketAddress boundAddress : boundAddresses) {
+      InetAddress boundInetAddress=boundAddress.getAddress();
+      if (boundInetAddress.isAnyLocalAddress() || boundInetAddress.equals(publishInetAddress)) {
+        publishPort=boundAddress.getPort();
+        break;
+      }
+    }
+  }
+  if (publishPort == null) {
+    publishPort=boundAddresses.get(0).getPort();
+    logger.warn("Publish port not found by matching publish address [{}] to bound addresses [{}], falling back to port [{}] of first bound address",publishInetAddress,boundAddresses,publishPort);
+  }
+  final TransportAddress publishAddress=new InetSocketTransportAddress(new InetSocketAddress(publishInetAddress,publishPort));
+  return new BoundTransportAddress(transportBoundAddresses,publishAddress);
+}

@@ -1,4 +1,5 @@
 {
+  Version version=queryShardContext().indexVersionCreated();
   GeoDistanceRangeQueryBuilder builder;
   if (randomBoolean()) {
     builder=new GeoDistanceRangeQueryBuilder(GEO_POINT_FIELD_NAME,randomGeohash(1,12));
@@ -13,21 +14,28 @@
       builder=new GeoDistanceRangeQueryBuilder(GEO_POINT_FIELD_NAME,lat,lon);
     }
   }
-  int fromValue=randomInt(1000000);
-  int toValue=randomIntBetween(fromValue,1000000);
-  String fromToUnits=randomFrom(DistanceUnit.values()).toString();
+  GeoPoint point=builder.point();
+  final double distToPole=SloppyMath.haversin(point.lat(),point.lon(),(point.lat() < 0) ? -90.0 : 90.0,point.lon());
+  final double maxRadius=GeoUtils.maxRadialDistance(point,distToPole);
+  final int fromValueMeters=randomInt((int)(maxRadius * 0.5));
+  final int toValueMeters=randomIntBetween(fromValueMeters,(int)maxRadius);
+  DistanceUnit fromToUnits=randomFrom(DistanceUnit.values());
+  final String fromToUnitsStr=fromToUnits.toString();
+  final double fromValue=DistanceUnit.convert(fromValueMeters,DistanceUnit.DEFAULT,fromToUnits);
+  final double toValue=DistanceUnit.convert(toValueMeters,DistanceUnit.DEFAULT,fromToUnits);
   if (randomBoolean()) {
     int branch=randomInt(2);
+    fromToUnits=DistanceUnit.DEFAULT;
 switch (branch) {
 case 0:
-      builder.from(fromValue);
+      builder.from(fromValueMeters);
     break;
 case 1:
   builder.to(toValue);
 break;
 case 2:
-builder.from(fromValue);
-builder.to(toValue);
+builder.from(fromValueMeters);
+builder.to(toValueMeters);
 break;
 }
 }
@@ -35,14 +43,14 @@ break;
 int branch=randomInt(2);
 switch (branch) {
 case 0:
-builder.from(fromValue + fromToUnits);
+builder.from(fromValue + fromToUnitsStr);
 break;
 case 1:
-builder.to(toValue + fromToUnits);
+builder.to(toValue + fromToUnitsStr);
 break;
 case 2:
-builder.from(fromValue + fromToUnits);
-builder.to(toValue + fromToUnits);
+builder.from(fromValue + fromToUnitsStr);
+builder.to(toValue + fromToUnitsStr);
 break;
 }
 }
@@ -55,12 +63,10 @@ builder.includeUpper(randomBoolean());
 if (randomBoolean()) {
 builder.geoDistance(randomFrom(GeoDistance.values()));
 }
-if (randomBoolean()) {
-builder.unit(randomFrom(DistanceUnit.values()));
-}
-if (randomBoolean()) {
+if (randomBoolean() && version.onOrBefore(Version.CURRENT)) {
 builder.optimizeBbox(randomFrom("none","memory","indexed"));
 }
+builder.unit(fromToUnits);
 if (randomBoolean()) {
 builder.setValidationMethod(randomFrom(GeoValidationMethod.values()));
 }

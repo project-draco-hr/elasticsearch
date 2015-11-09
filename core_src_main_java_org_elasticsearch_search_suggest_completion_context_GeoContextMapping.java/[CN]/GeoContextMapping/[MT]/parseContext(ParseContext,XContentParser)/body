@@ -1,0 +1,45 @@
+{
+  if (fieldName != null) {
+    FieldMapper mapper=parseContext.docMapper().mappers().getMapper(fieldName);
+    if (!(mapper instanceof GeoPointFieldMapper)) {
+      throw new ElasticsearchParseException("referenced field must be mapped to geo_point");
+    }
+  }
+  final Set<CharSequence> contexts=new HashSet<>();
+  Token token=parser.currentToken();
+  if (token == Token.START_ARRAY) {
+    token=parser.nextToken();
+    if (token == Token.VALUE_NUMBER) {
+      double lon=parser.doubleValue();
+      if (parser.nextToken() == Token.VALUE_NUMBER) {
+        double lat=parser.doubleValue();
+        if (parser.nextToken() == Token.END_ARRAY) {
+          contexts.add(GeoHashUtils.stringEncode(lon,lat,precision));
+        }
+ else {
+          throw new ElasticsearchParseException("only two values [lon, lat] expected");
+        }
+      }
+ else {
+        throw new ElasticsearchParseException("latitude must be a numeric value");
+      }
+    }
+ else {
+      while (token != Token.END_ARRAY) {
+        GeoPoint point=GeoUtils.parseGeoPoint(parser);
+        contexts.add(GeoHashUtils.stringEncode(point.getLon(),point.getLat(),precision));
+        token=parser.nextToken();
+      }
+    }
+  }
+ else   if (token == Token.VALUE_STRING) {
+    final String geoHash=parser.text();
+    final CharSequence truncatedGeoHash=geoHash.subSequence(0,Math.min(geoHash.length(),precision));
+    contexts.add(truncatedGeoHash);
+  }
+ else {
+    GeoPoint point=GeoUtils.parseGeoPoint(parser);
+    contexts.add(GeoHashUtils.stringEncode(point.getLon(),point.getLat(),precision));
+  }
+  return contexts;
+}

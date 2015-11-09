@@ -1,10 +1,15 @@
 {
   String otherField="testOtherField";
-  createIndex(INDEX);
-  PutMappingResponse putMappingResponse=client().admin().indices().preparePutMapping(INDEX).setType(TYPE).setSource(jsonBuilder().startObject().startObject(TYPE).startObject("properties").startObject(FIELD.toString()).field("type","completion").field("analyzer","simple").endObject().startObject(otherField).field("type","completion").field("analyzer","simple").endObject().endObject().endObject().endObject()).get();
+  client().admin().indices().prepareCreate(INDEX).setSettings(Settings.settingsBuilder().put("index.number_of_replicas",0).put("index.number_of_shards",2)).execute().actionGet();
+  ensureGreen();
+  PutMappingResponse putMappingResponse=client().admin().indices().preparePutMapping(INDEX).setType(TYPE).setSource(jsonBuilder().startObject().startObject(TYPE).startObject("properties").startObject(FIELD).field("type","completion").field("analyzer","simple").endObject().startObject(otherField).field("type","completion").field("analyzer","simple").endObject().endObject().endObject().endObject()).get();
   assertThat(putMappingResponse.isAcknowledged(),is(true));
-  client().prepareIndex(INDEX,TYPE,"1").setRefresh(true).setSource(jsonBuilder().startObject().field(FIELD,"Foo Fighters").field(otherField,"WHATEVER").endObject()).get();
-  client().prepareIndex(INDEX,TYPE,"2").setRefresh(true).setSource(jsonBuilder().startObject().field(FIELD,"Bar Fighters").field(otherField,"WHATEVER2").endObject()).get();
+  client().prepareIndex(INDEX,TYPE,"1").setSource(jsonBuilder().startObject().field(FIELD,"Foo Fighters").field(otherField,"WHATEVER").endObject()).get();
+  client().prepareIndex(INDEX,TYPE,"2").setSource(jsonBuilder().startObject().field(FIELD,"Bar Fighters").field(otherField,"WHATEVER2").endObject()).get();
+  refresh();
+  ensureGreen();
+  client().prepareSuggest(INDEX).addSuggestion(SuggestBuilders.completionSuggestion("foo").field(FIELD).prefix("f")).get();
+  client().prepareSuggest(INDEX).addSuggestion(SuggestBuilders.completionSuggestion("foo").field(otherField).prefix("f")).get();
   IndicesStatsResponse indicesStatsResponse=client().admin().indices().prepareStats(INDEX).setIndices(INDEX).setCompletion(true).get();
   CompletionStats completionStats=indicesStatsResponse.getIndex(INDEX).getPrimaries().completion;
   assertThat(completionStats,notNullValue());

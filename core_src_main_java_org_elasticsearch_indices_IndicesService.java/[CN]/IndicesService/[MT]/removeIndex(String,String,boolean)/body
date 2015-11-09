@@ -1,2 +1,32 @@
 {
+  try {
+    final IndexService indexService;
+    final IndexEventListener listener;
+synchronized (this) {
+      if (indices.containsKey(index) == false) {
+        return;
+      }
+      logger.debug("[{}] closing ... (reason [{}])",index,reason);
+      Map<String,IndexService> newIndices=new HashMap<>(indices);
+      indexService=newIndices.remove(index);
+      indices=unmodifiableMap(newIndices);
+      listener=indexService.getIndexEventListener();
+    }
+    listener.beforeIndexClosed(indexService);
+    if (delete) {
+      listener.beforeIndexDeleted(indexService);
+    }
+    logger.debug("[{}] closing index service (reason [{}])",index,reason);
+    indexService.close(reason,delete);
+    logger.debug("[{}] closed... (reason [{}])",index,reason);
+    listener.afterIndexClosed(indexService.index(),indexService.getIndexSettings().getSettings());
+    if (delete) {
+      final Settings indexSettings=indexService.getIndexSettings().getSettings();
+      listener.afterIndexDeleted(indexService.index(),indexSettings);
+      deleteIndexStore(reason,indexService.index(),indexSettings,false);
+    }
+  }
+ catch (  IOException ex) {
+    throw new ElasticsearchException("failed to remove index " + index,ex);
+  }
 }

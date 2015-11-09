@@ -1,0 +1,39 @@
+{
+  List<GeoQueryContext> queryContexts=new ArrayList<>();
+  Token token=parser.nextToken();
+  if (token == Token.START_OBJECT || token == Token.VALUE_STRING) {
+    queryContexts.add(GeoQueryContext.parse(parser));
+  }
+ else   if (token == Token.START_ARRAY) {
+    while (parser.nextToken() != Token.END_ARRAY) {
+      queryContexts.add(GeoQueryContext.parse(parser));
+    }
+  }
+  List<QueryContext> queryContextList=new ArrayList<>();
+  for (  GeoQueryContext queryContext : queryContexts) {
+    int minPrecision=this.precision;
+    if (queryContext.getPrecision() != -1) {
+      minPrecision=Math.min(minPrecision,queryContext.getPrecision());
+    }
+    GeoPoint point=queryContext.getGeoPoint();
+    final Collection<String> locations=new HashSet<>();
+    String geoHash=GeoHashUtils.stringEncode(point.getLon(),point.getLat(),minPrecision);
+    locations.add(geoHash);
+    if (queryContext.getNeighbours().isEmpty() && geoHash.length() == this.precision) {
+      GeoHashUtils.addNeighbors(geoHash,locations);
+    }
+ else     if (queryContext.getNeighbours().isEmpty() == false) {
+      for (      Integer neighbourPrecision : queryContext.getNeighbours()) {
+        if (neighbourPrecision < geoHash.length()) {
+          String truncatedGeoHash=geoHash.substring(0,neighbourPrecision);
+          locations.add(truncatedGeoHash);
+          GeoHashUtils.addNeighbors(truncatedGeoHash,locations);
+        }
+      }
+    }
+    for (    String location : locations) {
+      queryContextList.add(new QueryContext(location,queryContext.getBoost(),location.length() < this.precision));
+    }
+  }
+  return queryContextList;
+}
