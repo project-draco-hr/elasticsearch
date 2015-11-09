@@ -1,21 +1,26 @@
 {
   IndexMetaData indexMd=allocation.routingNodes().metaData().index(shardRouting.index());
-  int totalShardsPerNode=indexMd.getSettings().getAsInt(INDEX_TOTAL_SHARDS_PER_NODE,-1);
-  if (totalShardsPerNode <= 0) {
-    return allocation.decision(Decision.YES,NAME,"total shard limit disabled: [%d] <= 0",totalShardsPerNode);
+  int indexShardLimit=indexMd.getSettings().getAsInt(INDEX_TOTAL_SHARDS_PER_NODE,-1);
+  final int clusterShardLimit=this.clusterShardLimit;
+  if (indexShardLimit <= 0 && clusterShardLimit <= 0) {
+    return allocation.decision(Decision.YES,NAME,"total shard limit disabled: [index: %d, cluster: %d] <= 0",indexShardLimit,clusterShardLimit);
   }
-  int nodeCount=0;
+  int indexShardCount=0;
+  int nodeShardCount=0;
   for (  ShardRouting nodeShard : node) {
-    if (!nodeShard.index().equals(shardRouting.index())) {
-      continue;
-    }
     if (nodeShard.relocating()) {
       continue;
     }
-    nodeCount++;
+    nodeShardCount++;
+    if (nodeShard.index().equals(shardRouting.index())) {
+      indexShardCount++;
+    }
   }
-  if (nodeCount > totalShardsPerNode) {
-    return allocation.decision(Decision.NO,NAME,"too many shards for this index on node [%d], limit: [%d]",nodeCount,totalShardsPerNode);
+  if (clusterShardLimit > 0 && nodeShardCount > clusterShardLimit) {
+    return allocation.decision(Decision.NO,NAME,"too many shards for this node [%d], limit: [%d]",nodeShardCount,clusterShardLimit);
   }
-  return allocation.decision(Decision.YES,NAME,"shard count under limit [%d] of total shards per node",totalShardsPerNode);
+  if (indexShardLimit > 0 && indexShardCount > indexShardLimit) {
+    return allocation.decision(Decision.NO,NAME,"too many shards for this index [%s] on node [%d], limit: [%d]",shardRouting.index(),indexShardCount,indexShardLimit);
+  }
+  return allocation.decision(Decision.YES,NAME,"shard count under index limit [%d] and node limit [%d] of total shards per node",indexShardLimit,clusterShardLimit);
 }
