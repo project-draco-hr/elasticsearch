@@ -1,0 +1,34 @@
+{
+  PortsRange portsRange=new PortsRange(port);
+  final AtomicReference<Exception> lastException=new AtomicReference<>();
+  final AtomicReference<InetSocketAddress> boundSocket=new AtomicReference<>();
+  boolean success=portsRange.iterate(new PortsRange.PortCallback(){
+    @Override public boolean onPortNumber(    int portNumber){
+      try {
+        Channel channel=serverBootstraps.get(name).bind(new InetSocketAddress(hostAddress,portNumber));
+synchronized (serverChannels) {
+          List<Channel> list=serverChannels.get(name);
+          if (list == null) {
+            list=new ArrayList<>();
+            serverChannels.put(name,list);
+          }
+          list.add(channel);
+          boundSocket.set((InetSocketAddress)channel.getLocalAddress());
+        }
+      }
+ catch (      Exception e) {
+        lastException.set(e);
+        return false;
+      }
+      return true;
+    }
+  }
+);
+  if (!success) {
+    throw new BindTransportException("Failed to bind to [" + port + "]",lastException.get());
+  }
+  if (logger.isDebugEnabled()) {
+    logger.debug("Bound profile [{}] to address {{}}",name,NetworkAddress.format(boundSocket.get()));
+  }
+  return boundSocket.get();
+}

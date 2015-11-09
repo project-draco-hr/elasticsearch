@@ -1,0 +1,32 @@
+{
+  if (!NetworkUtils.SUPPORTS_V6) {
+    return;
+  }
+  logger.info("--> starting a node on ipv4 only");
+  Settings ipv4Settings=Settings.builder().put("network.host","127.0.0.1").build();
+  String ipv4OnlyNode=internalCluster().startNode(ipv4Settings);
+  logger.info("--> starting a node on ipv4 and ipv6");
+  Settings bothSettings=Settings.builder().put("network.host","_local_").build();
+  internalCluster().startNode(bothSettings);
+  logger.info("--> waiting for the cluster to declare itself stable");
+  ensureStableCluster(2);
+  logger.info("--> checking if boundAddress matching publishAddress has same port");
+  NodesInfoResponse nodesInfoResponse=client().admin().cluster().prepareNodesInfo().get();
+  for (  NodeInfo nodeInfo : nodesInfoResponse) {
+    BoundTransportAddress boundTransportAddress=nodeInfo.getTransport().getAddress();
+    if (nodeInfo.getNode().getName().equals(ipv4OnlyNode)) {
+      assertThat(boundTransportAddress.boundAddresses().length,equalTo(1));
+      assertThat(boundTransportAddress.boundAddresses()[0].getPort(),equalTo(boundTransportAddress.publishAddress().getPort()));
+    }
+ else {
+      assertThat(boundTransportAddress.boundAddresses().length,greaterThan(1));
+      for (      TransportAddress boundAddress : boundTransportAddress.boundAddresses()) {
+        assertThat(boundAddress,instanceOf(InetSocketTransportAddress.class));
+        InetSocketTransportAddress inetBoundAddress=(InetSocketTransportAddress)boundAddress;
+        if (inetBoundAddress.address().getAddress() instanceof Inet4Address) {
+          assertThat(inetBoundAddress.getPort(),equalTo(boundTransportAddress.publishAddress().getPort()));
+        }
+      }
+    }
+  }
+}
