@@ -1,0 +1,63 @@
+{
+  final ClusterState clusterState=observer.observedState();
+  final DiscoveryNodes nodes=clusterState.nodes();
+  if (nodes.localNodeMaster() || localExecute(request)) {
+    final ClusterBlockException blockException=checkBlock(request,clusterState);
+    if (blockException != null) {
+      if (!blockException.retryable()) {
+        listener.onFailure(blockException);
+      }
+ else {
+        logger.trace("can't execute due to a cluster block, retrying",blockException);
+        retry(blockException,retryableOrNoBlockPredicate);
+      }
+    }
+ else {
+      ActionListener<Response> delegate=new ActionListener<Response>(){
+        @Override public void onResponse(        Response response){
+          listener.onResponse(response);
+        }
+        @Override public void onFailure(        Throwable t){
+          if (t instanceof Discovery.FailedToCommitClusterStateException || (t instanceof NotMasterException)) {
+            logger.debug("master could not publish cluster state or stepped down before publishing action [{}], scheduling a retry",t,actionName);
+            retry(t,masterNodeChangedPredicate);
+          }
+ else {
+            listener.onFailure(t);
+          }
+        }
+      }
+;
+      threadPool.executor(executor).execute(new ActionRunnable(delegate){
+        @Override protected void doRun() throws Exception {
+          masterOperation(request,clusterService.state(),delegate);
+        }
+      }
+);
+    }
+  }
+ else {
+    if (nodes.masterNode() == null) {
+      logger.debug("no known master node, scheduling a retry");
+      retry(new MasterNotDiscoveredException(),masterNodeChangedPredicate);
+    }
+ else {
+      transportService.sendRequest(nodes.masterNode(),actionName,request,new ActionListenerResponseHandler<Response>(listener){
+        @Override public Response newInstance(){
+          return newResponse();
+        }
+        @Override public void handleException(        final TransportException exp){
+          Throwable cause=exp.unwrapCause();
+          if (cause instanceof ConnectTransportException) {
+            logger.debug("connection exception while trying to forward request with action name [{}] to master node [{}], scheduling a retry. Error: [{}]",actionName,nodes.masterNode(),exp.getDetailedMessage());
+            retry(cause,masterNodeChangedPredicate);
+          }
+ else {
+            listener.onFailure(exp);
+          }
+        }
+      }
+);
+    }
+  }
+}
