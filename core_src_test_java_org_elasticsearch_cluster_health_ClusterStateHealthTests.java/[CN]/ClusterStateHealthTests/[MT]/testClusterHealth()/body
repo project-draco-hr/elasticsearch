@@ -1,0 +1,20 @@
+{
+  RoutingTableGenerator routingTableGenerator=new RoutingTableGenerator();
+  RoutingTableGenerator.ShardCounter counter=new RoutingTableGenerator.ShardCounter();
+  RoutingTable.Builder routingTable=RoutingTable.builder();
+  MetaData.Builder metaData=MetaData.builder();
+  for (int i=randomInt(4); i >= 0; i--) {
+    int numberOfShards=randomInt(3) + 1;
+    int numberOfReplicas=randomInt(4);
+    IndexMetaData indexMetaData=IndexMetaData.builder("test_" + Integer.toString(i)).settings(settings(Version.CURRENT)).numberOfShards(numberOfShards).numberOfReplicas(numberOfReplicas).build();
+    IndexRoutingTable indexRoutingTable=routingTableGenerator.genIndexRoutingTable(indexMetaData,counter);
+    metaData.put(indexMetaData,true);
+    routingTable.add(indexRoutingTable);
+  }
+  ClusterState clusterState=ClusterState.builder(ClusterName.DEFAULT).metaData(metaData).routingTable(routingTable.build()).build();
+  String[] concreteIndices=indexNameExpressionResolver.concreteIndices(clusterState,IndicesOptions.strictExpand(),(String[])null);
+  ClusterStateHealth clusterStateHealth=new ClusterStateHealth(clusterState,concreteIndices);
+  logger.info("cluster status: {}, expected {}",clusterStateHealth.getStatus(),counter.status());
+  clusterStateHealth=maybeSerialize(clusterStateHealth);
+  assertClusterHealth(clusterStateHealth,counter);
+}
