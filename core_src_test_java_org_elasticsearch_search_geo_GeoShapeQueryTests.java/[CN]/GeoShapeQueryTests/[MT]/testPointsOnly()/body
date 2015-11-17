@@ -1,16 +1,15 @@
 {
   String mapping=XContentFactory.jsonBuilder().startObject().startObject("type1").startObject("properties").startObject("location").field("type","geo_shape").field("tree",randomBoolean() ? "quadtree" : "geohash").field("tree_levels","6").field("distance_error_pct","0.01").field("points_only",true).endObject().endObject().endObject().endObject().string();
-  assertAcked(prepareCreate("geo_points_only").addMapping("type1",mapping));
+  client().admin().indices().prepareCreate("geo_points_only").addMapping("type1",mapping).execute().actionGet();
   ensureGreen();
   ShapeBuilder shape=RandomShapeGenerator.createShape(random());
   try {
-    index("geo_points_only","type1","1",jsonBuilder().startObject().field("location",shape).endObject());
+    client().prepareIndex("geo_points_only","type1","1").setSource(jsonBuilder().startObject().field("location",shape).endObject()).setRefresh(true).execute().actionGet();
   }
  catch (  MapperParsingException e) {
     assertThat(e.getCause().getMessage(),containsString("is configured for points only"));
     return;
   }
-  refresh();
-  SearchResponse response=client().prepareSearch().setQuery(geoIntersectionQuery("location",shape)).execute().actionGet();
+  SearchResponse response=client().prepareSearch("geo_points_only").setTypes("type1").setQuery(geoIntersectionQuery("location",shape)).execute().actionGet();
   assertEquals(1,response.getHits().getTotalHits());
 }
