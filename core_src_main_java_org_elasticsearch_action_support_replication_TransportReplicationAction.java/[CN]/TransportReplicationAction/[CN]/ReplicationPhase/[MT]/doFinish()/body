@@ -1,7 +1,6 @@
 {
   if (finished.compareAndSet(false,true)) {
     Releasables.close(indexShardReference);
-    final ShardId shardId=shardIt.shardId();
     final ActionWriteResponse.ShardInfo.Failure[] failuresArray;
     if (!shardReplicaFailures.isEmpty()) {
       int slot=0;
@@ -15,6 +14,14 @@
       failuresArray=ActionWriteResponse.EMPTY;
     }
     finalResponse.setShardInfo(new ActionWriteResponse.ShardInfo(totalShards,success.get(),failuresArray));
-    listener.onResponse(finalResponse);
+    try {
+      channel.sendResponse(finalResponse);
+    }
+ catch (    IOException responseException) {
+      logger.warn("failed to send error message back to client for action [" + transportReplicaAction + "]",responseException);
+    }
+    if (logger.isTraceEnabled()) {
+      logger.trace("action [{}] completed on all replicas [{}] for request [{}]",transportReplicaAction,shardId,replicaRequest);
+    }
   }
 }
