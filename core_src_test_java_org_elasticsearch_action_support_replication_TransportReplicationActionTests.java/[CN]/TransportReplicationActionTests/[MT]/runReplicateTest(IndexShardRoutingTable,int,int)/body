@@ -9,7 +9,7 @@
   internalRequest.concreteIndex(shardId.index().name());
   Releasable reference=getOrCreateIndexShardOperationsCounter();
   assertIndexShardCounter(2);
-  TransportReplicationAction<Request,Request,Response>.ReplicationPhase replicationPhase=action.new ReplicationPhase(shardIt,request,new Response(),new ClusterStateObserver(clusterService,logger),primaryShard,internalRequest,listener,reference);
+  TransportReplicationAction<Request,Request,Response>.ReplicationPhase replicationPhase=action.new ReplicationPhase(shardIt,request,new Response(),new ClusterStateObserver(clusterService,logger),primaryShard,internalRequest,listener,reference,null);
   assertThat(replicationPhase.totalShards(),equalTo(totalShards));
   assertThat(replicationPhase.pending(),equalTo(assignedReplicas));
   replicationPhase.run();
@@ -22,10 +22,12 @@
   int pending=replicationPhase.pending();
   int criticalFailures=0;
   int successful=1;
+  List<CapturingTransport.CapturedRequest> failures=new ArrayList<>();
   for (  CapturingTransport.CapturedRequest capturedRequest : capturedRequests) {
     if (randomBoolean()) {
       Throwable t;
-      if (randomBoolean()) {
+      boolean criticalFailure=randomBoolean();
+      if (criticalFailure) {
         t=new CorruptIndexException("simulated",(String)null);
         criticalFailures++;
       }
@@ -34,6 +36,14 @@
       }
       logger.debug("--> simulating failure on {} with [{}]",capturedRequest.node,t.getClass().getSimpleName());
       transport.handleResponse(capturedRequest.requestId,t);
+      if (criticalFailure) {
+        CapturingTransport.CapturedRequest[] shardFailedRequests=transport.capturedRequests();
+        transport.clear();
+        assertEquals(1,shardFailedRequests.length);
+        CapturingTransport.CapturedRequest shardFailedRequest=shardFailedRequests[0];
+        failures.add(shardFailedRequest);
+        transport.handleResponse(shardFailedRequest.requestId,TransportResponse.Empty.INSTANCE);
+      }
     }
  else {
       successful++;
@@ -50,7 +60,7 @@
   assertThat(shardInfo.getFailures(),arrayWithSize(criticalFailures));
   assertThat(shardInfo.getSuccessful(),equalTo(successful));
   assertThat(shardInfo.getTotal(),equalTo(totalShards));
-  assertThat("failed to see enough shard failures",transport.capturedRequests().length,equalTo(criticalFailures));
+  assertThat("failed to see enough shard failures",failures.size(),equalTo(criticalFailures));
   for (  CapturingTransport.CapturedRequest capturedRequest : transport.capturedRequests()) {
     assertThat(capturedRequest.action,equalTo(ShardStateAction.SHARD_FAILED_ACTION_NAME));
   }
