@@ -1,0 +1,35 @@
+{
+  if (!bulkRequestModifier.hasNext()) {
+    BulkRequest bulkRequest=bulkRequestModifier.getBulkRequest();
+    ActionListener<BulkResponse> actionListener=bulkRequestModifier.wrapActionListenerIfNeeded(listener);
+    if (bulkRequest.requests().isEmpty()) {
+      actionListener.onResponse(new BulkResponse(new BulkItemResponse[0],0));
+    }
+ else {
+      chain.proceed(action,bulkRequest,actionListener);
+    }
+    return;
+  }
+  ActionRequest actionRequest=bulkRequestModifier.next();
+  if (!(actionRequest instanceof IndexRequest)) {
+    processBulkIndexRequest(bulkRequestModifier,pipelineId,action,chain,listener);
+    return;
+  }
+  IndexRequest indexRequest=(IndexRequest)actionRequest;
+  Map<String,Object> sourceAsMap=indexRequest.sourceAsMap();
+  IngestDocument ingestDocument=new IngestDocument(indexRequest.index(),indexRequest.type(),indexRequest.id(),sourceAsMap);
+  executionService.execute(ingestDocument,pipelineId,new PipelineExecutionService.Listener(){
+    @Override public void executed(    IngestDocument ingestDocument){
+      if (ingestDocument.isModified()) {
+        indexRequest.source(ingestDocument.getSource());
+      }
+      processBulkIndexRequest(bulkRequestModifier,pipelineId,action,chain,listener);
+    }
+    @Override public void failed(    Throwable e){
+      logger.debug("failed to execute pipeline [{}]",e,pipelineId);
+      bulkRequestModifier.markCurrentItemAsFailed(e);
+      processBulkIndexRequest(bulkRequestModifier,pipelineId,action,chain,listener);
+    }
+  }
+);
+}
