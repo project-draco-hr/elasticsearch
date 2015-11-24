@@ -1,0 +1,30 @@
+{
+  MetaDataProcessor.Factory metaProcessorFactory=new MetaDataProcessor.Factory();
+  Map<String,Object> config=new HashMap<>();
+  config.put("_ttl","5d");
+  MetaDataProcessor processor=metaProcessorFactory.create(config);
+  when(store.get("_id")).thenReturn(new Pipeline("_id","_description",Collections.singletonList(processor)));
+  IndexRequest indexRequest=new IndexRequest("_index","_type","_id").source(Collections.emptyMap());
+  PipelineExecutionService.Listener listener=mock(PipelineExecutionService.Listener.class);
+  executionService.execute(indexRequest,"_id",listener);
+  assertThat(indexRequest.ttl(),equalTo(TimeValue.parseTimeValue("5d",null,"ttl").millis()));
+  verify(listener,times(1)).executed(any());
+  verify(listener,never()).failed(any());
+  metaProcessorFactory=new MetaDataProcessor.Factory();
+  config=new HashMap<>();
+  config.put("_ttl","abc");
+  processor=metaProcessorFactory.create(config);
+  when(store.get("_id")).thenReturn(new Pipeline("_id","_description",Collections.singletonList(processor)));
+  indexRequest=new IndexRequest("_index","_type","_id").source(Collections.emptyMap());
+  listener=mock(PipelineExecutionService.Listener.class);
+  executionService.execute(indexRequest,"_id",listener);
+  verify(listener,never()).executed(any());
+  verify(listener,times(1)).failed(any(ElasticsearchParseException.class));
+  when(store.get("_id")).thenReturn(new Pipeline("_id","_description",Collections.emptyList()));
+  indexRequest=new IndexRequest("_index","_type","_id").source(Collections.emptyMap()).ttl(1000l);
+  listener=mock(PipelineExecutionService.Listener.class);
+  executionService.execute(indexRequest,"_id",listener);
+  assertThat(indexRequest.ttl(),equalTo(1000l));
+  verify(listener,times(1)).executed(any());
+  verify(listener,never()).failed(any(Throwable.class));
+}
