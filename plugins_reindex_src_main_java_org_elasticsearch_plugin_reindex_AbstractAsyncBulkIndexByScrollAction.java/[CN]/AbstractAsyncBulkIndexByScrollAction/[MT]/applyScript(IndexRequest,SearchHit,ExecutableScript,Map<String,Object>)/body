@@ -1,0 +1,71 @@
+{
+  if (script == null) {
+    return true;
+  }
+  ctx.put(IndexFieldMapper.NAME,doc.index());
+  ctx.put(TypeFieldMapper.NAME,doc.type());
+  ctx.put(IdFieldMapper.NAME,doc.id());
+  Long oldVersion=doc.getVersion();
+  ctx.put(VersionFieldMapper.NAME,oldVersion);
+  String oldParent=fieldValue(doc,ParentFieldMapper.NAME);
+  ctx.put(ParentFieldMapper.NAME,oldParent);
+  String oldRouting=fieldValue(doc,RoutingFieldMapper.NAME);
+  ctx.put(RoutingFieldMapper.NAME,oldRouting);
+  Long oldTimestamp=fieldValue(doc,TimestampFieldMapper.NAME);
+  ctx.put(TimestampFieldMapper.NAME,oldTimestamp);
+  Long oldTTL=fieldValue(doc,TTLFieldMapper.NAME);
+  ctx.put(TTLFieldMapper.NAME,oldTTL);
+  ctx.put(SourceFieldMapper.NAME,index.sourceAsMap());
+  ctx.put("op","update");
+  script.setNextVar("ctx",ctx);
+  script.run();
+  Map<String,Object> resultCtx=(Map<String,Object>)script.unwrap(ctx);
+  String newOp=(String)resultCtx.remove("op");
+  if (newOp == null) {
+    throw new IllegalArgumentException("Script cleared op!");
+  }
+  if ("noop".equals(newOp)) {
+    noops.incrementAndGet();
+    return false;
+  }
+  if (false == "update".equals(newOp)) {
+    throw new IllegalArgumentException("Invalid op [" + newOp + ']');
+  }
+  index.source((Map<String,Object>)resultCtx.remove(SourceFieldMapper.NAME));
+  Object newValue=ctx.remove(IndexFieldMapper.NAME);
+  if (false == doc.index().equals(newValue)) {
+    scriptChangedIndex(index,newValue);
+  }
+  newValue=ctx.remove(TypeFieldMapper.NAME);
+  if (false == doc.type().equals(newValue)) {
+    scriptChangedType(index,newValue);
+  }
+  newValue=ctx.remove(IdFieldMapper.NAME);
+  if (false == doc.id().equals(newValue)) {
+    scriptChangedId(index,newValue);
+  }
+  newValue=ctx.remove(VersionFieldMapper.NAME);
+  if (false == Objects.equals(oldVersion,newValue)) {
+    scriptChangedVersion(index,newValue);
+  }
+  newValue=ctx.remove(ParentFieldMapper.NAME);
+  if (false == Objects.equals(oldParent,newValue)) {
+    scriptChangedParent(index,newValue);
+  }
+  newValue=ctx.remove(RoutingFieldMapper.NAME);
+  if (false == Objects.equals(oldRouting,newValue)) {
+    scriptChangedRouting(index,newValue);
+  }
+  newValue=ctx.remove(TimestampFieldMapper.NAME);
+  if (false == Objects.equals(oldTimestamp,newValue)) {
+    scriptChangedTimestamp(index,newValue);
+  }
+  newValue=ctx.remove(TTLFieldMapper.NAME);
+  if (false == Objects.equals(oldTTL,newValue)) {
+    scriptChangedTTL(index,newValue);
+  }
+  if (false == ctx.isEmpty()) {
+    throw new IllegalArgumentException("Invalid fields added to ctx [" + String.join(",",ctx.keySet()) + ']');
+  }
+  return true;
+}

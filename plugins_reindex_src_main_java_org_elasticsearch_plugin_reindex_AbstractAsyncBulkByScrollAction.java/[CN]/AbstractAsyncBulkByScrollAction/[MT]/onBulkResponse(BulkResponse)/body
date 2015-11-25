@@ -1,0 +1,42 @@
+{
+  try {
+    Set<String> destinationIndicesThisBatch=new HashSet<>();
+    for (    BulkItemResponse item : response) {
+      if (item.isFailed()) {
+        recordFailure(item.getFailure());
+        continue;
+      }
+switch (item.getOpType()) {
+case "index":
+case "create":
+        IndexResponse ir=item.getResponse();
+      if (ir.isCreated()) {
+        created.incrementAndGet();
+      }
+ else {
+        updated.incrementAndGet();
+      }
+    break;
+case "delete":
+  deleted.incrementAndGet();
+break;
+default :
+throw new IllegalArgumentException("Unknown op type:  " + item.getOpType());
+}
+destinationIndices.add(item.getIndex());
+}
+destinationIndices.addAll(destinationIndicesThisBatch);
+if (false == indexingFailures.isEmpty()) {
+startNormalTermination();
+return;
+}
+if (mainRequest.getSize() != SIZE_ALL_MATCHES && successfullyProcessed() >= mainRequest.getSize()) {
+startNormalTermination();
+return;
+}
+startNextScrollRequest();
+}
+ catch (Throwable t) {
+finishHim(t);
+}
+}

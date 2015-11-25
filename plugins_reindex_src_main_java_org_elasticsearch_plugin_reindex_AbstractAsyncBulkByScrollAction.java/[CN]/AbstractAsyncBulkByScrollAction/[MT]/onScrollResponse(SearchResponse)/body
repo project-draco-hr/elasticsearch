@@ -1,0 +1,54 @@
+{
+  scroll.set(searchResponse.getScrollId());
+  if (searchResponse.getShardFailures() != null && searchResponse.getShardFailures().length > 0) {
+    Collections.addAll(searchFailures,searchResponse.getShardFailures());
+    startNormalTermination();
+    return;
+  }
+  threadPool.generic().execute(new AbstractRunnable(){
+    @Override protected void doRun() throws Exception {
+      try {
+        SearchHit[] docs=searchResponse.getHits().getHits();
+        logger.debug("scroll returned [{}] documents with a scroll id of [{}]",docs.length,searchResponse.getScrollId());
+        if (docs.length == 0) {
+          startNormalTermination();
+          return;
+        }
+        batches.incrementAndGet();
+        List<SearchHit> docsIterable=Arrays.asList(docs);
+        if (mainRequest.getSize() != SIZE_ALL_MATCHES) {
+          long remaining=max(0,mainRequest.getSize() - successfullyProcessed());
+          if (remaining < docs.length) {
+            docsIterable=docsIterable.subList(0,(int)remaining);
+          }
+        }
+        BulkRequest request=buildBulk(docsIterable);
+        if (request.requests().isEmpty()) {
+          startNextScrollRequest();
+          return;
+        }
+        request.timeout(mainRequest.getTimeout());
+        request.consistencyLevel(mainRequest.getConsistency());
+        if (logger.isDebugEnabled()) {
+          logger.debug("sending [{}] entry, [{}] bulk request",request.requests().size(),new ByteSizeValue(request.estimatedSizeInBytes()));
+        }
+        client.bulk(request,new ActionListener<BulkResponse>(){
+          @Override public void onResponse(          BulkResponse response){
+            onBulkResponse(response);
+          }
+          @Override public void onFailure(          Throwable e){
+            finishHim(e);
+          }
+        }
+);
+      }
+ catch (      Throwable t) {
+        finishHim(t);
+      }
+    }
+    @Override public void onFailure(    Throwable t){
+      finishHim(t);
+    }
+  }
+);
+}

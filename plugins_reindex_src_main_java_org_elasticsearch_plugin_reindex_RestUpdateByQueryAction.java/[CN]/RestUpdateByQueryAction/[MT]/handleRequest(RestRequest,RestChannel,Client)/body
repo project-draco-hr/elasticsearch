@@ -1,0 +1,35 @@
+{
+  UpdateByQueryRequest internalRequest=new UpdateByQueryRequest(new SearchRequest());
+  int scrollSize=internalRequest.getSource().source().size();
+  internalRequest.getSource().source().size(SIZE_ALL_MATCHES);
+  BytesReference bodyContent=null;
+  if (RestActions.hasBodyContent(request)) {
+    bodyContent=RestActions.getRestContent(request);
+    Tuple<XContentType,Map<String,Object>> body=XContentHelper.convertToMap(bodyContent,false);
+    boolean modified=false;
+    String conflicts=(String)body.v2().remove("conflicts");
+    if (conflicts != null) {
+      internalRequest.setConflicts(conflicts);
+      modified=true;
+    }
+    @SuppressWarnings("unchecked") Map<String,Object> script=(Map<String,Object>)body.v2().remove("script");
+    if (script != null) {
+      internalRequest.setScript(Script.parse(script,false,parseFieldMatcher));
+      modified=true;
+    }
+    if (modified) {
+      XContentBuilder builder=XContentFactory.contentBuilder(body.v1());
+      builder.map(body.v2());
+      bodyContent=builder.bytes();
+    }
+  }
+  RestSearchAction.parseSearchRequest(internalRequest.getSource(),indicesQueriesRegistry,request,parseFieldMatcher,bodyContent);
+  String conflicts=request.param("conflicts");
+  if (conflicts != null) {
+    internalRequest.setConflicts(conflicts);
+  }
+  parseCommon(internalRequest,request);
+  internalRequest.setSize(internalRequest.getSource().source().size());
+  internalRequest.getSource().source().size(request.paramAsInt("scroll_size",scrollSize));
+  client.execute(INSTANCE,internalRequest,new BulkIndexByScrollResponseContentListener<>(channel));
+}
