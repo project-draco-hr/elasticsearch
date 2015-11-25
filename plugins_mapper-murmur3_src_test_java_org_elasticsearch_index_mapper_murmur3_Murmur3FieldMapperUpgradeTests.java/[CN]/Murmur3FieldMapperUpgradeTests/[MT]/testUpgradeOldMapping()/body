@@ -1,0 +1,23 @@
+{
+  final String indexName="index-mapper-murmur3-2.0.0";
+  Path unzipDir=createTempDir();
+  Path unzipDataDir=unzipDir.resolve("data");
+  Path backwardsIndex=getBwcIndicesPath().resolve(indexName + ".zip");
+  try (InputStream stream=Files.newInputStream(backwardsIndex)){
+    TestUtil.unzip(stream,unzipDir);
+  }
+   assertTrue(Files.exists(unzipDataDir));
+  final String node=internalCluster().startNode();
+  Path[] nodePaths=internalCluster().getInstance(NodeEnvironment.class,node).nodeDataPaths();
+  assertEquals(1,nodePaths.length);
+  Path dataPath=nodePaths[0].resolve(NodeEnvironment.INDICES_FOLDER);
+  assertFalse(Files.exists(dataPath));
+  Path src=unzipDataDir.resolve(indexName + "/nodes/0/indices");
+  Files.move(src,dataPath);
+  ensureYellow();
+  final SearchResponse countResponse=client().prepareSearch(indexName).setSize(0).get();
+  ElasticsearchAssertions.assertHitCount(countResponse,3L);
+  final SearchResponse cardinalityResponse=client().prepareSearch(indexName).addAggregation(AggregationBuilders.cardinality("card").field("foo.hash")).get();
+  Cardinality cardinality=cardinalityResponse.getAggregations().get("card");
+  assertEquals(3L,cardinality.getValue());
+}
