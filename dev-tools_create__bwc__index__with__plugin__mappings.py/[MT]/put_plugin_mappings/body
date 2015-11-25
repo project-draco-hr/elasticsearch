@@ -1,0 +1,14 @@
+def put_plugin_mappings(client, index_name, mapping, docs):
+    client.indices.delete(index=index_name, ignore=404)
+    logging.info('Create single shard test index')
+    client.indices.create(index=index_name, body={'settings': {'number_of_shards': 1, 'number_of_replicas': 0, }, 'mappings': {'type': mapping, }, })
+    health = client.cluster.health(wait_for_status='green', wait_for_relocating_shards=0)
+    assert (health['timed_out'] == False), ('cluster health timed out %s' % health)
+    logging.info('Indexing documents')
+    for i in range(len(docs)):
+        client.index(index=index_name, doc_type='type', id=str(i), body=docs[i])
+    logging.info('Flushing index')
+    client.indices.flush(index=index_name)
+    logging.info('Running basic checks')
+    count = client.count(index=index_name)['count']
+    assert (count == len(docs)), ('expected %d docs, got %d' % (len(docs), count))

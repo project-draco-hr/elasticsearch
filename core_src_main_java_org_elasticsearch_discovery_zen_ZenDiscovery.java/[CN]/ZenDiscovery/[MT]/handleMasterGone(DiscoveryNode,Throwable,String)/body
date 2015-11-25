@@ -1,0 +1,54 @@
+{
+  if (lifecycleState() != Lifecycle.State.STARTED) {
+    return;
+  }
+  if (localNodeMaster()) {
+    return;
+  }
+  logger.info("master_left [{}], reason [{}]",cause,masterNode,reason);
+  clusterService.submitStateUpdateTask("zen-disco-master_failed (" + masterNode + ")",Priority.IMMEDIATE,new ClusterStateUpdateTask(){
+    @Override public boolean runOnlyOnMaster(){
+      return false;
+    }
+    @Override public ClusterState execute(    ClusterState currentState){
+      if (!masterNode.id().equals(currentState.nodes().masterNodeId())) {
+        return currentState;
+      }
+      DiscoveryNodes discoveryNodes=DiscoveryNodes.builder(currentState.nodes()).remove(masterNode.id()).masterNodeId(null).build();
+      publishClusterState.pendingStatesQueue().failAllStatesAndClear(new ElasticsearchException("master left [{}]",reason));
+      if (rejoinOnMasterGone) {
+        return rejoin(ClusterState.builder(currentState).nodes(discoveryNodes).build(),"master left (reason = " + reason + ")");
+      }
+      if (!electMaster.hasEnoughMasterNodes(discoveryNodes)) {
+        return rejoin(ClusterState.builder(currentState).nodes(discoveryNodes).build(),"not enough master nodes after master left (reason = " + reason + ")");
+      }
+      final DiscoveryNode electedMaster=electMaster.electMaster(discoveryNodes);
+      final DiscoveryNode localNode=currentState.nodes().localNode();
+      if (localNode.equals(electedMaster)) {
+        masterFD.stop("got elected as new master since master left (reason = " + reason + ")");
+        discoveryNodes=DiscoveryNodes.builder(discoveryNodes).masterNodeId(localNode.id()).build();
+        ClusterState newState=ClusterState.builder(currentState).nodes(discoveryNodes).build();
+        nodesFD.updateNodesAndPing(newState);
+        return newState;
+      }
+ else {
+        nodesFD.stop();
+        if (electedMaster != null) {
+          discoveryNodes=DiscoveryNodes.builder(discoveryNodes).masterNodeId(electedMaster.id()).build();
+          masterFD.restart(electedMaster,"possible elected master since master left (reason = " + reason + ")");
+          return ClusterState.builder(currentState).nodes(discoveryNodes).build();
+        }
+ else {
+          return rejoin(ClusterState.builder(currentState).nodes(discoveryNodes).build(),"master_left and no other node elected to become master");
+        }
+      }
+    }
+    @Override public void onFailure(    String source,    Throwable t){
+      logger.error("unexpected failure during [{}]",t,source);
+    }
+    @Override public void clusterStateProcessed(    String source,    ClusterState oldState,    ClusterState newState){
+      sendInitialStateEventIfNeeded();
+    }
+  }
+);
+}

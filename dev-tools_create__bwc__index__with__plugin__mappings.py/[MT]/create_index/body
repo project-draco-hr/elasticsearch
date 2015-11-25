@@ -1,0 +1,34 @@
+def create_index(plugin, mapping, docs):
+    '\n  Creates a static back compat index (.zip) with mappings using fields defined in plugins.\n  '
+    logging.basicConfig(format='[%(levelname)s] [%(asctime)s] %(message)s', level=logging.INFO, datefmt='%Y-%m-%d %I:%M:%S %p')
+    logging.getLogger('elasticsearch').setLevel(logging.ERROR)
+    logging.getLogger('urllib3').setLevel(logging.WARN)
+    tmp_dir = tempfile.mkdtemp()
+    plugin_installed = False
+    node = None
+    try:
+        data_dir = os.path.join(tmp_dir, 'data')
+        repo_dir = os.path.join(tmp_dir, 'repo')
+        logging.info(('Temp data dir: %s' % data_dir))
+        logging.info(('Temp repo dir: %s' % repo_dir))
+        version = '2.0.0'
+        classifier = ('%s-%s' % (plugin, version))
+        index_name = ('index-%s' % classifier)
+        release_dir = os.path.join('backwards', ('elasticsearch-%s' % version))
+        if (not os.path.exists(release_dir)):
+            fetch_version(version)
+        create_bwc_index.install_plugin(version, release_dir, plugin)
+        plugin_installed = True
+        node = create_bwc_index.start_node(version, release_dir, data_dir, repo_dir, cluster_name=index_name)
+        client = create_bwc_index.create_client()
+        put_plugin_mappings(client, index_name, mapping, docs)
+        create_bwc_index.shutdown_node(node)
+        print ('%s server output:\n%s' % (version, node.stdout.read().decode('utf-8')))
+        node = None
+        create_bwc_index.compress_index(classifier, tmp_dir, ('plugins/%s/src/test/resources/indices/bwc' % plugin))
+    finally:
+        if (node is not None):
+            create_bwc_index.shutdown_node(node)
+        if plugin_installed:
+            create_bwc_index.remove_plugin(version, release_dir, plugin)
+        shutil.rmtree(tmp_dir)
