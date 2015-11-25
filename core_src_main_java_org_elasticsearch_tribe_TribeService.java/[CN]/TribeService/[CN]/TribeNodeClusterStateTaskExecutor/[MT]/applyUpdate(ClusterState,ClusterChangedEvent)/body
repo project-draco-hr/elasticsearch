@@ -1,0 +1,89 @@
+{
+  boolean clusterStateChanged=false;
+  ClusterState tribeState=task.state();
+  DiscoveryNodes.Builder nodes=DiscoveryNodes.builder(currentState.nodes());
+  for (  DiscoveryNode discoNode : currentState.nodes()) {
+    String markedTribeName=discoNode.attributes().get(TRIBE_NAME);
+    if (markedTribeName != null && markedTribeName.equals(tribeName)) {
+      if (tribeState.nodes().get(discoNode.id()) == null) {
+        clusterStateChanged=true;
+        logger.info("[{}] removing node [{}]",tribeName,discoNode);
+        nodes.remove(discoNode.id());
+      }
+    }
+  }
+  for (  DiscoveryNode tribe : tribeState.nodes()) {
+    if (currentState.nodes().get(tribe.id()) == null) {
+      Map<String,String> tribeAttr=new HashMap<>();
+      for (      ObjectObjectCursor<String,String> attr : tribe.attributes()) {
+        tribeAttr.put(attr.key,attr.value);
+      }
+      tribeAttr.put(TRIBE_NAME,tribeName);
+      DiscoveryNode discoNode=new DiscoveryNode(tribe.name(),tribe.id(),tribe.getHostName(),tribe.getHostAddress(),tribe.address(),unmodifiableMap(tribeAttr),tribe.version());
+      clusterStateChanged=true;
+      logger.info("[{}] adding node [{}]",tribeName,discoNode);
+      nodes.put(discoNode);
+    }
+  }
+  ClusterBlocks.Builder blocks=ClusterBlocks.builder().blocks(currentState.blocks());
+  MetaData.Builder metaData=MetaData.builder(currentState.metaData());
+  RoutingTable.Builder routingTable=RoutingTable.builder(currentState.routingTable());
+  for (  IndexMetaData index : currentState.metaData()) {
+    String markedTribeName=index.getSettings().get(TRIBE_NAME);
+    if (markedTribeName != null && markedTribeName.equals(tribeName)) {
+      IndexMetaData tribeIndex=tribeState.metaData().index(index.getIndex());
+      clusterStateChanged=true;
+      if (tribeIndex == null || tribeIndex.getState() == IndexMetaData.State.CLOSE) {
+        logger.info("[{}] removing index [{}]",tribeName,index.getIndex());
+        removeIndex(blocks,metaData,routingTable,index);
+      }
+ else {
+        routingTable.add(tribeState.routingTable().index(index.getIndex()));
+        Settings tribeSettings=Settings.builder().put(tribeIndex.getSettings()).put(TRIBE_NAME,tribeName).build();
+        metaData.put(IndexMetaData.builder(tribeIndex).settings(tribeSettings));
+      }
+    }
+  }
+  for (  IndexMetaData tribeIndex : tribeState.metaData()) {
+    IndexRoutingTable table=tribeState.routingTable().index(tribeIndex.getIndex());
+    if (table == null) {
+      continue;
+    }
+    final IndexMetaData indexMetaData=currentState.metaData().index(tribeIndex.getIndex());
+    if (indexMetaData == null) {
+      if (!droppedIndices.contains(tribeIndex.getIndex())) {
+        clusterStateChanged=true;
+        logger.info("[{}] adding index [{}]",tribeName,tribeIndex.getIndex());
+        addNewIndex(tribeState,blocks,metaData,routingTable,tribeIndex);
+      }
+    }
+ else {
+      String existingFromTribe=indexMetaData.getSettings().get(TRIBE_NAME);
+      if (!tribeName.equals(existingFromTribe)) {
+        if (ON_CONFLICT_ANY.equals(onConflict)) {
+        }
+ else         if (ON_CONFLICT_DROP.equals(onConflict)) {
+          clusterStateChanged=true;
+          logger.info("[{}] dropping index [{}] due to conflict with [{}]",tribeName,tribeIndex.getIndex(),existingFromTribe);
+          removeIndex(blocks,metaData,routingTable,tribeIndex);
+          droppedIndices.add(tribeIndex.getIndex());
+        }
+ else         if (onConflict.startsWith(ON_CONFLICT_PREFER)) {
+          String preferredTribeName=onConflict.substring(ON_CONFLICT_PREFER.length());
+          if (tribeName.equals(preferredTribeName)) {
+            clusterStateChanged=true;
+            logger.info("[{}] adding index [{}], preferred over [{}]",tribeName,tribeIndex.getIndex(),existingFromTribe);
+            removeIndex(blocks,metaData,routingTable,tribeIndex);
+            addNewIndex(tribeState,blocks,metaData,routingTable,tribeIndex);
+          }
+        }
+      }
+    }
+  }
+  if (!clusterStateChanged) {
+    return currentState;
+  }
+ else {
+    return ClusterState.builder(currentState).incrementVersion().blocks(blocks).nodes(nodes).metaData(metaData).routingTable(routingTable.build()).build();
+  }
+}
