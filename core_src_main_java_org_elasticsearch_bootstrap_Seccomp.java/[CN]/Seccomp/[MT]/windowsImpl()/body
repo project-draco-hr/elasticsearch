@@ -1,0 +1,32 @@
+{
+  if (!Constants.WINDOWS) {
+    throw new IllegalStateException("bug: should not be trying to initialize ActiveProcessLimit for an unsupported OS");
+  }
+  JNAKernel32Library lib=JNAKernel32Library.getInstance();
+  Pointer job=lib.CreateJobObjectW(null,null);
+  if (job == null) {
+    throw new UnsupportedOperationException("CreateJobObject: " + Native.getLastError());
+  }
+  try {
+    int clazz=JNAKernel32Library.JOBOBJECT_BASIC_LIMIT_INFORMATION_CLASS;
+    JNAKernel32Library.JOBOBJECT_BASIC_LIMIT_INFORMATION limits=new JNAKernel32Library.JOBOBJECT_BASIC_LIMIT_INFORMATION();
+    limits.write();
+    if (!lib.QueryInformationJobObject(job,clazz,limits.getPointer(),limits.size(),null)) {
+      throw new UnsupportedOperationException("QueryInformationJobObject: " + Native.getLastError());
+    }
+    limits.read();
+    limits.ActiveProcessLimit=1;
+    limits.LimitFlags=JNAKernel32Library.JOB_OBJECT_LIMIT_ACTIVE_PROCESS;
+    limits.write();
+    if (!lib.SetInformationJobObject(job,clazz,limits.getPointer(),limits.size())) {
+      throw new UnsupportedOperationException("SetInformationJobObject: " + Native.getLastError());
+    }
+    if (!lib.AssignProcessToJobObject(job,lib.GetCurrentProcess())) {
+      throw new UnsupportedOperationException("AssignProcessToJobObject: " + Native.getLastError());
+    }
+  }
+  finally {
+    lib.CloseHandle(job);
+  }
+  logger.debug("Windows ActiveProcessLimit initialization successful");
+}
