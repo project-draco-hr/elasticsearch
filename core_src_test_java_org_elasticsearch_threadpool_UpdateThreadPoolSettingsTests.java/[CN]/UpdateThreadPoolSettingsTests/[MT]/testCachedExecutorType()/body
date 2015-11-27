@@ -2,10 +2,13 @@
   String threadPoolName=randomThreadPool(ThreadPool.ThreadPoolType.CACHED);
   ThreadPool threadPool=null;
   try {
-    threadPool=new ThreadPool(Settings.settingsBuilder().put("name","testCachedExecutorType").build());
+    Settings nodeSettings=Settings.settingsBuilder().put("name","testCachedExecutorType").build();
+    threadPool=new ThreadPool(nodeSettings);
+    ClusterSettingsService clusterSettingsService=new ClusterSettingsService(nodeSettings,new ClusterSettings(ClusterSettings.BUILT_IN_CLUSTER_SETTINGS));
+    threadPool.setNodeSettingsService(clusterSettingsService);
     assertEquals(info(threadPool,threadPoolName).getThreadPoolType(),ThreadPool.ThreadPoolType.CACHED);
     assertThat(threadPool.executor(threadPoolName),instanceOf(EsThreadPoolExecutor.class));
-    threadPool.updateSettings(settingsBuilder().put("threadpool." + threadPoolName + ".keep_alive","10m").build());
+    Settings settings=clusterSettingsService.applySettings(settingsBuilder().put("threadpool." + threadPoolName + ".keep_alive","10m").build());
     assertEquals(info(threadPool,threadPoolName).getThreadPoolType(),ThreadPool.ThreadPoolType.CACHED);
     assertThat(threadPool.executor(threadPoolName),instanceOf(EsThreadPoolExecutor.class));
     assertThat(((EsThreadPoolExecutor)threadPool.executor(threadPoolName)).getCorePoolSize(),equalTo(0));
@@ -14,12 +17,12 @@
     assertThat(info(threadPool,threadPoolName).getKeepAlive().minutes(),equalTo(10L));
     assertThat(threadPool.executor(threadPoolName),instanceOf(EsThreadPoolExecutor.class));
     Executor oldExecutor=threadPool.executor(threadPoolName);
-    threadPool.updateSettings(settingsBuilder().put("threadpool." + threadPoolName + ".keep_alive","1m").build());
+    settings=clusterSettingsService.applySettings(settingsBuilder().put(settings).put("threadpool." + threadPoolName + ".keep_alive","1m").build());
     assertThat(info(threadPool,threadPoolName).getKeepAlive().minutes(),equalTo(1L));
     assertThat(((EsThreadPoolExecutor)threadPool.executor(threadPoolName)).getKeepAliveTime(TimeUnit.MINUTES),equalTo(1L));
     assertEquals(info(threadPool,threadPoolName).getThreadPoolType(),ThreadPool.ThreadPoolType.CACHED);
     assertThat(threadPool.executor(threadPoolName),sameInstance(oldExecutor));
-    threadPool.updateSettings(settingsBuilder().put("threadpool." + threadPoolName + ".keep_alive","1m").build());
+    settings=clusterSettingsService.applySettings(settingsBuilder().put(settings).put("threadpool." + threadPoolName + ".keep_alive","1m").build());
     assertThat(info(threadPool,threadPoolName).getKeepAlive().minutes(),equalTo(1L));
     assertThat(((EsThreadPoolExecutor)threadPool.executor(threadPoolName)).getKeepAliveTime(TimeUnit.MINUTES),equalTo(1L));
     assertEquals(info(threadPool,threadPoolName).getThreadPoolType(),ThreadPool.ThreadPoolType.CACHED);

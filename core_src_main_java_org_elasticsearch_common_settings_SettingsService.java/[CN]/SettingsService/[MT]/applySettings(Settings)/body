@@ -1,0 +1,55 @@
+{
+  if (lastSettingsApplied != null && settings.equals(lastSettingsApplied)) {
+    return settings;
+  }
+  final Settings build=Settings.builder().put(this.settings).put(settings).build();
+  boolean success=false;
+  try {
+    for (    SettingUpdater settingUpdater : settingUpdaters) {
+      try {
+        settingUpdater.prepareApply(build);
+      }
+ catch (      Exception ex) {
+        logger.warn("failed to prepareCommit settings for [{}]",ex,settingUpdater);
+        throw ex;
+      }
+    }
+    for (    SettingUpdater settingUpdater : settingUpdaters) {
+      settingUpdater.apply();
+    }
+    success=true;
+  }
+ catch (  Exception ex) {
+    logger.warn("failed to apply settings",ex);
+    throw ex;
+  }
+ finally {
+    if (success == false) {
+      for (      SettingUpdater settingUpdater : settingUpdaters) {
+        try {
+          settingUpdater.rollback();
+        }
+ catch (        Exception e) {
+          logger.warn("failed to refresh settings for [{}]",e,settingUpdater);
+        }
+      }
+    }
+  }
+  try {
+    for (    Map.Entry<String,String> entry : settings.getAsMap().entrySet()) {
+      if (entry.getKey().startsWith("logger.")) {
+        String component=entry.getKey().substring("logger.".length());
+        if ("_root".equals(component)) {
+          ESLoggerFactory.getRootLogger().setLevel(entry.getValue());
+        }
+ else {
+          ESLoggerFactory.getLogger(component).setLevel(entry.getValue());
+        }
+      }
+    }
+  }
+ catch (  Exception e) {
+    logger.warn("failed to refresh settings for [{}]",e,"logger");
+  }
+  return lastSettingsApplied=settings;
+}

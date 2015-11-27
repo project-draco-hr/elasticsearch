@@ -2,14 +2,17 @@
   String threadPoolName=randomThreadPool(ThreadPool.ThreadPoolType.SCALING);
   ThreadPool threadPool=null;
   try {
-    threadPool=new ThreadPool(settingsBuilder().put("threadpool." + threadPoolName + ".size",10).put("name","testCachedExecutorType").build());
+    Settings nodeSettings=settingsBuilder().put("threadpool." + threadPoolName + ".size",10).put("name","testScalingExecutorType").build();
+    threadPool=new ThreadPool(nodeSettings);
+    ClusterSettingsService clusterSettingsService=new ClusterSettingsService(nodeSettings,new ClusterSettings(ClusterSettings.BUILT_IN_CLUSTER_SETTINGS));
+    threadPool.setNodeSettingsService(clusterSettingsService);
     assertThat(info(threadPool,threadPoolName).getMin(),equalTo(1));
     assertThat(info(threadPool,threadPoolName).getMax(),equalTo(10));
     assertThat(info(threadPool,threadPoolName).getKeepAlive().minutes(),equalTo(5L));
     assertEquals(info(threadPool,threadPoolName).getThreadPoolType(),ThreadPool.ThreadPoolType.SCALING);
     assertThat(threadPool.executor(threadPoolName),instanceOf(EsThreadPoolExecutor.class));
     Executor oldExecutor=threadPool.executor(threadPoolName);
-    threadPool.updateSettings(settingsBuilder().put("threadpool." + threadPoolName + ".keep_alive","10m").put("threadpool." + threadPoolName + ".min","2").put("threadpool." + threadPoolName + ".size","15").build());
+    clusterSettingsService.applySettings(settingsBuilder().put("threadpool." + threadPoolName + ".keep_alive","10m").put("threadpool." + threadPoolName + ".min","2").put("threadpool." + threadPoolName + ".size","15").build());
     assertEquals(info(threadPool,threadPoolName).getThreadPoolType(),ThreadPool.ThreadPoolType.SCALING);
     assertThat(threadPool.executor(threadPoolName),instanceOf(EsThreadPoolExecutor.class));
     assertThat(((EsThreadPoolExecutor)threadPool.executor(threadPoolName)).getCorePoolSize(),equalTo(2));
