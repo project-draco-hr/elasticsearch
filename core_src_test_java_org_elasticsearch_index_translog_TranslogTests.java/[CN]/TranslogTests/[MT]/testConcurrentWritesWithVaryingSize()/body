@@ -8,52 +8,26 @@
   final CountDownLatch downLatch=new CountDownLatch(1);
   for (int i=0; i < threadCount; i++) {
     final int threadId=i;
-    threads[i]=new Thread(new Runnable(){
-      @Override public void run(){
-        try {
-          downLatch.await();
-          for (int opCount=0; opCount < opsPerThread; opCount++) {
-            Translog.Operation op;
-switch (randomFrom(Translog.Operation.Type.values())) {
-case CREATE:
-case INDEX:
-              op=new Translog.Index("test",threadId + "_" + opCount,randomUnicodeOfLengthBetween(1,20 * 1024).getBytes("UTF-8"));
-            break;
-case DELETE:
-          op=new Translog.Delete(new Term("_uid",threadId + "_" + opCount),1 + randomInt(100000),randomFrom(VersionType.values()));
-        break;
-default :
-      throw new ElasticsearchException("not supported op type");
+    threads[i]=new TranslogThread(translog,downLatch,opsPerThread,threadId,writtenOperations,threadExceptions);
+    threads[i].setDaemon(true);
+    threads[i].start();
   }
-  Translog.Location loc=translog.add(op);
-  writtenOperations.add(new LocationOperation(op,loc));
-}
-}
- catch (Throwable t) {
-threadExceptions[threadId]=t;
-}
-}
-}
-);
-threads[i].setDaemon(true);
-threads[i].start();
-}
-downLatch.countDown();
-for (int i=0; i < threadCount; i++) {
-if (threadExceptions[i] != null) {
-throw threadExceptions[i];
-}
-threads[i].join(60 * 1000);
-}
-for (LocationOperation locationOperation : writtenOperations) {
-Translog.Operation op=translog.read(locationOperation.location);
-Translog.Operation expectedOp=locationOperation.operation;
-assertEquals(expectedOp.opType(),op.opType());
+  downLatch.countDown();
+  for (int i=0; i < threadCount; i++) {
+    if (threadExceptions[i] != null) {
+      throw threadExceptions[i];
+    }
+    threads[i].join(60 * 1000);
+  }
+  for (  LocationOperation locationOperation : writtenOperations) {
+    Translog.Operation op=translog.read(locationOperation.location);
+    Translog.Operation expectedOp=locationOperation.operation;
+    assertEquals(expectedOp.opType(),op.opType());
 switch (op.opType()) {
 case INDEX:
-Translog.Index indexOp=(Translog.Index)op;
-Translog.Index expIndexOp=(Translog.Index)expectedOp;
-assertEquals(expIndexOp.id(),indexOp.id());
+      Translog.Index indexOp=(Translog.Index)op;
+    Translog.Index expIndexOp=(Translog.Index)expectedOp;
+  assertEquals(expIndexOp.id(),indexOp.id());
 assertEquals(expIndexOp.routing(),indexOp.routing());
 assertEquals(expIndexOp.type(),indexOp.type());
 assertEquals(expIndexOp.source(),indexOp.source());
