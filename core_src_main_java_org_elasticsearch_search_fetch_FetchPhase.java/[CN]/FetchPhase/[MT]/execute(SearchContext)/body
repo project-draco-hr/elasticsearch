@@ -1,8 +1,7 @@
 {
   FieldsVisitor fieldsVisitor;
   Set<String> fieldNames=null;
-  List<String> extractFieldNames=null;
-  boolean loadAllStored=false;
+  List<String> fieldNamePatterns=null;
   if (!context.hasFieldNames()) {
     if (!context.hasScriptFields() && !context.hasFetchSourceContext()) {
       context.fetchSourceContext(new FetchSourceContext(true));
@@ -14,10 +13,6 @@
   }
  else {
     for (    String fieldName : context.fieldNames()) {
-      if (fieldName.equals("*")) {
-        loadAllStored=true;
-        continue;
-      }
       if (fieldName.equals(SourceFieldMapper.NAME)) {
         if (context.hasFetchSourceContext()) {
           context.fetchSourceContext().fetchSource(true);
@@ -27,35 +22,27 @@
         }
         continue;
       }
-      MappedFieldType fieldType=context.smartNameFieldType(fieldName);
-      if (fieldType == null) {
-        if (context.getObjectMapper(fieldName) != null) {
-          throw new IllegalArgumentException("field [" + fieldName + "] isn't a leaf field");
+      if (Regex.isSimpleMatchPattern(fieldName)) {
+        if (fieldNamePatterns == null) {
+          fieldNamePatterns=new ArrayList<>();
         }
+        fieldNamePatterns.add(fieldName);
       }
- else       if (fieldType.stored()) {
+ else {
+        MappedFieldType fieldType=context.smartNameFieldType(fieldName);
+        if (fieldType == null) {
+          if (context.getObjectMapper(fieldName) != null) {
+            throw new IllegalArgumentException("field [" + fieldName + "] isn't a leaf field");
+          }
+        }
         if (fieldNames == null) {
           fieldNames=new HashSet<>();
         }
-        fieldNames.add(fieldType.names().indexName());
-      }
- else {
-        if (extractFieldNames == null) {
-          extractFieldNames=new ArrayList<>();
-        }
-        extractFieldNames.add(fieldName);
+        fieldNames.add(fieldName);
       }
     }
-    if (loadAllStored) {
-      fieldsVisitor=new AllFieldsVisitor();
-    }
- else     if (fieldNames != null) {
-      boolean loadSource=extractFieldNames != null || context.sourceRequested();
-      fieldsVisitor=new CustomFieldsVisitor(fieldNames,loadSource);
-    }
- else {
-      fieldsVisitor=new FieldsVisitor(extractFieldNames != null || context.sourceRequested());
-    }
+    boolean loadSource=context.sourceRequested();
+    fieldsVisitor=new CustomFieldsVisitor(fieldNames == null ? Collections.emptySet() : fieldNames,fieldNamePatterns == null ? Collections.emptyList() : fieldNamePatterns,loadSource);
   }
   InternalSearchHit[] hits=new InternalSearchHit[context.docIdsToLoadSize()];
   FetchSubPhase.HitContext hitContext=new FetchSubPhase.HitContext();
@@ -68,10 +55,10 @@
     try {
       int rootDocId=findRootDocumentIfNested(context,subReaderContext,subDocId);
       if (rootDocId != -1) {
-        searchHit=createNestedSearchHit(context,docId,subDocId,rootDocId,extractFieldNames,loadAllStored,fieldNames,subReaderContext);
+        searchHit=createNestedSearchHit(context,docId,subDocId,rootDocId,fieldNames,fieldNamePatterns,subReaderContext);
       }
  else {
-        searchHit=createSearchHit(context,fieldsVisitor,docId,subDocId,extractFieldNames,subReaderContext);
+        searchHit=createSearchHit(context,fieldsVisitor,docId,subDocId,subReaderContext);
       }
     }
  catch (    IOException e) {
