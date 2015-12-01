@@ -1,19 +1,24 @@
 {
-  List<String> indicesToClose=new ArrayList<>();
+  Set<String> indicesToClose=new HashSet<>();
   BatchResult.Builder<PutMappingClusterStateUpdateRequest> builder=BatchResult.builder();
-  Map<PutMappingClusterStateUpdateRequest,TaskResult> executionResults=new HashMap<>();
   try {
     for (    PutMappingClusterStateUpdateRequest request : tasks) {
       for (      String index : request.indices()) {
         if (currentState.metaData().hasIndex(index)) {
-          if (indicesService.hasIndex(index) == false) {
+          if (indicesService.hasIndex(index) == false || indicesToClose.contains(index)) {
             final IndexMetaData indexMetaData=currentState.metaData().index(index);
-            IndexService indexService=indicesService.createIndex(nodeServicesProvider,indexMetaData,Collections.EMPTY_LIST);
-            indicesToClose.add(indexMetaData.getIndex());
-            if (indexMetaData.getMappings().containsKey(MapperService.DEFAULT_MAPPING)) {
-              indexService.mapperService().merge(MapperService.DEFAULT_MAPPING,indexMetaData.getMappings().get(MapperService.DEFAULT_MAPPING).source(),false,request.updateAllTypes());
+            IndexService indexService;
+            if (indicesService.hasIndex(index) == false) {
+              indicesToClose.add(index);
+              indexService=indicesService.createIndex(nodeServicesProvider,indexMetaData,Collections.EMPTY_LIST);
+              if (indexMetaData.getMappings().containsKey(MapperService.DEFAULT_MAPPING)) {
+                indexService.mapperService().merge(MapperService.DEFAULT_MAPPING,indexMetaData.getMappings().get(MapperService.DEFAULT_MAPPING).source(),false,request.updateAllTypes());
+              }
             }
-            if (indexMetaData.getMappings().containsKey(request.type())) {
+ else {
+              indexService=indicesService.indexService(index);
+            }
+            if (indexMetaData.getMappings().containsKey(request.type()) && !indexService.mapperService().hasMapping(request.type())) {
               indexService.mapperService().merge(request.type(),indexMetaData.getMappings().get(request.type()).source(),false,request.updateAllTypes());
             }
           }
