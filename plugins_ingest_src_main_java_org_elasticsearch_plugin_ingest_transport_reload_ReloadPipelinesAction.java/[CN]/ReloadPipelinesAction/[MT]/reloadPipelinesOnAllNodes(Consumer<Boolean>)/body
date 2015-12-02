@@ -1,0 +1,39 @@
+{
+  List<DiscoveryNode> ingestNodes=new ArrayList<>();
+  for (  DiscoveryNode node : clusterService.state().getNodes()) {
+    String nodeEnabled=node.getAttributes().get("ingest");
+    if ("true".equals(nodeEnabled)) {
+      ingestNodes.add(node);
+    }
+  }
+  if (ingestNodes.isEmpty()) {
+    throw new IllegalStateException("There are no ingest nodes in this cluster");
+  }
+  AtomicBoolean failed=new AtomicBoolean();
+  AtomicInteger expectedResponses=new AtomicInteger(ingestNodes.size());
+  for (  DiscoveryNode node : ingestNodes) {
+    ReloadPipelinesRequest nodeRequest=new ReloadPipelinesRequest();
+    transportService.sendRequest(node,ACTION_NAME,nodeRequest,new TransportResponseHandler<ReloadPipelinesResponse>(){
+      @Override public ReloadPipelinesResponse newInstance(){
+        return new ReloadPipelinesResponse();
+      }
+      @Override public void handleResponse(      ReloadPipelinesResponse response){
+        decrementAndReturn();
+      }
+      @Override public void handleException(      TransportException exp){
+        logger.warn("failed to update pipelines on remote node [{}]",exp,node);
+        failed.set(true);
+        decrementAndReturn();
+      }
+      void decrementAndReturn(){
+        if (expectedResponses.decrementAndGet() == 0) {
+          listener.accept(!failed.get());
+        }
+      }
+      @Override public String executor(){
+        return ThreadPool.Names.MANAGEMENT;
+      }
+    }
+);
+  }
+}
