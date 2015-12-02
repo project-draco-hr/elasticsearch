@@ -1,0 +1,52 @@
+{
+  Directory dir=newDirectory();
+  IndexWriter w=new IndexWriter(dir,newIndexWriterConfig());
+  w.addDocument(new Document());
+  DirectoryReader r=DirectoryReader.open(w,false);
+  w.close();
+  ShardId shard=new ShardId(new Index("index"),0);
+  r=ElasticsearchDirectoryReader.wrap(r,shard);
+  IndexSearcher s=new IndexSearcher(r);
+  s.setQueryCachingPolicy(QueryCachingPolicy.ALWAYS_CACHE);
+  Settings settings=Settings.builder().put(IndicesQueryCache.INDICES_CACHE_QUERY_COUNT,10).build();
+  IndicesQueryCache cache=new IndicesQueryCache(settings);
+  s.setQueryCache(cache);
+  QueryCacheStats stats=cache.getStats(shard);
+  assertEquals(0L,stats.getCacheSize());
+  assertEquals(0L,stats.getCacheCount());
+  assertEquals(0L,stats.getHitCount());
+  assertEquals(0L,stats.getMissCount());
+  assertEquals(1,s.count(new DummyQuery(0)));
+  stats=cache.getStats(shard);
+  assertEquals(1L,stats.getCacheSize());
+  assertEquals(1L,stats.getCacheCount());
+  assertEquals(0L,stats.getHitCount());
+  assertEquals(1L,stats.getMissCount());
+  for (int i=1; i < 20; ++i) {
+    assertEquals(1,s.count(new DummyQuery(i)));
+  }
+  stats=cache.getStats(shard);
+  assertEquals(10L,stats.getCacheSize());
+  assertEquals(20L,stats.getCacheCount());
+  assertEquals(0L,stats.getHitCount());
+  assertEquals(20L,stats.getMissCount());
+  s.count(new DummyQuery(10));
+  stats=cache.getStats(shard);
+  assertEquals(10L,stats.getCacheSize());
+  assertEquals(20L,stats.getCacheCount());
+  assertEquals(1L,stats.getHitCount());
+  assertEquals(20L,stats.getMissCount());
+  IOUtils.close(r,dir);
+  stats=cache.getStats(shard);
+  assertEquals(0L,stats.getCacheSize());
+  assertEquals(20L,stats.getCacheCount());
+  assertEquals(1L,stats.getHitCount());
+  assertEquals(20L,stats.getMissCount());
+  cache.onClose(shard);
+  stats=cache.getStats(shard);
+  assertEquals(0L,stats.getCacheSize());
+  assertEquals(0L,stats.getCacheCount());
+  assertEquals(0L,stats.getHitCount());
+  assertEquals(0L,stats.getMissCount());
+  cache.close();
+}
