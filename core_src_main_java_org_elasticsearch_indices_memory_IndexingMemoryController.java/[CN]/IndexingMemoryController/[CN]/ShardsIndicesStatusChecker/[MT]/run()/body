@@ -1,7 +1,32 @@
 {
-  EnumSet<ShardStatusChangeType> changes=purgeDeletedAndClosedShards();
-  updateShardStatuses(changes);
-  if (changes.isEmpty() == false) {
-    calcAndSetShardBuffers("[" + changes + "]");
+  List<IndexShard> availableShards=availableShards();
+  List<IndexShard> activeShards=new ArrayList<>();
+  for (  IndexShard shard : availableShards) {
+    if (!checkIdle(shard)) {
+      activeShards.add(shard);
+    }
+  }
+  int activeShardCount=activeShards.size();
+  if (activeShardCount == 0) {
+    logger.debug("no active shards");
+    return;
+  }
+  ByteSizeValue shardIndexingBufferSize=new ByteSizeValue(indexingBuffer.bytes() / activeShardCount);
+  if (shardIndexingBufferSize.bytes() < minShardIndexBufferSize.bytes()) {
+    shardIndexingBufferSize=minShardIndexBufferSize;
+  }
+  if (shardIndexingBufferSize.bytes() > maxShardIndexBufferSize.bytes()) {
+    shardIndexingBufferSize=maxShardIndexBufferSize;
+  }
+  ByteSizeValue shardTranslogBufferSize=new ByteSizeValue(translogBuffer.bytes() / activeShardCount);
+  if (shardTranslogBufferSize.bytes() < minShardTranslogBufferSize.bytes()) {
+    shardTranslogBufferSize=minShardTranslogBufferSize;
+  }
+  if (shardTranslogBufferSize.bytes() > maxShardTranslogBufferSize.bytes()) {
+    shardTranslogBufferSize=maxShardTranslogBufferSize;
+  }
+  logger.debug("recalculating shard indexing buffer, total is [{}] with [{}] active shards, each shard set to indexing=[{}], translog=[{}]",indexingBuffer,activeShardCount,shardIndexingBufferSize,shardTranslogBufferSize);
+  for (  IndexShard shard : activeShards) {
+    updateShardBuffers(shard,shardIndexingBufferSize,shardTranslogBufferSize);
   }
 }
