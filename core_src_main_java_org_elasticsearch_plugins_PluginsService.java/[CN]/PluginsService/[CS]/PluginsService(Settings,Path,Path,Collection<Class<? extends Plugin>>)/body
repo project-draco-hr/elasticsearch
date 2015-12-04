@@ -1,18 +1,24 @@
 {
   super(settings);
-  List<Tuple<PluginInfo,Plugin>> tupleBuilder=new ArrayList<>();
+  info=new PluginsInfo();
+  List<Tuple<PluginInfo,Plugin>> pluginsLoaded=new ArrayList<>();
   for (  Class<? extends Plugin> pluginClass : classpathPlugins) {
     Plugin plugin=loadPlugin(pluginClass,settings);
     PluginInfo pluginInfo=new PluginInfo(plugin.name(),plugin.description(),false,"NA",true,pluginClass.getName(),false);
     if (logger.isTraceEnabled()) {
       logger.trace("plugin loaded from classpath [{}]",pluginInfo);
     }
-    tupleBuilder.add(new Tuple<>(pluginInfo,plugin));
+    pluginsLoaded.add(new Tuple<>(pluginInfo,plugin));
+    info.addPlugin(pluginInfo);
   }
   if (modulesDirectory != null) {
     try {
       List<Bundle> bundles=getModuleBundles(modulesDirectory);
-      tupleBuilder.addAll(loadBundles(bundles));
+      List<Tuple<PluginInfo,Plugin>> loaded=loadBundles(bundles);
+      pluginsLoaded.addAll(loaded);
+      for (      Tuple<PluginInfo,Plugin> module : loaded) {
+        info.addModule(module.v1());
+      }
     }
  catch (    IOException ex) {
       throw new IllegalStateException("Unable to initialize modules",ex);
@@ -21,17 +27,17 @@
   if (pluginsDirectory != null) {
     try {
       List<Bundle> bundles=getPluginBundles(pluginsDirectory);
-      tupleBuilder.addAll(loadBundles(bundles));
+      List<Tuple<PluginInfo,Plugin>> loaded=loadBundles(bundles);
+      pluginsLoaded.addAll(loaded);
+      for (      Tuple<PluginInfo,Plugin> plugin : loaded) {
+        info.addPlugin(plugin.v1());
+      }
     }
  catch (    IOException ex) {
       throw new IllegalStateException("Unable to initialize plugins",ex);
     }
   }
-  plugins=Collections.unmodifiableList(tupleBuilder);
-  info=new PluginsInfo();
-  for (  Tuple<PluginInfo,Plugin> tuple : plugins) {
-    info.add(tuple.v1());
-  }
+  plugins=Collections.unmodifiableList(pluginsLoaded);
   Map<String,Plugin> jvmPlugins=new HashMap<>();
   List<String> sitePlugins=new ArrayList<>();
   for (  Tuple<PluginInfo,Plugin> tuple : plugins) {
