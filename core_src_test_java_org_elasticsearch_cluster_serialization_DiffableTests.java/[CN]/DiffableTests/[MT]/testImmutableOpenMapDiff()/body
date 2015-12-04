@@ -1,34 +1,32 @@
 {
-  ImmutableOpenMap.Builder<String,TestDiffable> builder=ImmutableOpenMap.builder();
-  builder.put("foo",new TestDiffable("1"));
-  builder.put("bar",new TestDiffable("2"));
-  builder.put("baz",new TestDiffable("3"));
-  ImmutableOpenMap<String,TestDiffable> before=builder.build();
-  builder=ImmutableOpenMap.builder(before);
-  builder.remove("bar");
-  builder.put("baz",new TestDiffable("4"));
-  builder.put("new",new TestDiffable("5"));
-  ImmutableOpenMap<String,TestDiffable> after=builder.build();
-  Diff diff=DiffableUtils.diff(before,after);
-  BytesStreamOutput out=new BytesStreamOutput();
-  diff.writeTo(out);
-  StreamInput in=StreamInput.wrap(out.bytes());
-  ImmutableOpenMap<String,TestDiffable> serialized=DiffableUtils.readImmutableOpenMapDiff(in,new KeyedReader<TestDiffable>(){
-    @Override public TestDiffable readFrom(    StreamInput in,    String key) throws IOException {
-      return new TestDiffable(in.readString());
+  new ImmutableOpenMapDriver<TestDiffable>(){
+    @Override protected boolean diffableValues(){
+      return true;
     }
-    @Override public Diff<TestDiffable> readDiffFrom(    StreamInput in,    String key) throws IOException {
-      return AbstractDiffable.readDiffFrom(new StreamableReader<TestDiffable>(){
-        @Override public TestDiffable readFrom(        StreamInput in) throws IOException {
-          return new TestDiffable(in.readString());
-        }
-      }
-,in);
+    @Override protected TestDiffable createValue(    Integer key,    boolean before){
+      return new TestDiffable(String.valueOf(before ? key : key + 1));
+    }
+    @Override protected MapDiff diff(    ImmutableOpenMap<Integer,TestDiffable> before,    ImmutableOpenMap<Integer,TestDiffable> after){
+      return DiffableUtils.diff(before,after,keySerializer);
+    }
+    @Override protected MapDiff readDiff(    StreamInput in) throws IOException {
+      return useProtoForDiffableSerialization ? DiffableUtils.readImmutableOpenMapDiff(in,keySerializer,TestDiffable.PROTO) : DiffableUtils.readImmutableOpenMapDiff(in,keySerializer,diffableValueSerializer());
     }
   }
-).apply(before);
-  assertThat(serialized.size(),equalTo(3));
-  assertThat(serialized.get("foo").value(),equalTo("1"));
-  assertThat(serialized.get("baz").value(),equalTo("4"));
-  assertThat(serialized.get("new").value(),equalTo("5"));
+.execute();
+  new ImmutableOpenMapDriver<String>(){
+    @Override protected boolean diffableValues(){
+      return false;
+    }
+    @Override protected String createValue(    Integer key,    boolean before){
+      return String.valueOf(before ? key : key + 1);
+    }
+    @Override protected MapDiff diff(    ImmutableOpenMap<Integer,String> before,    ImmutableOpenMap<Integer,String> after){
+      return DiffableUtils.diff(before,after,keySerializer,nonDiffableValueSerializer());
+    }
+    @Override protected MapDiff readDiff(    StreamInput in) throws IOException {
+      return DiffableUtils.readImmutableOpenMapDiff(in,keySerializer,nonDiffableValueSerializer());
+    }
+  }
+.execute();
 }
