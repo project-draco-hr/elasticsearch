@@ -1,0 +1,90 @@
+{
+  XContentParser parser=context.parser();
+  String fieldName=null;
+  List<GeoPoint> geoPoints=new ArrayList<>();
+  DistanceUnit unit=DistanceUnit.DEFAULT;
+  GeoDistance geoDistance=GeoDistance.DEFAULT;
+  boolean reverse=false;
+  MultiValueMode sortMode=null;
+  QueryBuilder nestedFilter=null;
+  String nestedPath=null;
+  boolean coerce=GeoDistanceSortBuilder.DEFAULT_COERCE;
+  boolean ignoreMalformed=GeoDistanceSortBuilder.DEFAULT_IGNORE_MALFORMED;
+  XContentParser.Token token;
+  String currentName=parser.currentName();
+  while ((token=parser.nextToken()) != XContentParser.Token.END_OBJECT) {
+    if (token == XContentParser.Token.FIELD_NAME) {
+      currentName=parser.currentName();
+    }
+ else     if (token == XContentParser.Token.START_ARRAY) {
+      parseGeoPoints(parser,geoPoints);
+      fieldName=currentName;
+    }
+ else     if (token == XContentParser.Token.START_OBJECT) {
+      if ("nested_filter".equals(currentName) || "nestedFilter".equals(currentName)) {
+        nestedFilter=context.parseInnerQueryBuilder();
+      }
+ else {
+        fieldName=currentName;
+        GeoPoint point=new GeoPoint();
+        GeoUtils.parseGeoPoint(parser,point);
+        geoPoints.add(point);
+      }
+    }
+ else     if (token.isValue()) {
+      if ("reverse".equals(currentName)) {
+        reverse=parser.booleanValue();
+      }
+ else       if ("order".equals(currentName)) {
+        reverse="desc".equals(parser.text());
+      }
+ else       if ("unit".equals(currentName)) {
+        unit=DistanceUnit.fromString(parser.text());
+      }
+ else       if ("distance_type".equals(currentName) || "distanceType".equals(currentName)) {
+        geoDistance=GeoDistance.fromString(parser.text());
+      }
+ else       if ("coerce".equals(currentName) || "normalize".equals(currentName)) {
+        coerce=parser.booleanValue();
+        if (coerce == true) {
+          ignoreMalformed=true;
+        }
+      }
+ else       if ("ignore_malformed".equals(currentName)) {
+        boolean ignore_malformed_value=parser.booleanValue();
+        if (coerce == false) {
+          ignoreMalformed=ignore_malformed_value;
+        }
+      }
+ else       if ("sort_mode".equals(currentName) || "sortMode".equals(currentName) || "mode".equals(currentName)) {
+        sortMode=MultiValueMode.fromString(parser.text());
+      }
+ else       if ("nested_path".equals(currentName) || "nestedPath".equals(currentName)) {
+        nestedPath=parser.text();
+      }
+ else {
+        GeoPoint point=new GeoPoint();
+        point.resetFromString(parser.text());
+        geoPoints.add(point);
+        fieldName=currentName;
+      }
+    }
+  }
+  GeoDistanceSortBuilder result=new GeoDistanceSortBuilder(fieldName,geoPoints.toArray(new GeoPoint[geoPoints.size()]));
+  result.geoDistance(geoDistance);
+  result.unit(unit);
+  if (reverse) {
+    result.order(SortOrder.DESC);
+  }
+ else {
+    result.order(SortOrder.ASC);
+  }
+  if (sortMode != null) {
+    result.sortMode(sortMode.name());
+  }
+  result.setNestedFilter(nestedFilter);
+  result.setNestedPath(nestedPath);
+  result.coerce(coerce);
+  result.ignoreMalformed(ignoreMalformed);
+  return result;
+}
