@@ -1,0 +1,25 @@
+{
+  boolean changed=false;
+  Settings.Builder transientSettings=Settings.settingsBuilder();
+  transientSettings.put(currentState.metaData().transientSettings());
+  changed|=apply(transientToApply,transientSettings,transientUpdates,"transient");
+  Settings.Builder persistentSettings=Settings.settingsBuilder();
+  persistentSettings.put(currentState.metaData().persistentSettings());
+  changed|=apply(persistentToApply,persistentSettings,persistentUpdates,"persistent");
+  if (!changed) {
+    return currentState;
+  }
+  MetaData.Builder metaData=MetaData.builder(currentState.metaData()).persistentSettings(persistentSettings.build()).transientSettings(transientSettings.build());
+  ClusterBlocks.Builder blocks=ClusterBlocks.builder().blocks(currentState.blocks());
+  boolean updatedReadOnly=MetaData.SETTING_READ_ONLY_SETTING.get(metaData.persistentSettings()) || MetaData.SETTING_READ_ONLY_SETTING.get(metaData.transientSettings());
+  if (updatedReadOnly) {
+    blocks.addGlobalBlock(MetaData.CLUSTER_READ_ONLY_BLOCK);
+  }
+ else {
+    blocks.removeGlobalBlock(MetaData.CLUSTER_READ_ONLY_BLOCK);
+  }
+  ClusterState build=builder(currentState).metaData(metaData).blocks(blocks).build();
+  Settings settings=build.metaData().settings();
+  clusterSettingsService.dryRun(settings);
+  return build;
+}
