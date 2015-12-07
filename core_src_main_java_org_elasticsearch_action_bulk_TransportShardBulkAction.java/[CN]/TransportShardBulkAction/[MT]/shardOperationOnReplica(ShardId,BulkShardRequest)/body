@@ -10,13 +10,7 @@
     if (item.request() instanceof IndexRequest) {
       IndexRequest indexRequest=(IndexRequest)item.request();
       try {
-        SourceToParse sourceToParse=SourceToParse.source(SourceToParse.Origin.REPLICA,indexRequest.source()).index(shardId.getIndex()).type(indexRequest.type()).id(indexRequest.id()).routing(indexRequest.routing()).parent(indexRequest.parent()).timestamp(indexRequest.timestamp()).ttl(indexRequest.ttl());
-        final Engine.Index operation=indexShard.prepareIndex(sourceToParse,indexRequest.version(),indexRequest.versionType(),Engine.Operation.Origin.REPLICA);
-        Mapping update=operation.parsedDoc().dynamicMappingsUpdate();
-        if (update != null) {
-          throw new RetryOnReplicaException(shardId,"Mappings are not available on the replica yet, triggered update: " + update);
-        }
-        indexShard.index(operation);
+        Engine.Index operation=TransportIndexAction.executeIndexRequestOnReplica(indexRequest,indexShard);
         location=locationToSync(location,operation.getTranslogLocation());
       }
  catch (      Throwable e) {
@@ -28,7 +22,7 @@
  else     if (item.request() instanceof DeleteRequest) {
       DeleteRequest deleteRequest=(DeleteRequest)item.request();
       try {
-        Engine.Delete delete=indexShard.prepareDelete(deleteRequest.type(),deleteRequest.id(),deleteRequest.version(),deleteRequest.versionType(),Engine.Operation.Origin.REPLICA);
+        Engine.Delete delete=TransportDeleteAction.executeDeleteRequestOnReplica(deleteRequest,indexShard);
         indexShard.delete(delete);
         location=locationToSync(location,delete.getTranslogLocation());
       }
@@ -42,5 +36,5 @@
       throw new IllegalStateException("Unexpected index operation: " + item.request());
     }
   }
-  processAfter(request.refresh(),indexShard,location);
+  processAfterWrite(request.refresh(),indexShard,location);
 }
