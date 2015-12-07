@@ -1,0 +1,99 @@
+{
+  super(settings);
+  info=new PluginsAndModules();
+  List<Tuple<PluginInfo,Plugin>> pluginsLoaded=new ArrayList<>();
+  for (  Class<? extends Plugin> pluginClass : classpathPlugins) {
+    Plugin plugin=loadPlugin(pluginClass,settings);
+    PluginInfo pluginInfo=new PluginInfo(plugin.name(),plugin.description(),false,"NA",true,pluginClass.getName(),false);
+    if (logger.isTraceEnabled()) {
+      logger.trace("plugin loaded from classpath [{}]",pluginInfo);
+    }
+    pluginsLoaded.add(new Tuple<>(pluginInfo,plugin));
+    info.addPlugin(pluginInfo);
+  }
+  if (modulesDirectory != null) {
+    try {
+      List<Bundle> bundles=getModuleBundles(modulesDirectory);
+      List<Tuple<PluginInfo,Plugin>> loaded=loadBundles(bundles);
+      pluginsLoaded.addAll(loaded);
+      for (      Tuple<PluginInfo,Plugin> module : loaded) {
+        info.addModule(module.v1());
+      }
+    }
+ catch (    IOException ex) {
+      throw new IllegalStateException("Unable to initialize modules",ex);
+    }
+  }
+  if (pluginsDirectory != null) {
+    try {
+      List<Bundle> bundles=getPluginBundles(pluginsDirectory);
+      List<Tuple<PluginInfo,Plugin>> loaded=loadBundles(bundles);
+      pluginsLoaded.addAll(loaded);
+      for (      Tuple<PluginInfo,Plugin> plugin : loaded) {
+        info.addPlugin(plugin.v1());
+      }
+    }
+ catch (    IOException ex) {
+      throw new IllegalStateException("Unable to initialize plugins",ex);
+    }
+  }
+  plugins=Collections.unmodifiableList(pluginsLoaded);
+  Map<String,Plugin> jvmPlugins=new HashMap<>();
+  List<String> sitePlugins=new ArrayList<>();
+  for (  Tuple<PluginInfo,Plugin> tuple : plugins) {
+    PluginInfo info=tuple.v1();
+    if (info.isJvm()) {
+      jvmPlugins.put(info.getName(),tuple.v2());
+    }
+    if (info.isSite()) {
+      sitePlugins.add(info.getName());
+    }
+  }
+  String[] mandatoryPlugins=settings.getAsArray("plugin.mandatory",null);
+  if (mandatoryPlugins != null) {
+    Set<String> missingPlugins=new HashSet<>();
+    for (    String mandatoryPlugin : mandatoryPlugins) {
+      if (!jvmPlugins.containsKey(mandatoryPlugin) && !sitePlugins.contains(mandatoryPlugin) && !missingPlugins.contains(mandatoryPlugin)) {
+        missingPlugins.add(mandatoryPlugin);
+      }
+    }
+    if (!missingPlugins.isEmpty()) {
+      throw new ElasticsearchException("Missing mandatory plugins [" + Strings.collectionToDelimitedString(missingPlugins,", ") + "]");
+    }
+  }
+  Set<String> moduleNames=new HashSet<>();
+  Set<String> jvmPluginNames=new HashSet<>();
+  for (  PluginInfo moduleInfo : info.getModuleInfos()) {
+    moduleNames.add(moduleInfo.getName());
+  }
+  for (  PluginInfo pluginInfo : info.getPluginInfos()) {
+    jvmPluginNames.add(pluginInfo.getName());
+  }
+  logger.info("modules {}, plugins {}, sites {}",moduleNames,jvmPluginNames,sitePlugins);
+  Map<Plugin,List<OnModuleReference>> onModuleReferences=new HashMap<>();
+  for (  Plugin plugin : jvmPlugins.values()) {
+    List<OnModuleReference> list=new ArrayList<>();
+    for (    Method method : plugin.getClass().getMethods()) {
+      if (!method.getName().equals("onModule")) {
+        continue;
+      }
+      if (method.getParameterTypes().length == 1 && method.getParameterTypes()[0].equals(IndexModule.class)) {
+        continue;
+      }
+      if (method.getParameterTypes().length == 0 || method.getParameterTypes().length > 1) {
+        logger.warn("Plugin: {} implementing onModule with no parameters or more than one parameter",plugin.name());
+        continue;
+      }
+      Class moduleClass=method.getParameterTypes()[0];
+      if (!Module.class.isAssignableFrom(moduleClass)) {
+        logger.warn("Plugin: {} implementing onModule by the type is not of Module type {}",plugin.name(),moduleClass);
+        continue;
+      }
+      list.add(new OnModuleReference(moduleClass,method));
+    }
+    if (!list.isEmpty()) {
+      onModuleReferences.put(plugin,list);
+    }
+  }
+  this.onModuleReferences=Collections.unmodifiableMap(onModuleReferences);
+}
