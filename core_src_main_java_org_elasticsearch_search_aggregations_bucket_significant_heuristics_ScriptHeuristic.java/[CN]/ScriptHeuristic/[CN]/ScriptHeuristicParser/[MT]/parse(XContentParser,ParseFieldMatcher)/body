@@ -1,0 +1,43 @@
+{
+  String heuristicName=parser.currentName();
+  Script script=null;
+  XContentParser.Token token;
+  Map<String,Object> params=null;
+  String currentFieldName=null;
+  ScriptParameterParser scriptParameterParser=new ScriptParameterParser();
+  while ((token=parser.nextToken()) != XContentParser.Token.END_OBJECT) {
+    if (token.equals(XContentParser.Token.FIELD_NAME)) {
+      currentFieldName=parser.currentName();
+    }
+ else     if (token == XContentParser.Token.START_OBJECT) {
+      if (parseFieldMatcher.match(currentFieldName,ScriptField.SCRIPT)) {
+        script=Script.parse(parser,parseFieldMatcher);
+      }
+ else       if ("params".equals(currentFieldName)) {
+        params=parser.map();
+      }
+ else {
+        throw new ElasticsearchParseException("failed to parse [{}] significance heuristic. unknown object [{}]",heuristicName,currentFieldName);
+      }
+    }
+ else     if (!scriptParameterParser.token(currentFieldName,token,parser,parseFieldMatcher)) {
+      throw new ElasticsearchParseException("failed to parse [{}] significance heuristic. unknown field [{}]",heuristicName,currentFieldName);
+    }
+  }
+  if (script == null) {
+    ScriptParameterValue scriptValue=scriptParameterParser.getDefaultScriptParameterValue();
+    if (scriptValue != null) {
+      if (params == null) {
+        params=new HashMap<>();
+      }
+      script=new Script(scriptValue.script(),scriptValue.scriptType(),scriptParameterParser.lang(),params);
+    }
+  }
+ else   if (params != null) {
+    throw new ElasticsearchParseException("failed to parse [{}] significance heuristic. script params must be specified inside script object",heuristicName);
+  }
+  if (script == null) {
+    throw new ElasticsearchParseException("failed to parse [{}] significance heuristic. no script found in script_heuristic",heuristicName);
+  }
+  return new ScriptHeuristic(script);
+}
