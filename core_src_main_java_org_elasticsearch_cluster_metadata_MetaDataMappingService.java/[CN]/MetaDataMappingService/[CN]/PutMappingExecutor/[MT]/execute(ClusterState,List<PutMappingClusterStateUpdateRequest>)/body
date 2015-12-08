@@ -1,0 +1,33 @@
+{
+  Set<String> indicesToClose=new HashSet<>();
+  BatchResult.Builder<PutMappingClusterStateUpdateRequest> builder=BatchResult.builder();
+  try {
+    for (    PutMappingClusterStateUpdateRequest request : tasks) {
+      for (      String index : request.indices()) {
+        final IndexMetaData indexMetaData=currentState.metaData().index(index);
+        if (indexMetaData != null && indicesService.hasIndex(index) == false) {
+          indicesToClose.add(index);
+          IndexService indexService=indicesService.createIndex(nodeServicesProvider,indexMetaData,Collections.emptyList());
+          for (          ObjectCursor<MappingMetaData> mapping : indexMetaData.getMappings().values()) {
+            indexService.mapperService().merge(mapping.value.type(),mapping.value.source(),false,request.updateAllTypes());
+          }
+        }
+      }
+    }
+    for (    PutMappingClusterStateUpdateRequest request : tasks) {
+      try {
+        currentState=applyRequest(currentState,request);
+        builder.success(request);
+      }
+ catch (      Throwable t) {
+        builder.failure(request,t);
+      }
+    }
+    return builder.build(currentState);
+  }
+  finally {
+    for (    String index : indicesToClose) {
+      indicesService.removeIndex(index,"created for mapping processing");
+    }
+  }
+}

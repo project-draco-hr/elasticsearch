@@ -7,5 +7,69 @@
       cursor.value.updateDefaultMapping(defaultMapping);
     }
   }
-  return new IndexMetaData(index,version,state,tmpSettings,mappings.build(),tmpAliases.build(),customs.build());
+  Integer maybeNumberOfShards=settings.getAsInt(SETTING_NUMBER_OF_SHARDS,null);
+  if (maybeNumberOfShards == null) {
+    throw new IllegalArgumentException("must specify numberOfShards for index [" + index + "]");
+  }
+  int numberOfShards=maybeNumberOfShards;
+  if (numberOfShards <= 0) {
+    throw new IllegalArgumentException("must specify positive number of shards for index [" + index + "]");
+  }
+  Integer maybeNumberOfReplicas=settings.getAsInt(SETTING_NUMBER_OF_REPLICAS,null);
+  if (maybeNumberOfReplicas == null) {
+    throw new IllegalArgumentException("must specify numberOfReplicas for index [" + index + "]");
+  }
+  int numberOfReplicas=maybeNumberOfReplicas;
+  if (numberOfReplicas < 0) {
+    throw new IllegalArgumentException("must specify non-negative number of shards for index [" + index + "]");
+  }
+  ImmutableOpenIntMap.Builder<Set<String>> filledActiveAllocationIds=ImmutableOpenIntMap.builder();
+  for (int i=0; i < numberOfShards; i++) {
+    if (activeAllocationIds.containsKey(i)) {
+      filledActiveAllocationIds.put(i,Collections.unmodifiableSet(new HashSet<>(activeAllocationIds.get(i))));
+    }
+ else {
+      filledActiveAllocationIds.put(i,Collections.emptySet());
+    }
+  }
+  Map<String,String> requireMap=settings.getByPrefix("index.routing.allocation.require.").getAsMap();
+  final DiscoveryNodeFilters requireFilters;
+  if (requireMap.isEmpty()) {
+    requireFilters=null;
+  }
+ else {
+    requireFilters=DiscoveryNodeFilters.buildFromKeyValue(AND,requireMap);
+  }
+  Map<String,String> includeMap=settings.getByPrefix("index.routing.allocation.include.").getAsMap();
+  final DiscoveryNodeFilters includeFilters;
+  if (includeMap.isEmpty()) {
+    includeFilters=null;
+  }
+ else {
+    includeFilters=DiscoveryNodeFilters.buildFromKeyValue(OR,includeMap);
+  }
+  Map<String,String> excludeMap=settings.getByPrefix("index.routing.allocation.exclude.").getAsMap();
+  final DiscoveryNodeFilters excludeFilters;
+  if (excludeMap.isEmpty()) {
+    excludeFilters=null;
+  }
+ else {
+    excludeFilters=DiscoveryNodeFilters.buildFromKeyValue(OR,excludeMap);
+  }
+  Version indexCreatedVersion=Version.indexCreated(settings);
+  Version indexUpgradedVersion=settings.getAsVersion(IndexMetaData.SETTING_VERSION_UPGRADED,indexCreatedVersion);
+  String stringLuceneVersion=settings.get(SETTING_VERSION_MINIMUM_COMPATIBLE);
+  final org.apache.lucene.util.Version minimumCompatibleLuceneVersion;
+  if (stringLuceneVersion != null) {
+    try {
+      minimumCompatibleLuceneVersion=org.apache.lucene.util.Version.parse(stringLuceneVersion);
+    }
+ catch (    ParseException ex) {
+      throw new IllegalStateException("Cannot parse lucene version [" + stringLuceneVersion + "] in the ["+ SETTING_VERSION_MINIMUM_COMPATIBLE+ "] setting",ex);
+    }
+  }
+ else {
+    minimumCompatibleLuceneVersion=null;
+  }
+  return new IndexMetaData(index,version,state,numberOfShards,numberOfReplicas,tmpSettings,mappings.build(),tmpAliases.build(),customs.build(),filledActiveAllocationIds.build(),requireFilters,includeFilters,excludeFilters,indexCreatedVersion,indexUpgradedVersion,minimumCompatibleLuceneVersion);
 }
