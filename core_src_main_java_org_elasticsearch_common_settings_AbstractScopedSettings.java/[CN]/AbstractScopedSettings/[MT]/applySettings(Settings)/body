@@ -2,38 +2,28 @@
   if (lastSettingsApplied != null && newSettings.equals(lastSettingsApplied)) {
     return newSettings;
   }
-  final Settings build=Settings.builder().put(this.settings).put(newSettings).build();
-  boolean success=false;
+  final Settings current=Settings.builder().put(this.settings).put(newSettings).build();
+  final Settings previous=Settings.builder().put(this.settings).put(this.lastSettingsApplied).build();
   try {
+    List<Runnable> applyRunnables=new ArrayList<>();
     for (    SettingUpdater settingUpdater : settingUpdaters) {
       try {
-        settingUpdater.prepareApply(build);
+        applyRunnables.add(settingUpdater.updater(current,previous));
       }
  catch (      Exception ex) {
         logger.warn("failed to prepareCommit settings for [{}]",ex,settingUpdater);
         throw ex;
       }
     }
-    for (    SettingUpdater settingUpdater : settingUpdaters) {
-      settingUpdater.apply();
+    for (    Runnable settingUpdater : applyRunnables) {
+      settingUpdater.run();
     }
-    success=true;
   }
  catch (  Exception ex) {
     logger.warn("failed to apply settings",ex);
     throw ex;
   }
  finally {
-    if (success == false) {
-      for (      SettingUpdater settingUpdater : settingUpdaters) {
-        try {
-          settingUpdater.rollback();
-        }
- catch (        Exception e) {
-          logger.error("failed to refresh settings for [{}]",e,settingUpdater);
-        }
-      }
-    }
   }
   return lastSettingsApplied=newSettings;
 }
