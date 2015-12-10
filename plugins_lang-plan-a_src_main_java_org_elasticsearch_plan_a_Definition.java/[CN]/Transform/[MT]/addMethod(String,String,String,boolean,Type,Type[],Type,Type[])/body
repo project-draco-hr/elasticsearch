@@ -1,0 +1,88 @@
+{
+  final Struct owner=structs.get(struct);
+  if (owner == null) {
+    throw new IllegalArgumentException("Owner struct [" + struct + "] not defined"+ " for "+ (statik ? "function" : "method")+ " ["+ name+ "].");
+  }
+  if (!name.matches("^[_a-zA-Z][_a-zA-Z0-9]*$")) {
+    throw new IllegalArgumentException("Invalid " + (statik ? "function" : "method") + " name ["+ name+ "] with the struct ["+ owner.name+ "].");
+  }
+  if (owner.constructors.containsKey(name)) {
+    throw new IllegalArgumentException("Constructors and " + (statik ? "functions" : "methods") + " may not have the same name ["+ name+ "] within the same struct"+ " ["+ owner.name+ "].");
+  }
+  if (owner.statics.containsKey(name)) {
+    if (statik) {
+      throw new IllegalArgumentException("Duplicate function name [" + name + "] found within the struct ["+ owner.name+ "].");
+    }
+ else {
+      throw new IllegalArgumentException("Functions and methods may not have the same name" + " [" + name + "] within the same struct ["+ owner.name+ "].");
+    }
+  }
+  if (owner.methods.containsKey(name)) {
+    if (statik) {
+      throw new IllegalArgumentException("Functions and methods may not have the same name" + " [" + name + "] within the same struct ["+ owner.name+ "].");
+    }
+ else {
+      throw new IllegalArgumentException("Duplicate method name [" + name + "]"+ " found within the struct ["+ owner.name+ "].");
+    }
+  }
+  if (genrtn != null) {
+    try {
+      genrtn.clazz.asSubclass(rtn.clazz);
+    }
+ catch (    ClassCastException exception) {
+      throw new ClassCastException("Generic return [" + genrtn.clazz.getCanonicalName() + "]"+ " is not a sub class of ["+ rtn.clazz.getCanonicalName()+ "] in the method"+ " ["+ name+ " ] from the struct ["+ owner.name+ "].");
+    }
+  }
+  if (genargs != null && genargs.length != args.length) {
+    throw new IllegalArgumentException("Generic arguments arity [" + genargs.length + "] is not the same as "+ (statik ? "function" : "method")+ " ["+ name+ "] arguments arity"+ " ["+ args.length+ "] within the struct ["+ owner.name+ "].");
+  }
+  final Class[] classes=new Class[args.length];
+  for (int count=0; count < classes.length; ++count) {
+    if (genargs != null) {
+      try {
+        genargs[count].clazz.asSubclass(args[count].clazz);
+      }
+ catch (      ClassCastException exception) {
+        throw new ClassCastException("Generic argument [" + genargs[count].name + "] is not a sub class"+ " of ["+ args[count].name+ "] in the "+ (statik ? "function" : "method")+ " ["+ name+ " ] from the struct ["+ owner.name+ "].");
+      }
+    }
+    classes[count]=args[count].clazz;
+  }
+  final java.lang.reflect.Method reflect;
+  try {
+    reflect=owner.clazz.getMethod(alias == null ? name : alias,classes);
+  }
+ catch (  NoSuchMethodException exception) {
+    throw new IllegalArgumentException((statik ? "Function" : "Method") + " [" + (alias == null ? name : alias)+ "] not found for class ["+ owner.clazz.getName()+ "]"+ " with arguments "+ Arrays.toString(classes)+ ".");
+  }
+  if (!reflect.getReturnType().equals(rtn.clazz)) {
+    throw new IllegalArgumentException("Specified return type class [" + rtn.clazz + "]"+ " does not match the found return type class ["+ reflect.getReturnType()+ "] for the "+ (statik ? "function" : "method")+ " ["+ name+ "]"+ " within the struct ["+ owner.name+ "].");
+  }
+  final org.objectweb.asm.commons.Method asm=org.objectweb.asm.commons.Method.getMethod(reflect);
+  MethodHandle handle;
+  try {
+    if (statik) {
+      handle=MethodHandles.publicLookup().in(owner.clazz).findStatic(owner.clazz,alias == null ? name : alias,MethodType.methodType(rtn.clazz,classes));
+    }
+ else {
+      handle=MethodHandles.publicLookup().in(owner.clazz).findVirtual(owner.clazz,alias == null ? name : alias,MethodType.methodType(rtn.clazz,classes));
+    }
+  }
+ catch (  NoSuchMethodException|IllegalAccessException exception) {
+    throw new IllegalArgumentException("Method [" + (alias == null ? name : alias) + "]"+ " not found for class ["+ owner.clazz.getName()+ "]"+ " with arguments "+ Arrays.toString(classes)+ ".");
+  }
+  final Method method=new Method(name,owner,genrtn != null ? genrtn : rtn,Arrays.asList(genargs != null ? genargs : args),asm,reflect,handle);
+  final int modifiers=reflect.getModifiers();
+  if (statik) {
+    if (!java.lang.reflect.Modifier.isStatic(modifiers)) {
+      throw new IllegalArgumentException("Function [" + name + "]"+ " within the struct ["+ owner.name+ "] is not linked to a static Java method.");
+    }
+    owner.functions.put(name,method);
+  }
+ else {
+    if (java.lang.reflect.Modifier.isStatic(modifiers)) {
+      throw new IllegalArgumentException("Method [" + name + "]"+ " within the struct ["+ owner.name+ "] is not linked to a non-static Java method.");
+    }
+    owner.methods.put(name,method);
+  }
+}
