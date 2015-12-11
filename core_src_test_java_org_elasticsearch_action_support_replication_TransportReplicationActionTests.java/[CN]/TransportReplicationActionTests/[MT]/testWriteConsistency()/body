@@ -37,9 +37,9 @@ clusterService.setState(state(index,true,ShardRoutingState.STARTED,replicaStates
 logger.debug("using consistency level of [{}], assigned shards [{}], total shards [{}]. expecting op to [{}]. using state: \n{}",request.consistencyLevel(),1 + assignedReplicas,1 + assignedReplicas + unassignedReplicas,passesWriteConsistency ? "succeed" : "retry",clusterService.state().prettyPrint());
 final IndexShardRoutingTable shardRoutingTable=clusterService.state().routingTable().index(index).shard(shardId.id());
 PlainActionFuture<Response> listener=new PlainActionFuture<>();
-TransportReplicationAction<Request,Request,Response>.PrimaryPhase primaryPhase=action.new PrimaryPhase(request,listener);
+TransportReplicationAction.PrimaryPhase primaryPhase=action.new PrimaryPhase(request,createTransportChannel(listener));
 if (passesWriteConsistency) {
-assertThat(primaryPhase.checkWriteConsistency(shardRoutingTable.primaryShard()),nullValue());
+assertThat(primaryPhase.checkWriteConsistency(shardRoutingTable.primaryShard().shardId()),nullValue());
 primaryPhase.run();
 assertTrue("operations should have been perform, consistency level is met",request.processedOnPrimary.get());
 if (assignedReplicas > 0) {
@@ -50,14 +50,18 @@ assertIndexShardCounter(1);
 }
 }
  else {
-assertThat(primaryPhase.checkWriteConsistency(shardRoutingTable.primaryShard()),notNullValue());
+assertThat(primaryPhase.checkWriteConsistency(shardRoutingTable.primaryShard().shardId()),notNullValue());
 primaryPhase.run();
 assertFalse("operations should not have been perform, consistency level is *NOT* met",request.processedOnPrimary.get());
+assertListenerThrows("should throw exception to trigger retry",listener,UnavailableShardsException.class);
 assertIndexShardUninitialized();
 for (int i=0; i < replicaStates.length; i++) {
 replicaStates[i]=ShardRoutingState.STARTED;
 }
 clusterService.setState(state(index,true,ShardRoutingState.STARTED,replicaStates));
+listener=new PlainActionFuture<>();
+primaryPhase=action.new PrimaryPhase(request,createTransportChannel(listener));
+primaryPhase.run();
 assertTrue("once the consistency level met, operation should continue",request.processedOnPrimary.get());
 assertIndexShardCounter(2);
 }

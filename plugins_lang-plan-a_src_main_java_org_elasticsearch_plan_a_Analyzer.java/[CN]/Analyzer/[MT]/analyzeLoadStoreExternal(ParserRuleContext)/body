@@ -1,0 +1,29 @@
+{
+  final ExtNodeMetadata extenmd=adapter.getExtNodeMetadata(source);
+  final ParserRuleContext parent=extenmd.parent;
+  final ExternalMetadata parentemd=adapter.getExternalMetadata(parent);
+  if (extenmd.last && parentemd.storeExpr != null) {
+    final ParserRuleContext store=parentemd.storeExpr;
+    final ExpressionMetadata storeemd=adapter.createExpressionMetadata(parentemd.storeExpr);
+    final int token=parentemd.token;
+    if (token > 0) {
+      visit(store);
+      final boolean add=token == ADD;
+      final boolean xor=token == BWAND || token == BWXOR || token == BWOR;
+      final boolean decimal=token == MUL || token == DIV || token == REM || token == SUB;
+      extenmd.promote=add ? promoteAdd(extenmd.type,storeemd.from) : xor ? promoteXor(extenmd.type,storeemd.from) : promoteNumeric(extenmd.type,storeemd.from,decimal,true);
+      if (extenmd.promote == null) {
+        throw new IllegalArgumentException("Cannot apply compound assignment to " + " types [" + extenmd.type.name + "] and ["+ storeemd.from.name+ "].");
+      }
+      extenmd.castFrom=getLegalCast(source,extenmd.type,extenmd.promote,false);
+      extenmd.castTo=getLegalCast(source,extenmd.promote,extenmd.type,true);
+      storeemd.to=add && extenmd.promote.sort == Sort.STRING ? storeemd.from : extenmd.promote;
+      markCast(storeemd);
+    }
+ else {
+      storeemd.to=extenmd.type;
+      visit(store);
+      markCast(storeemd);
+    }
+  }
+}
