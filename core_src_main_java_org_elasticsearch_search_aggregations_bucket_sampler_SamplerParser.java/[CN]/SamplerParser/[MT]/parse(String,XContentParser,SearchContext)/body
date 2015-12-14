@@ -1,51 +1,26 @@
 {
   XContentParser.Token token;
   String currentFieldName=null;
-  String executionHint=null;
-  int shardSize=DEFAULT_SHARD_SAMPLE_SIZE;
-  int maxDocsPerValue=MAX_DOCS_PER_VALUE_DEFAULT;
-  ValuesSourceParser vsParser=null;
-  boolean diversityChoiceMade=false;
-  vsParser=ValuesSourceParser.any(aggregationName,InternalSampler.TYPE,context).scriptable(true).formattable(false).build();
+  Integer shardSize=null;
   while ((token=parser.nextToken()) != XContentParser.Token.END_OBJECT) {
     if (token == XContentParser.Token.FIELD_NAME) {
       currentFieldName=parser.currentName();
     }
- else     if (vsParser.token(currentFieldName,token,parser)) {
-      continue;
-    }
  else     if (token == XContentParser.Token.VALUE_NUMBER) {
-      if (context.parseFieldMatcher().match(currentFieldName,SHARD_SIZE_FIELD)) {
+      if (context.parseFieldMatcher().match(currentFieldName,SamplerAggregator.SHARD_SIZE_FIELD)) {
         shardSize=parser.intValue();
       }
- else       if (context.parseFieldMatcher().match(currentFieldName,MAX_DOCS_PER_VALUE_FIELD)) {
-        diversityChoiceMade=true;
-        maxDocsPerValue=parser.intValue();
-      }
  else {
-        throw new SearchParseException(context,"Unsupported property \"" + currentFieldName + "\" for aggregation \""+ aggregationName,parser.getTokenLocation());
-      }
-    }
- else     if (!vsParser.token(currentFieldName,token,parser)) {
-      if (context.parseFieldMatcher().match(currentFieldName,EXECUTION_HINT_FIELD)) {
-        executionHint=parser.text();
-      }
- else {
-        throw new SearchParseException(context,"Unexpected token " + token + " in ["+ aggregationName+ "].",parser.getTokenLocation());
+        throw new ParsingException(parser.getTokenLocation(),"Unsupported property \"" + currentFieldName + "\" for aggregation \""+ aggregationName);
       }
     }
  else {
-      throw new SearchParseException(context,"Unsupported property \"" + currentFieldName + "\" for aggregation \""+ aggregationName,parser.getTokenLocation());
+      throw new ParsingException(parser.getTokenLocation(),"Unsupported property \"" + currentFieldName + "\" for aggregation \""+ aggregationName);
     }
   }
-  ValuesSourceParser.Input vsInput=vsParser.input();
-  if (vsInput.valid()) {
-    return new SamplerAggregator.DiversifiedFactory(aggregationName,shardSize,executionHint,vsInput,maxDocsPerValue);
+  SamplerAggregator.Factory factory=new SamplerAggregator.Factory(aggregationName);
+  if (shardSize != null) {
+    factory.shardSize(shardSize);
   }
- else {
-    if (diversityChoiceMade) {
-      throw new SearchParseException(context,"Sampler aggregation has " + MAX_DOCS_PER_VALUE_FIELD.getPreferredName() + " setting but no \"field\" or \"script\" setting to provide values for aggregation \""+ aggregationName+ "\"",parser.getTokenLocation());
-    }
-    return new SamplerAggregator.Factory(aggregationName,shardSize);
-  }
+  return factory;
 }
