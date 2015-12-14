@@ -1,6 +1,5 @@
 {
   Path tempDir=createTempDir();
-  final AtomicBoolean failWrite=new AtomicBoolean();
   final AtomicBoolean simulateDiskFull=new AtomicBoolean();
   TranslogConfig config=getTranslogConfig(tempDir);
   Translog translog=new Translog(config){
@@ -11,9 +10,6 @@
           FileChannel channel=factory.open(file);
           return new FilterFileChannel(channel){
             @Override public int write(            ByteBuffer src) throws IOException {
-              if (failWrite.get()) {
-                throw new IOException("boom");
-              }
               if (simulateDiskFull.get()) {
                 if (src.limit() > 1) {
                   final int pos=src.position();
@@ -48,11 +44,8 @@
     }
  catch (    IOException ex) {
       failed=true;
+      assertFalse(translog.isOpen());
       assertEquals("no space left on device",ex.getMessage());
-    }
-catch (    TranslogException ex) {
-      failed=true;
-      assertTrue(ex.toString(),ex.getMessage().startsWith("Failed to write operation"));
     }
     simulateDiskFull.set(randomBoolean());
   }
@@ -73,16 +66,19 @@ catch (    TranslogException ex) {
     fail("already closed");
   }
  catch (  AlreadyClosedException ex) {
+    assertNotNull(ex.getCause());
+    assertSame(translog.getTragicException(),ex.getCause());
   }
   try {
-    translog.close();
-    if (opsAdded != opsSynced) {
-      fail("already closed");
-    }
+    translog.commit();
+    fail("already closed");
   }
  catch (  AlreadyClosedException ex) {
     assertNotNull(ex.getCause());
+    assertSame(translog.getTragicException(),ex.getCause());
   }
+  assertFalse(translog.isOpen());
+  translog.close();
   config.setTranslogGeneration(translogGeneration);
   try (Translog tlog=new Translog(config)){
     assertEquals("lastCommitted must be 1 less than current",translogGeneration.translogFileGeneration + 1,tlog.currentFileGeneration());
