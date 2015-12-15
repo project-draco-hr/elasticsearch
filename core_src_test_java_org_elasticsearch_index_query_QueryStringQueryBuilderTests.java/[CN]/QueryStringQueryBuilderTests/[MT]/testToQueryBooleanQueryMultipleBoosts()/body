@@ -1,0 +1,31 @@
+{
+  assumeTrue("test runs only when at least a type is registered",getCurrentTypes().length > 0);
+  int numBoosts=randomIntBetween(2,10);
+  float[] boosts=new float[numBoosts + 1];
+  String queryStringPrefix="";
+  String queryStringSuffix="";
+  for (int i=0; i < boosts.length - 1; i++) {
+    float boost=2.0f / randomIntBetween(3,20);
+    boosts[i]=boost;
+    queryStringPrefix+="(";
+    queryStringSuffix+=")^" + boost;
+  }
+  String queryString=queryStringPrefix + "foo bar" + queryStringSuffix;
+  float mainBoost=2.0f / randomIntBetween(3,20);
+  boosts[boosts.length - 1]=mainBoost;
+  QueryStringQueryBuilder queryStringQueryBuilder=new QueryStringQueryBuilder(queryString).field(STRING_FIELD_NAME).minimumShouldMatch("2").boost(mainBoost);
+  Query query=queryStringQueryBuilder.toQuery(createShardContext());
+  for (int i=boosts.length - 1; i >= 0; i--) {
+    assertThat(query,instanceOf(BoostQuery.class));
+    BoostQuery boostQuery=(BoostQuery)query;
+    assertThat(boostQuery.getBoost(),equalTo(boosts[i]));
+    query=boostQuery.getQuery();
+  }
+  assertThat(query,instanceOf(BooleanQuery.class));
+  BooleanQuery booleanQuery=(BooleanQuery)query;
+  assertThat(booleanQuery.getMinimumNumberShouldMatch(),equalTo(2));
+  assertThat(booleanQuery.clauses().get(0).getOccur(),equalTo(BooleanClause.Occur.SHOULD));
+  assertThat(booleanQuery.clauses().get(0).getQuery(),equalTo(new TermQuery(new Term(STRING_FIELD_NAME,"foo"))));
+  assertThat(booleanQuery.clauses().get(1).getOccur(),equalTo(BooleanClause.Occur.SHOULD));
+  assertThat(booleanQuery.clauses().get(1).getQuery(),equalTo(new TermQuery(new Term(STRING_FIELD_NAME,"bar"))));
+}

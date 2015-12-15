@@ -46,14 +46,14 @@
             IntSet ignoreShards=new IntHashSet();
             if (currentIndexMetaData == null) {
               createIndexService.validateIndexName(renamedIndex,currentState);
-              createIndexService.validateIndexSettings(renamedIndex,snapshotIndexMetaData.settings());
+              createIndexService.validateIndexSettings(renamedIndex,snapshotIndexMetaData.getSettings());
               IndexMetaData.Builder indexMdBuilder=IndexMetaData.builder(snapshotIndexMetaData).state(IndexMetaData.State.OPEN).index(renamedIndex);
-              indexMdBuilder.settings(Settings.settingsBuilder().put(snapshotIndexMetaData.settings()).put(IndexMetaData.SETTING_INDEX_UUID,Strings.randomBase64UUID()));
-              if (!request.includeAliases() && !snapshotIndexMetaData.aliases().isEmpty()) {
+              indexMdBuilder.settings(Settings.settingsBuilder().put(snapshotIndexMetaData.getSettings()).put(IndexMetaData.SETTING_INDEX_UUID,Strings.randomBase64UUID()));
+              if (!request.includeAliases() && !snapshotIndexMetaData.getAliases().isEmpty()) {
                 indexMdBuilder.removeAllAliases();
               }
  else {
-                for (                ObjectCursor<String> alias : snapshotIndexMetaData.aliases().keys()) {
+                for (                ObjectCursor<String> alias : snapshotIndexMetaData.getAliases().keys()) {
                   aliases.add(alias.value);
                 }
               }
@@ -68,21 +68,21 @@
  else {
               validateExistingIndex(currentIndexMetaData,snapshotIndexMetaData,renamedIndex,partial);
               IndexMetaData.Builder indexMdBuilder=IndexMetaData.builder(snapshotIndexMetaData).state(IndexMetaData.State.OPEN);
-              indexMdBuilder.version(Math.max(snapshotIndexMetaData.version(),currentIndexMetaData.version() + 1));
+              indexMdBuilder.version(Math.max(snapshotIndexMetaData.getVersion(),currentIndexMetaData.getVersion() + 1));
               if (!request.includeAliases()) {
-                if (!snapshotIndexMetaData.aliases().isEmpty()) {
+                if (!snapshotIndexMetaData.getAliases().isEmpty()) {
                   indexMdBuilder.removeAllAliases();
                 }
-                for (                ObjectCursor<AliasMetaData> alias : currentIndexMetaData.aliases().values()) {
+                for (                ObjectCursor<AliasMetaData> alias : currentIndexMetaData.getAliases().values()) {
                   indexMdBuilder.putAlias(alias.value);
                 }
               }
  else {
-                for (                ObjectCursor<String> alias : snapshotIndexMetaData.aliases().keys()) {
+                for (                ObjectCursor<String> alias : snapshotIndexMetaData.getAliases().keys()) {
                   aliases.add(alias.value);
                 }
               }
-              indexMdBuilder.settings(Settings.settingsBuilder().put(snapshotIndexMetaData.settings()).put(IndexMetaData.SETTING_INDEX_UUID,currentIndexMetaData.indexUUID()));
+              indexMdBuilder.settings(Settings.settingsBuilder().put(snapshotIndexMetaData.getSettings()).put(IndexMetaData.SETTING_INDEX_UUID,currentIndexMetaData.getIndexUUID()));
               IndexMetaData updatedIndexMetaData=indexMdBuilder.index(renamedIndex).build();
               rtBuilder.addAsRestore(updatedIndexMetaData,restoreSource);
               blocks.updateBlocks(updatedIndexMetaData);
@@ -111,7 +111,7 @@
         }
         RoutingTable rt=rtBuilder.build();
         ClusterState updatedState=builder.metaData(mdBuilder).blocks(blocks).routingTable(rt).build();
-        RoutingAllocation.Result routingResult=allocationService.reroute(ClusterState.builder(updatedState).routingTable(rt).build());
+        RoutingAllocation.Result routingResult=allocationService.reroute(ClusterState.builder(updatedState).routingTable(rt).build(),"restored snapshot [" + snapshotId + "]");
         return ClusterState.builder(updatedState).routingResult(routingResult).build();
       }
       private void checkAliasNameConflicts(      Map<String,String> renamedIndices,      Set<String> aliases){
@@ -142,7 +142,7 @@
         }
       }
       private void validateExistingIndex(      IndexMetaData currentIndexMetaData,      IndexMetaData snapshotIndexMetaData,      String renamedIndex,      boolean partial){
-        if (currentIndexMetaData.state() != IndexMetaData.State.CLOSE) {
+        if (currentIndexMetaData.getState() != IndexMetaData.State.CLOSE) {
           throw new SnapshotRestoreException(snapshotId,"cannot restore index [" + renamedIndex + "] because it's open");
         }
         if (partial) {
@@ -162,7 +162,7 @@
         }
         Settings normalizedChangeSettings=Settings.settingsBuilder().put(changeSettings).normalizePrefix(IndexMetaData.INDEX_SETTING_PREFIX).build();
         IndexMetaData.Builder builder=IndexMetaData.builder(indexMetaData);
-        Map<String,String> settingsMap=new HashMap<>(indexMetaData.settings().getAsMap());
+        Map<String,String> settingsMap=new HashMap<>(indexMetaData.getSettings().getAsMap());
         List<String> simpleMatchPatterns=new ArrayList<>();
         for (        String ignoredSetting : ignoreSettings) {
           if (!Regex.isSimpleMatchPattern(ignoredSetting)) {

@@ -1,0 +1,36 @@
+{
+  Directory dir1=newDirectory();
+  IndexWriter w1=new IndexWriter(dir1,newIndexWriterConfig());
+  w1.addDocument(new Document());
+  DirectoryReader r1=DirectoryReader.open(w1,false);
+  w1.close();
+  ShardId shard1=new ShardId(new Index("index"),0);
+  r1=ElasticsearchDirectoryReader.wrap(r1,shard1);
+  IndexSearcher s1=new IndexSearcher(r1);
+  s1.setQueryCachingPolicy(QueryCachingPolicy.ALWAYS_CACHE);
+  Directory dir2=newDirectory();
+  IndexWriter w2=new IndexWriter(dir2,newIndexWriterConfig());
+  w2.addDocument(new Document());
+  DirectoryReader r2=DirectoryReader.open(w2,false);
+  w2.close();
+  ShardId shard2=new ShardId(new Index("index"),1);
+  r2=ElasticsearchDirectoryReader.wrap(r2,shard2);
+  IndexSearcher s2=new IndexSearcher(r2);
+  s2.setQueryCachingPolicy(QueryCachingPolicy.ALWAYS_CACHE);
+  Settings settings=Settings.builder().put(IndicesQueryCache.INDICES_CACHE_QUERY_COUNT,10).build();
+  IndicesQueryCache cache=new IndicesQueryCache(settings);
+  s1.setQueryCache(cache);
+  s2.setQueryCache(cache);
+  assertEquals(1,s1.count(new DummyQuery(0)));
+  for (int i=1; i <= 20; ++i) {
+    assertEquals(1,s2.count(new DummyQuery(i)));
+  }
+  QueryCacheStats stats1=cache.getStats(shard1);
+  assertEquals(0L,stats1.getCacheSize());
+  assertEquals(1L,stats1.getCacheCount());
+  IOUtils.close(r1,dir1);
+  cache.onClose(shard1);
+  IOUtils.close(r2,dir2);
+  cache.onClose(shard2);
+  cache.close();
+}

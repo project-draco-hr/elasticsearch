@@ -1,0 +1,35 @@
+{
+  AllocationService strategy=createAllocationService(settingsBuilder().put("cluster.routing.allocation.concurrent_recoveries",10).put(ClusterRebalanceAllocationDecider.CLUSTER_ROUTING_ALLOCATION_ALLOW_REBALANCE,"always").build());
+  logger.info("Building initial routing table");
+  int numberOfReplicas=scaledRandomIntBetween(2,10);
+  MetaData metaData=MetaData.builder().put(IndexMetaData.builder("test").settings(settings(Version.CURRENT)).numberOfShards(1).numberOfReplicas(numberOfReplicas)).build();
+  RoutingTable routingTable=RoutingTable.builder().addAsNew(metaData.index("test")).build();
+  ClusterState clusterState=ClusterState.builder(org.elasticsearch.cluster.ClusterName.DEFAULT).metaData(metaData).routingTable(routingTable).build();
+  logger.info("Adding {} nodes and performing rerouting",numberOfReplicas + 1);
+  DiscoveryNodes.Builder nodeBuilder=DiscoveryNodes.builder();
+  for (int i=0; i < numberOfReplicas + 1; i++) {
+    nodeBuilder.put(newNode("node" + Integer.toString(i)));
+  }
+  clusterState=ClusterState.builder(clusterState).nodes(nodeBuilder).build();
+  while (!clusterState.routingTable().shardsWithState(UNASSIGNED).isEmpty()) {
+    clusterState=ClusterState.builder(clusterState).routingTable(strategy.applyStartedShards(clusterState,clusterState.routingTable().shardsWithState(INITIALIZING)).routingTable()).build();
+    clusterState=ClusterState.builder(clusterState).routingTable(strategy.reroute(clusterState,"reroute").routingTable()).build();
+  }
+  int shardsToFail=randomIntBetween(1,numberOfReplicas);
+  ArrayList<FailedRerouteAllocation.FailedShard> failedShards=new ArrayList<>();
+  RoutingNodes routingNodes=clusterState.getRoutingNodes();
+  for (int i=0; i < shardsToFail; i++) {
+    String n="node" + Integer.toString(randomInt(numberOfReplicas));
+    logger.info("failing shard on node [{}]",n);
+    ShardRouting shardToFail=routingNodes.node(n).get(0);
+    failedShards.add(new FailedRerouteAllocation.FailedShard(new ShardRouting(shardToFail),null,null));
+  }
+  routingTable=strategy.applyFailedShards(clusterState,failedShards).routingTable();
+  clusterState=ClusterState.builder(clusterState).routingTable(routingTable).build();
+  routingNodes=clusterState.getRoutingNodes();
+  for (  FailedRerouteAllocation.FailedShard failedShard : failedShards) {
+    if (!routingNodes.node(failedShard.shard.currentNodeId()).isEmpty()) {
+      fail("shard " + failedShard + " was re-assigned to it's node");
+    }
+  }
+}

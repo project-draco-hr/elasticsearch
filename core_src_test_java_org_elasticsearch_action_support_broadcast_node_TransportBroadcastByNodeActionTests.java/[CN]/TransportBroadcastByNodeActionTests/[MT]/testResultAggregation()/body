@@ -1,6 +1,15 @@
 {
   Request request=new Request(new String[]{TEST_INDEX});
   PlainActionFuture<Response> listener=new PlainActionFuture<>();
+  final boolean simulateFailedMasterNode=rarely();
+  DiscoveryNode failedMasterNode=null;
+  if (simulateFailedMasterNode) {
+    failedMasterNode=clusterService.state().nodes().masterNode();
+    DiscoveryNodes.Builder builder=DiscoveryNodes.builder(clusterService.state().getNodes());
+    builder.remove(failedMasterNode.id());
+    builder.masterNodeId(null);
+    clusterService.setState(ClusterState.builder(clusterService.state()).nodes(builder));
+  }
   action.new AsyncAction(request,listener).start();
   Map<String,List<CapturingTransport.CapturedRequest>> capturedRequests=transport.capturedRequestsByTargetNode();
   transport.clear();
@@ -8,7 +17,7 @@
   Map<String,List<ShardRouting>> map=new HashMap<>();
   for (  ShardRouting shard : shardIt.asUnordered()) {
     if (!map.containsKey(shard.currentNodeId())) {
-      map.put(shard.currentNodeId(),new ArrayList<ShardRouting>());
+      map.put(shard.currentNodeId(),new ArrayList<>());
     }
     map.get(shard.currentNodeId()).add(shard);
   }
@@ -40,6 +49,9 @@
       TransportBroadcastByNodeAction.NodeResponse nodeResponse=action.new NodeResponse(entry.getKey(),shards.size(),shardResults,exceptions);
       transport.handleResponse(requestId,nodeResponse);
     }
+  }
+  if (simulateFailedMasterNode) {
+    totalShards+=map.get(failedMasterNode.id()).size();
   }
   Response response=listener.get();
   assertEquals("total shards",totalShards,response.getTotalShards());

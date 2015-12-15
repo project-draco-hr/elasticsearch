@@ -1,14 +1,16 @@
 {
   Version version=randomBoolean() ? Version.CURRENT : VersionUtils.randomVersionBetween(random(),Version.V_2_0_0_beta1,Version.CURRENT);
-  Settings settings=Settings.settingsBuilder().put("name",AbstractQueryTestCase.class.toString()).put("path.home",createTempDir()).build();
+  Settings settings=Settings.settingsBuilder().put("name",AbstractQueryTestCase.class.toString()).put("path.home",createTempDir()).put(ScriptService.SCRIPT_AUTO_RELOAD_ENABLED_SETTING,false).build();
   Settings indexSettings=Settings.settingsBuilder().put(IndexMetaData.SETTING_VERSION_CREATED,version).build();
   index=new Index(randomAsciiOfLengthBetween(1,10));
+  IndexSettings idxSettings=IndexSettingsModule.newIndexSettings(index,indexSettings);
   final TestClusterService clusterService=new TestClusterService();
   clusterService.setState(new ClusterState.Builder(clusterService.state()).metaData(new MetaData.Builder().put(new IndexMetaData.Builder(index.name()).settings(indexSettings).numberOfShards(1).numberOfReplicas(0))));
   final Client proxy=(Client)Proxy.newProxyInstance(Client.class.getClassLoader(),new Class[]{Client.class},clientInvocationHandler);
-  injector=new ModulesBuilder().add(new EnvironmentModule(new Environment(settings)),new SettingsModule(settings),new ThreadPoolModule(new ThreadPool(settings)),new IndicesModule(settings){
+  injector=new ModulesBuilder().add(new EnvironmentModule(new Environment(settings)),new SettingsModule(settings,new SettingsFilter(settings)),new ThreadPoolModule(new ThreadPool(settings)),new IndicesModule(){
     @Override public void configure(){
       bindQueryParsersExtension();
+      bindMapperExtension();
     }
   }
 ,new ScriptModule(settings){
@@ -17,16 +19,8 @@
       MockScriptEngine mockScriptEngine=new MockScriptEngine();
       Multibinder<ScriptEngineService> multibinder=Multibinder.newSetBinder(binder(),ScriptEngineService.class);
       multibinder.addBinding().toInstance(mockScriptEngine);
-      try {
-        Class.forName("com.github.mustachejava.Mustache");
-      }
- catch (      ClassNotFoundException e) {
-        throw new IllegalStateException("error while loading mustache",e);
-      }
-      MustacheScriptEngineService mustacheScriptEngineService=new MustacheScriptEngineService(settings);
       Set<ScriptEngineService> engines=new HashSet<>();
       engines.add(mockScriptEngine);
-      engines.add(mustacheScriptEngineService);
       List<ScriptContext.Plugin> customContexts=new ArrayList<>();
       bind(ScriptContextRegistry.class).toInstance(new ScriptContextRegistry(customContexts));
       try {
@@ -38,7 +32,7 @@
       }
     }
   }
-,new IndexSettingsModule(index,indexSettings),new IndexCacheModule(indexSettings),new AnalysisModule(indexSettings,new IndicesAnalysisService(indexSettings)),new SimilarityModule(index,indexSettings),new IndexNameModule(index),new AbstractModule(){
+,new IndexSettingsModule(index,indexSettings),new AbstractModule(){
     @Override protected void configure(){
       bind(Client.class).toInstance(proxy);
       Multibinder.newSetBinder(binder(),ScoreFunctionParser.class);
@@ -49,8 +43,21 @@
     }
   }
 ).createInjector();
-  queryParserService=injector.getInstance(IndexQueryParserService.class);
-  MapperService mapperService=queryParserService.mapperService;
+  AnalysisService analysisService=new AnalysisRegistry(null,new Environment(settings)).build(idxSettings);
+  ScriptService scriptService=injector.getInstance(ScriptService.class);
+  SimilarityService similarityService=new SimilarityService(idxSettings,Collections.emptyMap());
+  MapperRegistry mapperRegistry=injector.getInstance(MapperRegistry.class);
+  MapperService mapperService=new MapperService(idxSettings,analysisService,similarityService,mapperRegistry);
+  indexFieldDataService=new IndexFieldDataService(idxSettings,injector.getInstance(IndicesFieldDataCache.class),injector.getInstance(CircuitBreakerService.class),mapperService);
+  BitsetFilterCache bitsetFilterCache=new BitsetFilterCache(idxSettings,new IndicesWarmer(idxSettings.getNodeSettings(),null),new BitsetFilterCache.Listener(){
+    @Override public void onCache(    ShardId shardId,    Accountable accountable){
+    }
+    @Override public void onRemoval(    ShardId shardId,    Accountable accountable){
+    }
+  }
+);
+  indicesQueriesRegistry=injector.getInstance(IndicesQueriesRegistry.class);
+  queryShardContext=new QueryShardContext(idxSettings,proxy,bitsetFilterCache,indexFieldDataService,mapperService,similarityService,scriptService,indicesQueriesRegistry);
   currentTypes=new String[randomIntBetween(0,5)];
   for (int i=0; i < currentTypes.length; i++) {
     String type=randomAsciiOfLengthBetween(1,10);

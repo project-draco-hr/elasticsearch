@@ -1,0 +1,36 @@
+{
+  Version version=VersionUtils.randomVersionBetween(random(),Version.V_2_0_0,Version.CURRENT);
+  Settings settings=Settings.settingsBuilder().put(IndexMetaData.SETTING_VERSION_CREATED,version).build();
+  assertAcked(prepareCreate("index").setSettings(settings).addMapping("type","location","type=geo_point"));
+  XContentBuilder d1Builder=jsonBuilder();
+  GeoPoint[] d1Points={new GeoPoint(2.5,1),new GeoPoint(2.75,2),new GeoPoint(3,3),new GeoPoint(3.25,4)};
+  createShuffeldJSONArray(d1Builder,d1Points);
+  XContentBuilder d2Builder=jsonBuilder();
+  GeoPoint[] d2Points={new GeoPoint(4.5,1),new GeoPoint(4.75,2),new GeoPoint(5,3),new GeoPoint(5.25,4)};
+  createShuffeldJSONArray(d2Builder,d2Points);
+  indexRandom(true,client().prepareIndex("index","type","d1").setSource(d1Builder),client().prepareIndex("index","type","d2").setSource(d2Builder));
+  ensureYellow();
+  List<String> qHashes=new ArrayList<>();
+  List<GeoPoint> qPoints=new ArrayList<>();
+  createQPoints(qHashes,qPoints);
+  GeoDistanceSortBuilder geoDistanceSortBuilder=new GeoDistanceSortBuilder("location");
+  for (int i=0; i < 4; i++) {
+    int at=randomInt(3 - i);
+    if (randomBoolean()) {
+      geoDistanceSortBuilder.geohashes(qHashes.get(at));
+    }
+ else {
+      geoDistanceSortBuilder.points(qPoints.get(at));
+    }
+    qHashes.remove(at);
+    qPoints.remove(at);
+  }
+  SearchResponse searchResponse=client().prepareSearch().setQuery(matchAllQuery()).addSort(geoDistanceSortBuilder.sortMode("min").order(SortOrder.ASC).geoDistance(GeoDistance.PLANE).unit(DistanceUnit.KILOMETERS)).execute().actionGet();
+  assertOrderedSearchHits(searchResponse,"d1","d2");
+  assertThat((Double)searchResponse.getHits().getAt(0).getSortValues()[0],closeTo(GeoDistance.PLANE.calculate(2.5,1,2,1,DistanceUnit.KILOMETERS),1.e-4));
+  assertThat((Double)searchResponse.getHits().getAt(1).getSortValues()[0],closeTo(GeoDistance.PLANE.calculate(4.5,1,2,1,DistanceUnit.KILOMETERS),1.e-4));
+  searchResponse=client().prepareSearch().setQuery(matchAllQuery()).addSort(geoDistanceSortBuilder.sortMode("max").order(SortOrder.ASC).geoDistance(GeoDistance.PLANE).unit(DistanceUnit.KILOMETERS)).execute().actionGet();
+  assertOrderedSearchHits(searchResponse,"d1","d2");
+  assertThat((Double)searchResponse.getHits().getAt(0).getSortValues()[0],closeTo(GeoDistance.PLANE.calculate(3.25,4,2,1,DistanceUnit.KILOMETERS),1.e-4));
+  assertThat((Double)searchResponse.getHits().getAt(1).getSortValues()[0],closeTo(GeoDistance.PLANE.calculate(5.25,4,2,1,DistanceUnit.KILOMETERS),1.e-4));
+}

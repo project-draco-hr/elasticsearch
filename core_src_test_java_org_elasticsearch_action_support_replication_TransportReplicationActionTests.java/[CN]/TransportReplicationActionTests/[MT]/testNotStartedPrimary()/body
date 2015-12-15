@@ -1,0 +1,25 @@
+{
+  final String index="test";
+  final ShardId shardId=new ShardId(index,0);
+  clusterService.setState(state(index,true,randomBoolean() ? ShardRoutingState.INITIALIZING : ShardRoutingState.UNASSIGNED));
+  logger.debug("--> using initial state:\n{}",clusterService.state().prettyPrint());
+  Request request=new Request(shardId).timeout("1ms");
+  PlainActionFuture<Response> listener=new PlainActionFuture<>();
+  TransportReplicationAction.ReroutePhase reroutePhase=action.new ReroutePhase(request,listener);
+  reroutePhase.run();
+  assertListenerThrows("unassigned primary didn't cause a timeout",listener,UnavailableShardsException.class);
+  request=new Request(shardId);
+  listener=new PlainActionFuture<>();
+  reroutePhase=action.new ReroutePhase(request,listener);
+  reroutePhase.run();
+  assertFalse("unassigned primary didn't cause a retry",listener.isDone());
+  clusterService.setState(state(index,true,ShardRoutingState.STARTED));
+  logger.debug("--> primary assigned state:\n{}",clusterService.state().prettyPrint());
+  final IndexShardRoutingTable shardRoutingTable=clusterService.state().routingTable().index(index).shard(shardId.id());
+  final String primaryNodeId=shardRoutingTable.primaryShard().currentNodeId();
+  final List<CapturingTransport.CapturedRequest> capturedRequests=transport.capturedRequestsByTargetNode().get(primaryNodeId);
+  assertThat(capturedRequests,notNullValue());
+  assertThat(capturedRequests.size(),equalTo(1));
+  assertThat(capturedRequests.get(0).action,equalTo("testAction[p]"));
+  assertIndexShardCounter(1);
+}

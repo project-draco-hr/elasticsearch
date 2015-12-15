@@ -1,0 +1,55 @@
+{
+  Client client=client();
+  Path repositoryLocation=randomRepoPath();
+  logger.info("-->  creating repository");
+  PutRepositoryResponse putRepositoryResponse=client.admin().cluster().preparePutRepository("test-repo").setType("mock").setSettings(Settings.settingsBuilder().put("location",repositoryLocation).put("random",randomAsciiOfLength(10)).put("wait_after_unblock",200)).get();
+  assertThat(putRepositoryResponse.isAcknowledged(),equalTo(true));
+  assertAcked(prepareCreate("test-idx",2,Settings.builder().put("number_of_replicas",0)));
+  logger.info("--> indexing some data");
+  for (int i=0; i < 100; i++) {
+    index("test-idx","doc",Integer.toString(i),"foo","bar" + i);
+  }
+  refresh();
+  assertThat(client.prepareSearch("test-idx").setSize(0).get().getHits().totalHits(),equalTo(100L));
+  String blockedNode=blockNodeWithIndex("test-idx");
+  logger.info("--> snapshot");
+  client.admin().cluster().prepareCreateSnapshot("test-repo","test-snap").setWaitForCompletion(false).setIndices("test-idx").get();
+  logger.info("--> waiting for block to kick in");
+  waitForBlock(blockedNode,"test-repo",TimeValue.timeValueSeconds(60));
+  logger.info("--> execution was blocked on node [{}], trying to delete repository",blockedNode);
+  try {
+    client.admin().cluster().prepareDeleteRepository("test-repo").execute().get();
+    fail("shouldn't be able to delete in-use repository");
+  }
+ catch (  Exception ex) {
+    logger.info("--> in-use repository deletion failed");
+  }
+  logger.info("--> trying to move repository to another location");
+  try {
+    client.admin().cluster().preparePutRepository("test-repo").setType("fs").setSettings(Settings.settingsBuilder().put("location",repositoryLocation.resolve("test"))).get();
+    fail("shouldn't be able to replace in-use repository");
+  }
+ catch (  Exception ex) {
+    logger.info("--> in-use repository replacement failed");
+  }
+  logger.info("--> trying to create a repository with different name");
+  assertAcked(client.admin().cluster().preparePutRepository("test-repo-2").setType("fs").setSettings(Settings.settingsBuilder().put("location",repositoryLocation.resolve("test"))));
+  logger.info("--> unblocking blocked node");
+  unblockNode(blockedNode);
+  logger.info("--> waiting for completion");
+  SnapshotInfo snapshotInfo=waitForCompletion("test-repo","test-snap",TimeValue.timeValueSeconds(600));
+  logger.info("Number of failed shards [{}]",snapshotInfo.shardFailures().size());
+  logger.info("--> done");
+  List<SnapshotInfo> snapshotInfos=client().admin().cluster().prepareGetSnapshots("test-repo").setSnapshots("test-snap").get().getSnapshots();
+  assertThat(snapshotInfos.size(),equalTo(1));
+  assertThat(snapshotInfos.get(0).state(),equalTo(SnapshotState.SUCCESS));
+  assertThat(snapshotInfos.get(0).shardFailures().size(),equalTo(0));
+  logger.info("--> delete index");
+  cluster().wipeIndices("test-idx");
+  logger.info("--> replace mock repository with real one at the same location");
+  assertAcked(client.admin().cluster().preparePutRepository("test-repo").setType("fs").setSettings(Settings.settingsBuilder().put("location",repositoryLocation)));
+  logger.info("--> restore index");
+  RestoreSnapshotResponse restoreSnapshotResponse=client.admin().cluster().prepareRestoreSnapshot("test-repo","test-snap").setWaitForCompletion(true).execute().actionGet();
+  assertThat(restoreSnapshotResponse.getRestoreInfo().totalShards(),greaterThan(0));
+  assertThat(client.prepareSearch("test-idx").setSize(0).get().getHits().totalHits(),equalTo(100L));
+}

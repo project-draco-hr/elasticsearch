@@ -1,0 +1,54 @@
+{
+  Client client=client();
+  logger.info("-->  creating repository");
+  assertAcked(client.admin().cluster().preparePutRepository("test-repo").setType("mock").setSettings(Settings.settingsBuilder().put("location",randomRepoPath()).put("random",randomAsciiOfLength(10)).put("random_data_file_io_exception_rate",0.3)));
+  createIndex("test-idx");
+  ensureGreen();
+  logger.info("--> indexing some data");
+  for (int i=0; i < 100; i++) {
+    index("test-idx","doc",Integer.toString(i),"foo","bar" + i);
+  }
+  refresh();
+  assertThat(client.prepareSearch("test-idx").setSize(0).get().getHits().totalHits(),equalTo(100L));
+  logger.info("--> snapshot");
+  CreateSnapshotResponse createSnapshotResponse=client.admin().cluster().prepareCreateSnapshot("test-repo","test-snap").setWaitForCompletion(true).setIndices("test-idx").get();
+  if (createSnapshotResponse.getSnapshotInfo().totalShards() == createSnapshotResponse.getSnapshotInfo().successfulShards()) {
+    logger.info("--> no failures");
+    assertThat(getFailureCount("test-repo"),equalTo(0L));
+  }
+ else {
+    logger.info("--> some failures");
+    assertThat(getFailureCount("test-repo"),greaterThan(0L));
+    assertThat(createSnapshotResponse.getSnapshotInfo().shardFailures().size(),greaterThan(0));
+    for (    SnapshotShardFailure shardFailure : createSnapshotResponse.getSnapshotInfo().shardFailures()) {
+      assertThat(shardFailure.nodeId(),notNullValue());
+      assertThat(shardFailure.index(),equalTo("test-idx"));
+    }
+    GetSnapshotsResponse getSnapshotsResponse=client.admin().cluster().prepareGetSnapshots("test-repo").addSnapshots("test-snap").get();
+    assertThat(getSnapshotsResponse.getSnapshots().size(),equalTo(1));
+    SnapshotInfo snapshotInfo=getSnapshotsResponse.getSnapshots().get(0);
+    assertThat(snapshotInfo.state(),equalTo(SnapshotState.PARTIAL));
+    assertThat(snapshotInfo.shardFailures().size(),greaterThan(0));
+    assertThat(snapshotInfo.totalShards(),greaterThan(snapshotInfo.successfulShards()));
+    SnapshotsStatusResponse snapshotsStatusResponse=client.admin().cluster().prepareSnapshotStatus("test-repo").addSnapshots("test-snap").get();
+    assertThat(snapshotsStatusResponse.getSnapshots().size(),equalTo(1));
+    SnapshotStatus snapshotStatus=snapshotsStatusResponse.getSnapshots().get(0);
+    assertThat(snapshotStatus.getIndices().size(),equalTo(1));
+    SnapshotIndexStatus indexStatus=snapshotStatus.getIndices().get("test-idx");
+    assertThat(indexStatus,notNullValue());
+    assertThat(indexStatus.getShardsStats().getFailedShards(),equalTo(snapshotInfo.failedShards()));
+    assertThat(indexStatus.getShardsStats().getDoneShards(),equalTo(snapshotInfo.successfulShards()));
+    assertThat(indexStatus.getShards().size(),equalTo(snapshotInfo.totalShards()));
+    int numberOfFailures=0;
+    for (    SnapshotIndexShardStatus shardStatus : indexStatus.getShards().values()) {
+      if (shardStatus.getStage() == SnapshotIndexShardStage.FAILURE) {
+        assertThat(shardStatus.getFailure(),notNullValue());
+        numberOfFailures++;
+      }
+ else {
+        assertThat(shardStatus.getFailure(),nullValue());
+      }
+    }
+    assertThat(indexStatus.getShardsStats().getFailedShards(),equalTo(numberOfFailures));
+  }
+}

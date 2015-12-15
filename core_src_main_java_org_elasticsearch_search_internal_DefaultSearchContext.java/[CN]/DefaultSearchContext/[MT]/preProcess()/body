@@ -3,23 +3,25 @@
     long from=from() == -1 ? 0 : from();
     long size=size() == -1 ? 10 : size();
     long resultWindow=from + size;
-    int maxResultWindow=indexService.settingsService().getSettings().getAsInt(MAX_RESULT_WINDOW,Defaults.MAX_RESULT_WINDOW);
+    int maxResultWindow=indexService.getIndexSettings().getSettings().getAsInt(MAX_RESULT_WINDOW,Defaults.MAX_RESULT_WINDOW);
     if (resultWindow > maxResultWindow) {
       throw new QueryPhaseExecutionException(this,"Result window is too large, from + size must be less than or equal to: [" + maxResultWindow + "] but was ["+ resultWindow+ "]. See the scroll api for a more efficient way to request large data sets. "+ "This limit can be set by changing the ["+ DefaultSearchContext.MAX_RESULT_WINDOW+ "] index level parameter.");
     }
   }
-  aliasFilter=indexService.aliasFilter(request.filteringAliases());
+  aliasFilter=indexService.aliasFilter(indexShard.getQueryShardContext(),request.filteringAliases());
   if (query() == null) {
     parsedQuery(ParsedQuery.parsedMatchAllQuery());
   }
-  if (queryBoost() != 1.0f) {
+  if (queryBoost() != AbstractQueryBuilder.DEFAULT_BOOST) {
     parsedQuery(new ParsedQuery(new FunctionScoreQuery(query(),new WeightFactorFunction(queryBoost)),parsedQuery()));
   }
   Query searchFilter=searchFilter(types());
   if (searchFilter != null) {
     if (Queries.isConstantMatchAllQuery(query())) {
       Query q=new ConstantScoreQuery(searchFilter);
-      q.setBoost(query().getBoost());
+      if (query().getBoost() != AbstractQueryBuilder.DEFAULT_BOOST) {
+        q=new BoostQuery(q,query().getBoost());
+      }
       parsedQuery(new ParsedQuery(q,parsedQuery()));
     }
  else {

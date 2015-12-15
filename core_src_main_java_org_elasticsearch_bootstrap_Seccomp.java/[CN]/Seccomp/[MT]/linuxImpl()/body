@@ -1,30 +1,90 @@
 {
-  boolean supported=Constants.LINUX && "amd64".equals(Constants.OS_ARCH);
+  final Arch arch=ARCHITECTURES.get(Constants.OS_ARCH);
+  boolean supported=Constants.LINUX && arch != null;
   if (supported == false) {
     throw new UnsupportedOperationException("seccomp unavailable: '" + Constants.OS_ARCH + "' architecture unsupported");
   }
   if (linux_libc == null) {
     throw new UnsupportedOperationException("seccomp unavailable: could not link methods. requires kernel 3.5+ with CONFIG_SECCOMP and CONFIG_SECCOMP_FILTER compiled in");
   }
-  if (linux_libc.prctl(PR_GET_NO_NEW_PRIVS,0,0,0,0) < 0) {
+  if (linux_syscall(999) >= 0 || Native.getLastError() != ENOSYS) {
+    throw new UnsupportedOperationException("seccomp unavailable: your kernel is buggy and you should upgrade");
+  }
+  final int bogusArg=0xf7a46a5c;
+  long ret=linux_syscall(arch.seccomp,bogusArg);
+  if (ret != -1) {
+    throw new UnsupportedOperationException("seccomp unavailable: seccomp(BOGUS_OPERATION) returned " + ret);
+  }
+ else {
     int errno=Native.getLastError();
 switch (errno) {
 case ENOSYS:
-      throw new UnsupportedOperationException("seccomp unavailable: requires kernel 3.5+ with CONFIG_SECCOMP and CONFIG_SECCOMP_FILTER compiled in");
+      break;
+case EINVAL:
+    break;
 default :
-    throw new UnsupportedOperationException("prctl(PR_GET_NO_NEW_PRIVS): " + JNACLibrary.strerror(errno));
+  throw new UnsupportedOperationException("seccomp(BOGUS_OPERATION): " + JNACLibrary.strerror(errno));
 }
 }
-if (linux_libc.prctl(PR_GET_SECCOMP,0,0,0,0) < 0) {
+ret=linux_syscall(arch.seccomp,SECCOMP_SET_MODE_FILTER,bogusArg);
+if (ret != -1) {
+throw new UnsupportedOperationException("seccomp unavailable: seccomp(SECCOMP_SET_MODE_FILTER, BOGUS_FLAG) returned " + ret);
+}
+ else {
 int errno=Native.getLastError();
 switch (errno) {
+case ENOSYS:
+break;
 case EINVAL:
-  throw new UnsupportedOperationException("seccomp unavailable: CONFIG_SECCOMP not compiled into kernel, CONFIG_SECCOMP and CONFIG_SECCOMP_FILTER are needed");
+break;
 default :
+throw new UnsupportedOperationException("seccomp(SECCOMP_SET_MODE_FILTER, BOGUS_FLAG): " + JNACLibrary.strerror(errno));
+}
+}
+ret=linux_prctl(bogusArg,0,0,0,0);
+if (ret != -1) {
+throw new UnsupportedOperationException("seccomp unavailable: prctl(BOGUS_OPTION) returned " + ret);
+}
+ else {
+int errno=Native.getLastError();
+switch (errno) {
+case ENOSYS:
+break;
+case EINVAL:
+break;
+default :
+throw new UnsupportedOperationException("prctl(BOGUS_OPTION): " + JNACLibrary.strerror(errno));
+}
+}
+switch (linux_prctl(PR_GET_NO_NEW_PRIVS,0,0,0,0)) {
+case 0:
+break;
+case 1:
+break;
+default :
+int errno=Native.getLastError();
+if (errno == EINVAL) {
+throw new UnsupportedOperationException("seccomp unavailable: requires kernel 3.5+ with CONFIG_SECCOMP and CONFIG_SECCOMP_FILTER compiled in");
+}
+ else {
+throw new UnsupportedOperationException("prctl(PR_GET_NO_NEW_PRIVS): " + JNACLibrary.strerror(errno));
+}
+}
+switch (linux_prctl(PR_GET_SECCOMP,0,0,0,0)) {
+case 0:
+break;
+case 2:
+break;
+default :
+int errno=Native.getLastError();
+if (errno == EINVAL) {
+throw new UnsupportedOperationException("seccomp unavailable: CONFIG_SECCOMP not compiled into kernel, CONFIG_SECCOMP and CONFIG_SECCOMP_FILTER are needed");
+}
+ else {
 throw new UnsupportedOperationException("prctl(PR_GET_SECCOMP): " + JNACLibrary.strerror(errno));
 }
 }
-if (linux_libc.prctl(PR_SET_SECCOMP,SECCOMP_MODE_FILTER,0,0,0) < 0) {
+if (linux_prctl(PR_SET_SECCOMP,SECCOMP_MODE_FILTER,0,0,0) != 0) {
 int errno=Native.getLastError();
 switch (errno) {
 case EFAULT:
@@ -35,25 +95,31 @@ default :
 throw new UnsupportedOperationException("prctl(PR_SET_SECCOMP): " + JNACLibrary.strerror(errno));
 }
 }
-if (linux_libc.prctl(PR_SET_NO_NEW_PRIVS,1,0,0,0) < 0) {
+if (linux_prctl(PR_SET_NO_NEW_PRIVS,1,0,0,0) != 0) {
 throw new UnsupportedOperationException("prctl(PR_SET_NO_NEW_PRIVS): " + JNACLibrary.strerror(Native.getLastError()));
 }
-SockFilter insns[]={BPF_STMT(BPF_LD + BPF_W + BPF_ABS,SECCOMP_DATA_ARCH_OFFSET),BPF_JUMP(BPF_JMP + BPF_JEQ + BPF_K,AUDIT_ARCH_X86_64,0,4),BPF_STMT(BPF_LD + BPF_W + BPF_ABS,SECCOMP_DATA_NR_OFFSET),BPF_JUMP(BPF_JMP + BPF_JGE + BPF_K,NR_SYSCALL_FORK,0,3),BPF_JUMP(BPF_JMP + BPF_JEQ + BPF_K,NR_SYSCALL_EXECVEAT,1,0),BPF_JUMP(BPF_JMP + BPF_JGT + BPF_K,NR_SYSCALL_EXECVE,1,0),BPF_STMT(BPF_RET + BPF_K,SECCOMP_RET_ERRNO | (EACCES & SECCOMP_RET_DATA)),BPF_STMT(BPF_RET + BPF_K,SECCOMP_RET_ALLOW)};
+if (linux_prctl(PR_GET_NO_NEW_PRIVS,0,0,0,0) != 1) {
+throw new UnsupportedOperationException("seccomp filter did not really succeed: prctl(PR_GET_NO_NEW_PRIVS): " + JNACLibrary.strerror(Native.getLastError()));
+}
+SockFilter insns[]={BPF_STMT(BPF_LD + BPF_W + BPF_ABS,SECCOMP_DATA_ARCH_OFFSET),BPF_JUMP(BPF_JMP + BPF_JEQ + BPF_K,arch.audit,0,7),BPF_STMT(BPF_LD + BPF_W + BPF_ABS,SECCOMP_DATA_NR_OFFSET),BPF_JUMP(BPF_JMP + BPF_JGT + BPF_K,arch.limit,5,0),BPF_JUMP(BPF_JMP + BPF_JEQ + BPF_K,arch.fork,4,0),BPF_JUMP(BPF_JMP + BPF_JEQ + BPF_K,arch.vfork,3,0),BPF_JUMP(BPF_JMP + BPF_JEQ + BPF_K,arch.execve,2,0),BPF_JUMP(BPF_JMP + BPF_JEQ + BPF_K,arch.execveat,1,0),BPF_STMT(BPF_RET + BPF_K,SECCOMP_RET_ALLOW),BPF_STMT(BPF_RET + BPF_K,SECCOMP_RET_ERRNO | (EACCES & SECCOMP_RET_DATA))};
 SockFProg prog=new SockFProg(insns);
 prog.write();
 long pointer=Pointer.nativeValue(prog.getPointer());
-if (linux_libc.syscall(SECCOMP_SYSCALL_NR,SECCOMP_SET_MODE_FILTER,SECCOMP_FILTER_FLAG_TSYNC,pointer) != 0) {
+int method=1;
+if (linux_syscall(arch.seccomp,SECCOMP_SET_MODE_FILTER,SECCOMP_FILTER_FLAG_TSYNC,new NativeLong(pointer)) != 0) {
+method=0;
 int errno1=Native.getLastError();
 if (logger.isDebugEnabled()) {
 logger.debug("seccomp(SECCOMP_SET_MODE_FILTER): " + JNACLibrary.strerror(errno1) + ", falling back to prctl(PR_SET_SECCOMP)...");
 }
-if (linux_libc.prctl(PR_SET_SECCOMP,SECCOMP_MODE_FILTER,pointer,0,0) < 0) {
+if (linux_prctl(PR_SET_SECCOMP,SECCOMP_MODE_FILTER,pointer,0,0) != 0) {
 int errno2=Native.getLastError();
 throw new UnsupportedOperationException("seccomp(SECCOMP_SET_MODE_FILTER): " + JNACLibrary.strerror(errno1) + ", prctl(PR_SET_SECCOMP): "+ JNACLibrary.strerror(errno2));
 }
 }
-if (linux_libc.prctl(PR_GET_SECCOMP,0,0,0,0) != 2) {
+if (linux_prctl(PR_GET_SECCOMP,0,0,0,0) != 2) {
 throw new UnsupportedOperationException("seccomp filter installation did not really succeed. seccomp(PR_GET_SECCOMP): " + JNACLibrary.strerror(Native.getLastError()));
 }
-logger.debug("Linux seccomp filter installation successful");
+logger.debug("Linux seccomp filter installation successful, threads: [{}]",method == 1 ? "all" : "app");
+return method;
 }

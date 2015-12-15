@@ -10,40 +10,18 @@
   }
   Mapper.TypeParser.ParserContext parserContext=parserContext(type);
   DocumentMapper.Builder docBuilder=doc(indexSettings,(RootObjectMapper.Builder)rootObjectTypeParser.parse(type,mapping,parserContext),mapperService);
-  for (  Map.Entry<String,Mapper.TypeParser> entry : additionalRootMappers.entrySet()) {
-    docBuilder.put((MetadataFieldMapper.Builder<?,?>)entry.getValue().parse(entry.getKey(),Collections.<String,Object>emptyMap(),parserContext));
-  }
   Iterator<Map.Entry<String,Object>> iterator=mapping.entrySet().iterator();
   while (iterator.hasNext()) {
     Map.Entry<String,Object> entry=iterator.next();
     String fieldName=Strings.toUnderscoreCase(entry.getKey());
     Object fieldNode=entry.getValue();
-    if ("transform".equals(fieldName)) {
-      if (fieldNode instanceof Map) {
-        parseTransform(docBuilder,(Map<String,Object>)fieldNode,parserContext.indexVersionCreated());
-      }
- else       if (fieldNode instanceof List) {
-        for (        Object transformItem : (List)fieldNode) {
-          if (!(transformItem instanceof Map)) {
-            throw new MapperParsingException("Elements of transform list must be objects but one was:  " + fieldNode);
-          }
-          parseTransform(docBuilder,(Map<String,Object>)transformItem,parserContext.indexVersionCreated());
-        }
-      }
- else {
-        throw new MapperParsingException("Transform must be an object or an array but was:  " + fieldNode);
-      }
+    MetadataFieldMapper.TypeParser typeParser=rootTypeParsers.get(fieldName);
+    if (typeParser != null) {
       iterator.remove();
-    }
- else {
-      Mapper.TypeParser typeParser=rootTypeParsers.get(fieldName);
-      if (typeParser != null) {
-        iterator.remove();
-        Map<String,Object> fieldNodeMap=(Map<String,Object>)fieldNode;
-        docBuilder.put((MetadataFieldMapper.Builder)typeParser.parse(fieldName,fieldNodeMap,parserContext));
-        fieldNodeMap.remove("type");
-        checkNoRemainingFields(fieldName,fieldNodeMap,parserContext.indexVersionCreated());
-      }
+      Map<String,Object> fieldNodeMap=(Map<String,Object>)fieldNode;
+      docBuilder.put(typeParser.parse(fieldName,fieldNodeMap,parserContext));
+      fieldNodeMap.remove("type");
+      checkNoRemainingFields(fieldName,fieldNodeMap,parserContext.indexVersionCreated());
     }
   }
   Map<String,Object> meta=(Map<String,Object>)mapping.remove("_meta");

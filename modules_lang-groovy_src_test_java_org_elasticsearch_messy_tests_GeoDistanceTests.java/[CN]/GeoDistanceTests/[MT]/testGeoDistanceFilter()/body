@@ -1,0 +1,18 @@
+{
+  Version version=VersionUtils.randomVersionBetween(random(),Version.V_2_0_0,Version.CURRENT);
+  Settings settings=Settings.settingsBuilder().put(IndexMetaData.SETTING_VERSION_CREATED,version).build();
+  double lat=40.720611;
+  double lon=-73.998776;
+  XContentBuilder mapping=JsonXContent.contentBuilder().startObject().startObject("location").startObject("properties").startObject("pin").field("type","geo_point");
+  if (version.before(Version.V_2_2_0)) {
+    mapping.field("lat_lon",true);
+  }
+  mapping.endObject().endObject().endObject().endObject();
+  XContentBuilder source=JsonXContent.contentBuilder().startObject().field("pin",GeoHashUtils.stringEncode(lon,lat)).endObject();
+  assertAcked(prepareCreate("locations").setSettings(settings).addMapping("location",mapping));
+  client().prepareIndex("locations","location","1").setCreate(true).setSource(source).execute().actionGet();
+  refresh();
+  client().prepareGet("locations","location","1").execute().actionGet();
+  SearchResponse result=client().prepareSearch("locations").setQuery(QueryBuilders.matchAllQuery()).setPostFilter(QueryBuilders.geoDistanceQuery("pin").geoDistance(GeoDistance.ARC).point(lat,lon).distance("1m")).execute().actionGet();
+  assertHitCount(result,1);
+}

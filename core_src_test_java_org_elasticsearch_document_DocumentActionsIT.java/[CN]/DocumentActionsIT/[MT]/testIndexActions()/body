@@ -19,10 +19,10 @@
   ClearIndicesCacheResponse clearIndicesCacheResponse=client().admin().indices().clearCache(clearIndicesCacheRequest("test").recycler(true).fieldDataCache(true).queryCache(true)).actionGet();
   assertNoFailures(clearIndicesCacheResponse);
   assertThat(clearIndicesCacheResponse.getSuccessfulShards(),equalTo(numShards.totalNumShards));
-  logger.info("Optimizing");
+  logger.info("Force Merging");
   waitForRelocation(ClusterHealthStatus.GREEN);
-  OptimizeResponse optimizeResponse=optimize();
-  assertThat(optimizeResponse.getSuccessfulShards(),equalTo(numShards.totalNumShards));
+  ForceMergeResponse mergeResponse=forceMerge();
+  assertThat(mergeResponse.getSuccessfulShards(),equalTo(numShards.totalNumShards));
   GetResponse getResult;
   logger.info("Get [type1/1]");
   for (int i=0; i < 5; i++) {
@@ -82,20 +82,14 @@
   }
   logger.info("Count");
   for (int i=0; i < 5; i++) {
-    CountResponse countResponse=client().prepareCount("test").setQuery(termQuery("_type","type1")).execute().actionGet();
+    SearchResponse countResponse=client().prepareSearch("test").setSize(0).setQuery(termQuery("_type","type1")).execute().actionGet();
     assertNoFailures(countResponse);
-    assertThat(countResponse.getCount(),equalTo(2l));
+    assertThat(countResponse.getHits().totalHits(),equalTo(2l));
     assertThat(countResponse.getSuccessfulShards(),equalTo(numShards.numPrimaries));
     assertThat(countResponse.getFailedShards(),equalTo(0));
-    try {
-      client().count(countRequest("test").source("{ term : { _type : \"type1 } }")).actionGet();
-    }
- catch (    SearchPhaseExecutionException e) {
-      assertThat(e.shardFailures().length,equalTo(numShards.numPrimaries));
-    }
-    countResponse=client().prepareCount("test").execute().actionGet();
+    countResponse=client().prepareSearch("test").setSize(0).execute().actionGet();
     assertThat("Failures " + countResponse.getShardFailures(),countResponse.getShardFailures() == null ? 0 : countResponse.getShardFailures().length,equalTo(0));
-    assertThat(countResponse.getCount(),equalTo(2l));
+    assertThat(countResponse.getHits().totalHits(),equalTo(2l));
     assertThat(countResponse.getSuccessfulShards(),equalTo(numShards.numPrimaries));
     assertThat(countResponse.getFailedShards(),equalTo(0));
   }

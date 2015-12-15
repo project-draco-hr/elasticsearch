@@ -1,42 +1,30 @@
 {
   for (  IndexMetaData indexMetaData : event.state().metaData()) {
-    if (!indicesService.hasIndex(indexMetaData.index())) {
+    if (!indicesService.hasIndex(indexMetaData.getIndex())) {
       continue;
     }
-    List<String> typesToRefresh=new ArrayList<>();
-    String index=indexMetaData.index();
+    boolean requireRefresh=false;
+    String index=indexMetaData.getIndex();
     IndexService indexService=indicesService.indexService(index);
     if (indexService == null) {
       return;
     }
     try {
       MapperService mapperService=indexService.mapperService();
-      if (indexMetaData.mappings().containsKey(MapperService.DEFAULT_MAPPING)) {
-        boolean requireRefresh=processMapping(index,mapperService,MapperService.DEFAULT_MAPPING,indexMetaData.mapping(MapperService.DEFAULT_MAPPING).source());
-        if (requireRefresh) {
-          typesToRefresh.add(MapperService.DEFAULT_MAPPING);
-        }
-      }
-      for (      ObjectCursor<MappingMetaData> cursor : indexMetaData.mappings().values()) {
+      for (      ObjectCursor<MappingMetaData> cursor : indexMetaData.getMappings().values()) {
         MappingMetaData mappingMd=cursor.value;
         String mappingType=mappingMd.type();
         CompressedXContent mappingSource=mappingMd.source();
-        if (mappingType.equals(MapperService.DEFAULT_MAPPING)) {
-          continue;
-        }
-        boolean requireRefresh=processMapping(index,mapperService,mappingType,mappingSource);
-        if (requireRefresh) {
-          typesToRefresh.add(mappingType);
-        }
+        requireRefresh|=processMapping(index,mapperService,mappingType,mappingSource);
       }
-      if (!typesToRefresh.isEmpty() && sendRefreshMapping) {
-        nodeMappingRefreshAction.nodeMappingRefresh(event.state(),new NodeMappingRefreshAction.NodeMappingRefreshRequest(index,indexMetaData.indexUUID(),typesToRefresh.toArray(new String[typesToRefresh.size()]),event.state().nodes().localNodeId()));
+      if (requireRefresh && sendRefreshMapping) {
+        nodeMappingRefreshAction.nodeMappingRefresh(event.state(),new NodeMappingRefreshAction.NodeMappingRefreshRequest(index,indexMetaData.getIndexUUID(),event.state().nodes().localNodeId()));
       }
     }
  catch (    Throwable t) {
       for (      IndexShard indexShard : indexService) {
         ShardRouting shardRouting=indexShard.routingEntry();
-        failAndRemoveShard(shardRouting,indexService,true,"failed to update mappings",t);
+        failAndRemoveShard(shardRouting,indexService.indexUUID(),indexService,true,"failed to update mappings",t);
       }
     }
   }

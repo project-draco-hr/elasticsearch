@@ -17,10 +17,11 @@
   Lucene.cleanLuceneIndex(store.directory());
   store.decRef();
   ShardRoutingHelper.reinit(routing);
-  IndexShard newShard=test.createShard(0,routing);
+  IndexShard newShard=test.createShard(routing);
   newShard.updateRoutingEntry(routing,false);
+  newShard.markAsRecovering("store",new RecoveryState(newShard.shardId(),routing.primary(),RecoveryState.Type.STORE,localNode,localNode));
   try {
-    newShard.recoverFromStore(routing,localNode);
+    newShard.recoverFromStore(localNode);
     fail("index not there!");
   }
  catch (  IndexShardRecoveryException ex) {
@@ -28,11 +29,18 @@
   }
   ShardRoutingHelper.moveToUnassigned(routing,new UnassignedInfo(UnassignedInfo.Reason.INDEX_CREATED,"because I say so"));
   ShardRoutingHelper.initialize(routing,origRouting.currentNodeId());
-  assertFalse("it's already recovering",newShard.recoverFromStore(routing,localNode));
+  assertTrue("it's already recovering, we should ignore new ones",newShard.ignoreRecoveryAttempt());
+  try {
+    newShard.markAsRecovering("store",new RecoveryState(newShard.shardId(),routing.primary(),RecoveryState.Type.STORE,localNode,localNode));
+    fail("we are already recovering, can't mark again");
+  }
+ catch (  IllegalIndexShardStateException e) {
+  }
   test.removeShard(0,"I broken it");
-  newShard=test.createShard(0,routing);
+  newShard=test.createShard(routing);
   newShard.updateRoutingEntry(routing,false);
-  assertTrue("recover even if there is nothing to recover",newShard.recoverFromStore(routing,localNode));
+  newShard.markAsRecovering("store",new RecoveryState(newShard.shardId(),routing.primary(),RecoveryState.Type.STORE,localNode,localNode));
+  assertTrue("recover even if there is nothing to recover",newShard.recoverFromStore(localNode));
   routing=new ShardRouting(routing);
   ShardRoutingHelper.moveToStarted(routing);
   newShard.updateRoutingEntry(routing,true);

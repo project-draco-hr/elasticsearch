@@ -1,0 +1,28 @@
+{
+  AllocationService allocation=createAllocationService(settingsBuilder().put("cluster.routing.allocation.concurrent_recoveries",10).put(ClusterRebalanceAllocationDecider.CLUSTER_ROUTING_ALLOCATION_ALLOW_REBALANCE,"always").build());
+  logger.info("--> building initial routing table");
+  MetaData metaData=MetaData.builder().put(IndexMetaData.builder("test").settings(settings(Version.CURRENT)).numberOfShards(1).numberOfReplicas(1)).build();
+  RoutingTable routingTable=RoutingTable.builder().addAsNew(metaData.index("test")).build();
+  ClusterState clusterState=ClusterState.builder(org.elasticsearch.cluster.ClusterName.DEFAULT).metaData(metaData).routingTable(routingTable).build();
+  logger.info("--> adding 2 nodes on same rack and do rerouting");
+  clusterState=ClusterState.builder(clusterState).nodes(DiscoveryNodes.builder().put(newNode("node1")).put(newNode("node2"))).build();
+  RoutingAllocation.Result rerouteResult=allocation.reroute(clusterState,"reroute");
+  clusterState=ClusterState.builder(clusterState).routingTable(rerouteResult.routingTable()).build();
+  rerouteResult=allocation.applyStartedShards(clusterState,clusterState.getRoutingNodes().shardsWithState(INITIALIZING));
+  clusterState=ClusterState.builder(clusterState).routingTable(rerouteResult.routingTable()).build();
+  rerouteResult=allocation.applyStartedShards(clusterState,clusterState.getRoutingNodes().shardsWithState(INITIALIZING));
+  clusterState=ClusterState.builder(clusterState).routingTable(rerouteResult.routingTable()).build();
+  logger.info("--> verifying all is allocated");
+  assertThat(clusterState.getRoutingNodes().node("node1").size(),equalTo(1));
+  assertThat(clusterState.getRoutingNodes().node("node1").get(0).state(),equalTo(STARTED));
+  assertThat(clusterState.getRoutingNodes().node("node2").size(),equalTo(1));
+  assertThat(clusterState.getRoutingNodes().node("node2").get(0).state(),equalTo(STARTED));
+  logger.info("--> fail node with primary");
+  String nodeIdToFail=clusterState.routingTable().index("test").shard(0).primaryShard().currentNodeId();
+  String nodeIdRemaining=nodeIdToFail.equals("node1") ? "node2" : "node1";
+  clusterState=ClusterState.builder(clusterState).nodes(DiscoveryNodes.builder().put(newNode(nodeIdRemaining))).build();
+  rerouteResult=allocation.reroute(clusterState,"reroute");
+  clusterState=ClusterState.builder(clusterState).routingTable(rerouteResult.routingTable()).build();
+  assertThat(clusterState.getRoutingNodes().node(nodeIdRemaining).get(0).primary(),equalTo(true));
+  assertThat(clusterState.getRoutingNodes().node(nodeIdRemaining).get(0).state(),equalTo(STARTED));
+}

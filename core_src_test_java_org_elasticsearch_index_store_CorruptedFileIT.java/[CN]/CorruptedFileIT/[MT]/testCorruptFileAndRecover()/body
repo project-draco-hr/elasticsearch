@@ -5,7 +5,7 @@
     logger.info("--> cluster has [3] data nodes, corrupted primary will be overwritten");
   }
   assertThat(cluster().numDataNodes(),greaterThanOrEqualTo(3));
-  assertAcked(prepareCreate("test").setSettings(Settings.builder().put(IndexMetaData.SETTING_NUMBER_OF_SHARDS,"1").put(IndexMetaData.SETTING_NUMBER_OF_REPLICAS,"1").put(MergePolicyConfig.INDEX_MERGE_ENABLED,false).put(MockFSDirectoryService.CHECK_INDEX_ON_CLOSE,false).put(IndexShard.INDEX_TRANSLOG_DISABLE_FLUSH,true).put("indices.recovery.concurrent_streams",10)));
+  assertAcked(prepareCreate("test").setSettings(Settings.builder().put(IndexMetaData.SETTING_NUMBER_OF_SHARDS,"1").put(IndexMetaData.SETTING_NUMBER_OF_REPLICAS,"1").put(MergePolicyConfig.INDEX_MERGE_ENABLED,false).put(MockFSIndexStore.CHECK_INDEX_ON_CLOSE,false).put(IndexShard.INDEX_TRANSLOG_DISABLE_FLUSH,true).put("indices.recovery.concurrent_streams",10)));
   ensureGreen();
   disableAllocation("test");
   IndexRequestBuilder[] builders=new IndexRequestBuilder[numDocs];
@@ -15,7 +15,7 @@
   indexRandom(true,builders);
   ensureGreen();
   assertAllSuccessful(client().admin().indices().prepareFlush().setForce(true).setWaitIfOngoing(true).execute().actionGet());
-  CountResponse countResponse=client().prepareCount().get();
+  SearchResponse countResponse=client().prepareSearch().setSize(0).get();
   assertHitCount(countResponse,numDocs);
   final int numShards=numShards("test");
   ShardRouting corruptedShardRouting=corruptRandomPrimaryFile();
@@ -36,10 +36,10 @@
   }
   final CountDownLatch latch=new CountDownLatch(numShards * 3);
   final CopyOnWriteArrayList<Throwable> exception=new CopyOnWriteArrayList<>();
-  final IndicesLifecycle.Listener listener=new IndicesLifecycle.Listener(){
-    @Override public void afterIndexShardClosed(    ShardId sid,    @Nullable IndexShard indexShard,    @IndexSettings Settings indexSettings){
+  final IndexEventListener listener=new IndexEventListener(){
+    @Override public void afterIndexShardClosed(    ShardId sid,    @Nullable IndexShard indexShard,    Settings indexSettings){
       if (indexShard != null) {
-        Store store=((IndexShard)indexShard).store();
+        Store store=indexShard.store();
         store.incRef();
         try {
           if (!Lucene.indexExists(store.directory()) && indexShard.state() == IndexShardState.STARTED) {
@@ -68,8 +68,8 @@
     }
   }
 ;
-  for (  IndicesService service : internalCluster().getDataNodeInstances(IndicesService.class)) {
-    service.indicesLifecycle().addListener(listener);
+  for (  MockIndexEventListener.TestEventListener eventListener : internalCluster().getDataNodeInstances(MockIndexEventListener.TestEventListener.class)) {
+    eventListener.setNewDelegate(listener);
   }
   try {
     client().admin().indices().prepareDelete("test").get();
@@ -77,8 +77,8 @@
     assertThat(exception,empty());
   }
   finally {
-    for (    IndicesService service : internalCluster().getDataNodeInstances(IndicesService.class)) {
-      service.indicesLifecycle().removeListener(listener);
+    for (    MockIndexEventListener.TestEventListener eventListener : internalCluster().getDataNodeInstances(MockIndexEventListener.TestEventListener.class)) {
+      eventListener.setNewDelegate(null);
     }
   }
 }

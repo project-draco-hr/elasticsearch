@@ -1,0 +1,15 @@
+{
+  createIndex("test_index");
+  ensureGreen("test_index");
+  client().prepareIndex("test_index","test_type","1").setSource("{\"foo\":\"bar\"}").get();
+  flush("test_index");
+  int iterations=randomIntBetween(2,11);
+  for (int i=1; i < iterations; i++) {
+    PutIndexedScriptResponse response=client().preparePutIndexedScript(GroovyScriptEngineService.NAME,"script1","{\"script\":\"" + i + "\"}").get();
+    assertEquals(i,response.getVersion());
+    SearchResponse searchResponse=client().prepareSearch().setSource(new SearchSourceBuilder().query(QueryBuilders.matchAllQuery()).scriptField("test_field",new Script("script1",ScriptType.INDEXED,"groovy",null))).setIndices("test_index").setTypes("test_type").get();
+    assertHitCount(searchResponse,1);
+    SearchHit sh=searchResponse.getHits().getAt(0);
+    assertThat((Integer)sh.field("test_field").getValue(),equalTo(i));
+  }
+}

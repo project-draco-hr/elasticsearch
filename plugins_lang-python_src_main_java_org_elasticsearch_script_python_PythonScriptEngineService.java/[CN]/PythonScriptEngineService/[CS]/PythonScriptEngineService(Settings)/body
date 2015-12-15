@@ -1,12 +1,28 @@
 {
   super(settings);
-  SecurityManager sm=System.getSecurityManager();
+  final SecurityManager sm=System.getSecurityManager();
   if (sm != null) {
     sm.checkPermission(new SpecialPermission());
   }
   this.interp=AccessController.doPrivileged(new PrivilegedAction<PythonInterpreter>(){
     @Override public PythonInterpreter run(){
-      return PythonInterpreter.threadLocalStateInterpreter(null);
+      final AccessControlContext engineContext=AccessController.getContext();
+      PythonInterpreter interp=PythonInterpreter.threadLocalStateInterpreter(null);
+      if (sm != null) {
+        interp.getSystemState().setClassLoader(new ClassLoader(getClass().getClassLoader()){
+          @Override protected Class<?> loadClass(          String name,          boolean resolve) throws ClassNotFoundException {
+            try {
+              engineContext.checkPermission(new ClassPermission(name));
+            }
+ catch (            SecurityException e) {
+              throw new ClassNotFoundException(name,e);
+            }
+            return super.loadClass(name,resolve);
+          }
+        }
+);
+      }
+      return interp;
     }
   }
 );

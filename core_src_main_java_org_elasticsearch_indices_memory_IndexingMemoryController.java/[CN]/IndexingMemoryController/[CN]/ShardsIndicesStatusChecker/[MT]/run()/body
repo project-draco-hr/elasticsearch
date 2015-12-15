@@ -1,41 +1,40 @@
 {
   long totalBytesUsed=0;
-  for (  ShardId shardId : availableShards()) {
-    Long refreshingBytes=refreshingBytes.get(shardId);
-    checkIdle(shardId,inactiveTime.nanos());
-    Long refreshingBytes=refreshingBytes.get(shardId);
-    long shardBytesUsed=getIndexBufferRAMBytesUsed(shardId);
-    if (refreshingBytes != null) {
-      shardBytesUsed-=refreshingBytes;
+  for (  IndexShard shard : availableShards()) {
+    checkIdle(shard,inactiveTime.nanos());
+    Long bytes=refreshingBytes.get(shard);
+    long shardBytesUsed=getIndexBufferRAMBytesUsed(shard);
+    if (bytes != null) {
+      shardBytesUsed-=bytes;
       if (shardBytesUsed < 0) {
         continue;
       }
     }
     totalBytesUsed+=shardBytesUsed;
-    System.out.println("IMC:   " + shardId + " using "+ (shardBytesUsed / 1024. / 1024.)+ " MB");
+    System.out.println("IMC:   " + shard.shardId() + " using "+ (shardBytesUsed / 1024. / 1024.)+ " MB");
   }
   System.out.println(((System.currentTimeMillis() - startMS) / 1000.0) + ": TOT=" + totalBytesUsed+ " vs "+ indexingBuffer.bytes());
   if (totalBytesUsed - bytesRefreshingNow.get() > indexingBuffer.bytes()) {
     logger.debug("now refreshing some shards: total indexing bytes used [{}] vs index_buffer_size [{}]",new ByteSizeValue(totalBytesUsed),indexingBuffer);
     PriorityQueue<ShardAndBytesUsed> queue=new PriorityQueue<>();
-    for (    ShardId shardId : availableShards()) {
-      Long refreshingBytes=refreshingBytes.get(shardId);
-      long shardBytesUsed=getIndexBufferRAMBytesUsed(shardId);
-      if (refreshingBytes != null) {
-        shardBytesUsed-=refreshingBytes;
+    for (    IndexShard shard : availableShards()) {
+      Long bytes=refreshingBytes.get(shard);
+      long shardBytesUsed=getIndexBufferRAMBytesUsed(shard);
+      if (bytes != null) {
+        shardBytesUsed-=bytes;
         if (shardBytesUsed < 0) {
           continue;
         }
       }
       if (shardBytesUsed > 0) {
-        queue.add(new ShardAndBytesUsed(shardBytesUsed,shardId));
+        queue.add(new ShardAndBytesUsed(shardBytesUsed,shard));
       }
     }
     while (totalBytesUsed > indexingBuffer.bytes() && queue.isEmpty() == false) {
       ShardAndBytesUsed largest=queue.poll();
-      System.out.println("IMC: write " + largest.shardId + ": "+ (largest.bytesUsed / 1024. / 1024.)+ " MB");
-      logger.debug("refresh shard [{}] to free up its [{}] indexing buffer",largest.shardId,new ByteSizeValue(largest.bytesUsed));
-      refreshShardAsync(largest.shardId);
+      System.out.println("IMC: write " + largest.shard.shardId() + ": "+ (largest.bytesUsed / 1024. / 1024.)+ " MB");
+      logger.debug("refresh shard [{}] to free up its [{}] indexing buffer",largest.shard.shardId(),new ByteSizeValue(largest.bytesUsed));
+      refreshShardAsync(largest.shard);
       totalBytesUsed-=largest.bytesUsed;
     }
   }

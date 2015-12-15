@@ -1,0 +1,123 @@
+{
+  AllocationService allocation=createAllocationService(settingsBuilder().put(EnableAllocationDecider.CLUSTER_ROUTING_ALLOCATION_ENABLE,"none").put(EnableAllocationDecider.CLUSTER_ROUTING_REBALANCE_ENABLE,"none").build());
+  logger.info("--> building initial routing table");
+  MetaData metaData=MetaData.builder().put(IndexMetaData.builder("test").settings(settings(Version.CURRENT)).numberOfShards(1).numberOfReplicas(1)).build();
+  RoutingTable routingTable=RoutingTable.builder().addAsNew(metaData.index("test")).build();
+  ClusterState clusterState=ClusterState.builder(org.elasticsearch.cluster.ClusterName.DEFAULT).metaData(metaData).routingTable(routingTable).build();
+  logger.info("--> adding 3 nodes");
+  clusterState=ClusterState.builder(clusterState).nodes(DiscoveryNodes.builder().put(newNode("node1")).put(newNode("node2")).put(newNode("node3"))).build();
+  RoutingAllocation.Result rerouteResult=allocation.reroute(clusterState,"reroute");
+  clusterState=ClusterState.builder(clusterState).routingTable(rerouteResult.routingTable()).build();
+  assertThat(clusterState.getRoutingNodes().shardsWithState(INITIALIZING).size(),equalTo(0));
+  logger.info("--> allocating with primary flag set to true");
+  rerouteResult=allocation.reroute(clusterState,new AllocationCommands(new AllocateAllocationCommand(new ShardId("test",0),"node1",true)));
+  assertThat(rerouteResult.changed(),equalTo(true));
+  clusterState=ClusterState.builder(clusterState).routingTable(rerouteResult.routingTable()).build();
+  assertThat(clusterState.getRoutingNodes().node("node1").size(),equalTo(1));
+  assertThat(clusterState.getRoutingNodes().node("node1").shardsWithState(INITIALIZING).size(),equalTo(1));
+  assertThat(clusterState.getRoutingNodes().node("node2").size(),equalTo(0));
+  logger.info("--> cancel primary allocation, make sure it fails...");
+  try {
+    allocation.reroute(clusterState,new AllocationCommands(new CancelAllocationCommand(new ShardId("test",0),"node1",false)));
+    fail();
+  }
+ catch (  IllegalArgumentException e) {
+  }
+  logger.info("--> start the primary shard");
+  rerouteResult=allocation.applyStartedShards(clusterState,clusterState.getRoutingNodes().shardsWithState(INITIALIZING));
+  clusterState=ClusterState.builder(clusterState).routingTable(rerouteResult.routingTable()).build();
+  assertThat(clusterState.getRoutingNodes().node("node1").size(),equalTo(1));
+  assertThat(clusterState.getRoutingNodes().node("node1").shardsWithState(STARTED).size(),equalTo(1));
+  assertThat(clusterState.getRoutingNodes().node("node2").size(),equalTo(0));
+  logger.info("--> cancel primary allocation, make sure it fails...");
+  try {
+    allocation.reroute(clusterState,new AllocationCommands(new CancelAllocationCommand(new ShardId("test",0),"node1",false)));
+    fail();
+  }
+ catch (  IllegalArgumentException e) {
+  }
+  logger.info("--> allocate the replica shard on on the second node");
+  rerouteResult=allocation.reroute(clusterState,new AllocationCommands(new AllocateAllocationCommand(new ShardId("test",0),"node2",false)));
+  assertThat(rerouteResult.changed(),equalTo(true));
+  clusterState=ClusterState.builder(clusterState).routingTable(rerouteResult.routingTable()).build();
+  assertThat(clusterState.getRoutingNodes().node("node1").size(),equalTo(1));
+  assertThat(clusterState.getRoutingNodes().node("node1").shardsWithState(STARTED).size(),equalTo(1));
+  assertThat(clusterState.getRoutingNodes().node("node2").size(),equalTo(1));
+  assertThat(clusterState.getRoutingNodes().node("node2").shardsWithState(INITIALIZING).size(),equalTo(1));
+  logger.info("--> cancel the relocation allocation");
+  rerouteResult=allocation.reroute(clusterState,new AllocationCommands(new CancelAllocationCommand(new ShardId("test",0),"node2",false)));
+  assertThat(rerouteResult.changed(),equalTo(true));
+  clusterState=ClusterState.builder(clusterState).routingTable(rerouteResult.routingTable()).build();
+  assertThat(clusterState.getRoutingNodes().node("node1").size(),equalTo(1));
+  assertThat(clusterState.getRoutingNodes().node("node1").shardsWithState(STARTED).size(),equalTo(1));
+  assertThat(clusterState.getRoutingNodes().node("node2").size(),equalTo(0));
+  assertThat(clusterState.getRoutingNodes().node("node3").size(),equalTo(0));
+  logger.info("--> allocate the replica shard on on the second node");
+  rerouteResult=allocation.reroute(clusterState,new AllocationCommands(new AllocateAllocationCommand(new ShardId("test",0),"node2",false)));
+  assertThat(rerouteResult.changed(),equalTo(true));
+  clusterState=ClusterState.builder(clusterState).routingTable(rerouteResult.routingTable()).build();
+  assertThat(clusterState.getRoutingNodes().node("node1").size(),equalTo(1));
+  assertThat(clusterState.getRoutingNodes().node("node1").shardsWithState(STARTED).size(),equalTo(1));
+  assertThat(clusterState.getRoutingNodes().node("node2").size(),equalTo(1));
+  assertThat(clusterState.getRoutingNodes().node("node2").shardsWithState(INITIALIZING).size(),equalTo(1));
+  logger.info("--> cancel the primary being replicated, make sure it fails");
+  try {
+    allocation.reroute(clusterState,new AllocationCommands(new CancelAllocationCommand(new ShardId("test",0),"node1",false)));
+    fail();
+  }
+ catch (  IllegalArgumentException e) {
+  }
+  logger.info("--> start the replica shard");
+  rerouteResult=allocation.applyStartedShards(clusterState,clusterState.getRoutingNodes().shardsWithState(INITIALIZING));
+  clusterState=ClusterState.builder(clusterState).routingTable(rerouteResult.routingTable()).build();
+  assertThat(clusterState.getRoutingNodes().node("node1").size(),equalTo(1));
+  assertThat(clusterState.getRoutingNodes().node("node1").shardsWithState(STARTED).size(),equalTo(1));
+  assertThat(clusterState.getRoutingNodes().node("node2").size(),equalTo(1));
+  assertThat(clusterState.getRoutingNodes().node("node2").shardsWithState(STARTED).size(),equalTo(1));
+  logger.info("--> cancel allocation of the replica shard");
+  rerouteResult=allocation.reroute(clusterState,new AllocationCommands(new CancelAllocationCommand(new ShardId("test",0),"node2",false)));
+  assertThat(rerouteResult.changed(),equalTo(true));
+  clusterState=ClusterState.builder(clusterState).routingTable(rerouteResult.routingTable()).build();
+  assertThat(clusterState.getRoutingNodes().node("node1").size(),equalTo(1));
+  assertThat(clusterState.getRoutingNodes().node("node1").shardsWithState(STARTED).size(),equalTo(1));
+  assertThat(clusterState.getRoutingNodes().node("node2").size(),equalTo(0));
+  assertThat(clusterState.getRoutingNodes().node("node3").size(),equalTo(0));
+  logger.info("--> allocate the replica shard on on the second node");
+  rerouteResult=allocation.reroute(clusterState,new AllocationCommands(new AllocateAllocationCommand(new ShardId("test",0),"node2",false)));
+  clusterState=ClusterState.builder(clusterState).routingTable(rerouteResult.routingTable()).build();
+  assertThat(rerouteResult.changed(),equalTo(true));
+  assertThat(clusterState.getRoutingNodes().node("node1").size(),equalTo(1));
+  assertThat(clusterState.getRoutingNodes().node("node1").shardsWithState(STARTED).size(),equalTo(1));
+  assertThat(clusterState.getRoutingNodes().node("node2").size(),equalTo(1));
+  assertThat(clusterState.getRoutingNodes().node("node2").shardsWithState(INITIALIZING).size(),equalTo(1));
+  logger.info("--> start the replica shard");
+  rerouteResult=allocation.applyStartedShards(clusterState,clusterState.getRoutingNodes().shardsWithState(INITIALIZING));
+  clusterState=ClusterState.builder(clusterState).routingTable(rerouteResult.routingTable()).build();
+  assertThat(clusterState.getRoutingNodes().node("node1").size(),equalTo(1));
+  assertThat(clusterState.getRoutingNodes().node("node1").shardsWithState(STARTED).size(),equalTo(1));
+  assertThat(clusterState.getRoutingNodes().node("node2").size(),equalTo(1));
+  assertThat(clusterState.getRoutingNodes().node("node2").shardsWithState(STARTED).size(),equalTo(1));
+  logger.info("--> move the replica shard");
+  rerouteResult=allocation.reroute(clusterState,new AllocationCommands(new MoveAllocationCommand(new ShardId("test",0),"node2","node3")));
+  clusterState=ClusterState.builder(clusterState).routingTable(rerouteResult.routingTable()).build();
+  assertThat(clusterState.getRoutingNodes().node("node1").size(),equalTo(1));
+  assertThat(clusterState.getRoutingNodes().node("node1").shardsWithState(STARTED).size(),equalTo(1));
+  assertThat(clusterState.getRoutingNodes().node("node2").size(),equalTo(1));
+  assertThat(clusterState.getRoutingNodes().node("node2").shardsWithState(RELOCATING).size(),equalTo(1));
+  assertThat(clusterState.getRoutingNodes().node("node3").size(),equalTo(1));
+  assertThat(clusterState.getRoutingNodes().node("node3").shardsWithState(INITIALIZING).size(),equalTo(1));
+  logger.info("--> cancel the move of the replica shard");
+  rerouteResult=allocation.reroute(clusterState,new AllocationCommands(new CancelAllocationCommand(new ShardId("test",0),"node3",false)));
+  clusterState=ClusterState.builder(clusterState).routingTable(rerouteResult.routingTable()).build();
+  assertThat(clusterState.getRoutingNodes().node("node1").size(),equalTo(1));
+  assertThat(clusterState.getRoutingNodes().node("node1").shardsWithState(STARTED).size(),equalTo(1));
+  assertThat(clusterState.getRoutingNodes().node("node2").size(),equalTo(1));
+  assertThat(clusterState.getRoutingNodes().node("node2").shardsWithState(STARTED).size(),equalTo(1));
+  logger.info("--> cancel the primary allocation (with allow_primary set to true)");
+  rerouteResult=allocation.reroute(clusterState,new AllocationCommands(new CancelAllocationCommand(new ShardId("test",0),"node1",true)));
+  clusterState=ClusterState.builder(clusterState).routingTable(rerouteResult.routingTable()).build();
+  assertThat(rerouteResult.changed(),equalTo(true));
+  assertThat(clusterState.getRoutingNodes().node("node2").shardsWithState(STARTED).get(0).primary(),equalTo(true));
+  assertThat(clusterState.getRoutingNodes().node("node1").size(),equalTo(0));
+  assertThat(clusterState.getRoutingNodes().node("node3").size(),equalTo(0));
+}

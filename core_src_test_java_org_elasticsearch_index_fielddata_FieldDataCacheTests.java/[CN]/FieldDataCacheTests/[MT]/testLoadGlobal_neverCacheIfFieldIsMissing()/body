@@ -1,0 +1,31 @@
+{
+  Directory dir=newDirectory();
+  IndexWriterConfig iwc=new IndexWriterConfig(null);
+  iwc.setMergePolicy(NoMergePolicy.INSTANCE);
+  IndexWriter iw=new IndexWriter(dir,iwc);
+  long numDocs=scaledRandomIntBetween(32,128);
+  for (int i=1; i <= numDocs; i++) {
+    Document doc=new Document();
+    doc.add(new SortedSetDocValuesField("field1",new BytesRef(String.valueOf(i))));
+    doc.add(new StringField("field2",String.valueOf(i),Field.Store.NO));
+    iw.addDocument(doc);
+    if (i % 24 == 0) {
+      iw.commit();
+    }
+  }
+  iw.close();
+  DirectoryReader ir=ElasticsearchDirectoryReader.wrap(DirectoryReader.open(dir),new ShardId("_index",0));
+  DummyAccountingFieldDataCache fieldDataCache=new DummyAccountingFieldDataCache();
+  SortedSetDVOrdinalsIndexFieldData sortedSetDVOrdinalsIndexFieldData=createSortedDV("field1",fieldDataCache);
+  sortedSetDVOrdinalsIndexFieldData.loadGlobal(ir);
+  assertThat(fieldDataCache.cachedGlobally,equalTo(1));
+  sortedSetDVOrdinalsIndexFieldData.loadGlobal(new FieldMaskingReader("field1",ir));
+  assertThat(fieldDataCache.cachedGlobally,equalTo(1));
+  PagedBytesIndexFieldData pagedBytesIndexFieldData=createPagedBytes("field2",fieldDataCache);
+  pagedBytesIndexFieldData.loadGlobal(ir);
+  assertThat(fieldDataCache.cachedGlobally,equalTo(2));
+  pagedBytesIndexFieldData.loadGlobal(new FieldMaskingReader("field2",ir));
+  assertThat(fieldDataCache.cachedGlobally,equalTo(2));
+  ir.close();
+  dir.close();
+}

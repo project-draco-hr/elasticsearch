@@ -8,7 +8,7 @@ case UPSERT:
   final BytesReference upsertSourceBytes=upsertRequest.source();
 indexAction.execute(upsertRequest,new ActionListener<IndexResponse>(){
   @Override public void onResponse(  IndexResponse response){
-    UpdateResponse update=new UpdateResponse(response.getShardInfo(),response.getIndex(),response.getType(),response.getId(),response.getVersion(),response.isCreated());
+    UpdateResponse update=new UpdateResponse(response.getShardInfo(),response.getShardId(),response.getType(),response.getId(),response.getVersion(),response.isCreated());
     if (request.fields() != null && request.fields().length > 0) {
       Tuple<XContentType,Map<String,Object>> sourceAndContent=XContentHelper.convertToMap(upsertSourceBytes,true);
       update.setGetResult(updateHelper.extractGetResult(request,request.concreteIndex(),response.getVersion(),sourceAndContent.v2(),sourceAndContent.v1(),upsertSourceBytes));
@@ -22,6 +22,7 @@ indexAction.execute(upsertRequest,new ActionListener<IndexResponse>(){
     e=ExceptionsHelper.unwrapCause(e);
     if (e instanceof VersionConflictEngineException) {
       if (retryCount < request.retryOnConflict()) {
+        logger.trace("Retry attempt [{}] of [{}] on version conflict on [{}][{}][{}]",retryCount + 1,request.retryOnConflict(),request.index(),request.shardId(),request.id());
         threadPool.executor(executor()).execute(new ActionRunnable<UpdateResponse>(listener){
           @Override protected void doRun(){
             shardOperation(request,listener,retryCount + 1);
@@ -41,7 +42,7 @@ IndexRequest indexRequest=new IndexRequest(result.action(),request);
 final BytesReference indexSourceBytes=indexRequest.source();
 indexAction.execute(indexRequest,new ActionListener<IndexResponse>(){
 @Override public void onResponse(IndexResponse response){
-UpdateResponse update=new UpdateResponse(response.getShardInfo(),response.getIndex(),response.getType(),response.getId(),response.getVersion(),response.isCreated());
+UpdateResponse update=new UpdateResponse(response.getShardInfo(),response.getShardId(),response.getType(),response.getId(),response.getVersion(),response.isCreated());
 update.setGetResult(updateHelper.extractGetResult(request,request.concreteIndex(),response.getVersion(),result.updatedSourceAsMap(),result.updateSourceContentType(),indexSourceBytes));
 listener.onResponse(update);
 }
@@ -67,7 +68,7 @@ case DELETE:
 DeleteRequest deleteRequest=new DeleteRequest(result.action(),request);
 deleteAction.execute(deleteRequest,new ActionListener<DeleteResponse>(){
 @Override public void onResponse(DeleteResponse response){
-UpdateResponse update=new UpdateResponse(response.getShardInfo(),response.getIndex(),response.getType(),response.getId(),response.getVersion(),false);
+UpdateResponse update=new UpdateResponse(response.getShardInfo(),response.getShardId(),response.getType(),response.getId(),response.getVersion(),false);
 update.setGetResult(updateHelper.extractGetResult(request,request.concreteIndex(),response.getVersion(),result.updatedSourceAsMap(),result.updateSourceContentType(),null));
 listener.onResponse(update);
 }

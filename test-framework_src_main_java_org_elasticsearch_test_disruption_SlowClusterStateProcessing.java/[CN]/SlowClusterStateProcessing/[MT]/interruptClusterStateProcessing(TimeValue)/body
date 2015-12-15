@@ -1,0 +1,41 @@
+{
+  final String disruptionNodeCopy=disruptedNode;
+  if (disruptionNodeCopy == null) {
+    return false;
+  }
+  logger.info("delaying cluster state updates on node [{}] for [{}]",disruptionNodeCopy,duration);
+  final CountDownLatch countDownLatch=new CountDownLatch(1);
+  ClusterService clusterService=cluster.getInstance(ClusterService.class,disruptionNodeCopy);
+  if (clusterService == null) {
+    return false;
+  }
+  final AtomicBoolean stopped=new AtomicBoolean(false);
+  clusterService.submitStateUpdateTask("service_disruption_delay",new ClusterStateUpdateTask(Priority.IMMEDIATE){
+    @Override public boolean runOnlyOnMaster(){
+      return false;
+    }
+    @Override public ClusterState execute(    ClusterState currentState) throws Exception {
+      long count=duration.millis() / 200;
+      for (; count > 0 && !stopped.get(); count--) {
+        Thread.sleep(200);
+      }
+      if (!stopped.get()) {
+        Thread.sleep(duration.millis() % 200);
+      }
+      countDownLatch.countDown();
+      return currentState;
+    }
+    @Override public void onFailure(    String source,    Throwable t){
+      countDownLatch.countDown();
+    }
+  }
+);
+  try {
+    countDownLatch.await();
+  }
+ catch (  InterruptedException e) {
+    stopped.set(true);
+    countDownLatch.await();
+  }
+  return true;
+}

@@ -1,0 +1,21 @@
+{
+  List<IndexRequestBuilder> builders=new ArrayList<>();
+  builders.add(client().prepareIndex(ScriptService.SCRIPT_INDEX,"groovy","script1").setSource("{" + "\"script\":\"2\"" + "}").setTimeout(TimeValue.timeValueSeconds(randomIntBetween(2,10))));
+  builders.add(client().prepareIndex(ScriptService.SCRIPT_INDEX,"groovy","script2").setSource("{" + "\"script\":\"factor*2\"" + "}"));
+  indexRandom(true,builders);
+  builders.clear();
+  builders.add(client().prepareIndex("test","scriptTest","1").setSource("{\"theField\":\"foo\"}"));
+  builders.add(client().prepareIndex("test","scriptTest","2").setSource("{\"theField\":\"foo 2\"}"));
+  builders.add(client().prepareIndex("test","scriptTest","3").setSource("{\"theField\":\"foo 3\"}"));
+  builders.add(client().prepareIndex("test","scriptTest","4").setSource("{\"theField\":\"foo 4\"}"));
+  builders.add(client().prepareIndex("test","scriptTest","5").setSource("{\"theField\":\"bar\"}"));
+  indexRandom(true,builders);
+  Map<String,Object> script2Params=new HashMap<>();
+  script2Params.put("factor",3);
+  SearchResponse searchResponse=client().prepareSearch().setSource(new SearchSourceBuilder().query(QueryBuilders.matchAllQuery()).size(1).scriptField("test1",new Script("script1",ScriptType.INDEXED,"groovy",null)).scriptField("test2",new Script("script2",ScriptType.INDEXED,"groovy",script2Params))).setIndices("test").setTypes("scriptTest").get();
+  assertHitCount(searchResponse,5);
+  assertTrue(searchResponse.getHits().hits().length == 1);
+  SearchHit sh=searchResponse.getHits().getAt(0);
+  assertThat((Integer)sh.field("test1").getValue(),equalTo(2));
+  assertThat((Integer)sh.field("test2").getValue(),equalTo(6));
+}

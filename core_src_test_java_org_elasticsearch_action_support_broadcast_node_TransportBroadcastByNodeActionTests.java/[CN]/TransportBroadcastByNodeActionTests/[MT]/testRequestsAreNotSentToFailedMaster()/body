@@ -1,0 +1,22 @@
+{
+  Request request=new Request(new String[]{TEST_INDEX});
+  PlainActionFuture<Response> listener=new PlainActionFuture<>();
+  DiscoveryNode masterNode=clusterService.state().nodes().masterNode();
+  DiscoveryNodes.Builder builder=DiscoveryNodes.builder(clusterService.state().getNodes());
+  builder.remove(masterNode.id());
+  clusterService.setState(ClusterState.builder(clusterService.state()).nodes(builder));
+  action.new AsyncAction(request,listener).start();
+  Map<String,List<CapturingTransport.CapturedRequest>> capturedRequests=transport.capturedRequestsByTargetNode();
+  ShardsIterator shardIt=clusterService.state().routingTable().allShards(new String[]{TEST_INDEX});
+  Set<String> set=new HashSet<>();
+  for (  ShardRouting shard : shardIt.asUnordered()) {
+    if (!shard.currentNodeId().equals(masterNode.id())) {
+      set.add(shard.currentNodeId());
+    }
+  }
+  assertEquals(set.size(),capturedRequests.size());
+  assertEquals(set,capturedRequests.keySet());
+  for (  Map.Entry<String,List<CapturingTransport.CapturedRequest>> entry : capturedRequests.entrySet()) {
+    assertEquals(1,entry.getValue().size());
+  }
+}

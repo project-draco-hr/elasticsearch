@@ -1,0 +1,12 @@
+{
+  PutIndexedScriptResponse scriptResponse=transportClient().preparePutIndexedScript(GroovyScriptEngineService.NAME,"my_script",jsonBuilder().startObject().field("script","_score * 10").endObject().string()).get();
+  assertThat(scriptResponse.isCreated(),is(true));
+  transportClient().prepareIndex(queryIndex,"type","1").setSource(jsonBuilder().startObject().field("name","Star Wars - The new republic").endObject()).get();
+  transportClient().admin().indices().prepareRefresh(queryIndex).get();
+  SearchResponse searchResponse=transportClient().prepareSearch(queryIndex).setQuery(QueryBuilders.functionScoreQuery(new ScriptScoreFunctionBuilder(new Script("my_script",ScriptType.INDEXED,"groovy",null))).boostMode(CombineFunction.REPLACE)).get();
+  assertNoFailures(searchResponse);
+  assertHitCount(searchResponse,1);
+  assertThat(searchResponse.getHits().getMaxScore(),is(10.0f));
+  assertGetRequestsContainHeaders(".scripts");
+  assertRequestsContainHeader(PutIndexedScriptRequest.class);
+}

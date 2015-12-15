@@ -4,21 +4,21 @@
   String node3=internalCluster().startNode();
   final AtomicInteger beforeAddedCount=new AtomicInteger(0);
   final AtomicInteger allCreatedCount=new AtomicInteger(0);
-  IndicesLifecycle.Listener listener=new IndicesLifecycle.Listener(){
-    @Override public void beforeIndexAddedToCluster(    Index index,    @IndexSettings Settings indexSettings){
+  IndexEventListener listener=new IndexEventListener(){
+    @Override public void beforeIndexAddedToCluster(    Index index,    Settings indexSettings){
       beforeAddedCount.incrementAndGet();
       if (indexSettings.getAsBoolean("index.fail",false)) {
         throw new ElasticsearchException("failing on purpose");
       }
     }
-    @Override public void beforeIndexCreated(    Index index,    @IndexSettings Settings indexSettings){
+    @Override public void beforeIndexCreated(    Index index,    Settings indexSettings){
       allCreatedCount.incrementAndGet();
     }
   }
 ;
-  internalCluster().getInstance(IndicesLifecycle.class,node1).addListener(listener);
-  internalCluster().getInstance(IndicesLifecycle.class,node2).addListener(listener);
-  internalCluster().getInstance(IndicesLifecycle.class,node3).addListener(listener);
+  internalCluster().getInstance(MockIndexEventListener.TestEventListener.class,node1).setNewDelegate(listener);
+  internalCluster().getInstance(MockIndexEventListener.TestEventListener.class,node2).setNewDelegate(listener);
+  internalCluster().getInstance(MockIndexEventListener.TestEventListener.class,node3).setNewDelegate(listener);
   client().admin().indices().prepareCreate("test").setSettings(IndexMetaData.SETTING_NUMBER_OF_SHARDS,3,IndexMetaData.SETTING_NUMBER_OF_REPLICAS,1).get();
   ensureGreen("test");
   assertThat("beforeIndexAddedToCluster called only once",beforeAddedCount.get(),equalTo(1));

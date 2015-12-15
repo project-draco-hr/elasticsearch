@@ -1,0 +1,80 @@
+{
+  Client client=client();
+  logger.info("-->  creating repository");
+  assertAcked(client.admin().cluster().preparePutRepository("test-repo").setType("fs").setSettings(Settings.settingsBuilder().put("location",randomRepoPath()).put("compress",randomBoolean()).put("chunk_size",randomIntBetween(100,1000),ByteSizeUnit.BYTES)));
+  createIndex("test-idx-1","test-idx-2","test-idx-3");
+  ensureGreen();
+  logger.info("--> indexing some data");
+  for (int i=0; i < 100; i++) {
+    index("test-idx-1","doc",Integer.toString(i),"foo","bar" + i);
+    index("test-idx-2","doc",Integer.toString(i),"foo","baz" + i);
+    index("test-idx-3","doc",Integer.toString(i),"foo","baz" + i);
+  }
+  refresh();
+  assertHitCount(client.prepareSearch("test-idx-1").setSize(0).get(),100L);
+  assertHitCount(client.prepareSearch("test-idx-2").setSize(0).get(),100L);
+  assertHitCount(client.prepareSearch("test-idx-3").setSize(0).get(),100L);
+  ListenableActionFuture<FlushResponse> flushResponseFuture=null;
+  if (randomBoolean()) {
+    ArrayList<String> indicesToFlush=new ArrayList<>();
+    for (int i=1; i < 4; i++) {
+      if (randomBoolean()) {
+        indicesToFlush.add("test-idx-" + i);
+      }
+    }
+    if (!indicesToFlush.isEmpty()) {
+      String[] indices=indicesToFlush.toArray(new String[indicesToFlush.size()]);
+      logger.info("--> starting asynchronous flush for indices {}",Arrays.toString(indices));
+      flushResponseFuture=client.admin().indices().prepareFlush(indices).execute();
+    }
+  }
+  logger.info("--> snapshot");
+  CreateSnapshotResponse createSnapshotResponse=client.admin().cluster().prepareCreateSnapshot("test-repo","test-snap").setWaitForCompletion(true).setIndices("test-idx-*","-test-idx-3").get();
+  assertThat(createSnapshotResponse.getSnapshotInfo().successfulShards(),greaterThan(0));
+  assertThat(createSnapshotResponse.getSnapshotInfo().successfulShards(),equalTo(createSnapshotResponse.getSnapshotInfo().totalShards()));
+  List<SnapshotInfo> snapshotInfos=client.admin().cluster().prepareGetSnapshots("test-repo").setSnapshots(randomFrom("test-snap","_all","*","*-snap","test*")).get().getSnapshots();
+  assertThat(snapshotInfos.size(),equalTo(1));
+  SnapshotInfo snapshotInfo=snapshotInfos.get(0);
+  assertThat(snapshotInfo.state(),equalTo(SnapshotState.SUCCESS));
+  assertThat(snapshotInfo.version(),equalTo(Version.CURRENT));
+  logger.info("--> delete some data");
+  for (int i=0; i < 50; i++) {
+    client.prepareDelete("test-idx-1","doc",Integer.toString(i)).get();
+  }
+  for (int i=50; i < 100; i++) {
+    client.prepareDelete("test-idx-2","doc",Integer.toString(i)).get();
+  }
+  for (int i=0; i < 100; i+=2) {
+    client.prepareDelete("test-idx-3","doc",Integer.toString(i)).get();
+  }
+  assertAllSuccessful(refresh());
+  assertHitCount(client.prepareSearch("test-idx-1").setSize(0).get(),50L);
+  assertHitCount(client.prepareSearch("test-idx-2").setSize(0).get(),50L);
+  assertHitCount(client.prepareSearch("test-idx-3").setSize(0).get(),50L);
+  logger.info("--> close indices");
+  client.admin().indices().prepareClose("test-idx-1","test-idx-2").get();
+  logger.info("--> restore all indices from the snapshot");
+  RestoreSnapshotResponse restoreSnapshotResponse=client.admin().cluster().prepareRestoreSnapshot("test-repo","test-snap").setWaitForCompletion(true).execute().actionGet();
+  assertThat(restoreSnapshotResponse.getRestoreInfo().totalShards(),greaterThan(0));
+  ensureGreen();
+  for (int i=0; i < 5; i++) {
+    assertHitCount(client.prepareSearch("test-idx-1").setSize(0).get(),100L);
+    assertHitCount(client.prepareSearch("test-idx-2").setSize(0).get(),100L);
+    assertHitCount(client.prepareSearch("test-idx-3").setSize(0).get(),50L);
+  }
+  logger.info("--> delete indices");
+  cluster().wipeIndices("test-idx-1","test-idx-2");
+  logger.info("--> restore one index after deletion");
+  restoreSnapshotResponse=client.admin().cluster().prepareRestoreSnapshot("test-repo","test-snap").setWaitForCompletion(true).setIndices("test-idx-*","-test-idx-2").execute().actionGet();
+  assertThat(restoreSnapshotResponse.getRestoreInfo().totalShards(),greaterThan(0));
+  ensureGreen();
+  for (int i=0; i < 5; i++) {
+    assertHitCount(client.prepareSearch("test-idx-1").setSize(0).get(),100L);
+  }
+  ClusterState clusterState=client.admin().cluster().prepareState().get().getState();
+  assertThat(clusterState.getMetaData().hasIndex("test-idx-1"),equalTo(true));
+  assertThat(clusterState.getMetaData().hasIndex("test-idx-2"),equalTo(false));
+  if (flushResponseFuture != null) {
+    flushResponseFuture.actionGet();
+  }
+}

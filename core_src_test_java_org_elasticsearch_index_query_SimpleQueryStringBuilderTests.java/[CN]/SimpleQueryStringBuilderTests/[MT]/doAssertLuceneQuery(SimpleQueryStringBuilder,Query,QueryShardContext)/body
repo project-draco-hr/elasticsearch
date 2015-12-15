@@ -1,10 +1,10 @@
 {
   assertThat(query,notNullValue());
   if ("".equals(queryBuilder.value())) {
-    assertTrue("Query should have been MatchNoDocsQuery but was " + query.getClass().getName(),query instanceof MatchNoDocsQuery);
+    assertThat(query,instanceOf(MatchNoDocsQuery.class));
   }
  else   if (queryBuilder.fields().size() > 1) {
-    assertTrue("Query should have been BooleanQuery but was " + query.getClass().getName(),query instanceof BooleanQuery);
+    assertThat(query,instanceOf(BooleanQuery.class));
     BooleanQuery boolQuery=(BooleanQuery)query;
     if (queryBuilder.lowercaseExpandedTerms()) {
       for (      BooleanClause clause : boolQuery.clauses()) {
@@ -15,29 +15,21 @@
       }
     }
     assertThat(boolQuery.clauses().size(),equalTo(queryBuilder.fields().size()));
-    Iterator<String> fields=queryBuilder.fields().keySet().iterator();
+    Iterator<Map.Entry<String,Float>> fieldsIterator=queryBuilder.fields().entrySet().iterator();
     for (    BooleanClause booleanClause : boolQuery) {
-      assertThat(booleanClause.getQuery(),instanceOf(TermQuery.class));
-      TermQuery termQuery=(TermQuery)booleanClause.getQuery();
-      assertThat(termQuery.getTerm().field(),equalTo(fields.next()));
-      assertThat(termQuery.getTerm().text().toLowerCase(Locale.ROOT),equalTo(queryBuilder.value().toLowerCase(Locale.ROOT)));
+      Map.Entry<String,Float> field=fieldsIterator.next();
+      assertTermOrBoostQuery(booleanClause.getQuery(),field.getKey(),queryBuilder.value(),field.getValue());
     }
     if (queryBuilder.minimumShouldMatch() != null) {
       assertThat(boolQuery.getMinimumNumberShouldMatch(),greaterThan(0));
     }
   }
- else   if (queryBuilder.fields().size() <= 1) {
-    assertTrue("Query should have been TermQuery but was " + query.getClass().getName(),query instanceof TermQuery);
-    TermQuery termQuery=(TermQuery)query;
-    String field;
-    if (queryBuilder.fields().size() == 0) {
-      field=MetaData.ALL;
-    }
- else {
-      field=queryBuilder.fields().keySet().iterator().next();
-    }
-    assertThat(termQuery.getTerm().field(),equalTo(field));
-    assertThat(termQuery.getTerm().text().toLowerCase(Locale.ROOT),equalTo(queryBuilder.value().toLowerCase(Locale.ROOT)));
+ else   if (queryBuilder.fields().size() == 1) {
+    Map.Entry<String,Float> field=queryBuilder.fields().entrySet().iterator().next();
+    assertTermOrBoostQuery(query,field.getKey(),queryBuilder.value(),field.getValue());
+  }
+ else   if (queryBuilder.fields().size() == 0) {
+    assertTermQuery(query,MetaData.ALL,queryBuilder.value());
   }
  else {
     fail("Encountered lucene query type we do not have a validation implementation for in our " + SimpleQueryStringBuilderTests.class.getSimpleName());
