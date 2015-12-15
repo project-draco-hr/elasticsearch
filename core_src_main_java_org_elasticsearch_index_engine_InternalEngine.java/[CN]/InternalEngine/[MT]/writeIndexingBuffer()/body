@@ -1,0 +1,28 @@
+{
+  boolean useRefresh=versionMapRefreshPending.get() || (indexWriter.ramBytesUsed() / 4 < versionMap.ramBytesUsedForRefresh());
+  try (ReleasableLock lock=readLock.acquire()){
+    ensureOpen();
+    if (useRefresh) {
+      searcherManager.maybeRefreshBlocking();
+    }
+ else {
+      indexWriter.flush();
+    }
+  }
+ catch (  AlreadyClosedException e) {
+    ensureOpen();
+    maybeFailEngine("writeIndexingBuffer",e);
+  }
+catch (  EngineClosedException e) {
+    throw e;
+  }
+catch (  Throwable t) {
+    failEngine("writeIndexingBuffer failed",t);
+    throw new RefreshFailedEngineException(shardId,t);
+  }
+  if (useRefresh) {
+    maybePruneDeletedTombstones();
+    versionMapRefreshPending.set(false);
+    mergeScheduler.refreshConfig();
+  }
+}
