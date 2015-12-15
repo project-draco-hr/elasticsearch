@@ -1,44 +1,14 @@
 {
   Path tempDir=createTempDir();
-  final AtomicBoolean simulateDiskFull=new AtomicBoolean();
+  final AtomicBoolean fail=new AtomicBoolean();
   TranslogConfig config=getTranslogConfig(tempDir);
-  Translog translog=new Translog(config){
-    @Override TranslogWriter.ChannelFactory getChannelFactory(){
-      final TranslogWriter.ChannelFactory factory=super.getChannelFactory();
-      return new TranslogWriter.ChannelFactory(){
-        @Override public FileChannel open(        Path file) throws IOException {
-          FileChannel channel=factory.open(file);
-          return new FilterFileChannel(channel){
-            @Override public int write(            ByteBuffer src) throws IOException {
-              if (simulateDiskFull.get()) {
-                if (src.limit() > 1) {
-                  final int pos=src.position();
-                  final int limit=src.limit();
-                  src.limit(limit / 2);
-                  super.write(src);
-                  src.position(pos);
-                  src.limit(limit);
-                  throw new IOException("__FAKE__ no space left on device");
-                }
-              }
-              return super.write(src);
-            }
-          }
-;
-        }
-      }
-;
-    }
-  }
-;
+  Translog translog=getFailableTranslog(fail,config);
   List<Translog.Location> locations=new ArrayList<>();
   int opsSynced=0;
-  int opsAdded=0;
   boolean failed=false;
   while (failed == false) {
     try {
       locations.add(translog.add(new Translog.Index("test","" + opsSynced,Integer.toString(opsSynced).getBytes(Charset.forName("UTF-8")))));
-      opsAdded++;
       translog.sync();
       opsSynced++;
     }
@@ -47,9 +17,9 @@
       assertFalse(translog.isOpen());
       assertEquals("__FAKE__ no space left on device",ex.getMessage());
     }
-    simulateDiskFull.set(randomBoolean());
+    fail.set(randomBoolean());
   }
-  simulateDiskFull.set(false);
+  fail.set(false);
   if (randomBoolean()) {
     try {
       locations.add(translog.add(new Translog.Index("test","" + opsSynced,Integer.toString(opsSynced).getBytes(Charset.forName("UTF-8")))));
