@@ -1,0 +1,28 @@
+{
+  final String index="test";
+  final ShardId shardId=new ShardId(index,0);
+  clusterService.setState(state(index,true,ShardRoutingState.STARTED,randomBoolean() ? ShardRoutingState.INITIALIZING : ShardRoutingState.STARTED));
+  logger.debug("--> using initial state:\n{}",clusterService.state().prettyPrint());
+  final ClusterState stateWithRelocatingReplica=state(index,true,ShardRoutingState.STARTED,ShardRoutingState.RELOCATING);
+  final Action actionWithRelocatingReplicasAfterPrimaryOp=new Action(Settings.EMPTY,"testAction",transportService,clusterService,threadPool){
+    @Override protected Tuple<Response,Request> shardOperationOnPrimary(    MetaData metaData,    Request shardRequest) throws Throwable {
+      final Tuple<Response,Request> operationOnPrimary=super.shardOperationOnPrimary(metaData,shardRequest);
+      ((TestClusterService)clusterService).setState(stateWithRelocatingReplica);
+      logger.debug("--> state after primary operation:\n{}",clusterService.state().prettyPrint());
+      return operationOnPrimary;
+    }
+  }
+;
+  Request request=new Request(shardId);
+  PlainActionFuture<Response> listener=new PlainActionFuture<>();
+  TransportReplicationAction<Request,Request,Response>.PrimaryPhase primaryPhase=actionWithRelocatingReplicasAfterPrimaryOp.new PrimaryPhase(request,createTransportChannel(listener));
+  primaryPhase.run();
+  assertThat("request was not processed on primary",request.processedOnPrimary.get(),equalTo(true));
+  ShardRouting relocatingReplicaShard=stateWithRelocatingReplica.getRoutingTable().shardRoutingTable(index,shardId.id()).replicaShards().get(0);
+  for (  String node : new String[]{relocatingReplicaShard.currentNodeId(),relocatingReplicaShard.relocatingNodeId()}) {
+    List<CapturingTransport.CapturedRequest> requests=transport.capturedRequestsByTargetNode().get(node);
+    assertThat(requests,notNullValue());
+    assertThat(requests.size(),equalTo(1));
+    assertThat("replica request was not sent to replica",requests.get(0).action,equalTo("testAction[r]"));
+  }
+}

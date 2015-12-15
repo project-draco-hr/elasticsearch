@@ -1,0 +1,40 @@
+{
+  final StatementMetadata whilesmd=adapter.getStatementMetadata(ctx);
+  incrementScope();
+  final ExpressionContext exprctx=adapter.updateExpressionTree(ctx.expression());
+  final ExpressionMetadata expremd=adapter.createExpressionMetadata(exprctx);
+  expremd.to=definition.booleanType;
+  visit(exprctx);
+  markCast(expremd);
+  boolean exitrequired=false;
+  if (expremd.postConst != null) {
+    boolean constant=(boolean)expremd.postConst;
+    if (!constant) {
+      throw new IllegalArgumentException(error(ctx) + "The loop will never be executed.");
+    }
+    exitrequired=true;
+  }
+  final BlockContext blockctx=ctx.block();
+  if (blockctx != null) {
+    final StatementMetadata blocksmd=adapter.createStatementMetadata(blockctx);
+    visit(blockctx);
+    if (blocksmd.allReturn) {
+      throw new IllegalArgumentException(error(ctx) + "All paths return so the loop is not necessary.");
+    }
+    if (blocksmd.allBreak) {
+      throw new IllegalArgumentException(error(ctx) + "All paths break so the loop is not necessary.");
+    }
+    if (exitrequired && !blocksmd.anyReturn && !blocksmd.anyBreak) {
+      throw new IllegalArgumentException(error(ctx) + "The loop will never exit.");
+    }
+    if (exitrequired && blocksmd.anyReturn && !blocksmd.anyBreak) {
+      whilesmd.allExit=true;
+      whilesmd.allReturn=true;
+    }
+  }
+ else   if (exitrequired) {
+    throw new IllegalArgumentException(error(ctx) + "The loop will never exit.");
+  }
+  decrementScope();
+  return null;
+}

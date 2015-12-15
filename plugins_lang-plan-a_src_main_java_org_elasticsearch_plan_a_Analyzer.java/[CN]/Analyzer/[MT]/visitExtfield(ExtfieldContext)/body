@@ -1,0 +1,134 @@
+{
+  final ExtNodeMetadata memberenmd=adapter.getExtNodeMetadata(ctx);
+  final ParserRuleContext parent=memberenmd.parent;
+  final ExternalMetadata parentemd=adapter.getExternalMetadata(parent);
+  if (ctx.EXTID() == null && ctx.EXTINTEGER() == null) {
+    throw new IllegalArgumentException(error(ctx) + "Unexpected parser state.");
+  }
+  final String value=ctx.EXTID() == null ? ctx.EXTINTEGER().getText() : ctx.EXTID().getText();
+  final ExtdotContext dotctx=ctx.extdot();
+  final ExtbraceContext bracectx=ctx.extbrace();
+  memberenmd.last=parentemd.scope == 0 && dotctx == null && bracectx == null;
+  final boolean store=memberenmd.last && parentemd.storeExpr != null;
+  if (parentemd.current == null) {
+    throw new IllegalStateException(error(ctx) + "Unexpected field [" + value+ "] load.");
+  }
+  if (parentemd.current.sort == Sort.ARRAY) {
+    if ("length".equals(value)) {
+      if (!parentemd.read) {
+        throw new IllegalArgumentException(error(ctx) + "Must read array field [length].");
+      }
+ else       if (store) {
+        throw new IllegalArgumentException(error(ctx) + "Cannot write to read-only array field [length].");
+      }
+      memberenmd.target="#length";
+      memberenmd.type=definition.intType;
+      parentemd.current=definition.intType;
+    }
+ else {
+      throw new IllegalArgumentException(error(ctx) + "Unexpected array field [" + value+ "].");
+    }
+  }
+ else   if (parentemd.current.sort == Sort.DEF) {
+    memberenmd.target=value;
+    memberenmd.type=definition.defType;
+    analyzeLoadStoreExternal(ctx);
+    parentemd.current=memberenmd.type;
+  }
+ else {
+    final Struct struct=parentemd.current.struct;
+    final Field field=parentemd.statik ? struct.statics.get(value) : struct.members.get(value);
+    if (field != null) {
+      if (store && java.lang.reflect.Modifier.isFinal(field.reflect.getModifiers())) {
+        throw new IllegalArgumentException(error(ctx) + "Cannot write to read-only" + " field ["+ value+ "] for type ["+ struct.name+ "].");
+      }
+      memberenmd.target=field;
+      memberenmd.type=field.type;
+      analyzeLoadStoreExternal(ctx);
+      parentemd.current=memberenmd.type;
+    }
+ else {
+      final boolean get=parentemd.read || parentemd.token > 0 || !memberenmd.last;
+      final boolean set=memberenmd.last && store;
+      Method getter=struct.methods.get("get" + Character.toUpperCase(value.charAt(0)) + value.substring(1));
+      Method setter=struct.methods.get("set" + Character.toUpperCase(value.charAt(0)) + value.substring(1));
+      Object constant=null;
+      if (getter != null && (getter.rtn.sort == Sort.VOID || !getter.arguments.isEmpty())) {
+        throw new IllegalArgumentException(error(ctx) + "Illegal get shortcut on field [" + value+ "] for type ["+ struct.name+ "].");
+      }
+      if (setter != null && (setter.rtn.sort != Sort.VOID || setter.arguments.size() != 1)) {
+        throw new IllegalArgumentException(error(ctx) + "Illegal set shortcut on field [" + value+ "] for type ["+ struct.name+ "].");
+      }
+      Type settype=setter == null ? null : setter.arguments.get(0);
+      if (getter == null && setter == null) {
+        if (ctx.EXTID() != null) {
+          try {
+            parentemd.current.clazz.asSubclass(Map.class);
+            getter=parentemd.current.struct.methods.get("get");
+            setter=parentemd.current.struct.methods.get("put");
+            if (getter != null && (getter.rtn.sort == Sort.VOID || getter.arguments.size() != 1 || getter.arguments.get(0).sort != Sort.STRING)) {
+              throw new IllegalArgumentException(error(ctx) + "Illegal map get shortcut [" + value+ "] for type ["+ struct.name+ "].");
+            }
+            if (setter != null && (setter.arguments.size() != 2 || setter.arguments.get(0).sort != Sort.STRING)) {
+              throw new IllegalArgumentException(error(ctx) + "Illegal map set shortcut [" + value+ "] for type ["+ struct.name+ "].");
+            }
+            if (getter != null && setter != null && !getter.rtn.equals(setter.arguments.get(1))) {
+              throw new IllegalArgumentException(error(ctx) + "Shortcut argument types must match.");
+            }
+            settype=setter == null ? null : setter.arguments.get(1);
+            constant=value;
+          }
+ catch (          ClassCastException exception) {
+          }
+        }
+ else         if (ctx.EXTINTEGER() != null) {
+          try {
+            parentemd.current.clazz.asSubclass(List.class);
+            getter=parentemd.current.struct.methods.get("get");
+            setter=parentemd.current.struct.methods.get("add");
+            if (getter != null && (getter.rtn.sort == Sort.VOID || getter.arguments.size() != 1 || getter.arguments.get(0).sort != Sort.INT)) {
+              throw new IllegalArgumentException(error(ctx) + "Illegal list get shortcut [" + value+ "] for type ["+ struct.name+ "].");
+            }
+            if (setter != null && (setter.rtn.sort != Sort.VOID || setter.arguments.size() != 2 || setter.arguments.get(0).sort != Sort.INT)) {
+              throw new IllegalArgumentException(error(ctx) + "Illegal list add shortcut [" + value+ "] for type ["+ struct.name+ "].");
+            }
+            if (getter != null && setter != null && !getter.rtn.equals(setter.arguments.get(1))) {
+              throw new IllegalArgumentException(error(ctx) + "Shortcut argument types must match.");
+            }
+            settype=setter == null ? null : setter.arguments.get(1);
+            try {
+              constant=Integer.parseInt(value);
+            }
+ catch (            NumberFormatException exception) {
+              throw new IllegalArgumentException(error(ctx) + "Illegal list shortcut value [" + value+ "].");
+            }
+          }
+ catch (          ClassCastException exception) {
+          }
+        }
+ else {
+          throw new IllegalStateException(error(ctx) + "Unexpected parser state.");
+        }
+      }
+      if ((get || set) && (!get || getter != null) && (!set || setter != null)) {
+        memberenmd.target=new Object[]{getter,setter,constant != null,constant};
+        memberenmd.type=get ? getter.rtn : settype;
+        analyzeLoadStoreExternal(ctx);
+        parentemd.current=get ? getter.rtn : setter.rtn;
+      }
+    }
+    if (memberenmd.target == null) {
+      throw new IllegalArgumentException(error(ctx) + "Unknown field [" + value+ "] for type ["+ struct.name+ "].");
+    }
+  }
+  parentemd.statik=false;
+  if (dotctx != null) {
+    adapter.createExtNodeMetadata(parent,dotctx);
+    visit(dotctx);
+  }
+ else   if (bracectx != null) {
+    adapter.createExtNodeMetadata(parent,bracectx);
+    visit(bracectx);
+  }
+  return null;
+}

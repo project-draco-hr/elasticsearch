@@ -1,0 +1,77 @@
+{
+  DetailAnalyzeResponse detailResponse;
+  final Set<String> includeAttributes=new HashSet<>();
+  if (request.attributes() != null) {
+    for (    String attribute : request.attributes()) {
+      includeAttributes.add(attribute.toLowerCase(Locale.ROOT));
+    }
+  }
+  CustomAnalyzer customAnalyzer=null;
+  if (analyzer instanceof CustomAnalyzer) {
+    customAnalyzer=(CustomAnalyzer)analyzer;
+  }
+ else   if (analyzer instanceof NamedAnalyzer && ((NamedAnalyzer)analyzer).analyzer() instanceof CustomAnalyzer) {
+    customAnalyzer=(CustomAnalyzer)((NamedAnalyzer)analyzer).analyzer();
+  }
+  if (customAnalyzer != null) {
+    CharFilterFactory[] charFilterFactories=customAnalyzer.charFilters();
+    TokenizerFactory tokenizerFactory=customAnalyzer.tokenizerFactory();
+    TokenFilterFactory[] tokenFilterFactories=customAnalyzer.tokenFilters();
+    String[][] charFiltersTexts=new String[charFilterFactories != null ? charFilterFactories.length : 0][request.text().length];
+    TokenListCreator[] tokenFiltersTokenListCreator=new TokenListCreator[tokenFilterFactories != null ? tokenFilterFactories.length : 0];
+    TokenListCreator tokenizerTokenListCreator=new TokenListCreator();
+    for (int textIndex=0; textIndex < request.text().length; textIndex++) {
+      String charFilteredSource=request.text()[textIndex];
+      Reader reader=new FastStringReader(charFilteredSource);
+      if (charFilterFactories != null) {
+        for (int charFilterIndex=0; charFilterIndex < charFilterFactories.length; charFilterIndex++) {
+          reader=charFilterFactories[charFilterIndex].create(reader);
+          Reader readerForWriteOut=new FastStringReader(charFilteredSource);
+          readerForWriteOut=charFilterFactories[charFilterIndex].create(readerForWriteOut);
+          charFilteredSource=writeCharStream(readerForWriteOut);
+          charFiltersTexts[charFilterIndex][textIndex]=charFilteredSource;
+        }
+      }
+      Tokenizer tokenizer=tokenizerFactory.create();
+      tokenizer.setReader(reader);
+      tokenizerTokenListCreator.analyze(tokenizer,customAnalyzer,field,includeAttributes);
+      if (tokenFilterFactories != null) {
+        for (int tokenFilterIndex=0; tokenFilterIndex < tokenFilterFactories.length; tokenFilterIndex++) {
+          if (tokenFiltersTokenListCreator[tokenFilterIndex] == null) {
+            tokenFiltersTokenListCreator[tokenFilterIndex]=new TokenListCreator();
+          }
+          TokenStream stream=createStackedTokenStream(request.text()[textIndex],charFilterFactories,tokenizerFactory,tokenFilterFactories,tokenFilterIndex + 1);
+          tokenFiltersTokenListCreator[tokenFilterIndex].analyze(stream,customAnalyzer,field,includeAttributes);
+        }
+      }
+    }
+    DetailAnalyzeResponse.CharFilteredText[] charFilteredLists=new DetailAnalyzeResponse.CharFilteredText[charFiltersTexts.length];
+    if (charFilterFactories != null) {
+      for (int charFilterIndex=0; charFilterIndex < charFiltersTexts.length; charFilterIndex++) {
+        charFilteredLists[charFilterIndex]=new DetailAnalyzeResponse.CharFilteredText(charFilterFactories[charFilterIndex].name(),charFiltersTexts[charFilterIndex]);
+      }
+    }
+    DetailAnalyzeResponse.AnalyzeTokenList[] tokenFilterLists=new DetailAnalyzeResponse.AnalyzeTokenList[tokenFiltersTokenListCreator.length];
+    if (tokenFilterFactories != null) {
+      for (int tokenFilterIndex=0; tokenFilterIndex < tokenFiltersTokenListCreator.length; tokenFilterIndex++) {
+        tokenFilterLists[tokenFilterIndex]=new DetailAnalyzeResponse.AnalyzeTokenList(tokenFilterFactories[tokenFilterIndex].name(),tokenFiltersTokenListCreator[tokenFilterIndex].getArrayTokens());
+      }
+    }
+    detailResponse=new DetailAnalyzeResponse(charFilteredLists,new DetailAnalyzeResponse.AnalyzeTokenList(tokenizerFactory.name(),tokenizerTokenListCreator.getArrayTokens()),tokenFilterLists);
+  }
+ else {
+    String name;
+    if (analyzer instanceof NamedAnalyzer) {
+      name=((NamedAnalyzer)analyzer).name();
+    }
+ else {
+      name=analyzer.getClass().getName();
+    }
+    TokenListCreator tokenListCreator=new TokenListCreator();
+    for (    String text : request.text()) {
+      tokenListCreator.analyze(analyzer.tokenStream(field,text),analyzer,field,includeAttributes);
+    }
+    detailResponse=new DetailAnalyzeResponse(new DetailAnalyzeResponse.AnalyzeTokenList(name,tokenListCreator.getArrayTokens()));
+  }
+  return detailResponse;
+}

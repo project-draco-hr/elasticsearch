@@ -1,0 +1,68 @@
+{
+  final Struct owner=structs.get(struct);
+  if (owner == null) {
+    throw new IllegalArgumentException("Owner struct [" + struct + "] not defined for "+ (statik ? "static" : "member")+ " ["+ name+ "].");
+  }
+  if (!name.matches("^[_a-zA-Z][_a-zA-Z0-9]*$")) {
+    throw new IllegalArgumentException("Invalid " + (statik ? "static" : "member") + " name ["+ name+ "] with the struct ["+ owner.name+ "].");
+  }
+  if (owner.statics.containsKey(name)) {
+    if (statik) {
+      throw new IllegalArgumentException("Duplicate static name [" + name + "]"+ " found within the struct ["+ owner.name+ "].");
+    }
+ else {
+      throw new IllegalArgumentException("Statics and members may not have the same name " + "[" + name + "] within the same struct ["+ owner.name+ "].");
+    }
+  }
+  if (owner.members.containsKey(name)) {
+    if (statik) {
+      throw new IllegalArgumentException("Statics and members may not have the same name " + "[" + name + "] within the same struct ["+ owner.name+ "].");
+    }
+ else {
+      throw new IllegalArgumentException("Duplicate member name [" + name + "]"+ " found within the struct ["+ owner.name+ "].");
+    }
+  }
+  if (generic != null) {
+    try {
+      generic.clazz.asSubclass(type.clazz);
+    }
+ catch (    ClassCastException exception) {
+      throw new ClassCastException("Generic type [" + generic.clazz.getCanonicalName() + "]"+ " is not a sub class of ["+ type.clazz.getCanonicalName()+ "] for the field"+ " ["+ name+ " ] from the struct ["+ owner.name+ "].");
+    }
+  }
+  java.lang.reflect.Field reflect;
+  try {
+    reflect=owner.clazz.getField(alias == null ? name : alias);
+  }
+ catch (  NoSuchFieldException exception) {
+    throw new IllegalArgumentException("Field [" + (alias == null ? name : alias) + "]"+ " not found for class ["+ owner.clazz.getName()+ "].");
+  }
+  MethodHandle getter=null;
+  MethodHandle setter=null;
+  try {
+    if (!statik) {
+      getter=MethodHandles.publicLookup().in(owner.clazz).findGetter(owner.clazz,alias == null ? name : alias,type.clazz);
+      setter=MethodHandles.publicLookup().in(owner.clazz).findSetter(owner.clazz,alias == null ? name : alias,type.clazz);
+    }
+  }
+ catch (  NoSuchFieldException|IllegalAccessException exception) {
+    throw new IllegalArgumentException("Getter/Setter [" + (alias == null ? name : alias) + "]"+ " not found for class ["+ owner.clazz.getName()+ "].");
+  }
+  final Field field=new Field(name,owner,generic == null ? type : generic,type,reflect,getter,setter);
+  final int modifiers=reflect.getModifiers();
+  if (statik) {
+    if (!java.lang.reflect.Modifier.isStatic(modifiers)) {
+      throw new IllegalArgumentException();
+    }
+    if (!java.lang.reflect.Modifier.isFinal(modifiers)) {
+      throw new IllegalArgumentException("Static [" + name + "]"+ " within the struct ["+ owner.name+ "] is not linked to static Java field.");
+    }
+    owner.statics.put(alias == null ? name : alias,field);
+  }
+ else {
+    if (java.lang.reflect.Modifier.isStatic(modifiers)) {
+      throw new IllegalArgumentException("Member [" + name + "]"+ " within the struct ["+ owner.name+ "] is not linked to non-static Java field.");
+    }
+    owner.members.put(alias == null ? name : alias,field);
+  }
+}
