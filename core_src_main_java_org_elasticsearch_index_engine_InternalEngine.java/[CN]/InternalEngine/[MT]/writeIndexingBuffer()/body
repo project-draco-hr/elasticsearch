@@ -1,11 +1,15 @@
 {
-  boolean useRefresh=versionMapRefreshPending.get() || (indexWriter.ramBytesUsed() / 4 < versionMap.ramBytesUsedForRefresh());
+  long versionMapBytes=versionMap.ramBytesUsedForRefresh();
+  long indexingBufferBytes=indexWriter.ramBytesUsed();
+  boolean useRefresh=versionMapRefreshPending.get() || (indexingBufferBytes / 4 < versionMapBytes);
   try (ReleasableLock lock=readLock.acquire()){
     ensureOpen();
     if (useRefresh) {
-      searcherManager.maybeRefreshBlocking();
+      logger.debug("use refresh to write indexing buffer (heap size=[{}]), to also clear version map (heap size=[{}])",new ByteSizeValue(indexingBufferBytes),new ByteSizeValue(versionMapBytes));
+      refresh("write indexing buffer");
     }
  else {
+      logger.debug("use flush to write indexing buffer (heap size=[{}]) since version map is small (heap size=[{}])",new ByteSizeValue(indexingBufferBytes),new ByteSizeValue(versionMapBytes));
       indexWriter.flush();
     }
   }

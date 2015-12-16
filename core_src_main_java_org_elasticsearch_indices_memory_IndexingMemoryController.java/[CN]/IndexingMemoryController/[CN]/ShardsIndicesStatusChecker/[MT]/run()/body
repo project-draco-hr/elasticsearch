@@ -1,41 +1,64 @@
 {
   long totalBytesUsed=0;
+  long totalBytesWriting=0;
   for (  IndexShard shard : availableShards()) {
     checkIdle(shard,inactiveTime.nanos());
-    Long bytes=refreshingBytes.get(shard);
+    Long shardWritingBytes=writingBytes.get(shard);
     long shardBytesUsed=getIndexBufferRAMBytesUsed(shard);
-    if (bytes != null) {
-      shardBytesUsed-=bytes;
+    if (shardWritingBytes != null) {
+      shardBytesUsed-=shardWritingBytes;
+      totalBytesWriting+=shardWritingBytes;
       if (shardBytesUsed < 0) {
         continue;
       }
     }
     totalBytesUsed+=shardBytesUsed;
-    System.out.println("IMC:   " + shard.shardId() + " using "+ (shardBytesUsed / 1024. / 1024.)+ " MB");
   }
-  System.out.println(((System.currentTimeMillis() - startMS) / 1000.0) + ": TOT=" + totalBytesUsed+ " vs "+ indexingBuffer.bytes());
-  if (totalBytesUsed - bytesRefreshingNow.get() > indexingBuffer.bytes()) {
-    logger.debug("now refreshing some shards: total indexing bytes used [{}] vs index_buffer_size [{}]",new ByteSizeValue(totalBytesUsed),indexingBuffer);
+  if (logger.isTraceEnabled()) {
+    logger.trace("total indexing heap bytes used [{}] vs {} [{}], currently writing bytes [{}]",new ByteSizeValue(totalBytesUsed),INDEX_BUFFER_SIZE_SETTING,indexingBuffer,new ByteSizeValue(totalBytesWriting));
+  }
+  if (totalBytesUsed > indexingBuffer.bytes()) {
+    logger.debug("now write some indexing buffers: total indexing heap bytes used [{}] vs {} [{}], currently writing bytes [{}]",new ByteSizeValue(totalBytesUsed),INDEX_BUFFER_SIZE_SETTING,indexingBuffer,new ByteSizeValue(totalBytesWriting));
     PriorityQueue<ShardAndBytesUsed> queue=new PriorityQueue<>();
     for (    IndexShard shard : availableShards()) {
-      Long bytes=refreshingBytes.get(shard);
+      Long shardWritingBytes=writingBytes.get(shard);
       long shardBytesUsed=getIndexBufferRAMBytesUsed(shard);
-      if (bytes != null) {
-        shardBytesUsed-=bytes;
+      if (shardWritingBytes != null) {
+        shardBytesUsed-=shardWritingBytes;
         if (shardBytesUsed < 0) {
           continue;
         }
       }
       if (shardBytesUsed > 0) {
+        if (logger.isTraceEnabled()) {
+          if (shardWritingBytes != null) {
+            logger.trace("shard [{}] is using [{}] heap, writing [{}] heap",shard.shardId(),shardBytesUsed,shardWritingBytes);
+          }
+ else {
+            logger.trace("shard [{}] is using [{}] heap, not writing any bytes",shard.shardId(),shardBytesUsed);
+          }
+        }
         queue.add(new ShardAndBytesUsed(shardBytesUsed,shard));
       }
     }
+    boolean doThrottle=(totalBytesWriting + totalBytesUsed) > 1.5 * indexingBuffer.bytes();
     while (totalBytesUsed > indexingBuffer.bytes() && queue.isEmpty() == false) {
       ShardAndBytesUsed largest=queue.poll();
-      System.out.println("IMC: write " + largest.shard.shardId() + ": "+ (largest.bytesUsed / 1024. / 1024.)+ " MB");
-      logger.debug("refresh shard [{}] to free up its [{}] indexing buffer",largest.shard.shardId(),new ByteSizeValue(largest.bytesUsed));
+      logger.debug("write indexing buffer to disk for shard [{}] to free up its [{}] indexing buffer",largest.shard.shardId(),new ByteSizeValue(largest.bytesUsed));
       writeIndexingBufferAsync(largest.shard);
       totalBytesUsed-=largest.bytesUsed;
+      if (doThrottle && throttled.contains(largest.shard) == false) {
+        logger.info("now throttling indexing for shard [{}]: segment writing can't keep up",largest.shard.shardId());
+        throttled.add(largest.shard);
+        largest.shard.activateThrottling();
+      }
+    }
+    if (doThrottle == false) {
+      for (      IndexShard shard : throttled) {
+        logger.info("stop throttling indexing for shard [{}]",shard.shardId());
+        shard.deactivateThrottling();
+      }
+      throttled.clear();
     }
   }
   bytesWrittenSinceCheck=0;
