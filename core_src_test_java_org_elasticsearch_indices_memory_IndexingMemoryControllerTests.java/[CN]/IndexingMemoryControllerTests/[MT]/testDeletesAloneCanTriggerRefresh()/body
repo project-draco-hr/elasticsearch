@@ -1,0 +1,39 @@
+{
+  createIndex("index",Settings.builder().put(SETTING_NUMBER_OF_SHARDS,1).put(SETTING_NUMBER_OF_REPLICAS,0).put("index.refresh_interval",-1).build());
+  ensureGreen();
+  IndicesService indicesService=getInstanceFromNode(IndicesService.class);
+  IndexService indexService=indicesService.indexService("index");
+  IndexShard shard=indexService.getShardOrNull(0);
+  assertNotNull(shard);
+  for (int i=0; i < 100; i++) {
+    String id=Integer.toString(i);
+    client().prepareIndex("index","type",id).setSource("field","value").get();
+  }
+  ForceMergeResponse r=client().admin().indices().prepareForceMerge().setMaxNumSegments(1).execute().actionGet();
+  assertNoFailures(r);
+  Settings settings=Settings.builder().put(IndexingMemoryController.INDEX_BUFFER_SIZE_SETTING,"1kb").build();
+  IndexingMemoryController imc=new IndexingMemoryController(settings,null,null){
+    @Override protected List<IndexShard> availableShards(){
+      return Collections.singletonList(shard);
+    }
+    @Override protected long getIndexBufferRAMBytesUsed(    IndexShard shard){
+      return shard.getIndexBufferRAMBytesUsed();
+    }
+  }
+;
+  for (int i=0; i < 100; i++) {
+    String id=Integer.toString(i);
+    client().prepareDelete("index","type",id).get();
+  }
+  final long indexingBufferBytes1=shard.getIndexBufferRAMBytesUsed();
+  imc.forceCheck();
+  assertBusy(new Runnable(){
+    @Override public void run(){
+      try (Engine.Searcher s2=shard.acquireSearcher("index")){
+        final long indexingBufferBytes2=shard.getIndexBufferRAMBytesUsed();
+        assertTrue(indexingBufferBytes2 < indexingBufferBytes1);
+      }
+     }
+  }
+);
+}
