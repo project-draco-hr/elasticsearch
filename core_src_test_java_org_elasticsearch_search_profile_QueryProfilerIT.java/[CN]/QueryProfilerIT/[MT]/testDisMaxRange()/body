@@ -1,0 +1,28 @@
+{
+  createIndex("test");
+  ensureGreen();
+  int numDocs=randomIntBetween(100,150);
+  IndexRequestBuilder[] docs=new IndexRequestBuilder[numDocs];
+  for (int i=0; i < numDocs; i++) {
+    docs[i]=client().prepareIndex("test","type1",String.valueOf(i)).setSource("field1",English.intToEnglish(i),"field2",i);
+  }
+  indexRandom(true,docs);
+  refresh();
+  QueryBuilder q=QueryBuilders.disMaxQuery().boost(0.33703882f).add(QueryBuilders.rangeQuery("field2").from(null).to(73).includeLower(true).includeUpper(true));
+  logger.info(q.toString());
+  SearchResponse resp=client().prepareSearch().setQuery(q).setProfile(true).setSearchType(SearchType.QUERY_THEN_FETCH).execute().actionGet();
+  assertNotNull("Profile response element should not be null",resp.getProfileResults());
+  for (  Map.Entry<String,List<ProfileShardResult>> shardResult : resp.getProfileResults().entrySet()) {
+    for (    ProfileShardResult searchProfiles : shardResult.getValue()) {
+      for (      ProfileResult result : searchProfiles.getQueryResults()) {
+        assertNotNull(result.getQueryName());
+        assertNotNull(result.getLuceneDescription());
+        assertThat(result.getTime(),greaterThan(0L));
+        assertNotNull(result.getTimeBreakdown());
+      }
+      CollectorResult result=searchProfiles.getCollectorResult();
+      assertThat(result.getName(),not(isEmptyOrNullString()));
+      assertThat(result.getTime(),greaterThan(0L));
+    }
+  }
+}
