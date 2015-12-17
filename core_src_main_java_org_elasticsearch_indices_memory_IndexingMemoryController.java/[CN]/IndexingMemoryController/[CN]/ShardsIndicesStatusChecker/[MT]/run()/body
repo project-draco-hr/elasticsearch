@@ -17,6 +17,7 @@
   if (logger.isTraceEnabled()) {
     logger.trace("total indexing heap bytes used [{}] vs {} [{}], currently writing bytes [{}]",new ByteSizeValue(totalBytesUsed),INDEX_BUFFER_SIZE_SETTING,indexingBuffer,new ByteSizeValue(totalBytesWriting));
   }
+  boolean doThrottle=(totalBytesWriting + totalBytesUsed) > 1.5 * indexingBuffer.bytes();
   if (totalBytesUsed > indexingBuffer.bytes()) {
     logger.debug("now write some indexing buffers: total indexing heap bytes used [{}] vs {} [{}], currently writing bytes [{}]",new ByteSizeValue(totalBytesUsed),INDEX_BUFFER_SIZE_SETTING,indexingBuffer,new ByteSizeValue(totalBytesWriting));
     PriorityQueue<ShardAndBytesUsed> queue=new PriorityQueue<>();
@@ -41,7 +42,6 @@
         queue.add(new ShardAndBytesUsed(shardBytesUsed,shard));
       }
     }
-    boolean doThrottle=(totalBytesWriting + totalBytesUsed) > 1.5 * indexingBuffer.bytes();
     while (totalBytesUsed > indexingBuffer.bytes() && queue.isEmpty() == false) {
       ShardAndBytesUsed largest=queue.poll();
       logger.debug("write indexing buffer to disk for shard [{}] to free up its [{}] indexing buffer",largest.shard.shardId(),new ByteSizeValue(largest.bytesUsed));
@@ -50,16 +50,16 @@
       if (doThrottle && throttled.contains(largest.shard) == false) {
         logger.info("now throttling indexing for shard [{}]: segment writing can't keep up",largest.shard.shardId());
         throttled.add(largest.shard);
-        largest.shard.activateThrottling();
+        activateThrottling(largest.shard);
       }
     }
-    if (doThrottle == false) {
-      for (      IndexShard shard : throttled) {
-        logger.info("stop throttling indexing for shard [{}]",shard.shardId());
-        shard.deactivateThrottling();
-      }
-      throttled.clear();
+  }
+  if (doThrottle == false) {
+    for (    IndexShard shard : throttled) {
+      logger.info("stop throttling indexing for shard [{}]",shard.shardId());
+      deactivateThrottling(shard);
     }
+    throttled.clear();
   }
   bytesWrittenSinceCheck=0;
 }
