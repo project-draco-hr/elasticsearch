@@ -1,11 +1,23 @@
 {
-  boolean rename=SecurityUtils.execute(blobStore.fileSystemFactory(),new FsCallback<Boolean>(){
-    @Override public Boolean doInHdfs(    FileSystem fs) throws IOException {
-      return fs.rename(new Path(path,sourceBlobName),new Path(path,targetBlobName));
+  SecurityUtils.execute(blobStore.fileContextFactory(),new FcCallback<Void>(){
+    @Override public Void doInHdfs(    FileContext fc) throws IOException {
+      Path source=new Path(path,sourceBlobName);
+      FSDataOutputStream stream=null;
+      try {
+        stream=fc.create(source,EnumSet.of(CreateFlag.APPEND,CreateFlag.SYNC_BLOCK),CreateOpts.donotCreateParent());
+      }
+ catch (      IOException ex) {
+      }
+      if (stream != null) {
+        try (OutputStream s=stream){
+          if (s instanceof Syncable) {
+            ((Syncable)s).hsync();
+          }
+        }
+       }
+      fc.rename(source,new Path(path,targetBlobName));
+      return null;
     }
   }
 );
-  if (!rename) {
-    throw new IOException(String.format(Locale.ROOT,"can not move blob from [%s] to [%s]",sourceBlobName,targetBlobName));
-  }
 }

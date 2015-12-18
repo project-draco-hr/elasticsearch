@@ -1,0 +1,32 @@
+{
+  Configuration cfg=new Configuration(repositorySettings.settings().getAsBoolean("load_defaults",settings.getAsBoolean("load_defaults",true)));
+  cfg.setClassLoader(this.getClass().getClassLoader());
+  cfg.reloadConfiguration();
+  String confLocation=repositorySettings.settings().get("conf_location",settings.get("conf_location"));
+  if (Strings.hasText(confLocation)) {
+    for (    String entry : Strings.commaDelimitedListToStringArray(confLocation)) {
+      addConfigLocation(cfg,entry.trim());
+    }
+  }
+  Map<String,String> map=repositorySettings.settings().getByPrefix("conf.").getAsMap();
+  for (  Entry<String,String> entry : map.entrySet()) {
+    cfg.set(entry.getKey(),entry.getValue());
+  }
+  try {
+    UserGroupInformation.setConfiguration(cfg);
+  }
+ catch (  Throwable th) {
+    throw new ElasticsearchGenerationException(String.format(Locale.ROOT,"Cannot initialize Hadoop"),th);
+  }
+  String uri=repositorySettings.settings().get("uri",settings.get("uri"));
+  URI actualUri=(uri != null ? URI.create(uri) : null);
+  try {
+    String disableFsCache=String.format(Locale.ROOT,"fs.%s.impl.disable.cache",actualUri.getScheme());
+    cfg.setBoolean(disableFsCache,true);
+    AbstractFileSystem fs=AbstractFileSystem.get(actualUri,cfg);
+    return FileContext.getFileContext(fs,cfg);
+  }
+ catch (  Exception ex) {
+    throw new ElasticsearchGenerationException(String.format(Locale.ROOT,"Cannot create Hdfs file-system for uri [%s]",actualUri),ex);
+  }
+}
