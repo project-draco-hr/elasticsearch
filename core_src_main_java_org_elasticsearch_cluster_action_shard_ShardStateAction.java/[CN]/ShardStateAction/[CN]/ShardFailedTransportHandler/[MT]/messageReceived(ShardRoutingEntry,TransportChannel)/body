@@ -1,4 +1,31 @@
 {
-  handleShardFailureOnMaster(request);
-  channel.sendResponse(TransportResponse.Empty.INSTANCE);
+  handleShardFailureOnMaster(request,new ClusterStateTaskListener(){
+    @Override public void onFailure(    String source,    Throwable t){
+      logger.error("unexpected failure while failing shard [{}]",t,request.shardRouting);
+      try {
+        channel.sendResponse(t);
+      }
+ catch (      Throwable channelThrowable) {
+        logger.warn("failed to send failure [{}] while failing shard [{}]",channelThrowable,t,request.shardRouting);
+      }
+    }
+    @Override public void onNoLongerMaster(    String source){
+      logger.error("no longer master while failing shard [{}]",request.shardRouting);
+      try {
+        channel.sendResponse(new NotMasterException(source));
+      }
+ catch (      Throwable channelThrowable) {
+        logger.warn("failed to send no longer master while failing shard [{}]",channelThrowable,request.shardRouting);
+      }
+    }
+    @Override public void clusterStateProcessed(    String source,    ClusterState oldState,    ClusterState newState){
+      try {
+        channel.sendResponse(TransportResponse.Empty.INSTANCE);
+      }
+ catch (      Throwable channelThrowable) {
+        logger.warn("failed to send response while failing shard [{}]",channelThrowable,request.shardRouting);
+      }
+    }
+  }
+);
 }
