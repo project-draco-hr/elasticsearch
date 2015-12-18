@@ -2,9 +2,12 @@
   String threadPoolName=randomThreadPool(ThreadPool.ThreadPoolType.FIXED);
   ThreadPool threadPool=null;
   try {
-    threadPool=new ThreadPool(settingsBuilder().put("name","testCachedExecutorType").build());
+    Settings nodeSettings=Settings.settingsBuilder().put("name","testFixedExecutorType").build();
+    threadPool=new ThreadPool(nodeSettings);
+    ClusterSettings clusterSettings=new ClusterSettings(nodeSettings,ClusterSettings.BUILT_IN_CLUSTER_SETTINGS);
+    threadPool.setClusterSettings(clusterSettings);
     assertThat(threadPool.executor(threadPoolName),instanceOf(EsThreadPoolExecutor.class));
-    threadPool.updateSettings(settingsBuilder().put("threadpool." + threadPoolName + ".size","15").build());
+    Settings settings=clusterSettings.applySettings(settingsBuilder().put("threadpool." + threadPoolName + ".size","15").build());
     assertEquals(info(threadPool,threadPoolName).getThreadPoolType(),ThreadPool.ThreadPoolType.FIXED);
     assertThat(threadPool.executor(threadPoolName),instanceOf(EsThreadPoolExecutor.class));
     assertThat(((EsThreadPoolExecutor)threadPool.executor(threadPoolName)).getCorePoolSize(),equalTo(15));
@@ -12,7 +15,7 @@
     assertThat(info(threadPool,threadPoolName).getMin(),equalTo(15));
     assertThat(info(threadPool,threadPoolName).getMax(),equalTo(15));
     assertThat(((EsThreadPoolExecutor)threadPool.executor(threadPoolName)).getKeepAliveTime(TimeUnit.MINUTES),equalTo(0L));
-    threadPool.updateSettings(Settings.EMPTY);
+    settings=clusterSettings.applySettings(Settings.EMPTY);
     assertEquals(info(threadPool,threadPoolName).getThreadPoolType(),ThreadPool.ThreadPoolType.FIXED);
     assertThat(info(threadPool,threadPoolName).getKeepAlive(),nullValue());
     assertThat(info(threadPool,threadPoolName).getMin(),equalTo(15));
@@ -21,14 +24,14 @@
     assertThat(((EsThreadPoolExecutor)threadPool.executor(threadPoolName)).getCorePoolSize(),equalTo(15));
     assertThat(((EsThreadPoolExecutor)threadPool.executor(threadPoolName)).getMaximumPoolSize(),equalTo(15));
     Executor oldExecutor=threadPool.executor(threadPoolName);
-    threadPool.updateSettings(settingsBuilder().put("threadpool." + threadPoolName + ".size","10").build());
+    settings=clusterSettings.applySettings(settingsBuilder().put(settings).put("threadpool." + threadPoolName + ".size","10").build());
     assertThat(info(threadPool,threadPoolName).getMax(),equalTo(10));
     assertThat(info(threadPool,threadPoolName).getMin(),equalTo(10));
     assertThat(((EsThreadPoolExecutor)threadPool.executor(threadPoolName)).getMaximumPoolSize(),equalTo(10));
     assertThat(((EsThreadPoolExecutor)threadPool.executor(threadPoolName)).getCorePoolSize(),equalTo(10));
     assertEquals(info(threadPool,threadPoolName).getThreadPoolType(),ThreadPool.ThreadPoolType.FIXED);
     assertThat(threadPool.executor(threadPoolName),sameInstance(oldExecutor));
-    threadPool.updateSettings(settingsBuilder().put("threadpool." + threadPoolName + ".queue","500").build());
+    settings=clusterSettings.applySettings(settingsBuilder().put(settings).put("threadpool." + threadPoolName + ".queue","500").build());
   }
   finally {
     terminateThreadPoolIfNeeded(threadPool);

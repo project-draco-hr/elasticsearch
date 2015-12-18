@@ -2,19 +2,24 @@
   int nodeCount=scaledRandomIntBetween(1,5);
   Settings.Builder settings=settingsBuilder().put("discovery.type","zen").put(ZenDiscovery.SETTING_PING_TIMEOUT,"200ms").put("discovery.initial_state_timeout","500ms");
   int initialMinMasterNodes=randomIntBetween(nodeCount / 2 + 1,nodeCount);
-  settings.put(ElectMasterService.DISCOVERY_ZEN_MINIMUM_MASTER_NODES,initialMinMasterNodes);
+  settings.put(ElectMasterService.DISCOVERY_ZEN_MINIMUM_MASTER_NODES_SETTING.getKey(),initialMinMasterNodes);
   logger.info("--> starting [{}] nodes. min_master_nodes set to [{}]",nodeCount,initialMinMasterNodes);
   internalCluster().startNodesAsync(nodeCount,settings.build()).get();
   logger.info("--> waiting for nodes to join");
   assertFalse(client().admin().cluster().prepareHealth().setWaitForNodes(Integer.toString(nodeCount)).get().isTimedOut());
   int updateCount=randomIntBetween(1,nodeCount);
-  logger.info("--> updating [{}] to [{}]",ElectMasterService.DISCOVERY_ZEN_MINIMUM_MASTER_NODES,updateCount);
-  assertAcked(client().admin().cluster().prepareUpdateSettings().setPersistentSettings(settingsBuilder().put(ElectMasterService.DISCOVERY_ZEN_MINIMUM_MASTER_NODES,updateCount)));
+  logger.info("--> updating [{}] to [{}]",ElectMasterService.DISCOVERY_ZEN_MINIMUM_MASTER_NODES_SETTING.getKey(),updateCount);
+  assertAcked(client().admin().cluster().prepareUpdateSettings().setPersistentSettings(settingsBuilder().put(ElectMasterService.DISCOVERY_ZEN_MINIMUM_MASTER_NODES_SETTING.getKey(),updateCount)));
   logger.info("--> verifying no node left and master is up");
   assertFalse(client().admin().cluster().prepareHealth().setWaitForNodes(Integer.toString(nodeCount)).get().isTimedOut());
   updateCount=nodeCount + randomIntBetween(1,2000);
-  logger.info("--> trying to updating [{}] to [{}]",ElectMasterService.DISCOVERY_ZEN_MINIMUM_MASTER_NODES,updateCount);
-  assertThat(client().admin().cluster().prepareUpdateSettings().setPersistentSettings(settingsBuilder().put(ElectMasterService.DISCOVERY_ZEN_MINIMUM_MASTER_NODES,updateCount)).get().getPersistentSettings().getAsMap().keySet(),empty());
+  logger.info("--> trying to updating [{}] to [{}]",ElectMasterService.DISCOVERY_ZEN_MINIMUM_MASTER_NODES_SETTING.getKey(),updateCount);
+  try {
+    client().admin().cluster().prepareUpdateSettings().setPersistentSettings(settingsBuilder().put(ElectMasterService.DISCOVERY_ZEN_MINIMUM_MASTER_NODES_SETTING.getKey(),updateCount));
+  }
+ catch (  IllegalArgumentException ex) {
+    assertEquals(ex.getMessage(),"cannot set discovery.zen.minimum_master_nodes to more than the current master nodes count [" + updateCount + "]");
+  }
   logger.info("--> verifying no node left and master is up");
   assertFalse(client().admin().cluster().prepareHealth().setWaitForNodes(Integer.toString(nodeCount)).get().isTimedOut());
 }
