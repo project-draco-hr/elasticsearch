@@ -1,0 +1,37 @@
+{
+  createIndex("test");
+  ensureGreen();
+  int numDocs=randomIntBetween(100,150);
+  IndexRequestBuilder[] docs=new IndexRequestBuilder[numDocs];
+  for (int i=0; i < numDocs; i++) {
+    docs[i]=client().prepareIndex("test","type1",String.valueOf(i)).setSource("field1",English.intToEnglish(i),"field2",i);
+  }
+  List<String> stringFields=Arrays.asList("field1");
+  List<String> numericFields=Arrays.asList("field2");
+  indexRandom(true,docs);
+  refresh();
+  int iters=between(1,10);
+  for (int i=0; i < iters; i++) {
+    QueryBuilder q=randomQueryBuilder(stringFields,numericFields,numDocs,3);
+    logger.info(q.toString());
+    SearchRequestBuilder vanilla=client().prepareSearch("test").setQuery(q).setProfile(false).addSort("_score",SortOrder.DESC).addSort("_uid",SortOrder.ASC).setPreference("_primary").setSearchType(SearchType.QUERY_THEN_FETCH);
+    SearchRequestBuilder profile=client().prepareSearch("test").setQuery(q).setProfile(true).addSort("_score",SortOrder.DESC).addSort("_uid",SortOrder.ASC).setPreference("_primary").setSearchType(SearchType.QUERY_THEN_FETCH);
+    MultiSearchResponse.Item[] responses=client().prepareMultiSearch().add(vanilla).add(profile).execute().actionGet().getResponses();
+    SearchResponse vanillaResponse=responses[0].getResponse();
+    SearchResponse profileResponse=responses[1].getResponse();
+    float vanillaMaxScore=vanillaResponse.getHits().getMaxScore();
+    float profileMaxScore=profileResponse.getHits().getMaxScore();
+    if (Float.isNaN(vanillaMaxScore)) {
+      assertTrue("Vanilla maxScore is NaN but Profile is not [" + profileMaxScore + "]",Float.isNaN(profileMaxScore));
+    }
+ else {
+      assertTrue("Profile maxScore of [" + profileMaxScore + "] is not close to Vanilla maxScore ["+ vanillaMaxScore+ "]",nearlyEqual(vanillaMaxScore,profileMaxScore,0.001));
+    }
+    assertThat("Profile totalHits of [" + profileResponse.getHits().totalHits() + "] is not close to Vanilla totalHits ["+ vanillaResponse.getHits().totalHits()+ "]",vanillaResponse.getHits().getTotalHits(),equalTo(profileResponse.getHits().getTotalHits()));
+    SearchHit[] vanillaHits=vanillaResponse.getHits().getHits();
+    SearchHit[] profileHits=profileResponse.getHits().getHits();
+    for (int j=0; j < vanillaHits.length; j++) {
+      assertThat("Profile hit #" + j + " has a different ID from Vanilla",vanillaHits[j].getId(),equalTo(profileHits[j].getId()));
+    }
+  }
+}
