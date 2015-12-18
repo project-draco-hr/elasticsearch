@@ -1,0 +1,46 @@
+{
+  XContentBuilder mapping=XContentBuilder.builder(JsonXContent.jsonXContent).startObject().startObject("type").startObject(FieldNamesFieldMapper.NAME).field("enabled",randomBoolean()).endObject().startObject("properties").startObject("foo").field("type","string").endObject().startObject("bar").field("type","object").startObject("properties").startObject("foo").field("type","string").endObject().startObject("bar").field("type","object").startObject("properties").startObject("bar").field("type","string").endObject().endObject().endObject().startObject("baz").field("type","long").endObject().endObject().endObject().endObject().endObject().endObject();
+  assertAcked(client().admin().indices().prepareCreate("idx").addMapping("type",mapping));
+  @SuppressWarnings("unchecked") Map<String,Object> barObject=new HashMap<>();
+  barObject.put("foo","bar");
+  barObject.put("bar",singletonMap("bar","foo"));
+  final Map<String,Object>[] sources=new Map[]{singletonMap("foo","bar"),singletonMap("bar",barObject),singletonMap("bar",singletonMap("baz",42)),emptyMap()};
+  List<IndexRequestBuilder> reqs=new ArrayList<IndexRequestBuilder>();
+  for (  Map<String,Object> source : sources) {
+    reqs.add(client().prepareIndex("idx","type").setSource(source));
+  }
+  indexRandom(true,false,reqs);
+  final Map<String,Integer> expected=new LinkedHashMap<String,Integer>();
+  expected.put("foo",1);
+  expected.put("f*",1);
+  expected.put("bar",2);
+  expected.put("bar.*",2);
+  expected.put("bar.foo",1);
+  expected.put("bar.bar",1);
+  expected.put("bar.bar.bar",1);
+  expected.put("foobar",0);
+  ensureYellow("idx");
+  final long numDocs=sources.length;
+  SearchResponse allDocs=client().prepareSearch("idx").setSize(sources.length).get();
+  assertSearchResponse(allDocs);
+  assertHitCount(allDocs,numDocs);
+  for (  Map.Entry<String,Integer> entry : expected.entrySet()) {
+    final String fieldName=entry.getKey();
+    final int count=entry.getValue();
+    SearchResponse resp=client().prepareSearch("idx").setQuery(QueryBuilders.existsQuery(fieldName)).execute().actionGet();
+    assertSearchResponse(resp);
+    try {
+      assertEquals(String.format(Locale.ROOT,"exists(%s, %d) mapping: %s response: %s",fieldName,count,mapping.string(),resp),count,resp.getHits().totalHits());
+    }
+ catch (    AssertionError e) {
+      for (      SearchHit searchHit : allDocs.getHits()) {
+        final String index=searchHit.getIndex();
+        final String type=searchHit.getType();
+        final String id=searchHit.getId();
+        final ExplainResponse explanation=client().prepareExplain(index,type,id).setQuery(QueryBuilders.existsQuery(fieldName)).get();
+        logger.info("Explanation for [{}] / [{}] / [{}]: [{}]",fieldName,id,searchHit.getSourceAsString(),explanation.getExplanation());
+      }
+      throw e;
+    }
+  }
+}
