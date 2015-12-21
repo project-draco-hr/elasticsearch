@@ -1,18 +1,27 @@
 {
-  final long position;
   try (ReleasableLock lock=writeLock.acquire()){
     ensureOpen();
-    position=writtenOffset;
-    try {
-      data.writeTo(channel);
+    final long offset=totalOffset;
+    if (data.length() >= buffer.length) {
+      flush();
+      try {
+        data.writeTo(channel);
+      }
+ catch (      Throwable ex) {
+        closeWithTragicEvent(ex);
+        throw ex;
+      }
+      writtenOffset+=data.length();
+      totalOffset+=data.length();
     }
- catch (    Throwable e) {
-      closeWithTragicEvent(e);
-      throw e;
+ else {
+      if (data.length() > buffer.length - bufferCount) {
+        flush();
+      }
+      data.writeTo(bufferOs);
+      totalOffset+=data.length();
     }
-    writtenOffset=writtenOffset + data.length();
     operationCounter++;
-    ;
+    return new Translog.Location(generation,offset,data.length());
   }
-   return new Translog.Location(generation,position,data.length());
-}
+ }
