@@ -6,19 +6,29 @@
   for (  Entry<String,String> entry : map.entrySet()) {
     cfg.set(entry.getKey(),entry.getValue());
   }
+  Subject subject;
   try {
-    UserGroupInformation.setConfiguration(cfg);
+    Class<?> clazz=Class.forName("org.apache.hadoop.security.User");
+    Constructor<?> ctor=clazz.getConstructor(String.class);
+    ctor.setAccessible(true);
+    Principal principal=(Principal)ctor.newInstance(System.getProperty("user.name"));
+    subject=new Subject(false,Collections.singleton(principal),Collections.emptySet(),Collections.emptySet());
   }
- catch (  Throwable th) {
-    throw new ElasticsearchGenerationException(String.format(Locale.ROOT,"Cannot initialize Hadoop"),th);
+ catch (  ReflectiveOperationException e) {
+    throw new RuntimeException(e);
   }
   URI actualUri=URI.create(uri);
+  cfg.setBoolean("fs.hdfs.impl.disable.cache",true);
   try {
-    cfg.setBoolean("fs.hdfs.impl.disable.cache",true);
-    AbstractFileSystem fs=AbstractFileSystem.get(actualUri,cfg);
-    return FileContext.getFileContext(fs,cfg);
+    return Subject.doAs(subject,new PrivilegedExceptionAction<FileContext>(){
+      @Override public FileContext run() throws IOException {
+        AbstractFileSystem fs=AbstractFileSystem.get(actualUri,cfg);
+        return FileContext.getFileContext(fs,cfg);
+      }
+    }
+);
   }
- catch (  Exception ex) {
-    throw new ElasticsearchGenerationException(String.format(Locale.ROOT,"Cannot create Hdfs file-system for uri [%s]",actualUri),ex);
+ catch (  PrivilegedActionException e) {
+    throw (IOException)e.getException();
   }
 }
