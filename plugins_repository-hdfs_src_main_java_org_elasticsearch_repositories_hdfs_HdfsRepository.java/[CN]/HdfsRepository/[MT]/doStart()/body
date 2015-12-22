@@ -1,32 +1,41 @@
 {
-  if (Strings.hasText(uri) == false) {
-    throw new IllegalArgumentException("No 'uri' defined for hdfs snapshot/restore");
-  }
-  URI actualUri=URI.create(uri);
-  String scheme=actualUri.getScheme();
-  if (Strings.hasText(scheme) == false || scheme.toLowerCase(Locale.ROOT).equals("hdfs") == false) {
-    throw new IllegalArgumentException(String.format(Locale.ROOT,"Invalid scheme [%s] specified in uri [%s]; only 'hdfs' uri allowed for hdfs snapshot/restore",scheme,uri));
-  }
-  String p=actualUri.getPath();
-  if (Strings.hasText(p) && p.equals("/") == false) {
-    throw new IllegalArgumentException(String.format(Locale.ROOT,"Use 'path' option to specify a path [%s], not the uri [%s] for hdfs snapshot/restore",p,uri));
-  }
-  if (path == null) {
+  String pathSetting=repositorySettings.settings().get("path");
+  if (pathSetting == null) {
     throw new IllegalArgumentException("No 'path' defined for hdfs snapshot/restore");
   }
+  String uriSetting=repositorySettings.settings().get("uri");
+  if (!Strings.hasText(uriSetting)) {
+    throw new IllegalArgumentException("No 'uri' defined for hdfs snapshot/restore");
+  }
+  URI uri=URI.create(uriSetting);
+  if (!"hdfs".equalsIgnoreCase(uri.getScheme())) {
+    throw new IllegalArgumentException(String.format(Locale.ROOT,"Invalid scheme [%s] specified in uri [%s]; only 'hdfs' uri allowed for hdfs snapshot/restore",uri.getScheme(),uriSetting));
+  }
+  if (Strings.hasLength(uri.getPath()) && uri.getPath().equals("/") == false) {
+    throw new IllegalArgumentException(String.format(Locale.ROOT,"Use 'path' option to specify a path [%s], not the uri [%s] for hdfs snapshot/restore",uri.getPath(),uriSetting));
+  }
   try {
-    fc=getFileContext();
-    Path hdfsPath=SecurityUtils.execute(fc,new FcCallback<Path>(){
-      @Override public Path doInHdfs(      FileContext fc) throws IOException {
-        return fc.makeQualified(new Path(path));
+    SecurityManager sm=System.getSecurityManager();
+    if (sm != null) {
+      sm.checkPermission(new SpecialPermission());
+    }
+    fileContext=AccessController.doPrivileged(new PrivilegedAction<FileContext>(){
+      @Override public FileContext run(){
+        return createContext(uri,repositorySettings);
       }
     }
 );
-    logger.debug("Using file-system [{}] for URI [{}], path [{}]",fc.getDefaultFileSystem(),fc.getDefaultFileSystem().getUri(),hdfsPath);
+    Path hdfsPath=execute(new Operation<Path>(){
+      @Override public Path run(      FileContext fileContext) throws IOException {
+        return fileContext.makeQualified(new Path(pathSetting));
+      }
+    }
+);
+    logger.debug("Using file-system [{}] for URI [{}], path [{}]",fileContext.getDefaultFileSystem(),fileContext.getDefaultFileSystem().getUri(),hdfsPath);
     blobStore=new HdfsBlobStore(this,hdfsPath);
   }
  catch (  IOException e) {
-    throw new ElasticsearchGenerationException(String.format(Locale.ROOT,"Cannot create HDFS repository for uri [%s]",actualUri),e);
+    throw new ElasticsearchGenerationException(String.format(Locale.ROOT,"Cannot create HDFS repository for uri [%s]",uri),e);
   }
   super.doStart();
 }
