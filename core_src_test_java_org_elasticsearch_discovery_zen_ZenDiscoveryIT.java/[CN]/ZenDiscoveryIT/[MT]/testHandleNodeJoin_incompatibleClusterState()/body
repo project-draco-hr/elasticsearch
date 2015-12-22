@@ -1,0 +1,23 @@
+{
+  Settings nodeSettings=Settings.settingsBuilder().put("discovery.type","zen").build();
+  String masterOnlyNode=internalCluster().startMasterOnlyNode(nodeSettings);
+  String node1=internalCluster().startNode(nodeSettings);
+  ZenDiscovery zenDiscovery=(ZenDiscovery)internalCluster().getInstance(Discovery.class,masterOnlyNode);
+  ClusterService clusterService=internalCluster().getInstance(ClusterService.class,node1);
+  final ClusterState state=clusterService.state();
+  MetaData.Builder mdBuilder=MetaData.builder(state.metaData());
+  mdBuilder.putCustom(CustomMetaData.TYPE,new CustomMetaData("data"));
+  ClusterState stateWithCustomMetaData=ClusterState.builder(state).metaData(mdBuilder).build();
+  final AtomicReference<IllegalStateException> holder=new AtomicReference<>();
+  DiscoveryNode node=state.nodes().localNode();
+  zenDiscovery.handleJoinRequest(node,stateWithCustomMetaData,new MembershipAction.JoinCallback(){
+    @Override public void onSuccess(){
+    }
+    @Override public void onFailure(    Throwable t){
+      holder.set((IllegalStateException)t);
+    }
+  }
+);
+  assertThat(holder.get(),notNullValue());
+  assertThat(holder.get().getMessage(),equalTo("failure when sending a validation request to node"));
+}
