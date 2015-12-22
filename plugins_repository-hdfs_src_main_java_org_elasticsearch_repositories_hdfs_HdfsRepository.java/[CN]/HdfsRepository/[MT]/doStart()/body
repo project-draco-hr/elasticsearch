@@ -14,25 +14,20 @@
   if (pathSetting == null) {
     throw new IllegalArgumentException("No 'path' defined for hdfs snapshot/restore");
   }
+  int bufferSize=(int)repositorySettings.settings().getAsBytesSize("buffer_size",new ByteSizeValue(100,ByteSizeUnit.KB)).bytes();
   try {
     SecurityManager sm=System.getSecurityManager();
     if (sm != null) {
       sm.checkPermission(new SpecialPermission());
     }
-    fileContext=AccessController.doPrivileged(new PrivilegedAction<FileContext>(){
+    FileContext fileContext=AccessController.doPrivileged(new PrivilegedAction<FileContext>(){
       @Override public FileContext run(){
         return createContext(uri,repositorySettings);
       }
     }
 );
-    Path hdfsPath=execute(new Operation<Path>(){
-      @Override public Path run(      FileContext fileContext) throws IOException {
-        return fileContext.makeQualified(new Path(pathSetting));
-      }
-    }
-);
-    logger.debug("Using file-system [{}] for URI [{}], path [{}]",fileContext.getDefaultFileSystem(),fileContext.getDefaultFileSystem().getUri(),hdfsPath);
-    blobStore=new HdfsBlobStore(this,hdfsPath);
+    blobStore=new HdfsBlobStore(fileContext,pathSetting,bufferSize);
+    logger.debug("Using file-system [{}] for URI [{}], path [{}]",fileContext.getDefaultFileSystem(),fileContext.getDefaultFileSystem().getUri(),pathSetting);
   }
  catch (  IOException e) {
     throw new ElasticsearchGenerationException(String.format(Locale.ROOT,"Cannot create HDFS repository for uri [%s]",uri),e);
