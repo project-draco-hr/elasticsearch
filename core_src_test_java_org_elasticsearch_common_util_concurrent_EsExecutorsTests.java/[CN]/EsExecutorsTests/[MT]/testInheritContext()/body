@@ -1,0 +1,36 @@
+{
+  int pool=between(1,10);
+  int queue=between(0,100);
+  final CountDownLatch latch=new CountDownLatch(1);
+  final CountDownLatch executed=new CountDownLatch(1);
+  threadContext.putHeader("foo","bar");
+  final Integer one=new Integer(1);
+  threadContext.putTransient("foo",one);
+  EsThreadPoolExecutor executor=EsExecutors.newFixed(getTestName(),pool,queue,EsExecutors.daemonThreadFactory("dummy"),threadContext);
+  try {
+    executor.execute(new Runnable(){
+      @Override public void run(){
+        try {
+          latch.await();
+        }
+ catch (        InterruptedException e) {
+          fail();
+        }
+        assertEquals(threadContext.getHeader("foo"),"bar");
+        assertSame(threadContext.getTransient("foo"),one);
+        assertNull(threadContext.getHeader("bar"));
+        assertNull(threadContext.getTransient("bar"));
+        executed.countDown();
+      }
+    }
+);
+    threadContext.putTransient("bar","boom");
+    threadContext.putHeader("bar","boom");
+    latch.countDown();
+    executed.await();
+  }
+  finally {
+    latch.countDown();
+    terminate(executor);
+  }
+}
