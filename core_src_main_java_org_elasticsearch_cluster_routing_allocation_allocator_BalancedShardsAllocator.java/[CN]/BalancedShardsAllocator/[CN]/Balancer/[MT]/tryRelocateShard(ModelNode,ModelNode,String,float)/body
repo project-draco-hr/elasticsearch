@@ -8,23 +8,18 @@
     final RoutingNode node=routingNodes.node(minNode.getNodeId());
     ShardRouting candidate=null;
     final AllocationDeciders deciders=allocation.deciders();
-    final ArrayList<ShardRouting> shards=new ArrayList<>(index.getAllShards());
-    for (    ShardRouting shard : shards) {
+    for (    ShardRouting shard : index.getAllShards()) {
       if (shard.started()) {
         Decision allocationDecision=deciders.canAllocate(shard,node,allocation);
         Decision rebalanceDecision=deciders.canRebalance(shard,allocation);
         if (((allocationDecision.type() == Type.YES) || (allocationDecision.type() == Type.THROTTLE)) && ((rebalanceDecision.type() == Type.YES) || (rebalanceDecision.type() == Type.THROTTLE))) {
-          Decision srcDecision;
-          if ((srcDecision=maxNode.removeShard(shard)) != null) {
-            minNode.addShard(shard,srcDecision);
-            final float delta=weight.weight(this,minNode,idx) - weight.weight(this,maxNode,idx);
+          if (maxNode.containsShard(shard)) {
+            final float delta=weight.weightShardAdded(this,minNode,idx) - weight.weightShardRemoved(this,maxNode,idx);
             if (delta < minCost || (candidate != null && delta == minCost && candidate.id() > shard.id())) {
               minCost=delta;
               candidate=shard;
               decision=new Decision.Multi().add(allocationDecision).add(rebalanceDecision);
             }
-            minNode.removeShard(shard);
-            maxNode.addShard(shard,srcDecision);
           }
         }
       }
