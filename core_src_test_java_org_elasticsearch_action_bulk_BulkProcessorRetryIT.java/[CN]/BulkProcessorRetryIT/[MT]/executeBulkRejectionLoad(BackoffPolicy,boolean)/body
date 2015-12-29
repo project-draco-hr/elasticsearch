@@ -1,4 +1,5 @@
 {
+  final CorrelatingBackoffPolicy internalPolicy=new CorrelatingBackoffPolicy(backoffPolicy);
   int numberOfAsyncOps=randomIntBetween(600,700);
   final CountDownLatch latch=new CountDownLatch(numberOfAsyncOps);
   final Set<Object> responses=Collections.newSetFromMap(new ConcurrentHashMap<>());
@@ -8,6 +9,7 @@
     @Override public void beforeBulk(    long executionId,    BulkRequest request){
     }
     @Override public void afterBulk(    long executionId,    BulkRequest request,    BulkResponse response){
+      internalPolicy.logResponse(response);
       responses.add(response);
       latch.countDown();
     }
@@ -16,7 +18,7 @@
       latch.countDown();
     }
   }
-).setBulkActions(1).setConcurrentRequests(randomIntBetween(0,100)).setBackoffPolicy(backoffPolicy).build();
+).setBulkActions(1).setConcurrentRequests(randomIntBetween(0,100)).setBackoffPolicy(internalPolicy).build();
   indexDocs(bulkProcessor,numberOfAsyncOps);
   latch.await(10,TimeUnit.SECONDS);
   bulkProcessor.close();
@@ -30,7 +32,14 @@
           Throwable rootCause=ExceptionsHelper.unwrapCause(failure.getCause());
           if (rootCause instanceof EsRejectedExecutionException) {
             if (rejectedExecutionExpected == false) {
-              throw new AssertionError("Unexpected failure reason",rootCause);
+              Iterator<TimeValue> backoffState=internalPolicy.backoffStateFor(bulkResponse);
+              assertNotNull("backoffState is null (indicates a bulk request got rejected without retry)",backoffState);
+              if (backoffState.hasNext()) {
+                throw new AssertionError("Got rejected although backoff policy would allow more retries",rootCause);
+              }
+ else {
+                logger.debug("We maxed out the number of bulk retries and got rejected (this is ok).");
+              }
             }
           }
  else {
@@ -46,12 +55,7 @@
   }
   client().admin().indices().refresh(new RefreshRequest()).get();
   Matcher<Long> searchResultCount;
-  if (rejectedExecutionExpected) {
-    searchResultCount=lessThanOrEqualTo((long)numberOfAsyncOps);
-  }
- else {
-    searchResultCount=equalTo((long)numberOfAsyncOps);
-  }
+  searchResultCount=lessThanOrEqualTo((long)numberOfAsyncOps);
   SearchResponse results=client().prepareSearch(INDEX_NAME).setTypes(TYPE_NAME).setQuery(QueryBuilders.matchAllQuery()).setSize(0).get();
   assertThat(results.getHits().totalHits(),searchResultCount);
 }
