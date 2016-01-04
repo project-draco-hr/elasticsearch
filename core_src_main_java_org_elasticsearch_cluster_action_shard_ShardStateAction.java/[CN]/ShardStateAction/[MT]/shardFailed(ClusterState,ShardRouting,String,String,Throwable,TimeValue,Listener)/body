@@ -1,3 +1,23 @@
 {
-  innerShardFailed(clusterState,shardRouting,indexUUID,message,failure,timeout,listener);
+  DiscoveryNode masterNode=clusterState.nodes().masterNode();
+  if (masterNode == null) {
+    logger.warn("no master known to fail shard [{}]",shardRouting);
+    listener.onShardFailedNoMaster();
+    return;
+  }
+  ShardRoutingEntry shardRoutingEntry=new ShardRoutingEntry(shardRouting,indexUUID,message,failure);
+  TransportRequestOptions options=TransportRequestOptions.EMPTY;
+  if (timeout != null) {
+    options=TransportRequestOptions.builder().withTimeout(timeout).build();
+  }
+  transportService.sendRequest(masterNode,SHARD_FAILED_ACTION_NAME,shardRoutingEntry,options,new EmptyTransportResponseHandler(ThreadPool.Names.SAME){
+    @Override public void handleResponse(    TransportResponse.Empty response){
+      listener.onSuccess();
+    }
+    @Override public void handleException(    TransportException exp){
+      logger.warn("unexpected failure while sending request to [{}] to fail shard [{}]",exp,masterNode,shardRoutingEntry);
+      listener.onShardFailedFailure(masterNode,exp);
+    }
+  }
+);
 }
