@@ -62,7 +62,22 @@
         ShardStateAction.ShardRoutingEntry shardRoutingEntry=(ShardStateAction.ShardRoutingEntry)shardFailedRequest.request;
         assertEquals(shardRoutingEntry.getShardRouting(),routing);
         failures.add(shardFailedRequest);
-        transport.handleResponse(shardFailedRequest.requestId,TransportResponse.Empty.INSTANCE);
+        if (randomBoolean()) {
+          int numberOfRetries=randomIntBetween(1,4);
+          CapturingTransport.CapturedRequest currentRequest=shardFailedRequest;
+          for (int retryNumber=0; retryNumber < numberOfRetries; retryNumber++) {
+            clusterService.setState(ClusterState.builder(clusterService.state()));
+            transport.handleResponse(currentRequest.requestId,new NotMasterException("shard-failed-test"));
+            CapturingTransport.CapturedRequest[] retryRequests=transport.capturedRequests();
+            transport.clear();
+            assertEquals(1,retryRequests.length);
+            currentRequest=retryRequests[0];
+          }
+          transport.handleResponse(currentRequest.requestId,TransportResponse.Empty.INSTANCE);
+        }
+ else {
+          transport.handleResponse(shardFailedRequest.requestId,TransportResponse.Empty.INSTANCE);
+        }
       }
     }
  else {
