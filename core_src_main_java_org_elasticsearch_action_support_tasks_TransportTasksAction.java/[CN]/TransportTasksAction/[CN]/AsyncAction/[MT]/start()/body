@@ -1,0 +1,53 @@
+{
+  if (nodesIds.length == 0) {
+    try {
+      listener.onResponse(newResponse(request,responses));
+    }
+ catch (    Throwable t) {
+      logger.debug("failed to generate empty response",t);
+      listener.onFailure(t);
+    }
+  }
+ else {
+    TransportRequestOptions.Builder builder=TransportRequestOptions.builder();
+    if (request.timeout() != null) {
+      builder.withTimeout(request.timeout());
+    }
+    builder.withCompress(transportCompress());
+    for (int i=0; i < nodesIds.length; i++) {
+      final String nodeId=nodesIds[i];
+      final int idx=i;
+      final DiscoveryNode node=nodes[i];
+      try {
+        if (node == null) {
+          onFailure(idx,nodeId,new NoSuchNodeException(nodeId));
+        }
+ else         if (!clusterService.localNode().shouldConnectTo(node) && !clusterService.localNode().equals(node)) {
+          onFailure(idx,nodeId,new NodeShouldNotConnectException(clusterService.localNode(),node));
+        }
+ else {
+          NodeTaskRequest nodeRequest=new NodeTaskRequest(request);
+          nodeRequest.setParentTask(clusterService.localNode().id(),task.getId());
+          transportService.sendRequest(node,transportNodeAction,nodeRequest,builder.build(),new BaseTransportResponseHandler<NodeTasksResponse>(){
+            @Override public NodeTasksResponse newInstance(){
+              return new NodeTasksResponse();
+            }
+            @Override public void handleResponse(            NodeTasksResponse response){
+              onOperation(idx,response);
+            }
+            @Override public void handleException(            TransportException exp){
+              onFailure(idx,node.id(),exp);
+            }
+            @Override public String executor(){
+              return ThreadPool.Names.SAME;
+            }
+          }
+);
+        }
+      }
+ catch (      Throwable t) {
+        onFailure(idx,nodeId,t);
+      }
+    }
+  }
+}
