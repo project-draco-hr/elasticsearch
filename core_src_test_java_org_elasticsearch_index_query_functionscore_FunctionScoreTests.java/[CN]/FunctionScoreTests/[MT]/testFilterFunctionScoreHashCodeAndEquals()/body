@@ -1,0 +1,46 @@
+{
+  ScoreMode mode=randomFrom(ScoreMode.values());
+  CombineFunction combineFunction=randomFrom(CombineFunction.values());
+  ScoreFunction scoreFunction=new ScoreFunction(combineFunction){
+    @Override public LeafScoreFunction getLeafScoreFunction(    LeafReaderContext ctx) throws IOException {
+      return null;
+    }
+    @Override public boolean needsScores(){
+      return false;
+    }
+    @Override protected boolean doEquals(    ScoreFunction other){
+      return other == this;
+    }
+  }
+;
+  Float minScore=randomBoolean() ? null : 1.0f;
+  Float maxBoost=randomBoolean() ? Float.POSITIVE_INFINITY : randomFloat();
+  FilterFunction function=new FilterFunction(new TermQuery(new Term("filter","query")),scoreFunction);
+  FiltersFunctionScoreQuery q=new FiltersFunctionScoreQuery(new TermQuery(new Term("foo","bar")),mode,new FilterFunction[]{function},maxBoost,minScore,combineFunction);
+  FiltersFunctionScoreQuery q1=new FiltersFunctionScoreQuery(new TermQuery(new Term("foo","bar")),mode,new FilterFunction[]{function},maxBoost,minScore,combineFunction);
+  assertEquals(q,q);
+  assertEquals(q.hashCode(),q.hashCode());
+  assertEquals(q,q1);
+  assertEquals(q.hashCode(),q1.hashCode());
+  FiltersFunctionScoreQuery diffCombineFunc=new FiltersFunctionScoreQuery(new TermQuery(new Term("foo","bar")),mode,new FilterFunction[]{function},maxBoost,minScore,combineFunction == CombineFunction.AVG ? CombineFunction.MAX : CombineFunction.AVG);
+  FiltersFunctionScoreQuery diffQuery=new FiltersFunctionScoreQuery(new TermQuery(new Term("foo","baz")),mode,new FilterFunction[]{function},maxBoost,minScore,combineFunction);
+  FiltersFunctionScoreQuery diffMode=new FiltersFunctionScoreQuery(new TermQuery(new Term("foo","bar")),mode == ScoreMode.AVG ? ScoreMode.FIRST : ScoreMode.AVG,new FilterFunction[]{function},maxBoost,minScore,combineFunction);
+  FiltersFunctionScoreQuery diffMaxBoost=new FiltersFunctionScoreQuery(new TermQuery(new Term("foo","bar")),mode,new FilterFunction[]{function},maxBoost == 1.0f ? 0.9f : 1.0f,minScore,combineFunction);
+  FiltersFunctionScoreQuery diffMinScore=new FiltersFunctionScoreQuery(new TermQuery(new Term("foo","bar")),mode,new FilterFunction[]{function},maxBoost,minScore == null ? 0.9f : null,combineFunction);
+  FilterFunction otherFunc=new FilterFunction(new TermQuery(new Term("filter","other_query")),scoreFunction);
+  FiltersFunctionScoreQuery diffFunc=new FiltersFunctionScoreQuery(new TermQuery(new Term("foo","bar")),mode,randomBoolean() ? new FilterFunction[]{function,otherFunc} : new FilterFunction[]{otherFunc},maxBoost,minScore,combineFunction);
+  q1.setBoost(3.0f);
+  FiltersFunctionScoreQuery[] queries=new FiltersFunctionScoreQuery[]{diffQuery,diffMaxBoost,diffMinScore,diffMode,diffFunc,q,q1,diffCombineFunc};
+  final int numIters=randomIntBetween(20,100);
+  for (int i=0; i < numIters; i++) {
+    FiltersFunctionScoreQuery left=randomFrom(queries);
+    FiltersFunctionScoreQuery right=randomFrom(queries);
+    if (left == right) {
+      assertEquals(left,right);
+      assertEquals(left.hashCode(),right.hashCode());
+    }
+ else {
+      assertNotEquals(left + " == " + right,left,right);
+    }
+  }
+}

@@ -1,0 +1,25 @@
+{
+  connectNodes(testNodes);
+  CountDownLatch checkLatch=new CountDownLatch(1);
+  ActionFuture<NodesResponse> future=startBlockingTestNodesAction(checkLatch);
+  TestNode testNode=testNodes[randomIntBetween(0,testNodes.length - 1)];
+  ListTasksRequest listTasksRequest=new ListTasksRequest();
+  listTasksRequest.actions("testAction");
+  ListTasksResponse response=testNode.transportListTasksAction.execute(listTasksRequest).get();
+  assertEquals(1,response.getTasks().size());
+  String parentNode=response.getTasks().get(0).getNode().getId();
+  long parentTaskId=response.getTasks().get(0).getId();
+  listTasksRequest=new ListTasksRequest();
+  listTasksRequest.parentNode(parentNode);
+  listTasksRequest.parentTaskId(parentTaskId);
+  response=testNode.transportListTasksAction.execute(listTasksRequest).get();
+  assertEquals(testNodes.length,response.getTasks().size());
+  for (  TaskInfo task : response.getTasks()) {
+    assertEquals("testAction[n]",task.getAction());
+    assertEquals(parentNode,task.getParentNode());
+    assertEquals(parentTaskId,task.getParentId());
+  }
+  checkLatch.countDown();
+  NodesResponse responses=future.get();
+  assertEquals(0,responses.failureCount());
+}

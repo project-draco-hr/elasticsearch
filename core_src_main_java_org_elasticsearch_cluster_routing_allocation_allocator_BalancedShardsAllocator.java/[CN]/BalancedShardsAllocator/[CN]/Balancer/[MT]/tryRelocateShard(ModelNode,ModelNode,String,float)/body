@@ -1,0 +1,47 @@
+{
+  final ModelIndex index=maxNode.getIndex(idx);
+  Decision decision=null;
+  if (index != null) {
+    if (logger.isTraceEnabled()) {
+      logger.trace("Try relocating shard for index index [{}] from node [{}] to node [{}]",idx,maxNode.getNodeId(),minNode.getNodeId());
+    }
+    ShardRouting candidate=null;
+    final AllocationDeciders deciders=allocation.deciders();
+    for (    ShardRouting shard : index.getAllShards()) {
+      if (shard.started()) {
+        Decision allocationDecision=deciders.canAllocate(shard,minNode.getRoutingNode(routingNodes),allocation);
+        Decision rebalanceDecision=deciders.canRebalance(shard,allocation);
+        if (((allocationDecision.type() == Type.YES) || (allocationDecision.type() == Type.THROTTLE)) && ((rebalanceDecision.type() == Type.YES) || (rebalanceDecision.type() == Type.THROTTLE))) {
+          if (maxNode.containsShard(shard)) {
+            final float delta=weight.weightShardAdded(this,minNode,idx) - weight.weightShardRemoved(this,maxNode,idx);
+            if (delta < minCost || (candidate != null && delta == minCost && candidate.id() > shard.id())) {
+              minCost=delta;
+              candidate=shard;
+              decision=new Decision.Multi().add(allocationDecision).add(rebalanceDecision);
+            }
+          }
+        }
+      }
+    }
+    if (candidate != null) {
+      maxNode.removeShard(candidate);
+      minNode.addShard(candidate,decision);
+      if (decision.type() == Type.YES) {
+        if (logger.isTraceEnabled()) {
+          logger.trace("Relocate shard [{}] from node [{}] to node [{}]",candidate,maxNode.getNodeId(),minNode.getNodeId());
+        }
+        if (candidate.started()) {
+          routingNodes.relocate(candidate,minNode.getNodeId(),allocation.clusterInfo().getShardSize(candidate,ShardRouting.UNAVAILABLE_EXPECTED_SHARD_SIZE));
+        }
+ else {
+          routingNodes.initialize(candidate,minNode.getNodeId(),allocation.clusterInfo().getShardSize(candidate,ShardRouting.UNAVAILABLE_EXPECTED_SHARD_SIZE));
+        }
+        return true;
+      }
+    }
+  }
+  if (logger.isTraceEnabled()) {
+    logger.trace("Couldn't find shard to relocate from node [{}] to node [{}] allocation decision [{}]",maxNode.getNodeId(),minNode.getNodeId(),decision == null ? "NO" : decision.type().name());
+  }
+  return false;
+}
