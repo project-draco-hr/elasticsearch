@@ -27,13 +27,13 @@
                   id=Integer.toString(randomInt(idGen.get()));
                 }
  while (!liveIds.remove(id));
-                DeleteResponse response=client().prepareDelete("index",PercolatorService.TYPE_NAME,id).execute().actionGet();
+                DeleteResponse response=client().prepareDelete("index",PercolatorService.TYPE_NAME,id).setRefresh(true).execute().actionGet();
                 assertThat(response.getId(),equalTo(id));
                 assertThat("doc[" + id + "] should have been deleted, but isn't",response.isFound(),equalTo(true));
               }
  else {
                 String id=Integer.toString(idGen.getAndIncrement());
-                IndexResponse response=client().prepareIndex("index",PercolatorService.TYPE_NAME,id).setSource(doc).execute().actionGet();
+                IndexResponse response=client().prepareIndex("index",PercolatorService.TYPE_NAME,id).setSource(doc).setRefresh(true).execute().actionGet();
                 liveIds.add(id);
                 assertThat(response.isCreated(),equalTo(true));
                 assertThat(response.getId(),equalTo(id));
@@ -59,7 +59,7 @@ catch (        Throwable t) {
     indexThreads[i]=new Thread(r);
     indexThreads[i].start();
   }
-  XContentBuilder percolateDoc=XContentFactory.jsonBuilder().startObject().startObject("doc").field("field1","value").endObject().endObject();
+  String percolateDoc=XContentFactory.jsonBuilder().startObject().field("field1","value").endObject().string();
   for (int counter=0; counter < numberPercolateOperation; counter++) {
     Thread.sleep(5);
     semaphore.acquire(numIndexThreads);
@@ -68,7 +68,7 @@ catch (        Throwable t) {
         break;
       }
       int atLeastExpected=liveIds.size();
-      PercolateResponse response=client().preparePercolate().setIndices("index").setDocumentType("type").setSource(percolateDoc).execute().actionGet();
+      PercolateResponse response=client().preparePercolate().setIndices("index").setDocumentType("type").setPercolateDoc(new PercolateSourceBuilder.DocBuilder().setDoc(percolateDoc)).setSize(atLeastExpected).get();
       assertThat(response.getShardFailures(),emptyArray());
       assertThat(response.getSuccessfulShards(),equalTo(response.getTotalShards()));
       assertThat(response.getMatches().length,equalTo(atLeastExpected));

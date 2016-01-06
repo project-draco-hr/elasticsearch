@@ -1,0 +1,21 @@
+{
+  addPercolatorQuery("1",new TermQuery(new Term("field","brown")),"field","value1");
+  indexWriter.close();
+  directoryReader=DirectoryReader.open(directory);
+  IndexSearcher shardSearcher=newSearcher(directoryReader);
+  MemoryIndex memoryIndex=new MemoryIndex();
+  memoryIndex.addField("field","the quick brown fox jumps over the lazy dog",new WhitespaceAnalyzer());
+  IndexSearcher percolateSearcher=memoryIndex.createSearcher();
+  PercolatorQuery.Builder builder=new PercolatorQuery.Builder(percolateSearcher,queries,new MatchAllDocsQuery());
+  builder.extractQueryTermsQuery(EXTRACTED_TERMS_FIELD_NAME,UNKNOWN_QUERY_FIELD_NAME);
+  builder.setPercolateQuery(new TermQuery(new Term("field","value1")));
+  PercolatorQuery percolatorQuery=builder.build();
+  TopDocs topDocs=shardSearcher.search(percolatorQuery,1);
+  assertThat(topDocs.totalHits,equalTo(1));
+  assertThat(topDocs.scoreDocs.length,equalTo(1));
+  assertThat(topDocs.scoreDocs[0].doc,equalTo(0));
+  assertThat(topDocs.scoreDocs[0].score,not(1f));
+  Explanation explanation=shardSearcher.explain(percolatorQuery,0);
+  assertThat(explanation.isMatch(),is(true));
+  assertThat(explanation.getValue(),equalTo(topDocs.scoreDocs[0].score));
+}
