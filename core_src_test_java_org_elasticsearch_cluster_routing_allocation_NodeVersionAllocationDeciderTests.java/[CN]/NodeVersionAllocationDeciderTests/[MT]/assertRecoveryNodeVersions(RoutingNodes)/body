@@ -2,16 +2,27 @@
   logger.trace("RoutingNodes: {}",routingNodes.prettyPrint());
   List<ShardRouting> mutableShardRoutings=routingNodes.shardsWithState(ShardRoutingState.RELOCATING);
   for (  ShardRouting r : mutableShardRoutings) {
-    String toId=r.relocatingNodeId();
-    String fromId=r.currentNodeId();
-    assertThat(fromId,notNullValue());
-    assertThat(toId,notNullValue());
-    logger.trace("From: " + fromId + " with Version: "+ routingNodes.node(fromId).node().version()+ " to: "+ toId+ " with Version: "+ routingNodes.node(toId).node().version());
-    assertTrue(routingNodes.node(toId).node().version().onOrAfter(routingNodes.node(fromId).node().version()));
+    if (r.primary()) {
+      String toId=r.relocatingNodeId();
+      String fromId=r.currentNodeId();
+      assertThat(fromId,notNullValue());
+      assertThat(toId,notNullValue());
+      logger.trace("From: " + fromId + " with Version: "+ routingNodes.node(fromId).node().version()+ " to: "+ toId+ " with Version: "+ routingNodes.node(toId).node().version());
+      assertTrue(routingNodes.node(toId).node().version().onOrAfter(routingNodes.node(fromId).node().version()));
+    }
+ else {
+      ShardRouting primary=routingNodes.activePrimary(r);
+      assertThat(primary,notNullValue());
+      String fromId=primary.currentNodeId();
+      String toId=r.relocatingNodeId();
+      logger.error("From: " + fromId + " with Version: "+ routingNodes.node(fromId).node().version()+ " to: "+ toId+ " with Version: "+ routingNodes.node(toId).node().version());
+      logger.error(routingNodes.prettyPrint());
+      assertTrue(routingNodes.node(toId).node().version().onOrAfter(routingNodes.node(fromId).node().version()));
+    }
   }
   mutableShardRoutings=routingNodes.shardsWithState(ShardRoutingState.INITIALIZING);
   for (  ShardRouting r : mutableShardRoutings) {
-    if (r.initializing() && r.relocatingNodeId() == null && !r.primary()) {
+    if (!r.primary()) {
       ShardRouting primary=routingNodes.activePrimary(r);
       assertThat(primary,notNullValue());
       String fromId=primary.currentNodeId();
