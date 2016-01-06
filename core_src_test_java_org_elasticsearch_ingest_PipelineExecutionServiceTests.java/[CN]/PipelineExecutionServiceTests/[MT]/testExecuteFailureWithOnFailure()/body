@@ -1,0 +1,15 @@
+{
+  Processor processor=mock(Processor.class);
+  Processor onFailureProcessor=mock(Processor.class);
+  CompoundProcessor compoundProcessor=new CompoundProcessor(Collections.singletonList(processor),Collections.singletonList(new CompoundProcessor(onFailureProcessor)));
+  when(store.get("_id")).thenReturn(new Pipeline("_id","_description",compoundProcessor));
+  IndexRequest indexRequest=new IndexRequest("_index","_type","_id").source(Collections.emptyMap());
+  doThrow(new RuntimeException()).when(processor).execute(eqID("_index","_type","_id",Collections.emptyMap()));
+  doThrow(new RuntimeException()).when(onFailureProcessor).execute(eqID("_index","_type","_id",Collections.emptyMap()));
+  @SuppressWarnings("unchecked") Consumer<Throwable> failureHandler=mock(Consumer.class);
+  @SuppressWarnings("unchecked") Consumer<Boolean> completionHandler=mock(Consumer.class);
+  executionService.execute(indexRequest,"_id",failureHandler,completionHandler);
+  verify(processor).execute(eqID("_index","_type","_id",Collections.emptyMap()));
+  verify(failureHandler,times(1)).accept(Matchers.any(RuntimeException.class));
+  verify(completionHandler,never()).accept(Matchers.anyBoolean());
+}

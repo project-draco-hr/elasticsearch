@@ -1,0 +1,31 @@
+{
+  createIndex("index");
+  new PutPipelineRequestBuilder(client(),PutPipelineAction.INSTANCE).setId("_id").setSource(jsonBuilder().startObject().field("description","my_pipeline").startArray("processors").startObject().startObject("join").field("field","field1").field("separator","|").endObject().endObject().endArray().endObject().bytes()).get();
+  int numRequests=scaledRandomIntBetween(32,128);
+  BulkRequest bulkRequest=new BulkRequest();
+  bulkRequest.putHeader(ConfigurationUtils.PIPELINE_ID_PARAM,"_id");
+  for (int i=0; i < numRequests; i++) {
+    IndexRequest indexRequest=new IndexRequest("index","type",Integer.toString(i));
+    if (i % 2 == 0) {
+      indexRequest.source("field1",Arrays.asList("value1","value2"));
+    }
+ else {
+      indexRequest.source("field2",Arrays.asList("value1","value2"));
+    }
+    bulkRequest.add(indexRequest);
+  }
+  BulkResponse response=client().bulk(bulkRequest).actionGet();
+  assertThat(response.getItems().length,equalTo(bulkRequest.requests().size()));
+  for (int i=0; i < bulkRequest.requests().size(); i++) {
+    BulkItemResponse itemResponse=response.getItems()[i];
+    if (i % 2 == 0) {
+      IndexResponse indexResponse=itemResponse.getResponse();
+      assertThat(indexResponse.getId(),equalTo(Integer.toString(i)));
+      assertThat(indexResponse.isCreated(),is(true));
+    }
+ else {
+      BulkItemResponse.Failure failure=itemResponse.getFailure();
+      assertThat(failure.getMessage(),equalTo("java.lang.IllegalArgumentException: field [field1] not present as part of path [field1]"));
+    }
+  }
+}
