@@ -1,0 +1,27 @@
+{
+  Path tempDir=createTempDir();
+  final AtomicBoolean fail=new AtomicBoolean();
+  TranslogConfig config=getTranslogConfig(tempDir);
+  assumeFalse("this won't work if we sync on any op",config.isSyncOnEachOperation());
+  Translog translog=getFailableTranslog(fail,config,false,true);
+  LineFileDocs lineFileDocs=new LineFileDocs(random());
+  translog.add(new Translog.Index("test","1",lineFileDocs.nextDoc().toString().getBytes(Charset.forName("UTF-8"))));
+  fail.set(true);
+  try {
+    Translog.Location location=translog.add(new Translog.Index("test","2",lineFileDocs.nextDoc().toString().getBytes(Charset.forName("UTF-8"))));
+    if (randomBoolean()) {
+      translog.ensureSynced(location);
+    }
+ else {
+      translog.sync();
+    }
+    fail("WTF");
+  }
+ catch (  UnknownException ex) {
+  }
+catch (  TranslogException ex) {
+    assertTrue(ex.getCause() instanceof UnknownException);
+  }
+  assertFalse(translog.isOpen());
+  assertTrue(translog.getTragicException() instanceof UnknownException);
+}
