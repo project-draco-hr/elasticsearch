@@ -13,6 +13,28 @@
   final CapturingTransport.CapturedRequest[] capturedRequests=transport.capturedRequests();
   transport.clear();
   assertThat(capturedRequests.length,equalTo(assignedReplicas));
+  Set<String> nodesSentTo=new HashSet<>();
+  boolean executeOnReplica=action.shouldExecuteReplication(clusterService.state().getMetaData().index(shardId.getIndex()).getSettings());
+  for (  CapturingTransport.CapturedRequest capturedRequest : capturedRequests) {
+    assertTrue(nodesSentTo.add(capturedRequest.node.getId()));
+    Request replicationRequest=(Request)capturedRequest.request;
+    assertEquals(request.shardId,replicationRequest.shardId);
+  }
+  List<ShardRouting> shards=clusterService.state().getRoutingTable().index(shardId.getIndex()).shard(shardId.id()).shards();
+  for (  ShardRouting shard : shards) {
+    if (!shard.primary() && !executeOnReplica) {
+      continue;
+    }
+    if (shard.unassigned()) {
+      continue;
+    }
+    if (!clusterService.state().getNodes().localNodeId().equals(shard.currentNodeId())) {
+      assertThat(nodesSentTo,hasItem(shard.currentNodeId()));
+    }
+    if (shard.relocating()) {
+      assertThat(nodesSentTo,hasItem(shard.relocatingNodeId()));
+    }
+  }
   if (assignedReplicas > 0) {
     assertThat("listener is done, but there are outstanding replicas",listener.isDone(),equalTo(false));
   }
