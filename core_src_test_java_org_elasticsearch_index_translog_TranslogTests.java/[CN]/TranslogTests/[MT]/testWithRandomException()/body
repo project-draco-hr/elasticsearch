@@ -1,0 +1,69 @@
+{
+  final int runs=randomIntBetween(5,10);
+  for (int run=0; run < runs; run++) {
+    Path tempDir=createTempDir();
+    final FailSwitch fail=new FailSwitch();
+    fail.failRandomly();
+    TranslogConfig config=getTranslogConfig(tempDir);
+    final int numOps=randomIntBetween(100,200);
+    List<String> syncedDocs=new ArrayList<>();
+    List<String> unsynced=new ArrayList<>();
+    if (randomBoolean()) {
+      fail.onceFailedFailAlways();
+    }
+    try {
+      final Translog failableTLog=getFailableTranslog(fail,config,randomBoolean(),false);
+      try {
+        LineFileDocs lineFileDocs=new LineFileDocs(random());
+        for (int opsAdded=0; opsAdded < numOps; opsAdded++) {
+          String doc=lineFileDocs.nextDoc().toString();
+          failableTLog.add(new Translog.Index("test","" + opsAdded,doc.getBytes(Charset.forName("UTF-8"))));
+          unsynced.add(doc);
+          if (randomBoolean()) {
+            failableTLog.sync();
+            syncedDocs.addAll(unsynced);
+            unsynced.clear();
+          }
+          if (randomFloat() < 0.1) {
+            failableTLog.sync();
+            syncedDocs.addAll(unsynced);
+            unsynced.clear();
+            if (randomBoolean()) {
+              failableTLog.prepareCommit();
+            }
+            failableTLog.commit();
+            syncedDocs.clear();
+          }
+        }
+      }
+ catch (      TranslogException|MockDirectoryWrapper.FakeIOException ex) {
+      }
+catch (      IOException ex) {
+        assertEquals(ex.getMessage(),"__FAKE__ no space left on device");
+      }
+ finally {
+        config.setTranslogGeneration(failableTLog.getGeneration());
+        IOUtils.closeWhileHandlingException(failableTLog);
+      }
+    }
+ catch (    TranslogException|MockDirectoryWrapper.FakeIOException ex) {
+    }
+    if (randomBoolean()) {
+      try {
+        IOUtils.close(getFailableTranslog(fail,config,randomBoolean(),false));
+      }
+ catch (      TranslogException|MockDirectoryWrapper.FakeIOException ex) {
+      }
+    }
+    try (Translog translog=new Translog(config)){
+      try (Translog.Snapshot snapshot=translog.newSnapshot()){
+        assertEquals(syncedDocs.size(),snapshot.estimatedTotalOperations());
+        for (int i=0; i < syncedDocs.size(); i++) {
+          Translog.Operation next=snapshot.next();
+          assertEquals(syncedDocs.get(i),next.getSource().source.toUtf8());
+          assertNotNull("operation " + i + " must be non-null",next);
+        }
+      }
+     }
+   }
+}
