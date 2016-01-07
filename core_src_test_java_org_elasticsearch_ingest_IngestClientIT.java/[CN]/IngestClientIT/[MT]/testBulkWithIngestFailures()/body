@@ -1,0 +1,26 @@
+{
+  createIndex("index");
+  new PutPipelineRequestBuilder(client(),PutPipelineAction.INSTANCE).setId("_id").setSource(jsonBuilder().startObject().field("description","my_pipeline").startArray("processors").startObject().startObject("test").endObject().endObject().endArray().endObject().bytes()).get();
+  int numRequests=scaledRandomIntBetween(32,128);
+  BulkRequest bulkRequest=new BulkRequest();
+  bulkRequest.putHeader(IngestActionFilter.PIPELINE_ID_PARAM,"_id");
+  for (int i=0; i < numRequests; i++) {
+    IndexRequest indexRequest=new IndexRequest("index","type",Integer.toString(i));
+    indexRequest.source("field","value","fail",i % 2 == 0);
+    bulkRequest.add(indexRequest);
+  }
+  BulkResponse response=client().bulk(bulkRequest).actionGet();
+  assertThat(response.getItems().length,equalTo(bulkRequest.requests().size()));
+  for (int i=0; i < bulkRequest.requests().size(); i++) {
+    BulkItemResponse itemResponse=response.getItems()[i];
+    if (i % 2 == 0) {
+      BulkItemResponse.Failure failure=itemResponse.getFailure();
+      assertThat(failure.getMessage(),equalTo("java.lang.IllegalArgumentException: test processor failed"));
+    }
+ else {
+      IndexResponse indexResponse=itemResponse.getResponse();
+      assertThat(indexResponse.getId(),equalTo(Integer.toString(i)));
+      assertThat(indexResponse.isCreated(),is(true));
+    }
+  }
+}
