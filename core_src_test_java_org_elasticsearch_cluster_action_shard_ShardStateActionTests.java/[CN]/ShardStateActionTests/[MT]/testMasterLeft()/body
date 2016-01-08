@@ -1,9 +1,6 @@
 {
   final String index="test";
   clusterService.setState(stateWithStartedPrimary(index,true,randomInt(5)));
-  DiscoveryNodes.Builder noMasterBuilder=DiscoveryNodes.builder(clusterService.state().nodes());
-  noMasterBuilder.masterNodeId(null);
-  clusterService.setState(ClusterState.builder(clusterService.state()).nodes(noMasterBuilder));
   String indexUUID=clusterService.state().metaData().index(index).getIndexUUID();
   CountDownLatch latch=new CountDownLatch(1);
   AtomicBoolean noMaster=new AtomicBoolean();
@@ -17,8 +14,11 @@
     }
   }
 );
+  final CapturingTransport.CapturedRequest[] capturedRequests=transport.capturedRequests();
+  transport.clear();
+  assertThat(capturedRequests.length,equalTo(1));
+  assertFalse(success.get());
+  transport.handleResponse(capturedRequests[0].requestId,new NotMasterException("simulated"));
   latch.await();
-  assertTrue(noMaster.get());
-  assertTrue(retried.get());
   assertTrue(success.get());
 }

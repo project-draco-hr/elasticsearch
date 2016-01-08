@@ -1,0 +1,28 @@
+{
+  DiscoveryNode masterNode=observer.observedState().nodes().masterNode();
+  if (masterNode == null) {
+    logger.warn("{} no master known to fail shard [{}]",shardRoutingEntry.getShardRouting().shardId(),shardRoutingEntry.getShardRouting());
+    waitForNewMasterAndRetry(observer,shardRoutingEntry,options,listener);
+  }
+ else {
+    transportService.sendRequest(masterNode,SHARD_FAILED_ACTION_NAME,shardRoutingEntry,options,new EmptyTransportResponseHandler(ThreadPool.Names.SAME){
+      @Override public void handleResponse(      TransportResponse.Empty response){
+        listener.onSuccess();
+      }
+      @Override public void handleException(      TransportException exp){
+        if (exp instanceof ReceiveTimeoutTransportException) {
+          logger.trace("{} timeout sending shard failure [{}] to master [{}]",exp,shardRoutingEntry.getShardRouting().getId(),shardRoutingEntry.failure,masterNode);
+          handleTimeout(shardRoutingEntry,observer,options,listener);
+        }
+ else         if (exp.getCause() instanceof NotMasterException) {
+          waitForNewMasterAndRetry(observer,shardRoutingEntry,options,listener);
+        }
+ else {
+          logger.warn("{} unexpected failure while sending request to [{}] to fail shard [{}]",exp,shardRoutingEntry.getShardRouting().shardId(),masterNode,shardRoutingEntry);
+          listener.onShardFailedFailure(exp);
+        }
+      }
+    }
+);
+  }
+}
