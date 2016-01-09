@@ -1,0 +1,80 @@
+{
+  createIndex("test_iol");
+  ensureGreen();
+  client().prepareIndex("test_iol","test","0").setSource("{\"foo\" : \"bar\"}").setRefresh(true).get();
+  IndicesService indicesService=getInstanceFromNode(IndicesService.class);
+  IndexService test=indicesService.indexService("test_iol");
+  IndexShard shard=test.getShardOrNull(0);
+  AtomicInteger preIndex=new AtomicInteger();
+  AtomicInteger postIndex=new AtomicInteger();
+  AtomicInteger postIndexException=new AtomicInteger();
+  AtomicInteger preDelete=new AtomicInteger();
+  AtomicInteger postDelete=new AtomicInteger();
+  AtomicInteger postDeleteException=new AtomicInteger();
+  shard=reinitWithWrapper(test,shard,null,new IndexingOperationListener(){
+    @Override public Engine.Index preIndex(    Engine.Index operation){
+      preIndex.incrementAndGet();
+      return operation;
+    }
+    @Override public void postIndex(    Engine.Index index){
+      postIndex.incrementAndGet();
+    }
+    @Override public void postIndex(    Engine.Index index,    Throwable ex){
+      postIndexException.incrementAndGet();
+    }
+    @Override public Engine.Delete preDelete(    Engine.Delete delete){
+      preDelete.incrementAndGet();
+      return delete;
+    }
+    @Override public void postDelete(    Engine.Delete delete){
+      postDelete.incrementAndGet();
+    }
+    @Override public void postDelete(    Engine.Delete delete,    Throwable ex){
+      postDeleteException.incrementAndGet();
+    }
+  }
+);
+  ParsedDocument doc=testParsedDocument("1","1","test",null,-1,-1,new ParseContext.Document(),new BytesArray(new byte[]{1}),null);
+  Engine.Index index=new Engine.Index(new Term("_uid","1"),doc);
+  shard.index(index);
+  assertEquals(1,preIndex.get());
+  assertEquals(1,postIndex.get());
+  assertEquals(0,postIndexException.get());
+  assertEquals(0,preDelete.get());
+  assertEquals(0,postDelete.get());
+  assertEquals(0,postDeleteException.get());
+  Engine.Delete delete=new Engine.Delete("test","1",new Term("_uid","1"));
+  shard.delete(delete);
+  assertEquals(1,preIndex.get());
+  assertEquals(1,postIndex.get());
+  assertEquals(0,postIndexException.get());
+  assertEquals(1,preDelete.get());
+  assertEquals(1,postDelete.get());
+  assertEquals(0,postDeleteException.get());
+  shard.close("Unexpected close",true);
+  shard.state=IndexShardState.STARTED;
+  try {
+    shard.index(index);
+    fail();
+  }
+ catch (  IllegalIndexShardStateException e) {
+  }
+  assertEquals(2,preIndex.get());
+  assertEquals(1,postIndex.get());
+  assertEquals(1,postIndexException.get());
+  assertEquals(1,preDelete.get());
+  assertEquals(1,postDelete.get());
+  assertEquals(0,postDeleteException.get());
+  try {
+    shard.delete(delete);
+    fail();
+  }
+ catch (  IllegalIndexShardStateException e) {
+  }
+  assertEquals(2,preIndex.get());
+  assertEquals(1,postIndex.get());
+  assertEquals(1,postIndexException.get());
+  assertEquals(2,preDelete.get());
+  assertEquals(1,postDelete.get());
+  assertEquals(1,postDeleteException.get());
+}
