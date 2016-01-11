@@ -1,18 +1,23 @@
 {
   ensureWriteAllowed(delete);
   markLastWrite();
-  delete=indexingService.preDelete(delete);
+  delete=indexingOperationListeners.preDelete(delete);
   try {
     if (logger.isTraceEnabled()) {
       logger.trace("delete [{}]",delete.uid().text());
     }
-    getEngine().delete(delete);
+    final boolean isPercolatorQuery=percolatorQueriesRegistry.isPercolatorQuery(delete);
+    Engine engine=getEngine();
+    engine.delete(delete);
+    if (isPercolatorQuery) {
+      percolatorQueriesRegistry.updatePercolateQuery(engine,delete.id());
+    }
     delete.endTime(System.nanoTime());
   }
  catch (  Throwable ex) {
-    indexingService.postDelete(delete,ex);
+    indexingOperationListeners.postDelete(delete,ex);
     throw ex;
   }
-  indexingService.postDelete(delete);
   indexingMemoryController.bytesWritten(delete.getTranslogLocation().size);
+  indexingOperationListeners.postDelete(delete);
 }

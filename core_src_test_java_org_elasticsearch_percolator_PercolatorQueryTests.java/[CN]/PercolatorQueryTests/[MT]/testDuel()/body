@@ -1,0 +1,39 @@
+{
+  int numQueries=scaledRandomIntBetween(32,256);
+  for (int i=0; i < numQueries; i++) {
+    String id=Integer.toString(i);
+    Query query;
+    if (randomBoolean()) {
+      query=new PrefixQuery(new Term("field",id));
+    }
+ else     if (randomBoolean()) {
+      query=new WildcardQuery(new Term("field",id + "*"));
+    }
+ else     if (randomBoolean()) {
+      query=new CustomQuery(new Term("field",id + "*"));
+    }
+ else {
+      query=new TermQuery(new Term("field",id));
+    }
+    addPercolatorQuery(id,query);
+  }
+  indexWriter.close();
+  directoryReader=DirectoryReader.open(directory);
+  IndexSearcher shardSearcher=newSearcher(directoryReader);
+  for (int i=0; i < numQueries; i++) {
+    MemoryIndex memoryIndex=new MemoryIndex();
+    String id=Integer.toString(i);
+    memoryIndex.addField("field",id,new WhitespaceAnalyzer());
+    IndexSearcher percolateSearcher=memoryIndex.createSearcher();
+    PercolatorQuery.Builder builder1=new PercolatorQuery.Builder(percolateSearcher,queries,new MatchAllDocsQuery());
+    builder1.extractQueryTermsQuery(EXTRACTED_TERMS_FIELD_NAME,UNKNOWN_QUERY_FIELD_NAME);
+    TopDocs topDocs1=shardSearcher.search(builder1.build(),10);
+    PercolatorQuery.Builder builder2=new PercolatorQuery.Builder(percolateSearcher,queries,new MatchAllDocsQuery());
+    TopDocs topDocs2=shardSearcher.search(builder2.build(),10);
+    assertThat(topDocs1.totalHits,equalTo(topDocs2.totalHits));
+    assertThat(topDocs1.scoreDocs.length,equalTo(topDocs2.scoreDocs.length));
+    for (int j=0; j < topDocs1.scoreDocs.length; j++) {
+      assertThat(topDocs1.scoreDocs[j].doc,equalTo(topDocs2.scoreDocs[j].doc));
+    }
+  }
+}

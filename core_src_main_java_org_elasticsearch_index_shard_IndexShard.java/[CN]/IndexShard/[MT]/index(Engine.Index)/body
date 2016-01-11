@@ -1,20 +1,25 @@
 {
   ensureWriteAllowed(index);
   markLastWrite();
-  index=indexingService.preIndex(index);
+  index=indexingOperationListeners.preIndex(index);
   final boolean created;
   try {
     if (logger.isTraceEnabled()) {
       logger.trace("index [{}][{}]{}",index.type(),index.id(),index.docs());
     }
-    created=getEngine().index(index);
+    final boolean isPercolatorQuery=percolatorQueriesRegistry.isPercolatorQuery(index);
+    Engine engine=getEngine();
+    created=engine.index(index);
+    if (isPercolatorQuery) {
+      percolatorQueriesRegistry.updatePercolateQuery(engine,index.id());
+    }
     index.endTime(System.nanoTime());
   }
  catch (  Throwable ex) {
-    indexingService.postIndex(index,ex);
+    indexingOperationListeners.postIndex(index,ex);
     throw ex;
   }
-  indexingService.postIndex(index);
   indexingMemoryController.bytesWritten(index.getTranslogLocation().size);
+  indexingOperationListeners.postIndex(index);
   return created;
 }

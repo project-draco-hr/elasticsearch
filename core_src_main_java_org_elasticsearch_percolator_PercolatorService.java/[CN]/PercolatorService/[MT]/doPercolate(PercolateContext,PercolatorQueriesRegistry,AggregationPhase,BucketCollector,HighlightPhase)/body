@@ -1,0 +1,61 @@
+{
+  PercolatorQuery.Builder builder=new PercolatorQuery.Builder(context.docSearcher(),queriesRegistry.getPercolateQueries(),context.percolatorTypeFilter());
+  if (queriesRegistry.indexSettings().getSettings().getAsVersion(IndexMetaData.SETTING_VERSION_CREATED,null).onOrAfter(Version.V_3_0_0)) {
+    builder.extractQueryTermsQuery(PercolatorFieldMapper.EXTRACTED_TERMS_FULL_FIELD_NAME,PercolatorFieldMapper.UNKNOWN_QUERY_FULL_FIELD_NAME);
+  }
+  if (context.percolateQuery() != null || context.aliasFilter() != null) {
+    BooleanQuery.Builder bq=new BooleanQuery.Builder();
+    if (context.percolateQuery() != null) {
+      bq.add(context.percolateQuery(),MUST);
+    }
+    if (context.aliasFilter() != null) {
+      bq.add(context.aliasFilter(),FILTER);
+    }
+    builder.setPercolateQuery(bq.build());
+  }
+  PercolatorQuery percolatorQuery=builder.build();
+  if (context.isOnlyCount() || context.size() == 0) {
+    TotalHitCountCollector collector=new TotalHitCountCollector();
+    context.searcher().search(percolatorQuery,MultiCollector.wrap(collector,aggregatorCollector));
+    if (aggregatorCollector != null) {
+      aggregatorCollector.postCollection();
+      aggregationPhase.execute(context);
+    }
+    return new PercolateShardResponse(new TopDocs(collector.getTotalHits(),Lucene.EMPTY_SCORE_DOCS,0f),Collections.emptyMap(),Collections.emptyMap(),context);
+  }
+ else {
+    int size=context.size();
+    if (size > context.searcher().getIndexReader().maxDoc()) {
+      size=context.searcher().getIndexReader().maxDoc();
+    }
+    TopScoreDocCollector collector=TopScoreDocCollector.create(size);
+    context.searcher().search(percolatorQuery,MultiCollector.wrap(collector,aggregatorCollector));
+    if (aggregatorCollector != null) {
+      aggregatorCollector.postCollection();
+      aggregationPhase.execute(context);
+    }
+    TopDocs topDocs=collector.topDocs();
+    Map<Integer,String> ids=new HashMap<>(topDocs.scoreDocs.length);
+    Map<Integer,Map<String,HighlightField>> hls=new HashMap<>(topDocs.scoreDocs.length);
+    for (    ScoreDoc scoreDoc : topDocs.scoreDocs) {
+      if (context.trackScores() == false) {
+        scoreDoc.score=NO_SCORE;
+      }
+      int segmentIdx=ReaderUtil.subIndex(scoreDoc.doc,context.searcher().getIndexReader().leaves());
+      LeafReaderContext atomicReaderContext=context.searcher().getIndexReader().leaves().get(segmentIdx);
+      final int segmentDocId=scoreDoc.doc - atomicReaderContext.docBase;
+      SingleFieldsVisitor fieldsVisitor=new SingleFieldsVisitor(UidFieldMapper.NAME);
+      atomicReaderContext.reader().document(segmentDocId,fieldsVisitor);
+      String id=fieldsVisitor.uid().id();
+      ids.put(scoreDoc.doc,id);
+      if (context.highlight() != null) {
+        Query query=queriesRegistry.getPercolateQueries().get(new BytesRef(id));
+        context.parsedQuery(new ParsedQuery(query));
+        context.hitContext().cache().clear();
+        highlightPhase.hitExecute(context,context.hitContext());
+        hls.put(scoreDoc.doc,context.hitContext().hit().getHighlightFields());
+      }
+    }
+    return new PercolateShardResponse(topDocs,ids,hls,context);
+  }
+}

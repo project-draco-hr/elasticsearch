@@ -1,0 +1,24 @@
+{
+  PercolateContext context=mock(PercolateContext.class);
+  when(context.shardTarget()).thenReturn(new SearchShardTarget("_id","_index",0));
+  when(context.percolatorTypeFilter()).thenReturn(new MatchAllDocsQuery());
+  when(context.size()).thenReturn(10);
+  PercolatorQueriesRegistry registry=createRegistry();
+  addPercolatorQuery("1",new TermQuery(new Term("field","brown")),indexWriter,registry);
+  addPercolatorQuery("2",new TermQuery(new Term("field","monkey")),indexWriter,registry);
+  addPercolatorQuery("3",new TermQuery(new Term("field","fox")),indexWriter,registry);
+  indexWriter.close();
+  directoryReader=DirectoryReader.open(directory);
+  IndexSearcher shardSearcher=newSearcher(directoryReader);
+  when(context.searcher()).thenReturn(new ContextIndexSearcher(new Engine.Searcher("test",shardSearcher),shardSearcher.getQueryCache(),shardSearcher.getQueryCachingPolicy()));
+  MemoryIndex memoryIndex=new MemoryIndex();
+  memoryIndex.addField("field","the quick brown fox jumps over the lazy dog",new WhitespaceAnalyzer());
+  IndexSearcher percolateSearcher=memoryIndex.createSearcher();
+  when(context.docSearcher()).thenReturn(percolateSearcher);
+  PercolateShardResponse response=PercolatorService.doPercolate(context,registry,null,null,null);
+  TopDocs topDocs=response.topDocs();
+  assertThat(topDocs.totalHits,equalTo(2));
+  assertThat(topDocs.scoreDocs.length,equalTo(2));
+  assertThat(topDocs.scoreDocs[0].doc,equalTo(0));
+  assertThat(topDocs.scoreDocs[1].doc,equalTo(2));
+}
