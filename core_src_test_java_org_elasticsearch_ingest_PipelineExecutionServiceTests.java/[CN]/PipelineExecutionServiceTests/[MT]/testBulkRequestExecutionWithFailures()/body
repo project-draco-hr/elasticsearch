@@ -1,5 +1,6 @@
 {
   BulkRequest bulkRequest=new BulkRequest();
+  String pipelineId="_id";
   int numRequest=scaledRandomIntBetween(8,64);
   int numIndexRequests=0;
   for (int i=0; i < numRequest; i++) {
@@ -13,21 +14,20 @@
       }
     }
  else {
-      IndexRequest indexRequest=new IndexRequest("_index","_type","_id");
+      IndexRequest indexRequest=new IndexRequest("_index","_type","_id").pipeline(pipelineId);
       indexRequest.source("field1","value1");
       request=indexRequest;
       numIndexRequests++;
     }
     bulkRequest.add(request);
   }
-  String pipelineId="_id";
   CompoundProcessor processor=mock(CompoundProcessor.class);
   Exception error=new RuntimeException();
   doThrow(error).when(processor).execute(any());
   when(store.get(pipelineId)).thenReturn(new Pipeline(pipelineId,null,processor));
-  Consumer<Throwable> requestItemErrorHandler=mock(Consumer.class);
+  Consumer<Tuple<IndexRequest,Throwable>> requestItemErrorHandler=mock(Consumer.class);
   Consumer<Boolean> completionHandler=mock(Consumer.class);
-  executionService.execute(bulkRequest.requests(),pipelineId,requestItemErrorHandler,completionHandler);
-  verify(requestItemErrorHandler,times(numIndexRequests)).accept(error);
+  executionService.execute(bulkRequest.requests(),requestItemErrorHandler,completionHandler);
+  verify(requestItemErrorHandler,times(numIndexRequests)).accept(new Tuple<>(any(IndexRequest.class),error));
   verify(completionHandler,times(1)).accept(true);
 }
