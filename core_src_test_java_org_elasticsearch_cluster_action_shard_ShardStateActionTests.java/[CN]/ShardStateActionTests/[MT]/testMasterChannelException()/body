@@ -12,13 +12,20 @@
       success.set(true);
       latch.countDown();
     }
+    @Override public void onShardFailedFailure(    Exception e){
+      success.set(false);
+      latch.countDown();
+    }
   }
 );
   final CapturingTransport.CapturedRequest[] capturedRequests=transport.capturedRequests();
   transport.clear();
   assertThat(capturedRequests.length,equalTo(1));
   assertFalse(success.get());
-  transport.handleResponse(capturedRequests[0].requestId,new NotMasterException("simulated"));
+  List<Exception> possibleExceptions=new ArrayList<>();
+  possibleExceptions.add(new NotMasterException("simulated"));
+  possibleExceptions.add(new NodeDisconnectedException(clusterService.state().nodes().masterNode(),ShardStateAction.SHARD_FAILED_ACTION_NAME));
+  transport.handleResponse(capturedRequests[0].requestId,randomFrom(possibleExceptions));
   latch.await();
   assertTrue(success.get());
 }
