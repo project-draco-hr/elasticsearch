@@ -6,6 +6,7 @@
   AtomicBoolean noMaster=new AtomicBoolean();
   AtomicBoolean retried=new AtomicBoolean();
   AtomicBoolean success=new AtomicBoolean();
+  AtomicReference<Exception> exception=new AtomicReference<>();
   setUpMasterRetryVerification(noMaster,retried,latch);
   shardStateAction.shardFailed(getRandomShardRouting(index),indexUUID,"test",getSimulatedFailure(),new ShardStateAction.Listener(){
     @Override public void onSuccess(){
@@ -14,6 +15,7 @@
     }
     @Override public void onShardFailedFailure(    Exception e){
       success.set(false);
+      exception.set(e);
       latch.countDown();
     }
   }
@@ -25,7 +27,9 @@
   List<Exception> possibleExceptions=new ArrayList<>();
   possibleExceptions.add(new NotMasterException("simulated"));
   possibleExceptions.add(new NodeDisconnectedException(clusterService.state().nodes().masterNode(),ShardStateAction.SHARD_FAILED_ACTION_NAME));
+  possibleExceptions.add(new Discovery.FailedToCommitClusterStateException("simulated"));
   transport.handleResponse(capturedRequests[0].requestId,randomFrom(possibleExceptions));
   latch.await();
+  assertNull(exception.get());
   assertTrue(success.get());
 }
