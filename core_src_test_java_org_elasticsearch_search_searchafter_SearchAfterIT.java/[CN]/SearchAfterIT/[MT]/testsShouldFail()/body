@@ -1,0 +1,59 @@
+{
+  client().admin().indices().prepareCreate("test").execute().actionGet();
+  client().prepareIndex("test","type1","0").setSource("field1",0,"field2","toto").execute().actionGet();
+  refresh();
+  try {
+    client().prepareSearch("test").addSort("field1",SortOrder.ASC).setQuery(matchAllQuery()).searchAfter(new Object[]{0}).setScroll("1m").execute().actionGet();
+    fail("Should fail on search_after cannot be used with scroll.");
+  }
+ catch (  SearchPhaseExecutionException e) {
+    assertThat(e.getCause().getClass(),Matchers.equalTo(RemoteTransportException.class));
+    assertThat(e.getCause().getCause().getClass(),Matchers.equalTo(SearchContextException.class));
+    assertThat(e.getCause().getCause().getMessage(),Matchers.equalTo("`search_after` cannot be used in a scroll context."));
+  }
+  try {
+    client().prepareSearch("test").addSort("field1",SortOrder.ASC).setQuery(matchAllQuery()).searchAfter(new Object[]{0}).setFrom(10).execute().actionGet();
+    fail("Should fail on search_after cannot be used with from > 0.");
+  }
+ catch (  SearchPhaseExecutionException e) {
+    assertThat(e.getCause().getClass(),Matchers.equalTo(RemoteTransportException.class));
+    assertThat(e.getCause().getCause().getClass(),Matchers.equalTo(SearchContextException.class));
+    assertThat(e.getCause().getCause().getMessage(),Matchers.equalTo("`from` parameter must be set to 0 when `search_after` is used."));
+  }
+  try {
+    client().prepareSearch("test").setQuery(matchAllQuery()).searchAfter(new Object[]{0.75f}).execute().actionGet();
+    fail("Should fail on search_after on score only is disabled");
+  }
+ catch (  SearchPhaseExecutionException e) {
+    assertThat(e.getCause().getClass(),Matchers.equalTo(RemoteTransportException.class));
+    assertThat(e.getCause().getCause().getClass(),Matchers.equalTo(IllegalArgumentException.class));
+    assertThat(e.getCause().getCause().getMessage(),Matchers.equalTo("Sort must contain at least one field."));
+  }
+  try {
+    client().prepareSearch("test").addSort("field2",SortOrder.DESC).addSort("field1",SortOrder.ASC).setQuery(matchAllQuery()).searchAfter(new Object[]{1}).get();
+    fail("Should fail on search_after size differs from sort field size");
+  }
+ catch (  SearchPhaseExecutionException e) {
+    assertThat(e.getCause().getClass(),Matchers.equalTo(RemoteTransportException.class));
+    assertThat(e.getCause().getCause().getClass(),Matchers.equalTo(IllegalArgumentException.class));
+    assertThat(e.getCause().getCause().getMessage(),Matchers.equalTo("search_after has 1 value(s) but sort has 2."));
+  }
+  try {
+    client().prepareSearch("test").setQuery(matchAllQuery()).addSort("field1",SortOrder.ASC).searchAfter(new Object[]{1,2}).execute().actionGet();
+    fail("Should fail on search_after size differs from sort field size");
+  }
+ catch (  SearchPhaseExecutionException e) {
+    assertThat(e.getCause().getClass(),Matchers.equalTo(RemoteTransportException.class));
+    assertThat(e.getCause().getCause().getClass(),Matchers.equalTo(IllegalArgumentException.class));
+    assertThat(e.getCause().getCause().getMessage(),Matchers.equalTo("search_after has 2 value(s) but sort has 1."));
+  }
+  try {
+    client().prepareSearch("test").setQuery(matchAllQuery()).addSort("field1",SortOrder.ASC).searchAfter(new Object[]{"toto"}).execute().actionGet();
+    fail("Should fail on search_after on score only is disabled");
+  }
+ catch (  SearchPhaseExecutionException e) {
+    assertThat(e.getCause().getClass(),Matchers.equalTo(RemoteTransportException.class));
+    assertThat(e.getCause().getCause().getClass(),Matchers.equalTo(IllegalArgumentException.class));
+    assertThat(e.getCause().getCause().getMessage(),Matchers.equalTo("Failed to parse search_after value for field [field1]."));
+  }
+}
