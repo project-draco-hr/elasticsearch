@@ -1,10 +1,9 @@
 {
   IndexService indexService=newIndexService();
-  ThreadPool pool=indexService.getThreadPool();
   AtomicReference<CountDownLatch> latch=new AtomicReference<>(new CountDownLatch(1));
   AtomicReference<CountDownLatch> latch2=new AtomicReference<>(new CountDownLatch(1));
   final AtomicInteger count=new AtomicInteger();
-  IndexService.BaseAsyncTask task=new IndexService.BaseAsyncTask(indexService,pool,TimeValue.timeValueMillis(1)){
+  IndexService.BaseAsyncTask task=new IndexService.BaseAsyncTask(indexService,TimeValue.timeValueMillis(1)){
     @Override protected void runInternal(){
       count.incrementAndGet();
       assertTrue("generic threadpool is configured",Thread.currentThread().getName().contains("[generic]"));
@@ -39,19 +38,15 @@
   task.close();
   latch2.get().countDown();
   assertEquals(2,count.get());
-  task=new IndexService.BaseAsyncTask(indexService,pool,TimeValue.timeValueMillis(1000000)){
+  task=new IndexService.BaseAsyncTask(indexService,TimeValue.timeValueMillis(1000000)){
     @Override protected void runInternal(){
     }
   }
 ;
   assertTrue(task.mustReschedule());
-  if (randomBoolean()) {
-    for (    Integer id : indexService.shardIds()) {
-      indexService.removeShard(id,"simon says");
-    }
-  }
- else {
-    indexService.close("simon says",false);
-  }
+  indexService.close("simon says",false);
   assertFalse("no shards left",task.mustReschedule());
+  assertTrue(task.isScheduled());
+  task.close();
+  assertFalse(task.isScheduled());
 }
