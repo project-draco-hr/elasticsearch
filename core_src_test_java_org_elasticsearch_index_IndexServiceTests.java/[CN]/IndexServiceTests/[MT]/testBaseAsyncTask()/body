@@ -1,0 +1,54 @@
+{
+  IndexService indexService=newIndexService();
+  AtomicReference<CountDownLatch> latch=new AtomicReference<>(new CountDownLatch(1));
+  AtomicReference<CountDownLatch> latch2=new AtomicReference<>(new CountDownLatch(1));
+  final AtomicInteger count=new AtomicInteger();
+  IndexService.BaseAsyncTask task=new IndexService.BaseAsyncTask(indexService,TimeValue.timeValueMillis(1)){
+    @Override protected void runInternal(){
+      final CountDownLatch l1=latch.get();
+      final CountDownLatch l2=latch2.get();
+      count.incrementAndGet();
+      assertTrue("generic threadpool is configured",Thread.currentThread().getName().contains("[generic]"));
+      l1.countDown();
+      try {
+        l2.await();
+      }
+ catch (      InterruptedException e) {
+        fail("interrupted");
+      }
+      if (randomBoolean()) {
+        if (randomBoolean()) {
+          throw new RuntimeException("foo");
+        }
+ else {
+          throw new RuntimeException("bar");
+        }
+      }
+    }
+    @Override protected String getThreadPool(){
+      return ThreadPool.Names.GENERIC;
+    }
+  }
+;
+  latch.get().await();
+  latch.set(new CountDownLatch(1));
+  assertEquals(1,count.get());
+  latch2.get().countDown();
+  latch2.set(new CountDownLatch(1));
+  latch.get().await();
+  assertEquals(2,count.get());
+  task.close();
+  latch2.get().countDown();
+  assertEquals(2,count.get());
+  task=new IndexService.BaseAsyncTask(indexService,TimeValue.timeValueMillis(1000000)){
+    @Override protected void runInternal(){
+    }
+  }
+;
+  assertTrue(task.mustReschedule());
+  indexService.close("simon says",false);
+  assertFalse("no shards left",task.mustReschedule());
+  assertTrue(task.isScheduled());
+  task.close();
+  assertFalse(task.isScheduled());
+}
