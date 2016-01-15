@@ -1,0 +1,36 @@
+{
+  String uriSetting=repositorySettings.settings().get("uri");
+  if (Strings.hasText(uriSetting) == false) {
+    throw new IllegalArgumentException("No 'uri' defined for hdfs snapshot/restore");
+  }
+  URI uri=URI.create(uriSetting);
+  if ("hdfs".equalsIgnoreCase(uri.getScheme()) == false) {
+    throw new IllegalArgumentException(String.format(Locale.ROOT,"Invalid scheme [%s] specified in uri [%s]; only 'hdfs' uri allowed for hdfs snapshot/restore",uri.getScheme(),uriSetting));
+  }
+  if (Strings.hasLength(uri.getPath()) && uri.getPath().equals("/") == false) {
+    throw new IllegalArgumentException(String.format(Locale.ROOT,"Use 'path' option to specify a path [%s], not the uri [%s] for hdfs snapshot/restore",uri.getPath(),uriSetting));
+  }
+  String pathSetting=repositorySettings.settings().get("path");
+  if (pathSetting == null) {
+    throw new IllegalArgumentException("No 'path' defined for hdfs snapshot/restore");
+  }
+  int bufferSize=repositorySettings.settings().getAsBytesSize("buffer_size",DEFAULT_BUFFER_SIZE).bytesAsInt();
+  try {
+    SecurityManager sm=System.getSecurityManager();
+    if (sm != null) {
+      sm.checkPermission(new SpecialPermission());
+    }
+    FileContext fileContext=AccessController.doPrivileged(new PrivilegedAction<FileContext>(){
+      @Override public FileContext run(){
+        return createContext(uri,repositorySettings);
+      }
+    }
+);
+    blobStore=new HdfsBlobStore(fileContext,pathSetting,bufferSize);
+    logger.debug("Using file-system [{}] for URI [{}], path [{}]",fileContext.getDefaultFileSystem(),fileContext.getDefaultFileSystem().getUri(),pathSetting);
+  }
+ catch (  IOException e) {
+    throw new ElasticsearchGenerationException(String.format(Locale.ROOT,"Cannot create HDFS repository for uri [%s]",uri),e);
+  }
+  super.doStart();
+}

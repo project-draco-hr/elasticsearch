@@ -1,0 +1,32 @@
+{
+  if (cluster().size() > 0) {
+    Settings.Builder randomSettingsBuilder=setRandomIndexSettings(getRandom(),Settings.builder()).put(SETTING_INDEX_SEED,getRandom().nextLong());
+    randomSettingsBuilder.put(SETTING_NUMBER_OF_SHARDS,numberOfShards()).put(SETTING_NUMBER_OF_REPLICAS,numberOfReplicas());
+    SuppressCodecs annotation=getClass().getAnnotation(SuppressCodecs.class);
+    if (annotation != null && annotation.value().length == 1 && "*".equals(annotation.value()[0])) {
+      randomSettingsBuilder.put("index.codec",randomFrom(CodecService.DEFAULT_CODEC,CodecService.BEST_COMPRESSION_CODEC));
+    }
+ else {
+      randomSettingsBuilder.put("index.codec",CodecService.LUCENE_DEFAULT_CODEC);
+    }
+    XContentBuilder mappings=null;
+    if (frequently() && randomDynamicTemplates()) {
+      mappings=XContentFactory.jsonBuilder().startObject().startObject("_default_");
+      if (randomBoolean()) {
+        mappings.startObject(TimestampFieldMapper.NAME).field("enabled",randomBoolean());
+        mappings.endObject();
+      }
+      mappings.startArray("dynamic_templates").startObject().startObject("template-strings").field("match_mapping_type","string").startObject("mapping").startObject("fielddata").field(Loading.KEY,randomLoadingValues()).endObject().endObject().endObject().endObject().startObject().startObject("template-longs").field("match_mapping_type","long").startObject("mapping").startObject("fielddata").field(Loading.KEY,randomFrom(Loading.LAZY,Loading.EAGER)).endObject().endObject().endObject().endObject().startObject().startObject("template-doubles").field("match_mapping_type","double").startObject("mapping").startObject("fielddata").field(Loading.KEY,randomFrom(Loading.LAZY,Loading.EAGER)).endObject().endObject().endObject().endObject().startObject().startObject("template-geo_points").field("match_mapping_type","geo_point").startObject("mapping").startObject("fielddata").field(Loading.KEY,randomFrom(Loading.LAZY,Loading.EAGER)).endObject().endObject().endObject().endObject().startObject().startObject("template-booleans").field("match_mapping_type","boolean").startObject("mapping").startObject("fielddata").field(Loading.KEY,randomFrom(Loading.LAZY,Loading.EAGER)).endObject().endObject().endObject().endObject().endArray();
+      mappings.endObject().endObject();
+    }
+    for (    String setting : randomSettingsBuilder.internalMap().keySet()) {
+      assertThat("non index. prefix setting set on index template, its a node setting...",setting,startsWith("index."));
+    }
+    PutIndexTemplateRequestBuilder putTemplate=client().admin().indices().preparePutTemplate("random_index_template").setTemplate("*").setOrder(0).setSettings(randomSettingsBuilder);
+    if (mappings != null) {
+      logger.info("test using _default_ mappings: [{}]",mappings.bytes().toUtf8());
+      putTemplate.addMapping("_default_",mappings);
+    }
+    assertAcked(putTemplate.execute().actionGet());
+  }
+}

@@ -1,14 +1,14 @@
 {
-  Rectangle mbr=xRandomRectangle(getRandom(),xRandomPoint(getRandom()));
+  Rectangle mbr=xRandomRectangle(getRandom(),xRandomPoint(getRandom()),true);
   GeometryCollectionBuilder gcb=createGeometryCollectionWithin(getRandom(),mbr);
-  client().admin().indices().prepareCreate("test").addMapping("type","location","type=geo_shape").execute().actionGet();
+  client().admin().indices().prepareCreate("test").addMapping("type","location","type=geo_shape,tree=quadtree").execute().actionGet();
   XContentBuilder docSource=gcb.toXContent(jsonBuilder().startObject().field("location"),null).endObject();
   client().prepareIndex("test","type","1").setSource(docSource).setRefresh(true).execute().actionGet();
-  EnvelopeBuilder env=new EnvelopeBuilder().topLeft(mbr.getMinX(),mbr.getMaxY()).bottomRight(mbr.getMaxX(),mbr.getMinY());
+  EnvelopeBuilder env=new EnvelopeBuilder(new Coordinate(mbr.getMinX(),mbr.getMaxY()),new Coordinate(mbr.getMaxX(),mbr.getMinY()));
   docSource=env.toXContent(jsonBuilder().startObject().field("location"),null).endObject();
   client().prepareIndex("test","type","2").setSource(docSource).setRefresh(true).execute().actionGet();
   ShapeBuilder filterShape=(gcb.getShapeAt(randomIntBetween(0,gcb.numShapes() - 1)));
-  GeoShapeQueryBuilder filter=QueryBuilders.geoShapeQuery("location",filterShape).relation(ShapeRelation.INTERSECTS);
+  GeoShapeQueryBuilder filter=QueryBuilders.geoShapeQuery("location",filterShape).relation(ShapeRelation.CONTAINS);
   SearchResponse response=client().prepareSearch("test").setTypes("type").setQuery(QueryBuilders.matchAllQuery()).setPostFilter(filter).get();
   assertSearchResponse(response);
   assertThat(response.getHits().totalHits(),greaterThan(0L));

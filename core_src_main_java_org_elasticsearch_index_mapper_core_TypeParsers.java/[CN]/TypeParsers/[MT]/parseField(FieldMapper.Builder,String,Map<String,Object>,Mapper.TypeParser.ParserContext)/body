@@ -1,15 +1,10 @@
 {
-  NamedAnalyzer indexAnalyzer=builder.fieldType().indexAnalyzer();
-  NamedAnalyzer searchAnalyzer=builder.fieldType().searchAnalyzer();
+  Version indexVersionCreated=parserContext.indexVersionCreated();
   for (Iterator<Map.Entry<String,Object>> iterator=fieldNode.entrySet().iterator(); iterator.hasNext(); ) {
     Map.Entry<String,Object> entry=iterator.next();
     final String propName=Strings.toUnderscoreCase(entry.getKey());
     final Object propNode=entry.getValue();
-    if (propName.equals("index_name") && parserContext.indexVersionCreated().before(Version.V_2_0_0_beta1)) {
-      builder.indexName(propNode.toString());
-      iterator.remove();
-    }
- else     if (propName.equals("store")) {
+    if (propName.equals("store")) {
       builder.store(parseStore(name,propNode.toString()));
       iterator.remove();
     }
@@ -17,36 +12,12 @@
       parseIndex(name,propNode.toString(),builder);
       iterator.remove();
     }
- else     if (propName.equals("tokenized")) {
-      builder.tokenized(nodeBooleanValue(propNode));
-      iterator.remove();
-    }
  else     if (propName.equals(DOC_VALUES)) {
       builder.docValues(nodeBooleanValue(propNode));
       iterator.remove();
     }
- else     if (propName.equals("term_vector")) {
-      parseTermVector(name,propNode.toString(),builder);
-      iterator.remove();
-    }
  else     if (propName.equals("boost")) {
       builder.boost(nodeFloatValue(propNode));
-      iterator.remove();
-    }
- else     if (propName.equals("store_term_vectors")) {
-      builder.storeTermVectors(nodeBooleanValue(propNode));
-      iterator.remove();
-    }
- else     if (propName.equals("store_term_vector_offsets")) {
-      builder.storeTermVectorOffsets(nodeBooleanValue(propNode));
-      iterator.remove();
-    }
- else     if (propName.equals("store_term_vector_positions")) {
-      builder.storeTermVectorPositions(nodeBooleanValue(propNode));
-      iterator.remove();
-    }
- else     if (propName.equals("store_term_vector_payloads")) {
-      builder.storeTermVectorPayloads(nodeBooleanValue(propNode));
       iterator.remove();
     }
  else     if (propName.equals("omit_norms")) {
@@ -71,46 +42,17 @@
       DocumentMapperParser.checkNoRemainingFields(propName,properties,parserContext.indexVersionCreated());
       iterator.remove();
     }
- else     if (propName.equals("omit_term_freq_and_positions")) {
-      final IndexOptions op=nodeBooleanValue(propNode) ? IndexOptions.DOCS : IndexOptions.DOCS_AND_FREQS_AND_POSITIONS;
-      if (parserContext.indexVersionCreated().onOrAfter(Version.V_1_0_0_RC2)) {
-        throw new ElasticsearchParseException("'omit_term_freq_and_positions' is not supported anymore - use ['index_options' : 'docs']  instead");
-      }
-      builder.indexOptions(op);
-      iterator.remove();
-    }
  else     if (propName.equals("index_options")) {
       builder.indexOptions(nodeIndexOptionValue(propNode));
-      iterator.remove();
-    }
- else     if (propName.equals("analyzer") || propName.equals("index_analyzer") && parserContext.indexVersionCreated().before(Version.V_2_0_0_beta1)) {
-      NamedAnalyzer analyzer=parserContext.analysisService().analyzer(propNode.toString());
-      if (analyzer == null) {
-        throw new MapperParsingException("analyzer [" + propNode.toString() + "] not found for field ["+ name+ "]");
-      }
-      indexAnalyzer=analyzer;
-      iterator.remove();
-    }
- else     if (propName.equals("search_analyzer")) {
-      NamedAnalyzer analyzer=parserContext.analysisService().analyzer(propNode.toString());
-      if (analyzer == null) {
-        throw new MapperParsingException("analyzer [" + propNode.toString() + "] not found for field ["+ name+ "]");
-      }
-      searchAnalyzer=analyzer;
       iterator.remove();
     }
  else     if (propName.equals("include_in_all")) {
       builder.includeInAll(nodeBooleanValue(propNode));
       iterator.remove();
     }
- else     if (propName.equals("postings_format") && parserContext.indexVersionCreated().before(Version.V_2_0_0_beta1)) {
-      iterator.remove();
-    }
- else     if (propName.equals("doc_values_format") && parserContext.indexVersionCreated().before(Version.V_2_0_0_beta1)) {
-      iterator.remove();
-    }
  else     if (propName.equals("similarity")) {
-      builder.similarity(parserContext.getSimilarity(propNode.toString()));
+      SimilarityProvider similarityProvider=resolveSimilarity(parserContext,name,propNode.toString());
+      builder.similarity(similarityProvider);
       iterator.remove();
     }
  else     if (propName.equals("fielddata")) {
@@ -119,18 +61,21 @@
       iterator.remove();
     }
  else     if (propName.equals("copy_to")) {
-      parseCopyFields(propNode,builder);
+      if (parserContext.isWithinMultiField()) {
+        if (indexVersionCreated.after(Version.V_2_1_0) || (indexVersionCreated.after(Version.V_2_0_1) && indexVersionCreated.before(Version.V_2_1_0))) {
+          throw new MapperParsingException("copy_to in multi fields is not allowed. Found the copy_to in field [" + name + "] which is within a multi field.");
+        }
+ else {
+          ESLoggerFactory.getLogger("mapping [" + parserContext.type() + "]").warn("Found a copy_to in field [" + name + "] which is within a multi field. This feature has been removed and the copy_to will be removed from the mapping.");
+        }
+      }
+ else {
+        parseCopyFields(propNode,builder);
+      }
       iterator.remove();
     }
   }
-  if (indexAnalyzer == null) {
-    if (searchAnalyzer != null) {
-      throw new MapperParsingException("analyzer on field [" + name + "] must be set when search_analyzer is set");
-    }
+  if (indexVersionCreated.before(Version.V_2_2_0)) {
+    parseAnalyzersAndTermVectors(builder,name,fieldNode,parserContext);
   }
- else   if (searchAnalyzer == null) {
-    searchAnalyzer=indexAnalyzer;
-  }
-  builder.indexAnalyzer(indexAnalyzer);
-  builder.searchAnalyzer(searchAnalyzer);
 }

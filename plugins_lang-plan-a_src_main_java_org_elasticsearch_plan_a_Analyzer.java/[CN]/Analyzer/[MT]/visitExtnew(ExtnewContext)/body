@@ -1,0 +1,79 @@
+{
+  final ExtNodeMetadata newenmd=adapter.getExtNodeMetadata(ctx);
+  final ParserRuleContext parent=newenmd.parent;
+  final ExternalMetadata parentemd=adapter.getExternalMetadata(parent);
+  final ExtdotContext dotctx=ctx.extdot();
+  final ExtbraceContext bracectx=ctx.extbrace();
+  newenmd.last=parentemd.scope == 0 && dotctx == null && bracectx == null;
+  final String name=ctx.TYPE().getText();
+  final Struct struct=definition.structs.get(name);
+  if (parentemd.current != null) {
+    throw new IllegalArgumentException(error(ctx) + "Unexpected new call.");
+  }
+ else   if (struct == null) {
+    throw new IllegalArgumentException(error(ctx) + "Specified type [" + name+ "] not found.");
+  }
+ else   if (newenmd.last && parentemd.storeExpr != null) {
+    throw new IllegalArgumentException(error(ctx) + "Cannot assign a value to a new call.");
+  }
+  final boolean newclass=ctx.arguments() != null;
+  final boolean newarray=!ctx.expression().isEmpty();
+  final List<ExpressionContext> arguments=newclass ? ctx.arguments().expression() : ctx.expression();
+  final int size=arguments.size();
+  Type[] types;
+  if (newarray) {
+    if (!parentemd.read) {
+      throw new IllegalArgumentException(error(ctx) + "A newly created array must be assigned.");
+    }
+    types=new Type[size];
+    Arrays.fill(types,definition.intType);
+    newenmd.target="#makearray";
+    if (size > 1) {
+      newenmd.type=definition.getType(struct,size);
+      parentemd.current=newenmd.type;
+    }
+ else     if (size == 1) {
+      newenmd.type=definition.getType(struct,0);
+      parentemd.current=definition.getType(struct,1);
+    }
+ else {
+      throw new IllegalArgumentException(error(ctx) + "A newly created array cannot have zero dimensions.");
+    }
+  }
+ else   if (newclass) {
+    final Constructor constructor=struct.constructors.get("new");
+    if (constructor != null) {
+      types=new Type[constructor.arguments.size()];
+      constructor.arguments.toArray(types);
+      newenmd.target=constructor;
+      newenmd.type=definition.getType(struct,0);
+      parentemd.statement=!parentemd.read && newenmd.last;
+      parentemd.current=newenmd.type;
+    }
+ else {
+      throw new IllegalArgumentException(error(ctx) + "Unknown new call on type [" + struct.name+ "].");
+    }
+  }
+ else {
+    throw new IllegalArgumentException(error(ctx) + "Unknown parser state.");
+  }
+  if (size != types.length) {
+    throw new IllegalArgumentException(error(ctx) + "When calling [" + name+ "] on type "+ "["+ struct.name+ "] expected ["+ types.length+ "] arguments,"+ " but found ["+ arguments.size()+ "].");
+  }
+  for (int argument=0; argument < size; ++argument) {
+    final ExpressionContext exprctx=adapter.updateExpressionTree(arguments.get(argument));
+    final ExpressionMetadata expremd=adapter.createExpressionMetadata(exprctx);
+    expremd.to=types[argument];
+    visit(exprctx);
+    markCast(expremd);
+  }
+  if (dotctx != null) {
+    adapter.createExtNodeMetadata(parent,dotctx);
+    visit(dotctx);
+  }
+ else   if (bracectx != null) {
+    adapter.createExtNodeMetadata(parent,bracectx);
+    visit(bracectx);
+  }
+  return null;
+}

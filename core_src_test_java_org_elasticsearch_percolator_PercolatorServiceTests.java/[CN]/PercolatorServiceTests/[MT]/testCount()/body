@@ -1,0 +1,20 @@
+{
+  PercolateContext context=mock(PercolateContext.class);
+  when(context.shardTarget()).thenReturn(new SearchShardTarget("_id","_index",0));
+  when(context.percolatorTypeFilter()).thenReturn(new MatchAllDocsQuery());
+  when(context.isOnlyCount()).thenReturn(true);
+  PercolatorQueriesRegistry registry=createRegistry();
+  addPercolatorQuery("1",new TermQuery(new Term("field","brown")),indexWriter,registry);
+  addPercolatorQuery("2",new TermQuery(new Term("field","fox")),indexWriter,registry);
+  addPercolatorQuery("3",new TermQuery(new Term("field","monkey")),indexWriter,registry);
+  indexWriter.close();
+  directoryReader=DirectoryReader.open(directory);
+  IndexSearcher shardSearcher=newSearcher(directoryReader);
+  when(context.searcher()).thenReturn(new ContextIndexSearcher(new Engine.Searcher("test",shardSearcher),shardSearcher.getQueryCache(),shardSearcher.getQueryCachingPolicy()));
+  MemoryIndex memoryIndex=new MemoryIndex();
+  memoryIndex.addField("field","the quick brown fox jumps over the lazy dog",new WhitespaceAnalyzer());
+  IndexSearcher percolateSearcher=memoryIndex.createSearcher();
+  when(context.docSearcher()).thenReturn(percolateSearcher);
+  PercolateShardResponse response=PercolatorService.doPercolate(context,registry,null,null,null);
+  assertThat(response.topDocs().totalHits,equalTo(2));
+}

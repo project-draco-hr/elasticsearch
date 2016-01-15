@@ -1,8 +1,26 @@
 {
   if (syncNeeded()) {
-    try (ReleasableLock lock=writeLock.acquire()){
-      lastSyncedOffset=writtenOffset;
-      checkpoint(lastSyncedOffset,operationCounter,channelReference);
+synchronized (this) {
+      ensureOpen();
+      channelReference.incRef();
+      try {
+        final long offsetToSync;
+        final int opsCounter;
+        outputStream.flush();
+        offsetToSync=totalOffset;
+        opsCounter=operationCounter;
+        try {
+          checkpoint(offsetToSync,opsCounter,channelReference);
+        }
+ catch (        Throwable ex) {
+          closeWithTragicEvent(ex);
+          throw ex;
+        }
+        lastSyncedOffset=offsetToSync;
+      }
+  finally {
+        channelReference.decRef();
+      }
     }
-   }
+  }
 }

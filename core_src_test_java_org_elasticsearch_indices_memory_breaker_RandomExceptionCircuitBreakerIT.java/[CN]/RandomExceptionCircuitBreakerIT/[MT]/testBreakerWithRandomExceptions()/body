@@ -25,7 +25,7 @@
     topLevelRate=0d;
     lowLevelRate=0d;
   }
-  Settings.Builder settings=settingsBuilder().put(indexSettings()).put(EXCEPTION_TOP_LEVEL_RATIO_KEY,topLevelRate).put(EXCEPTION_LOW_LEVEL_RATIO_KEY,lowLevelRate).put(MockEngineSupport.WRAP_READER_RATIO,1.0d);
+  Settings.Builder settings=settingsBuilder().put(indexSettings()).put(EXCEPTION_TOP_LEVEL_RATIO_KEY,topLevelRate).put(EXCEPTION_LOW_LEVEL_RATIO_KEY,lowLevelRate).put(MockEngineSupport.WRAP_READER_RATIO.getKey(),1.0d);
   logger.info("creating index: [test] using settings: [{}]",settings.build().getAsMap());
   client().admin().indices().prepareCreate("test").setSettings(settings).addMapping("type",mapping).execute().actionGet();
   ClusterHealthResponse clusterHealthResponse=client().admin().cluster().health(Requests.clusterHealthRequest().waitForYellowStatus().timeout(TimeValue.timeValueSeconds(5))).get();
@@ -55,35 +55,29 @@
   }
   for (int i=0; i < numSearches; i++) {
     SearchRequestBuilder searchRequestBuilder=client().prepareSearch().setQuery(QueryBuilders.matchAllQuery());
-switch (randomIntBetween(0,5)) {
-case 5:
-case 4:
-case 3:
+    if (random().nextBoolean()) {
       searchRequestBuilder.addSort("test-str",SortOrder.ASC);
-case 2:
-case 1:
-default :
+    }
     searchRequestBuilder.addSort("test-num",SortOrder.ASC);
-}
-boolean success=false;
-try {
-  searchRequestBuilder.get();
-  success=true;
-}
- catch (SearchPhaseExecutionException ex) {
-  logger.info("expected SearchPhaseException: [{}]",ex.getMessage());
-}
-if (frequently()) {
-  ensureGreen("test");
-  assertAllSuccessful(client().admin().indices().prepareClearCache("test").setFieldDataCache(true).execute().actionGet());
-  for (  String node : internalCluster().getNodeNames()) {
-    final IndicesFieldDataCache fdCache=internalCluster().getInstance(IndicesFieldDataCache.class,node);
-    fdCache.getCache().refresh();
+    boolean success=false;
+    try {
+      searchRequestBuilder.get();
+      success=true;
+    }
+ catch (    SearchPhaseExecutionException ex) {
+      logger.info("expected SearchPhaseException: [{}]",ex.getMessage());
+    }
+    if (frequently()) {
+      ensureGreen("test");
+      assertAllSuccessful(client().admin().indices().prepareClearCache("test").setFieldDataCache(true).execute().actionGet());
+      for (      String node : internalCluster().getNodeNames()) {
+        final IndicesFieldDataCache fdCache=internalCluster().getInstance(IndicesFieldDataCache.class,node);
+        fdCache.getCache().refresh();
+      }
+      NodesStatsResponse nodeStats=client().admin().cluster().prepareNodesStats().clear().setBreaker(true).execute().actionGet();
+      for (      NodeStats stats : nodeStats.getNodes()) {
+        assertThat("Breaker reset to 0 last search success: " + success + " mapping: "+ mapping,stats.getBreaker().getStats(CircuitBreaker.FIELDDATA).getEstimated(),equalTo(0L));
+      }
+    }
   }
-  NodesStatsResponse nodeStats=client().admin().cluster().prepareNodesStats().clear().setBreaker(true).execute().actionGet();
-  for (  NodeStats stats : nodeStats.getNodes()) {
-    assertThat("Breaker reset to 0 last search success: " + success + " mapping: "+ mapping,stats.getBreaker().getStats(CircuitBreaker.FIELDDATA).getEstimated(),equalTo(0L));
-  }
-}
-}
 }

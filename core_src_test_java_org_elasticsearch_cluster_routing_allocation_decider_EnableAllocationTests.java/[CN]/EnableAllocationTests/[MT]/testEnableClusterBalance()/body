@@ -1,9 +1,9 @@
 {
   final boolean useClusterSetting=randomBoolean();
   final Rebalance allowedOnes=RandomPicks.randomFrom(getRandom(),EnumSet.of(Rebalance.PRIMARIES,Rebalance.REPLICAS,Rebalance.ALL));
-  Settings build=settingsBuilder().put(CLUSTER_ROUTING_REBALANCE_ENABLE,useClusterSetting ? Rebalance.NONE : RandomPicks.randomFrom(getRandom(),Rebalance.values())).put(ConcurrentRebalanceAllocationDecider.CLUSTER_ROUTING_ALLOCATION_CLUSTER_CONCURRENT_REBALANCE,3).build();
-  NodeSettingsService nodeSettingsService=new NodeSettingsService(build);
-  AllocationService strategy=createAllocationService(build,nodeSettingsService,getRandom());
+  Settings build=settingsBuilder().put(CLUSTER_ROUTING_REBALANCE_ENABLE_SETTING.getKey(),useClusterSetting ? Rebalance.NONE : RandomPicks.randomFrom(getRandom(),Rebalance.values())).put(ConcurrentRebalanceAllocationDecider.CLUSTER_ROUTING_ALLOCATION_CLUSTER_CONCURRENT_REBALANCE_SETTING.getKey(),3).put(ThrottlingAllocationDecider.CLUSTER_ROUTING_ALLOCATION_NODE_CONCURRENT_OUTGOING_RECOVERIES_SETTING.getKey(),10).build();
+  ClusterSettings clusterSettings=new ClusterSettings(build,ClusterSettings.BUILT_IN_CLUSTER_SETTINGS);
+  AllocationService strategy=createAllocationService(build,clusterSettings,getRandom());
   Settings indexSettings=useClusterSetting ? Settings.EMPTY : settingsBuilder().put(EnableAllocationDecider.INDEX_ROUTING_REBALANCE_ENABLE,Rebalance.NONE).build();
   logger.info("Building initial routing table");
   MetaData metaData=MetaData.builder().put(IndexMetaData.builder("test").settings(settings(Version.CURRENT).put(indexSettings)).numberOfShards(3).numberOfReplicas(1)).put(IndexMetaData.builder("always_disabled").settings(settings(Version.CURRENT).put(EnableAllocationDecider.INDEX_ROUTING_REBALANCE_ENABLE,Rebalance.NONE)).numberOfShards(1).numberOfReplicas(1)).build();
@@ -32,7 +32,7 @@
   assertThat(clusterState.getRoutingNodes().shardsWithState(RELOCATING).size(),equalTo(0));
   if (useClusterSetting) {
     prevState=clusterState;
-    clusterState=ClusterState.builder(clusterState).metaData(MetaData.builder(metaData).transientSettings(settingsBuilder().put(CLUSTER_ROUTING_REBALANCE_ENABLE,allowedOnes).build())).build();
+    clusterState=ClusterState.builder(clusterState).metaData(MetaData.builder(metaData).transientSettings(settingsBuilder().put(CLUSTER_ROUTING_REBALANCE_ENABLE_SETTING.getKey(),allowedOnes).build())).build();
   }
  else {
     prevState=clusterState;
@@ -40,7 +40,7 @@
     IndexMetaData meta1=clusterState.getMetaData().index("always_disabled");
     clusterState=ClusterState.builder(clusterState).metaData(MetaData.builder(metaData).removeAllIndices().put(IndexMetaData.builder(meta1)).put(IndexMetaData.builder(meta).settings(settingsBuilder().put(meta.getSettings()).put(EnableAllocationDecider.INDEX_ROUTING_REBALANCE_ENABLE,allowedOnes).build()))).build();
   }
-  nodeSettingsService.clusterChanged(new ClusterChangedEvent("foo",clusterState,prevState));
+  clusterSettings.applySettings(clusterState.metaData().settings());
   routingTable=strategy.reroute(clusterState,"reroute").routingTable();
   clusterState=ClusterState.builder(clusterState).routingTable(routingTable).build();
   assertThat("expected 6 shards to be started 2 to relocate useClusterSettings: " + useClusterSetting,clusterState.getRoutingNodes().shardsWithState(STARTED).size(),equalTo(6));

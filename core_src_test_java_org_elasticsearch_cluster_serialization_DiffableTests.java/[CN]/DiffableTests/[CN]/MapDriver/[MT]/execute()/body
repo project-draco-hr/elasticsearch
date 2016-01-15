@@ -1,0 +1,68 @@
+{
+  logger.debug("Keys in 'before' map: {}",keys);
+  logger.debug("Keys to remove: {}",keysToRemove);
+  logger.debug("Keys to override: {}",keysToOverride);
+  logger.debug("Keys to add: {}",keysToAdd);
+  logger.debug("--> creating 'before' map");
+  Map<Integer,V> before=new HashMap<>();
+  for (  Integer key : keys) {
+    before.put(key,createValue(key,true));
+  }
+  T beforeMap=createMap(before);
+  logger.debug("--> creating 'after' map");
+  Map<Integer,V> after=new HashMap<>();
+  after.putAll(before);
+  for (  Integer key : keysToRemove) {
+    after.remove(key);
+  }
+  for (  Integer key : keysToOverride) {
+    after.put(key,createValue(key,false));
+  }
+  for (  Integer key : keysToAdd) {
+    after.put(key,createValue(key,false));
+  }
+  T afterMap=createMap(unmodifiableMap(after));
+  MapDiff<Integer,V,T> diffMap=diff(beforeMap,afterMap);
+  assertThat(new HashSet(diffMap.getDeletes()),equalTo(keysToRemove));
+  if (diffableValues()) {
+    assertThat(diffMap.getDiffs().keySet(),equalTo(keysToOverride));
+    for (    Integer key : keysToOverride) {
+      assertThat(diffMap.getDiffs().get(key).apply(get(beforeMap,key)),equalTo(get(afterMap,key)));
+    }
+    assertThat(diffMap.getUpserts().keySet(),equalTo(keysToAdd));
+    for (    Integer key : keysToAdd) {
+      assertThat(diffMap.getUpserts().get(key),equalTo(get(afterMap,key)));
+    }
+  }
+ else {
+    assertThat(diffMap.getDiffs(),equalTo(emptyMap()));
+    Set<Integer> keysToAddAndOverride=Sets.union(keysToAdd,keysToOverride);
+    assertThat(diffMap.getUpserts().keySet(),equalTo(keysToAddAndOverride));
+    for (    Integer key : keysToAddAndOverride) {
+      assertThat(diffMap.getUpserts().get(key),equalTo(get(afterMap,key)));
+    }
+  }
+  if (randomBoolean()) {
+    logger.debug("--> serializing diff");
+    BytesStreamOutput out=new BytesStreamOutput();
+    diffMap.writeTo(out);
+    StreamInput in=StreamInput.wrap(out.bytes());
+    logger.debug("--> reading diff back");
+    diffMap=readDiff(in);
+  }
+  T appliedDiffMap=diffMap.apply(beforeMap);
+  assertThat(size(appliedDiffMap),equalTo(keys.size() - keysToRemove.size() + keysToAdd.size()));
+  for (  Integer key : keysToRemove) {
+    assertThat(get(appliedDiffMap,key),nullValue());
+  }
+  for (  Integer key : keysUnchanged) {
+    assertThat(get(appliedDiffMap,key),equalTo(get(beforeMap,key)));
+  }
+  for (  Integer key : keysToOverride) {
+    assertThat(get(appliedDiffMap,key),not(equalTo(get(beforeMap,key))));
+    assertThat(get(appliedDiffMap,key),equalTo(get(afterMap,key)));
+  }
+  for (  Integer key : keysToAdd) {
+    assertThat(get(appliedDiffMap,key),equalTo(get(afterMap,key)));
+  }
+}

@@ -1,0 +1,31 @@
+{
+  connectNodes(testNodes);
+  CountDownLatch checkLatch=new CountDownLatch(1);
+  ActionFuture<NodesResponse> future=startBlockingTestNodesAction(checkLatch);
+  TestTasksAction[] tasksActions=new TestTasksAction[nodesCount];
+  final int failTaskOnNode=randomIntBetween(1,nodesCount - 1);
+  for (int i=0; i < testNodes.length; i++) {
+    final int node=i;
+    tasksActions[i]=new TestTasksAction(Settings.EMPTY,"testTasksAction",clusterName,threadPool,testNodes[i].clusterService,testNodes[i].transportService){
+      @Override protected TestTaskResponse taskOperation(      TestTasksRequest request,      Task task){
+        logger.info("Task action on node " + node);
+        if (failTaskOnNode == node && ((ChildTask)task).getParentNode() != null) {
+          logger.info("Failing on node " + node);
+          throw new RuntimeException("Task level failure");
+        }
+        return new TestTaskResponse("Success on node " + node);
+      }
+    }
+;
+  }
+  TestTasksRequest testTasksRequest=new TestTasksRequest();
+  testTasksRequest.actions("testAction[n]");
+  TestTasksResponse response=tasksActions[0].execute(testTasksRequest).get();
+  assertEquals(testNodes.length - 1,response.tasks.size());
+  assertEquals(1,response.getTaskFailures().size());
+  assertThat(response.getTaskFailures().get(0).getReason(),containsString("Task level failure"));
+  assertEquals(0,response.getNodeFailures().size());
+  checkLatch.countDown();
+  NodesResponse responses=future.get();
+  assertEquals(0,responses.failureCount());
+}

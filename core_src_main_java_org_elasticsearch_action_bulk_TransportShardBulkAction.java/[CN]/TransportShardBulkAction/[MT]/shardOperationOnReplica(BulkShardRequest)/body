@@ -1,0 +1,41 @@
+{
+  final ShardId shardId=request.shardId();
+  IndexService indexService=indicesService.indexServiceSafe(shardId.getIndex());
+  IndexShard indexShard=indexService.getShard(shardId.id());
+  Translog.Location location=null;
+  for (int i=0; i < request.items().length; i++) {
+    BulkItemRequest item=request.items()[i];
+    if (item == null || item.isIgnoreOnReplica()) {
+      continue;
+    }
+    if (item.request() instanceof IndexRequest) {
+      IndexRequest indexRequest=(IndexRequest)item.request();
+      try {
+        Engine.Index operation=TransportIndexAction.executeIndexRequestOnReplica(indexRequest,indexShard);
+        location=locationToSync(location,operation.getTranslogLocation());
+      }
+ catch (      Throwable e) {
+        if (!ignoreReplicaException(e)) {
+          throw e;
+        }
+      }
+    }
+ else     if (item.request() instanceof DeleteRequest) {
+      DeleteRequest deleteRequest=(DeleteRequest)item.request();
+      try {
+        Engine.Delete delete=TransportDeleteAction.executeDeleteRequestOnReplica(deleteRequest,indexShard);
+        indexShard.delete(delete);
+        location=locationToSync(location,delete.getTranslogLocation());
+      }
+ catch (      Throwable e) {
+        if (!ignoreReplicaException(e)) {
+          throw e;
+        }
+      }
+    }
+ else {
+      throw new IllegalStateException("Unexpected index operation: " + item.request());
+    }
+  }
+  processAfterWrite(request.refresh(),indexShard,location);
+}
