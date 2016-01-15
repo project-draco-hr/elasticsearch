@@ -1,9 +1,10 @@
 {
   try {
+    List<Failure> failures=new ArrayList<Failure>();
     Set<String> destinationIndicesThisBatch=new HashSet<>();
     for (    BulkItemResponse item : response) {
       if (item.isFailed()) {
-        recordFailure(item.getFailure());
+        recordFailure(item.getFailure(),failures);
         continue;
       }
 switch (item.getOpType()) {
@@ -11,14 +12,14 @@ case "index":
 case "create":
         IndexResponse ir=item.getResponse();
       if (ir.isCreated()) {
-        created.incrementAndGet();
+        task.countCreated();
       }
  else {
-        updated.incrementAndGet();
+        task.countUpdated();
       }
     break;
 case "delete":
-  deleted.incrementAndGet();
+  task.countDeleted();
 break;
 default :
 throw new IllegalArgumentException("Unknown op type:  " + item.getOpType());
@@ -26,12 +27,12 @@ throw new IllegalArgumentException("Unknown op type:  " + item.getOpType());
 destinationIndices.add(item.getIndex());
 }
 destinationIndices.addAll(destinationIndicesThisBatch);
-if (false == indexingFailures.isEmpty()) {
-startNormalTermination();
+if (false == failures.isEmpty()) {
+startNormalTermination(unmodifiableList(failures),emptyList());
 return;
 }
-if (mainRequest.getSize() != SIZE_ALL_MATCHES && successfullyProcessed() >= mainRequest.getSize()) {
-startNormalTermination();
+if (mainRequest.getSize() != SIZE_ALL_MATCHES && task.getSuccessfullyProcessed() >= mainRequest.getSize()) {
+startNormalTermination(emptyList(),emptyList());
 return;
 }
 startNextScrollRequest();

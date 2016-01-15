@@ -1,0 +1,48 @@
+{
+  mainRequest.setAbortOnVersionConflict(false);
+  int maxBatches=randomIntBetween(0,100);
+  long versionConflicts=0;
+  long created=0;
+  long updated=0;
+  long deleted=0;
+  for (int batches=0; batches < maxBatches; batches++) {
+    BulkItemResponse[] responses=new BulkItemResponse[randomIntBetween(0,10000)];
+    for (int i=0; i < responses.length; i++) {
+      ShardId shardId=new ShardId(new Index("name","uid"),0);
+      String opType;
+      if (rarely()) {
+        opType=randomSimpleString(random());
+        versionConflicts++;
+        responses[i]=new BulkItemResponse(i,opType,new Failure(shardId.getIndexName(),"type","id" + i,new VersionConflictEngineException(shardId,"type","id","test")));
+        continue;
+      }
+      boolean createdResponse;
+switch (randomIntBetween(0,2)) {
+case 0:
+        opType=randomFrom("index","create");
+      createdResponse=true;
+    created++;
+  break;
+case 1:
+opType=randomFrom("index","create");
+createdResponse=false;
+updated++;
+break;
+case 2:
+opType="delete";
+createdResponse=false;
+deleted++;
+break;
+default :
+throw new RuntimeException("Bad scenario");
+}
+responses[i]=new BulkItemResponse(i,opType,new IndexResponse(shardId,"type","id" + i,randomInt(),createdResponse));
+}
+new DummyAbstractAsyncBulkByScrollAction().onBulkResponse(new BulkResponse(responses,0));
+assertEquals(versionConflicts,task.getStatus().getVersionConflicts());
+assertEquals(updated,task.getStatus().getUpdated());
+assertEquals(created,task.getStatus().getCreated());
+assertEquals(deleted,task.getStatus().getDeleted());
+assertEquals(versionConflicts,task.getStatus().getVersionConflicts());
+}
+}

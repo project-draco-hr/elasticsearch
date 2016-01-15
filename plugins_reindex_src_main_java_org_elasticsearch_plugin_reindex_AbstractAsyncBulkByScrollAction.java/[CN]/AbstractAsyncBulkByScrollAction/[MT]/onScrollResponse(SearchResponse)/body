@@ -1,23 +1,27 @@
 {
   scroll.set(searchResponse.getScrollId());
   if (searchResponse.getShardFailures() != null && searchResponse.getShardFailures().length > 0) {
-    Collections.addAll(searchFailures,searchResponse.getShardFailures());
-    startNormalTermination();
+    startNormalTermination(emptyList(),unmodifiableList(Arrays.asList(searchResponse.getShardFailures())));
     return;
   }
+  long total=searchResponse.getHits().totalHits();
+  if (mainRequest.getSize() > 0) {
+    total=min(total,mainRequest.getSize());
+  }
+  task.setTotal(total);
   threadPool.generic().execute(new AbstractRunnable(){
     @Override protected void doRun() throws Exception {
       try {
         SearchHit[] docs=searchResponse.getHits().getHits();
         logger.debug("scroll returned [{}] documents with a scroll id of [{}]",docs.length,searchResponse.getScrollId());
         if (docs.length == 0) {
-          startNormalTermination();
+          startNormalTermination(emptyList(),emptyList());
           return;
         }
-        batches.incrementAndGet();
+        task.countBatch();
         List<SearchHit> docsIterable=Arrays.asList(docs);
         if (mainRequest.getSize() != SIZE_ALL_MATCHES) {
-          long remaining=max(0,mainRequest.getSize() - successfullyProcessed());
+          long remaining=max(0,mainRequest.getSize() - task.getSuccessfullyProcessed());
           if (remaining < docs.length) {
             docsIterable=docsIterable.subList(0,(int)remaining);
           }
