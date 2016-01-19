@@ -1,7 +1,19 @@
 {
   connectNodes(testNodes);
   CountDownLatch checkLatch=new CountDownLatch(1);
-  ActionFuture<NodesResponse> future=startBlockingTestNodesAction(checkLatch);
+  CountDownLatch responseLatch=new CountDownLatch(1);
+  final AtomicReference<NodesResponse> responseReference=new AtomicReference<>();
+  Task mainTask=startBlockingTestNodesAction(checkLatch,new ActionListener<NodesResponse>(){
+    @Override public void onResponse(    NodesResponse listTasksResponse){
+      responseReference.set(listTasksResponse);
+      responseLatch.countDown();
+    }
+    @Override public void onFailure(    Throwable e){
+      logger.warn("Couldn't get list of tasks",e);
+      responseLatch.countDown();
+    }
+  }
+);
   Map<Long,Task> localTasks=testNodes[0].transportService.getTaskManager().getTasks();
   assertEquals(2,localTasks.size());
   Task coordinatingTask=localTasks.get(Collections.min(localTasks.keySet()));
@@ -42,8 +54,13 @@
     assertEquals(1,entry.getValue().size());
     assertEquals("NodeRequest[Test Request, true]",entry.getValue().get(0).getDescription());
   }
+  listTasksRequest.actions("testAction");
+  response=testNode.transportListTasksAction.execute(listTasksRequest).get();
+  assertEquals(1,response.getTasks().size());
+  assertEquals(mainTask.getId(),response.getTasks().get(0).getId());
   checkLatch.countDown();
-  NodesResponse responses=future.get();
+  assertTrue(responseLatch.await(10,TimeUnit.SECONDS));
+  NodesResponse responses=responseReference.get();
   assertEquals(0,responses.failureCount());
   for (  TestNode node : testNodes) {
     assertEquals(0,node.transportService.getTaskManager().getTasks().size());
