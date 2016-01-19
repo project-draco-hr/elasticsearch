@@ -6,7 +6,7 @@
   logger.debug("expecting [{}] assigned replicas, [{}] total shards. using state: \n{}",assignedReplicas,totalShards,clusterService.state().prettyPrint());
   Releasable reference=getOrCreateIndexShardOperationsCounter();
   assertIndexShardCounter(2);
-  TransportReplicationAction<Request,Request,Response>.ReplicationPhase replicationPhase=action.new ReplicationPhase(request,new Response(),request.shardId(),createTransportChannel(listener),reference,null);
+  TransportReplicationAction<Request,Request,Response>.ReplicationPhase replicationPhase=action.new ReplicationPhase(request,new Response(),request.shardId(),createTransportChannel(listener),reference);
   assertThat(replicationPhase.totalShards(),equalTo(totalShards));
   assertThat(replicationPhase.pending(),equalTo(assignedReplicas));
   replicationPhase.run();
@@ -53,7 +53,7 @@
         t=new IndexShardNotStartedException(shardId,IndexShardState.RECOVERING);
       }
       logger.debug("--> simulating failure on {} with [{}]",capturedRequest.node,t.getClass().getSimpleName());
-      transport.handleResponse(capturedRequest.requestId,t);
+      transport.handleRemoteError(capturedRequest.requestId,t);
       if (criticalFailure) {
         CapturingTransport.CapturedRequest[] shardFailedRequests=transport.getCapturedRequestsAndClear();
         assertEquals(1,shardFailedRequests.length);
@@ -62,7 +62,21 @@
         ShardStateAction.ShardRoutingEntry shardRoutingEntry=(ShardStateAction.ShardRoutingEntry)shardFailedRequest.request;
         assertEquals(shardRoutingEntry.getShardRouting(),routing);
         failures.add(shardFailedRequest);
-        transport.handleResponse(shardFailedRequest.requestId,TransportResponse.Empty.INSTANCE);
+        if (randomBoolean()) {
+          int numberOfRetries=randomIntBetween(1,4);
+          CapturingTransport.CapturedRequest currentRequest=shardFailedRequest;
+          for (int retryNumber=0; retryNumber < numberOfRetries; retryNumber++) {
+            clusterService.setState(ClusterState.builder(clusterService.state()));
+            transport.handleRemoteError(currentRequest.requestId,new NotMasterException("shard-failed-test"));
+            CapturingTransport.CapturedRequest[] retryRequests=transport.getCapturedRequestsAndClear();
+            assertEquals(1,retryRequests.length);
+            currentRequest=retryRequests[0];
+          }
+          transport.handleResponse(currentRequest.requestId,TransportResponse.Empty.INSTANCE);
+        }
+ else {
+          transport.handleResponse(shardFailedRequest.requestId,TransportResponse.Empty.INSTANCE);
+        }
       }
     }
  else {

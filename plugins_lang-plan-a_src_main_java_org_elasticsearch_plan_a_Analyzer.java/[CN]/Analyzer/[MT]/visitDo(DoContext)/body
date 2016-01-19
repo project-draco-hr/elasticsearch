@@ -1,36 +1,30 @@
 {
-  final StatementMetadata dosmd=adapter.getStatementMetadata(ctx);
+  final StatementMetadata dosmd=metadata.getStatementMetadata(ctx);
   incrementScope();
   final BlockContext blockctx=ctx.block();
-  final StatementMetadata blocksmd=adapter.createStatementMetadata(blockctx);
+  final StatementMetadata blocksmd=metadata.createStatementMetadata(blockctx);
+  blocksmd.beginLoop=true;
+  blocksmd.inLoop=true;
   visit(blockctx);
-  if (blocksmd.allReturn) {
-    throw new IllegalArgumentException(error(ctx) + "All paths return so the loop is not necessary.");
+  if (blocksmd.loopEscape && !blocksmd.anyContinue) {
+    throw new IllegalArgumentException(error(ctx) + "All paths escape so the loop is not necessary.");
   }
-  if (blocksmd.allBreak) {
-    throw new IllegalArgumentException(error(ctx) + "All paths break so the loop is not necessary.");
-  }
-  if (blocksmd.allContinue) {
-    throw new IllegalArgumentException(error(ctx) + "The loop will never exit.");
-  }
-  final ExpressionContext exprctx=adapter.updateExpressionTree(ctx.expression());
-  final ExpressionMetadata expremd=adapter.createExpressionMetadata(exprctx);
+  final ExpressionContext exprctx=metadata.updateExpressionTree(ctx.expression());
+  final ExpressionMetadata expremd=metadata.createExpressionMetadata(exprctx);
   expremd.to=definition.booleanType;
   visit(exprctx);
   markCast(expremd);
   if (expremd.postConst != null) {
-    final boolean exitrequired=(boolean)expremd.postConst;
-    if (exitrequired && !blocksmd.anyReturn && !blocksmd.anyBreak) {
-      throw new IllegalArgumentException(error(ctx) + "The loop will never exit.");
+    final boolean continuous=(boolean)expremd.postConst;
+    if (!continuous) {
+      throw new IllegalArgumentException(error(ctx) + "All paths escape so the loop is not necessary.");
     }
-    if (exitrequired && blocksmd.anyReturn && !blocksmd.anyBreak) {
-      dosmd.allExit=true;
-      dosmd.allReturn=true;
-    }
-    if (!exitrequired && !blocksmd.anyContinue) {
-      throw new IllegalArgumentException(error(ctx) + "All paths exit so the loop is not necessary.");
+    if (!blocksmd.anyBreak) {
+      dosmd.methodEscape=true;
+      dosmd.allLast=true;
     }
   }
+  dosmd.count=1;
   decrementScope();
   return null;
 }

@@ -1,0 +1,41 @@
+{
+  final DiscoveryNode discoNode;
+  try {
+    discoNode=allocation.nodes().resolveNode(node);
+  }
+ catch (  IllegalArgumentException e) {
+    return explainOrThrowRejectedCommand(explain,allocation,e);
+  }
+  final RoutingNodes routingNodes=allocation.routingNodes();
+  RoutingNode routingNode=routingNodes.node(discoNode.id());
+  if (routingNode == null) {
+    return explainOrThrowMissingRoutingNode(allocation,explain,discoNode);
+  }
+  final ShardRouting primaryShardRouting;
+  try {
+    primaryShardRouting=allocation.routingTable().shardRoutingTable(shardId).primaryShard();
+  }
+ catch (  IndexNotFoundException|ShardNotFoundException e) {
+    return explainOrThrowRejectedCommand(explain,allocation,e);
+  }
+  if (primaryShardRouting.unassigned()) {
+    return explainOrThrowRejectedCommand(explain,allocation,"trying to allocate a replica shard " + shardId + ", while corresponding primary shard is still unassigned");
+  }
+  List<ShardRouting> replicaShardRoutings=allocation.routingTable().shardRoutingTable(shardId).replicaShardsWithState(ShardRoutingState.UNASSIGNED);
+  ShardRouting shardRouting;
+  if (replicaShardRoutings.isEmpty()) {
+    return explainOrThrowRejectedCommand(explain,allocation,"all copies of " + shardId + " are already assigned. Use the move allocation command instead");
+  }
+ else {
+    shardRouting=replicaShardRoutings.get(0);
+  }
+  Decision decision=allocation.deciders().canAllocate(shardRouting,routingNode,allocation);
+  if (decision.type() == Decision.Type.NO) {
+    if (explain) {
+      return new RerouteExplanation(this,decision);
+    }
+    throw new IllegalArgumentException("[" + name() + "] allocation of "+ shardId+ " on node "+ discoNode+ " is not allowed, reason: "+ decision);
+  }
+  initializeUnassignedShard(allocation,routingNodes,routingNode,shardRouting);
+  return new RerouteExplanation(this,decision);
+}
