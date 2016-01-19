@@ -1,0 +1,22 @@
+{
+  boolean useStaleReplica=randomBoolean();
+  createStaleReplicaScenario();
+  logger.info("--> explicitly promote old primary shard");
+  ImmutableOpenIntMap<List<IndicesShardStoresResponse.StoreStatus>> storeStatuses=client().admin().indices().prepareShardStores("test").get().getStoreStatuses().get("test");
+  ClusterRerouteRequestBuilder rerouteBuilder=client().admin().cluster().prepareReroute();
+  for (  IntObjectCursor<List<IndicesShardStoresResponse.StoreStatus>> shardStoreStatuses : storeStatuses) {
+    int shardId=shardStoreStatuses.key;
+    IndicesShardStoresResponse.StoreStatus storeStatus=randomFrom(shardStoreStatuses.value);
+    logger.info("--> adding allocation command for shard " + shardId);
+    if (useStaleReplica) {
+      rerouteBuilder.add(new AllocateStalePrimaryAllocationCommand(new ShardId("test",shardId),storeStatus.getNode().getId(),true));
+    }
+ else {
+      rerouteBuilder.add(new AllocateEmptyPrimaryAllocationCommand(new ShardId("test",shardId),storeStatus.getNode().getId(),true));
+    }
+  }
+  rerouteBuilder.get();
+  logger.info("--> check that the stale primary shard gets allocated and that documents are available");
+  ensureYellow("test");
+  assertHitCount(client().prepareSearch("test").setSize(0).setQuery(matchAllQuery()).get(),useStaleReplica ? 1l : 0l);
+}
