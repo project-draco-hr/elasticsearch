@@ -1,0 +1,25 @@
+{
+  DiscoveryNode masterNode=observer.observedState().nodes().masterNode();
+  if (masterNode == null) {
+    logger.warn("{} no master known for action [{}] for shard [{}]",shardRoutingEntry.getShardRouting().shardId(),actionName,shardRoutingEntry.getShardRouting());
+    waitForNewMasterAndRetry(actionName,observer,shardRoutingEntry,listener);
+  }
+ else {
+    logger.debug("{} sending [{}] for shard [{}]",shardRoutingEntry.getShardRouting().getId(),actionName,shardRoutingEntry);
+    transportService.sendRequest(masterNode,actionName,shardRoutingEntry,new EmptyTransportResponseHandler(ThreadPool.Names.SAME){
+      @Override public void handleResponse(      TransportResponse.Empty response){
+        listener.onSuccess();
+      }
+      @Override public void handleException(      TransportException exp){
+        if (isMasterChannelException(exp)) {
+          waitForNewMasterAndRetry(actionName,observer,shardRoutingEntry,listener);
+        }
+ else {
+          logger.warn("{} unexpected failure while sending request [{}] to [{}] for shard [{}]",exp,shardRoutingEntry.getShardRouting().shardId(),actionName,masterNode,shardRoutingEntry);
+          listener.onFailure(exp.getCause());
+        }
+      }
+    }
+);
+  }
+}
