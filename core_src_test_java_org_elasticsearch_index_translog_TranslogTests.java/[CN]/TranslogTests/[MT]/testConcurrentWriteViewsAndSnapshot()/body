@@ -55,14 +55,20 @@ Set<Translog.Operation> writtenOpsAtView;
 @Override public void onFailure(Throwable t){
 logger.error("--> reader [{}] had an error",t,threadId);
 errors.add(t);
+try {
 closeView();
 }
-void closeView(){
+ catch (IOException e) {
+logger.error("unexpected error while closing view, after failure");
+t.addSuppressed(e);
+}
+}
+void closeView() throws IOException {
 if (view != null) {
 view.close();
 }
 }
-void newView(){
+void newView() throws IOException {
 closeView();
 view=translog.newView();
 writtenOpsAtView=new HashSet<>(writtenOps.keySet());
@@ -77,22 +83,21 @@ if (iter++ % 10 == 0) {
 }
 Set<Translog.Operation> expectedOps=new HashSet<>(writtenOps.keySet());
 expectedOps.removeAll(writtenOpsAtView);
-try (Translog.Snapshot snapshot=view.snapshot()){
-  Translog.Operation op;
-  while ((op=snapshot.next()) != null) {
-    expectedOps.remove(op);
-  }
+Translog.Snapshot snapshot=view.snapshot();
+Translog.Operation op;
+while ((op=snapshot.next()) != null) {
+  expectedOps.remove(op);
 }
- if (expectedOps.isEmpty() == false) {
+if (expectedOps.isEmpty() == false) {
   StringBuilder missed=new StringBuilder("missed ").append(expectedOps.size()).append(" operations");
   boolean failed=false;
-  for (  Translog.Operation op : expectedOps) {
-    final Translog.Location loc=writtenOps.get(op);
+  for (  Translog.Operation expectedOp : expectedOps) {
+    final Translog.Location loc=writtenOps.get(expectedOp);
     if (loc.generation < view.minTranslogGeneration()) {
       continue;
     }
     failed=true;
-    missed.append("\n --> [").append(op).append("] written at ").append(loc);
+    missed.append("\n --> [").append(expectedOp).append("] written at ").append(loc);
   }
   if (failed) {
     fail(missed.toString());
