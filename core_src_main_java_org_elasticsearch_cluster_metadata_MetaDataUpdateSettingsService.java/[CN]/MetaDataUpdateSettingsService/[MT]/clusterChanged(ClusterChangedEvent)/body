@@ -5,56 +5,25 @@
   final int dataNodeCount=event.state().nodes().dataNodes().size();
   Map<Integer,List<String>> nrReplicasChanged=new HashMap<>();
   for (  final IndexMetaData indexMetaData : event.state().metaData()) {
-    String autoExpandReplicas=indexMetaData.getSettings().get(IndexMetaData.SETTING_AUTO_EXPAND_REPLICAS);
-    if (autoExpandReplicas != null && Booleans.parseBoolean(autoExpandReplicas,true)) {
-      try {
-        final int min;
-        final int max;
-        final int dash=autoExpandReplicas.indexOf('-');
-        if (-1 == dash) {
-          logger.warn("failed to set [{}] for index [{}], it should be dash delimited [{}]",IndexMetaData.SETTING_AUTO_EXPAND_REPLICAS,indexMetaData.getIndex(),autoExpandReplicas);
-          continue;
-        }
-        final String sMin=autoExpandReplicas.substring(0,dash);
-        try {
-          min=Integer.parseInt(sMin);
-        }
- catch (        NumberFormatException e) {
-          logger.warn("failed to set [{}] for index [{}], minimum value is not a number [{}]",e,IndexMetaData.SETTING_AUTO_EXPAND_REPLICAS,indexMetaData.getIndex(),sMin);
-          continue;
-        }
-        String sMax=autoExpandReplicas.substring(dash + 1);
-        if (sMax.equals(ALL_NODES_VALUE)) {
-          max=dataNodeCount - 1;
-        }
- else {
-          try {
-            max=Integer.parseInt(sMax);
-          }
- catch (          NumberFormatException e) {
-            logger.warn("failed to set [{}] for index [{}], maximum value is neither [{}] nor a number [{}]",e,IndexMetaData.SETTING_AUTO_EXPAND_REPLICAS,indexMetaData.getIndex(),ALL_NODES_VALUE,sMax);
-            continue;
-          }
-        }
-        int numberOfReplicas=dataNodeCount - 1;
-        if (numberOfReplicas < min) {
-          numberOfReplicas=min;
-        }
- else         if (numberOfReplicas > max) {
-          numberOfReplicas=max;
-        }
-        if (numberOfReplicas == indexMetaData.getNumberOfReplicas()) {
-          continue;
-        }
-        if (numberOfReplicas >= min && numberOfReplicas <= max) {
-          if (!nrReplicasChanged.containsKey(numberOfReplicas)) {
-            nrReplicasChanged.put(numberOfReplicas,new ArrayList<String>());
-          }
-          nrReplicasChanged.get(numberOfReplicas).add(indexMetaData.getIndex());
-        }
+    AutoExpandReplicas autoExpandReplicas=IndexMetaData.INDEX_AUTO_EXPAND_REPLICAS_SETTING.get(indexMetaData.getSettings());
+    if (autoExpandReplicas.isEnabled()) {
+      final int min=autoExpandReplicas.getMinReplicas();
+      final int max=autoExpandReplicas.getMaxReplicas(dataNodeCount);
+      int numberOfReplicas=dataNodeCount - 1;
+      if (numberOfReplicas < min) {
+        numberOfReplicas=min;
       }
- catch (      Exception e) {
-        logger.warn("[{}] failed to parse auto expand replicas",e,indexMetaData.getIndex());
+ else       if (numberOfReplicas > max) {
+        numberOfReplicas=max;
+      }
+      if (numberOfReplicas == indexMetaData.getNumberOfReplicas()) {
+        continue;
+      }
+      if (numberOfReplicas >= min && numberOfReplicas <= max) {
+        if (!nrReplicasChanged.containsKey(numberOfReplicas)) {
+          nrReplicasChanged.put(numberOfReplicas,new ArrayList<>());
+        }
+        nrReplicasChanged.get(numberOfReplicas).add(indexMetaData.getIndex());
       }
     }
   }
