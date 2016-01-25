@@ -6,13 +6,13 @@
   }
 switch (queryBuilder.type()) {
 case BOOLEAN:
-    assertThat(query,either(instanceOf(BooleanQuery.class)).or(instanceOf(ExtendedCommonTermsQuery.class)).or(instanceOf(TermQuery.class)).or(instanceOf(FuzzyQuery.class)));
+    assertThat(query,either(instanceOf(BooleanQuery.class)).or(instanceOf(ExtendedCommonTermsQuery.class)).or(instanceOf(TermQuery.class)).or(instanceOf(FuzzyQuery.class)).or(instanceOf(NumericRangeQuery.class)));
   break;
 case PHRASE:
-assertThat(query,either(instanceOf(BooleanQuery.class)).or(instanceOf(PhraseQuery.class)).or(instanceOf(TermQuery.class)).or(instanceOf(FuzzyQuery.class)));
+assertThat(query,either(instanceOf(BooleanQuery.class)).or(instanceOf(PhraseQuery.class)).or(instanceOf(TermQuery.class)).or(instanceOf(FuzzyQuery.class)).or(instanceOf(NumericRangeQuery.class)));
 break;
 case PHRASE_PREFIX:
-assertThat(query,either(instanceOf(BooleanQuery.class)).or(instanceOf(MultiPhrasePrefixQuery.class)).or(instanceOf(TermQuery.class)).or(instanceOf(FuzzyQuery.class)));
+assertThat(query,either(instanceOf(BooleanQuery.class)).or(instanceOf(MultiPhrasePrefixQuery.class)).or(instanceOf(TermQuery.class)).or(instanceOf(FuzzyQuery.class)).or(instanceOf(NumericRangeQuery.class)));
 break;
 }
 MappedFieldType fieldType=context.fieldMapper(queryBuilder.fieldName());
@@ -50,8 +50,37 @@ assertTrue(queryBuilder.fuzziness() != null);
 FuzzyQuery fuzzyQuery=(FuzzyQuery)query;
 String originalTermLc=queryBuilder.value().toString().toLowerCase(Locale.ROOT);
 String actualTermLc=fuzzyQuery.getTerm().text().toLowerCase(Locale.ROOT);
-assertThat(actualTermLc,equalTo(originalTermLc));
+Matcher<String> termLcMatcher=equalTo(originalTermLc);
+if ("false".equals(originalTermLc) || "true".equals(originalTermLc)) {
+termLcMatcher=either(termLcMatcher).or(equalTo(originalTermLc.substring(0,1)));
+}
+assertThat(actualTermLc,termLcMatcher);
 assertThat(queryBuilder.prefixLength(),equalTo(fuzzyQuery.getPrefixLength()));
 assertThat(queryBuilder.fuzzyTranspositions(),equalTo(fuzzyQuery.getTranspositions()));
+}
+if (query instanceof NumericRangeQuery) {
+assertTrue(queryBuilder.fuzziness() != null);
+@SuppressWarnings("unchecked") NumericRangeQuery<Number> numericRangeQuery=(NumericRangeQuery<Number>)query;
+assertTrue(numericRangeQuery.includesMin());
+assertTrue(numericRangeQuery.includesMax());
+double value;
+double width=0;
+try {
+value=Double.parseDouble(queryBuilder.value().toString());
+}
+ catch (NumberFormatException e) {
+value=ISODateTimeFormat.dateTimeParser().parseMillis(queryBuilder.value().toString());
+width=queryBuilder.fuzziness().asTimeValue().getMillis();
+}
+if (width == 0) {
+if (queryBuilder.fuzziness().equals(Fuzziness.AUTO)) {
+width=1;
+}
+ else {
+width=queryBuilder.fuzziness().asDouble();
+}
+}
+assertEquals(value - width,numericRangeQuery.getMin().doubleValue(),width * .1);
+assertEquals(value + width,numericRangeQuery.getMax().doubleValue(),width * .1);
 }
 }

@@ -1,24 +1,23 @@
 {
-  Settings settings=Settings.settingsBuilder().put("name",BasePipelineAggregationTestCase.class.toString()).put("path.home",createTempDir()).put(IndexMetaData.SETTING_VERSION_CREATED,VersionUtils.randomVersionBetween(random(),Version.V_1_0_0,Version.CURRENT)).build();
+  Settings settings=Settings.settingsBuilder().put("name",BasePipelineAggregationTestCase.class.toString()).put("path.home",createTempDir()).build();
+  namedWriteableRegistry=new NamedWriteableRegistry();
   index=new Index("test");
   injector=new ModulesBuilder().add(new EnvironmentModule(new Environment(settings)),new SettingsModule(settings,new SettingsFilter(settings)),new ThreadPoolModule(new ThreadPool(settings)),new ScriptModule(settings),new IndicesModule(){
     @Override protected void configure(){
-      bindQueryParsersExtension();
+      bindMapperExtension();
     }
   }
-,new SearchModule(){
-    @Override protected void configure(){
-      configureAggs();
-      configureHighlighters();
-      configureFetchSubPhase();
-      configureFunctionScore();
+,new SearchModule(settings,namedWriteableRegistry){
+    @Override protected void configureSearch(){
+    }
+    @Override protected void configureSuggesters(){
     }
   }
 ,new IndexSettingsModule(index,settings),new AbstractModule(){
     @Override protected void configure(){
       bind(ClusterService.class).toProvider(Providers.of((ClusterService)null));
       bind(CircuitBreakerService.class).to(NoneCircuitBreakerService.class);
-      bind(NamedWriteableRegistry.class).asEagerSingleton();
+      bind(NamedWriteableRegistry.class).toInstance(namedWriteableRegistry);
     }
   }
 ).createInjector();
@@ -28,7 +27,6 @@
     String type=randomAsciiOfLengthBetween(1,10);
     currentTypes[i]=type;
   }
-  namedWriteableRegistry=injector.getInstance(NamedWriteableRegistry.class);
   queriesRegistry=injector.getInstance(IndicesQueriesRegistry.class);
   parseFieldMatcher=ParseFieldMatcher.STRICT;
 }

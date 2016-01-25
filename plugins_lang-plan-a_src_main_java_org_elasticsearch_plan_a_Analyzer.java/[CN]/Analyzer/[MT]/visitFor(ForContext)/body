@@ -1,55 +1,51 @@
 {
-  final StatementMetadata forsmd=adapter.getStatementMetadata(ctx);
-  boolean exitrequired=false;
+  final StatementMetadata forsmd=metadata.getStatementMetadata(ctx);
+  boolean continuous=false;
   incrementScope();
   final InitializerContext initctx=ctx.initializer();
   if (initctx != null) {
-    adapter.createStatementMetadata(initctx);
+    metadata.createStatementMetadata(initctx);
     visit(initctx);
   }
-  final ExpressionContext exprctx=adapter.updateExpressionTree(ctx.expression());
+  final ExpressionContext exprctx=metadata.updateExpressionTree(ctx.expression());
   if (exprctx != null) {
-    final ExpressionMetadata expremd=adapter.createExpressionMetadata(exprctx);
+    final ExpressionMetadata expremd=metadata.createExpressionMetadata(exprctx);
     expremd.to=definition.booleanType;
     visit(exprctx);
     markCast(expremd);
     if (expremd.postConst != null) {
-      boolean constant=(boolean)expremd.postConst;
-      if (!constant) {
+      continuous=(boolean)expremd.postConst;
+      if (!continuous) {
         throw new IllegalArgumentException(error(ctx) + "The loop will never be executed.");
       }
-      exitrequired=true;
+      if (ctx.empty() != null) {
+        throw new IllegalArgumentException(error(ctx) + "The loop is continuous.");
+      }
     }
   }
  else {
-    exitrequired=true;
+    continuous=true;
   }
   final AfterthoughtContext atctx=ctx.afterthought();
   if (atctx != null) {
-    adapter.createStatementMetadata(atctx);
+    metadata.createStatementMetadata(atctx);
     visit(atctx);
   }
   final BlockContext blockctx=ctx.block();
   if (blockctx != null) {
-    final StatementMetadata blocksmd=adapter.createStatementMetadata(blockctx);
+    final StatementMetadata blocksmd=metadata.createStatementMetadata(blockctx);
+    blocksmd.beginLoop=true;
+    blocksmd.inLoop=true;
     visit(blockctx);
-    if (blocksmd.allReturn) {
-      throw new IllegalArgumentException(error(ctx) + "All paths return so the loop is not necessary.");
+    if (blocksmd.loopEscape && !blocksmd.anyContinue) {
+      throw new IllegalArgumentException(error(ctx) + "All paths escape so the loop is not necessary.");
     }
-    if (blocksmd.allBreak) {
-      throw new IllegalArgumentException(error(ctx) + "All paths break so the loop is not necessary.");
-    }
-    if (exitrequired && !blocksmd.anyReturn && !blocksmd.anyBreak) {
-      throw new IllegalArgumentException(error(ctx) + "The loop will never exit.");
-    }
-    if (exitrequired && blocksmd.anyReturn && !blocksmd.anyBreak) {
-      forsmd.allExit=true;
-      forsmd.allReturn=true;
+    if (continuous && !blocksmd.anyBreak) {
+      forsmd.methodEscape=true;
+      forsmd.allLast=true;
     }
   }
- else   if (exitrequired) {
-    throw new IllegalArgumentException(error(ctx) + "The loop will never exit.");
-  }
+  forsmd.count=1;
   decrementScope();
   return null;
 }
