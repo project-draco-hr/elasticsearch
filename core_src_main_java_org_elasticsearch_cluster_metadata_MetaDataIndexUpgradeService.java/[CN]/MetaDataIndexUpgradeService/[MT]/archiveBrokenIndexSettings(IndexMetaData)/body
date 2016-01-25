@@ -1,0 +1,30 @@
+{
+  Settings settings=indexMetaData.getSettings();
+  Settings.Builder builder=Settings.builder();
+  boolean changed=false;
+  for (  Map.Entry<String,String> entry : settings.getAsMap().entrySet()) {
+    try {
+      Setting<?> setting=indexScopedSettigns.get(entry.getKey());
+      if (setting != null) {
+        setting.get(settings);
+        builder.put(entry.getKey(),entry.getValue());
+      }
+ else {
+        if (indexScopedSettigns.isPrivateSetting(entry.getKey()) || entry.getKey().startsWith(ARCHIVED_SETTINGS_PREFIX)) {
+          builder.put(entry.getKey(),entry.getValue());
+        }
+ else {
+          changed=true;
+          logger.warn("[{}] found unknown index setting: {} value: {} - archiving",indexMetaData.getIndex(),entry.getKey(),entry.getValue());
+          builder.put(ARCHIVED_SETTINGS_PREFIX + entry.getKey(),entry.getValue());
+        }
+      }
+    }
+ catch (    IllegalArgumentException ex) {
+      changed=true;
+      logger.warn("[{}] found invalid index setting: {} value: {} - archiving",ex,indexMetaData.getIndex(),entry.getKey(),entry.getValue());
+      builder.put(ARCHIVED_SETTINGS_PREFIX + entry.getKey(),entry.getValue());
+    }
+  }
+  return changed ? IndexMetaData.builder(indexMetaData).settings(builder.build()).build() : indexMetaData;
+}
