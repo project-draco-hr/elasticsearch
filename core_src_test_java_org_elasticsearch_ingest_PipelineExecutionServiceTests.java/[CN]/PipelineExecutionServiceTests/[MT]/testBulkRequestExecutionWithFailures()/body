@@ -1,0 +1,33 @@
+{
+  BulkRequest bulkRequest=new BulkRequest();
+  String pipelineId="_id";
+  int numRequest=scaledRandomIntBetween(8,64);
+  int numIndexRequests=0;
+  for (int i=0; i < numRequest; i++) {
+    ActionRequest request;
+    if (randomBoolean()) {
+      if (randomBoolean()) {
+        request=new DeleteRequest("_index","_type","_id");
+      }
+ else {
+        request=new UpdateRequest("_index","_type","_id");
+      }
+    }
+ else {
+      IndexRequest indexRequest=new IndexRequest("_index","_type","_id").setPipeline(pipelineId);
+      indexRequest.source("field1","value1");
+      request=indexRequest;
+      numIndexRequests++;
+    }
+    bulkRequest.add(request);
+  }
+  CompoundProcessor processor=mock(CompoundProcessor.class);
+  Exception error=new RuntimeException();
+  doThrow(error).when(processor).execute(any());
+  when(store.get(pipelineId)).thenReturn(new Pipeline(pipelineId,null,processor));
+  BiConsumer<IndexRequest,Throwable> requestItemErrorHandler=mock(BiConsumer.class);
+  Consumer<Throwable> completionHandler=mock(Consumer.class);
+  executionService.execute(bulkRequest.requests(),requestItemErrorHandler,completionHandler);
+  verify(requestItemErrorHandler,times(numIndexRequests)).accept(any(IndexRequest.class),eq(error));
+  verify(completionHandler,times(1)).accept(null);
+}
