@@ -1,0 +1,31 @@
+{
+  if (onlyCount) {
+    long finalCount=0;
+    for (    PercolateShardResponse shardResponse : shardResponses) {
+      finalCount+=shardResponse.topDocs().totalHits;
+    }
+    InternalAggregations reducedAggregations=reduceAggregations(shardResponses);
+    return new PercolatorService.ReduceResult(finalCount,reducedAggregations);
+  }
+ else {
+    int requestedSize=shardResponses.get(0).requestedSize();
+    TopDocs[] shardResults=new TopDocs[shardResponses.size()];
+    long foundMatches=0;
+    for (int i=0; i < shardResults.length; i++) {
+      TopDocs shardResult=shardResponses.get(i).topDocs();
+      foundMatches+=shardResult.totalHits;
+      shardResults[i]=shardResult;
+    }
+    TopDocs merged=TopDocs.merge(requestedSize,shardResults);
+    PercolateResponse.Match[] matches=new PercolateResponse.Match[merged.scoreDocs.length];
+    for (int i=0; i < merged.scoreDocs.length; i++) {
+      ScoreDoc doc=merged.scoreDocs[i];
+      PercolateShardResponse shardResponse=shardResponses.get(doc.shardIndex);
+      String id=shardResponse.ids().get(doc.doc);
+      Map<String,HighlightField> hl=shardResponse.hls().get(doc.doc);
+      matches[i]=new PercolateResponse.Match(new Text(shardResponse.getIndex()),new Text(id),doc.score,hl);
+    }
+    InternalAggregations reducedAggregations=reduceAggregations(shardResponses);
+    return new PercolatorService.ReduceResult(foundMatches,matches,reducedAggregations);
+  }
+}
