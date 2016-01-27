@@ -1,0 +1,49 @@
+{
+  final Metadata.ExtNodeMetadata sourceenmd=metadata.getExtNodeMetadata(source);
+  final boolean method=sourceenmd.target instanceof Method;
+  final boolean def=sourceenmd.target instanceof String;
+  if (!method && !def) {
+    throw new IllegalStateException(Metadata.error(source) + "Target not found for call.");
+  }
+  final List<ExpressionContext> arguments=source.arguments().expression();
+  if (method) {
+    for (    final ExpressionContext exprctx : arguments) {
+      visit(exprctx);
+    }
+    final Method target=(Method)sourceenmd.target;
+    if (java.lang.reflect.Modifier.isStatic(target.reflect.getModifiers())) {
+      execute.invokeStatic(target.owner.type,target.method);
+    }
+ else     if (java.lang.reflect.Modifier.isInterface(target.owner.clazz.getModifiers())) {
+      execute.invokeInterface(target.owner.type,target.method);
+    }
+ else {
+      execute.invokeVirtual(target.owner.type,target.method);
+    }
+    if (!target.rtn.clazz.equals(target.handle.type().returnType())) {
+      execute.checkCast(target.rtn.type);
+    }
+  }
+ else {
+    execute.push((String)sourceenmd.target);
+    execute.loadThis();
+    execute.getField(CLASS_TYPE,"definition",DEFINITION_TYPE);
+    execute.push(arguments.size());
+    execute.newArray(definition.defType.type);
+    for (int argument=0; argument < arguments.size(); ++argument) {
+      execute.dup();
+      execute.push(argument);
+      visit(arguments.get(argument));
+      execute.arrayStore(definition.defType.type);
+    }
+    execute.push(arguments.size());
+    execute.newArray(definition.booleanType.type);
+    for (int argument=0; argument < arguments.size(); ++argument) {
+      execute.dup();
+      execute.push(argument);
+      execute.push(metadata.getExpressionMetadata(arguments.get(argument)).typesafe);
+      execute.arrayStore(definition.booleanType.type);
+    }
+    execute.invokeStatic(definition.defobjType.type,DEF_METHOD_CALL);
+  }
+}

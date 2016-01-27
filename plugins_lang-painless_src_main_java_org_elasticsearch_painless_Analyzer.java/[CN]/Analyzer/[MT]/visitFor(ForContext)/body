@@ -1,0 +1,51 @@
+{
+  final Metadata.StatementMetadata forsmd=metadata.getStatementMetadata(ctx);
+  boolean continuous=false;
+  incrementScope();
+  final InitializerContext initctx=ctx.initializer();
+  if (initctx != null) {
+    metadata.createStatementMetadata(initctx);
+    visit(initctx);
+  }
+  final ExpressionContext exprctx=metadata.updateExpressionTree(ctx.expression());
+  if (exprctx != null) {
+    final Metadata.ExpressionMetadata expremd=metadata.createExpressionMetadata(exprctx);
+    expremd.to=definition.booleanType;
+    visit(exprctx);
+    markCast(expremd);
+    if (expremd.postConst != null) {
+      continuous=(boolean)expremd.postConst;
+      if (!continuous) {
+        throw new IllegalArgumentException(Metadata.error(ctx) + "The loop will never be executed.");
+      }
+      if (ctx.empty() != null) {
+        throw new IllegalArgumentException(Metadata.error(ctx) + "The loop is continuous.");
+      }
+    }
+  }
+ else {
+    continuous=true;
+  }
+  final AfterthoughtContext atctx=ctx.afterthought();
+  if (atctx != null) {
+    metadata.createStatementMetadata(atctx);
+    visit(atctx);
+  }
+  final BlockContext blockctx=ctx.block();
+  if (blockctx != null) {
+    final Metadata.StatementMetadata blocksmd=metadata.createStatementMetadata(blockctx);
+    blocksmd.beginLoop=true;
+    blocksmd.inLoop=true;
+    visit(blockctx);
+    if (blocksmd.loopEscape && !blocksmd.anyContinue) {
+      throw new IllegalArgumentException(Metadata.error(ctx) + "All paths escape so the loop is not necessary.");
+    }
+    if (continuous && !blocksmd.anyBreak) {
+      forsmd.methodEscape=true;
+      forsmd.allLast=true;
+    }
+  }
+  forsmd.count=1;
+  decrementScope();
+  return null;
+}
