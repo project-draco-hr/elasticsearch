@@ -2,34 +2,35 @@
   int shardsNo=numberOfReplicas + 1;
   int neededNodes=shardsNo <= 2 ? 1 : shardsNo / 2 + 1;
   internalCluster().ensureAtLeastNumDataNodes(randomIntBetween(neededNodes,shardsNo));
-  for (int i=0; i < 20; i++) {
-    logger.info("running iteration {}",i);
-    if (createIndex) {
-      createIndex("test");
-    }
-    client().prepareIndex("test","type1",randomAsciiOfLength(5)).setSource("field","test").execute().actionGet();
-    RefreshResponse refreshResponse=client().admin().indices().prepareRefresh("test").execute().actionGet();
-    assertThat(refreshResponse.getSuccessfulShards(),greaterThanOrEqualTo(1));
-    ClusterHealthStatus status=ClusterHealthStatus.RED;
-    while (status != ClusterHealthStatus.GREEN) {
-      SearchResponse searchResponse=client().prepareSearch("test").setPreference("_primary").setQuery(QueryBuilders.termQuery("field","test")).execute().actionGet();
-      assertHitCount(searchResponse,1);
-      String preference=randomAsciiOfLength(5);
-      Client client=client();
-      searchResponse=client.prepareSearch("test").setPreference(preference).setQuery(QueryBuilders.termQuery("field","test")).execute().actionGet();
-      if (searchResponse.getHits().getTotalHits() != 1) {
-        refresh();
-        SearchResponse searchResponseAfterRefresh=client.prepareSearch("test").setPreference(preference).setQuery(QueryBuilders.termQuery("field","test")).execute().actionGet();
-        logger.info("hits count mismatch on any shard search failed, post explicit refresh hits are {}",searchResponseAfterRefresh.getHits().getTotalHits());
-        ensureGreen();
-        SearchResponse searchResponseAfterGreen=client.prepareSearch("test").setPreference(preference).setQuery(QueryBuilders.termQuery("field","test")).execute().actionGet();
-        logger.info("hits count mismatch on any shard search failed, post explicit wait for green hits are {}",searchResponseAfterGreen.getHits().getTotalHits());
-        assertHitCount(searchResponse,1);
-      }
-      assertHitCount(searchResponse,1);
-      status=client().admin().cluster().prepareHealth("test").get().getStatus();
-      internalCluster().ensureAtLeastNumDataNodes(numberOfReplicas + 1);
-    }
-    cluster().wipeIndices("test");
+  String id=randomAsciiOfLength(5);
+  int counter=0;
+  String preference=randomAsciiOfLength(5);
+  logger.info("running iteration for id {}, preference {}",id,preference);
+  if (createIndex) {
+    createIndex("test");
   }
+  client().prepareIndex("test","type1",id).setSource("field","test").execute().actionGet();
+  RefreshResponse refreshResponse=client().admin().indices().prepareRefresh("test").execute().actionGet();
+  assertThat(refreshResponse.getSuccessfulShards(),greaterThanOrEqualTo(1));
+  logger.info("using preference {}",preference);
+  ClusterHealthStatus status=ClusterHealthStatus.RED;
+  while (status != ClusterHealthStatus.GREEN) {
+    SearchResponse searchResponse=client().prepareSearch("test").setPreference("_primary").setQuery(QueryBuilders.termQuery("field","test")).execute().actionGet();
+    assertHitCount(searchResponse,1);
+    Client client=client();
+    searchResponse=client.prepareSearch("test").setPreference(preference + Integer.toString(counter++)).setQuery(QueryBuilders.termQuery("field","test")).execute().actionGet();
+    if (searchResponse.getHits().getTotalHits() != 1) {
+      refresh();
+      SearchResponse searchResponseAfterRefresh=client.prepareSearch("test").setPreference(preference).setQuery(QueryBuilders.termQuery("field","test")).execute().actionGet();
+      logger.info("hits count mismatch on any shard search failed, post explicit refresh hits are {}",searchResponseAfterRefresh.getHits().getTotalHits());
+      ensureGreen();
+      SearchResponse searchResponseAfterGreen=client.prepareSearch("test").setPreference(preference).setQuery(QueryBuilders.termQuery("field","test")).execute().actionGet();
+      logger.info("hits count mismatch on any shard search failed, post explicit wait for green hits are {}",searchResponseAfterGreen.getHits().getTotalHits());
+      assertHitCount(searchResponse,1);
+    }
+    assertHitCount(searchResponse,1);
+    status=client().admin().cluster().prepareHealth("test").get().getStatus();
+    internalCluster().ensureAtLeastNumDataNodes(numberOfReplicas + 1);
+  }
+  cluster().wipeIndices("test");
 }
