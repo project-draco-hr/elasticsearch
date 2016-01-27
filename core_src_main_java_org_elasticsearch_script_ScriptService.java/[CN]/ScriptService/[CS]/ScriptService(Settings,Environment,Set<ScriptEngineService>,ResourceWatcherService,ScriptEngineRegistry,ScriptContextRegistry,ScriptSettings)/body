@@ -1,0 +1,49 @@
+{
+  super(settings);
+  Objects.requireNonNull(scriptEngineRegistry);
+  Objects.requireNonNull(scriptContextRegistry);
+  Objects.requireNonNull(scriptSettings);
+  this.parseFieldMatcher=new ParseFieldMatcher(settings);
+  if (Strings.hasLength(settings.get(DISABLE_DYNAMIC_SCRIPTING_SETTING))) {
+    throw new IllegalArgumentException(DISABLE_DYNAMIC_SCRIPTING_SETTING + " is not a supported setting, replace with fine-grained script settings. \n" + "Dynamic scripts can be enabled for all languages and all operations by replacing `script.disable_dynamic: false` with `script.inline: true` and `script.indexed: true` in elasticsearch.yml");
+  }
+  this.scriptEngines=scriptEngines;
+  this.scriptContextRegistry=scriptContextRegistry;
+  int cacheMaxSize=SCRIPT_CACHE_SIZE_SETTING.get(settings);
+  this.defaultLang=scriptSettings.getDefaultScriptLanguageSetting().get(settings);
+  CacheBuilder<CacheKey,CompiledScript> cacheBuilder=CacheBuilder.builder();
+  if (cacheMaxSize >= 0) {
+    cacheBuilder.setMaximumWeight(cacheMaxSize);
+  }
+  TimeValue cacheExpire=SCRIPT_CACHE_EXPIRE_SETTING.get(settings);
+  if (cacheExpire.getNanos() != 0) {
+    cacheBuilder.setExpireAfterAccess(cacheExpire.nanos());
+  }
+  logger.debug("using script cache with max_size [{}], expire [{}]",cacheMaxSize,cacheExpire);
+  this.cache=cacheBuilder.removalListener(new ScriptCacheRemovalListener()).build();
+  Map<String,ScriptEngineService> enginesByLangBuilder=new HashMap<>();
+  Map<String,ScriptEngineService> enginesByExtBuilder=new HashMap<>();
+  for (  ScriptEngineService scriptEngine : scriptEngines) {
+    for (    String language : scriptEngineRegistry.getLanguages(scriptEngine.getClass())) {
+      enginesByLangBuilder.put(language,scriptEngine);
+    }
+    for (    String ext : scriptEngine.getExtensions()) {
+      enginesByExtBuilder.put(ext,scriptEngine);
+    }
+  }
+  this.scriptEnginesByLang=unmodifiableMap(enginesByLangBuilder);
+  this.scriptEnginesByExt=unmodifiableMap(enginesByExtBuilder);
+  this.scriptModes=new ScriptModes(scriptSettings,settings);
+  scriptsDirectory=env.scriptsFile();
+  if (logger.isTraceEnabled()) {
+    logger.trace("Using scripts directory [{}] ",scriptsDirectory);
+  }
+  FileWatcher fileWatcher=new FileWatcher(scriptsDirectory);
+  fileWatcher.addListener(new ScriptChangesListener());
+  if (SCRIPT_AUTO_RELOAD_ENABLED_SETTING.get(settings)) {
+    resourceWatcherService.add(fileWatcher);
+  }
+ else {
+    fileWatcher.init();
+  }
+}
