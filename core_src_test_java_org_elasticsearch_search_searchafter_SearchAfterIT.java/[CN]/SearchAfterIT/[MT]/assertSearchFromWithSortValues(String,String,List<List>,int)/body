@@ -1,0 +1,37 @@
+{
+  int numFields=documents.get(0).size();
+{
+    createIndexMappingsFromObjectType(indexName,typeName,documents.get(0));
+    List<IndexRequestBuilder> requests=new ArrayList<>();
+    for (int i=0; i < documents.size(); i++) {
+      XContentBuilder builder=jsonBuilder();
+      assertThat(documents.get(i).size(),Matchers.equalTo(numFields));
+      builder.startObject();
+      for (int j=0; j < numFields; j++) {
+        builder.field("field" + Integer.toString(j),documents.get(i).get(j));
+      }
+      builder.endObject();
+      requests.add(client().prepareIndex(INDEX_NAME,TYPE_NAME,Integer.toString(i)).setSource(builder));
+    }
+    indexRandom(true,requests);
+  }
+  Collections.sort(documents,LST_COMPARATOR);
+  int offset=0;
+  Object[] sortValues=null;
+  while (offset < documents.size()) {
+    SearchRequestBuilder req=client().prepareSearch(indexName);
+    for (int i=0; i < documents.get(0).size(); i++) {
+      req.addSort("field" + Integer.toString(i),SortOrder.ASC);
+    }
+    req.setQuery(matchAllQuery()).setSize(reqSize);
+    if (sortValues != null) {
+      req.searchAfter(sortValues);
+    }
+    SearchResponse searchResponse=req.execute().actionGet();
+    for (    SearchHit hit : searchResponse.getHits()) {
+      List toCompare=convertSortValues(documents.get(offset++));
+      assertThat(LST_COMPARATOR.compare(toCompare,Arrays.asList(hit.sortValues())),equalTo(0));
+    }
+    sortValues=searchResponse.getHits().hits()[searchResponse.getHits().hits().length - 1].getSortValues();
+  }
+}
