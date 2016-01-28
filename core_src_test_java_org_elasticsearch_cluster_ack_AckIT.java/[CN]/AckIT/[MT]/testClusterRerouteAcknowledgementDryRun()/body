@@ -2,11 +2,13 @@
   client().admin().indices().prepareCreate("test").setSettings(settingsBuilder().put(SETTING_NUMBER_OF_SHARDS,between(cluster().numDataNodes(),DEFAULT_MAX_NUM_SHARDS)).put(SETTING_NUMBER_OF_REPLICAS,0)).get();
   ensureGreen();
   MoveAllocationCommand moveAllocationCommand=getAllocationCommand();
+  final Index index=client().admin().cluster().prepareState().get().getState().metaData().index("test").getIndex();
+  final ShardId commandShard=new ShardId(index,moveAllocationCommand.shardId());
   assertAcked(client().admin().cluster().prepareReroute().setDryRun(true).add(moveAllocationCommand));
   ClusterStateResponse clusterStateResponse=client().admin().cluster().prepareState().get();
   boolean found=false;
   for (  ShardRouting shardRouting : clusterStateResponse.getState().getRoutingNodes().routingNodeIter(moveAllocationCommand.fromNode())) {
-    if (shardRouting.shardId().equals(moveAllocationCommand.shardId())) {
+    if (shardRouting.shardId().equals(commandShard)) {
       assertThat(shardRouting.started(),equalTo(true));
       found=true;
       break;
@@ -14,7 +16,7 @@
   }
   assertThat(found,equalTo(true));
   for (  ShardRouting shardRouting : clusterStateResponse.getState().getRoutingNodes().routingNodeIter(moveAllocationCommand.toNode())) {
-    if (shardRouting.shardId().equals(moveAllocationCommand.shardId())) {
+    if (shardRouting.shardId().equals(commandShard)) {
       fail("shard [" + shardRouting + "] shouldn't be on node ["+ moveAllocationCommand.toString()+ "]");
     }
   }
