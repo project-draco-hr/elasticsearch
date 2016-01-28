@@ -1,0 +1,50 @@
+{
+  String repoName=randomAsciiName();
+  logger.info("-->  creating repository {}",repoName);
+  createTestRepository(repoName);
+  int indexCount=randomIntBetween(1,5);
+  int[] docCounts=new int[indexCount];
+  String[] indexNames=generateRandomNames(indexCount);
+  for (int i=0; i < indexCount; i++) {
+    logger.info("-->  create random index {} with {} records",indexNames[i],docCounts[i]);
+    docCounts[i]=iterations(10,1000);
+    addRandomDocuments(indexNames[i],docCounts[i]);
+    assertHitCount(client().prepareSearch(indexNames[i]).setSize(0).get(),docCounts[i]);
+  }
+  String snapshotName=randomAsciiName();
+  logger.info("-->  create snapshot {}:{}",repoName,snapshotName);
+  assertSuccessfulSnapshot(client().admin().cluster().prepareCreateSnapshot(repoName,snapshotName).setWaitForCompletion(true).setIndices(indexNames));
+  List<String> deleteIndices=randomSubsetOf(randomIntBetween(0,indexCount),indexNames);
+  if (deleteIndices.size() > 0) {
+    logger.info("-->  delete indices {}",deleteIndices);
+    assertAcked(client().admin().indices().prepareDelete(deleteIndices.toArray(new String[deleteIndices.size()])));
+  }
+  Set<String> closeIndices=new HashSet<>(Arrays.asList(indexNames));
+  closeIndices.removeAll(deleteIndices);
+  if (closeIndices.size() > 0) {
+    for (    String index : closeIndices) {
+      if (randomBoolean()) {
+        logger.info("--> add random documents to {}",index);
+        addRandomDocuments(index,randomIntBetween(10,1000));
+      }
+ else {
+        int docCount=(int)client().prepareSearch(index).setSize(0).get().getHits().totalHits();
+        int deleteCount=randomIntBetween(1,docCount);
+        logger.info("--> delete {} random documents from {}",deleteCount,index);
+        for (int i=0; i < deleteCount; i++) {
+          int doc=randomIntBetween(0,docCount - 1);
+          client().prepareDelete(index,index,Integer.toString(doc)).get();
+        }
+        client().admin().indices().prepareRefresh(index).get();
+      }
+    }
+    logger.info("-->  close indices {}",closeIndices);
+    assertAcked(client().admin().indices().prepareClose(closeIndices.toArray(new String[closeIndices.size()])));
+  }
+  logger.info("--> restore all indices from the snapshot");
+  assertSuccessfulRestore(client().admin().cluster().prepareRestoreSnapshot(repoName,snapshotName).setWaitForCompletion(true));
+  ensureGreen();
+  for (int i=0; i < indexCount; i++) {
+    assertHitCount(client().prepareSearch(indexNames[i]).setSize(0).get(),docCounts[i]);
+  }
+}
