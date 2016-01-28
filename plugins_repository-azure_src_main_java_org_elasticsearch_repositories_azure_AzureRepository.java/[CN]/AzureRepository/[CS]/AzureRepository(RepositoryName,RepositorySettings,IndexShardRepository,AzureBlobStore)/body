@@ -1,27 +1,25 @@
 {
   super(name.getName(),repositorySettings,indexShardRepository);
-  String container=getRepositorySettings(repositorySettings,Repository.CONTAINER,Storage.CONTAINER,Defaults.CONTAINER);
+  String container=getValue(repositorySettings,Repository.CONTAINER_SETTING,Storage.CONTAINER_SETTING);
   this.blobStore=azureBlobStore;
-  this.chunkSize=getRepositorySettingsAsBytesSize(repositorySettings,Repository.CHUNK_SIZE,Storage.CHUNK_SIZE,Defaults.CHUNK_SIZE);
-  if (this.chunkSize.getMb() > 64) {
-    logger.warn("azure repository does not support yet size > 64mb. Fall back to 64mb.");
-    this.chunkSize=new ByteSizeValue(64,ByteSizeUnit.MB);
+  ByteSizeValue configuredChunkSize=getValue(repositorySettings,Repository.CHUNK_SIZE_SETTING,Storage.CHUNK_SIZE_SETTING);
+  if (configuredChunkSize.getMb() > MAX_CHUNK_SIZE.getMb()) {
+    Setting<ByteSizeValue> setting=getEffectiveSetting(repositorySettings,Repository.CHUNK_SIZE_SETTING,Storage.CHUNK_SIZE_SETTING);
+    throw new SettingsException("[" + setting.getKey() + "] must not exceed ["+ MAX_CHUNK_SIZE+ "] but is set to ["+ configuredChunkSize+ "].");
   }
-  this.compress=getRepositorySettingsAsBoolean(repositorySettings,Repository.COMPRESS,Storage.COMPRESS,Defaults.COMPRESS);
-  String modeStr=getRepositorySettings(repositorySettings,Repository.LOCATION_MODE,Storage.LOCATION_MODE,null);
-  if (modeStr != null) {
-    LocationMode locationMode=LocationMode.valueOf(modeStr.toUpperCase(Locale.ROOT));
-    if (locationMode == LocationMode.SECONDARY_ONLY) {
-      readonly=true;
-    }
  else {
-      readonly=false;
-    }
+    this.chunkSize=configuredChunkSize;
+  }
+  this.compress=getValue(repositorySettings,Repository.COMPRESS_SETTING,Storage.COMPRESS_SETTING);
+  String modeStr=getValue(repositorySettings,Repository.LOCATION_MODE_SETTING,Storage.LOCATION_MODE_SETTING);
+  if (Strings.hasLength(modeStr)) {
+    LocationMode locationMode=LocationMode.valueOf(modeStr.toUpperCase(Locale.ROOT));
+    readonly=locationMode == LocationMode.SECONDARY_ONLY;
   }
  else {
     readonly=false;
   }
-  String basePath=getRepositorySettings(repositorySettings,Repository.BASE_PATH,Storage.BASE_PATH,null);
+  String basePath=getValue(repositorySettings,Repository.BASE_PATH_SETTING,Storage.BASE_PATH_SETTING);
   if (Strings.hasLength(basePath)) {
     basePath=Strings.trimLeadingCharacter(basePath,'/');
     BlobPath path=new BlobPath();
