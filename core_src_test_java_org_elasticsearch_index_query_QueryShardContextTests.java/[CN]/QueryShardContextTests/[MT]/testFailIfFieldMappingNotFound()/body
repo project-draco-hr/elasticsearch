@@ -1,0 +1,32 @@
+{
+  IndexMetaData.Builder indexMetadata=new IndexMetaData.Builder("index");
+  indexMetadata.settings(Settings.builder().put("index.version.created",Version.CURRENT).put("index.number_of_shards",1).put("index.number_of_replicas",1));
+  IndexSettings indexSettings=new IndexSettings(indexMetadata.build(),Settings.EMPTY);
+  MapperService mapperService=mock(MapperService.class);
+  when(mapperService.getIndexSettings()).thenReturn(indexSettings);
+  QueryShardContext context=new QueryShardContext(indexSettings,null,null,null,mapperService,null,null,null);
+  context.setAllowUnmappedFields(false);
+  MappedFieldType fieldType=new StringFieldMapper.StringFieldType();
+  MappedFieldType result=context.failIfFieldMappingNotFound("name",fieldType);
+  assertThat(result,sameInstance(fieldType));
+  try {
+    context.failIfFieldMappingNotFound("name",null);
+    fail("exception expected");
+  }
+ catch (  QueryShardException e) {
+    assertThat(e.getMessage(),equalTo("No field mapping can be found for the field with name [name]"));
+  }
+  context.setAllowUnmappedFields(true);
+  result=context.failIfFieldMappingNotFound("name",fieldType);
+  assertThat(result,sameInstance(fieldType));
+  result=context.failIfFieldMappingNotFound("name",null);
+  assertThat(result,nullValue());
+  context.setAllowUnmappedFields(false);
+  context.setMapUnmappedFieldAsString(true);
+  result=context.failIfFieldMappingNotFound("name",fieldType);
+  assertThat(result,sameInstance(fieldType));
+  result=context.failIfFieldMappingNotFound("name",null);
+  assertThat(result,notNullValue());
+  assertThat(result,instanceOf(StringFieldMapper.StringFieldType.class));
+  assertThat(result.name(),equalTo("name"));
+}
