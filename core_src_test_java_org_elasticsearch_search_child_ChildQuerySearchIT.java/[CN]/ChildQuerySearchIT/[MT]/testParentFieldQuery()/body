@@ -1,0 +1,18 @@
+{
+  assertAcked(prepareCreate("test").setSettings(settingsBuilder().put(indexSettings()).put("index.refresh_interval",-1)).addMapping("parent").addMapping("child","_parent","type=parent"));
+  ensureGreen();
+  SearchResponse response=client().prepareSearch("test").setQuery(termQuery("_parent","p1")).get();
+  assertHitCount(response,0L);
+  client().prepareIndex("test","child","c1").setSource("{}").setParent("p1").get();
+  refresh();
+  response=client().prepareSearch("test").setQuery(termQuery("_parent#parent","p1")).get();
+  assertHitCount(response,1L);
+  response=client().prepareSearch("test").setQuery(queryStringQuery("_parent#parent:p1")).get();
+  assertHitCount(response,1L);
+  client().prepareIndex("test","child","c2").setSource("{}").setParent("p2").get();
+  refresh();
+  response=client().prepareSearch("test").setQuery(termsQuery("_parent#parent","p1","p2")).get();
+  assertHitCount(response,2L);
+  response=client().prepareSearch("test").setQuery(boolQuery().should(termQuery("_parent#parent","p1")).should(termQuery("_parent#parent","p2"))).get();
+  assertHitCount(response,2L);
+}

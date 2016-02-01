@@ -1,0 +1,43 @@
+{
+  String repoName=randomAsciiName();
+  logger.info("-->  creating repository {}",repoName);
+  createTestRepository(repoName);
+  int iterationCount=randomIntBetween(2,5);
+  int[] docCounts=new int[iterationCount];
+  String indexName=randomAsciiName();
+  String snapshotName=randomAsciiName();
+  assertAcked(client().admin().indices().prepareCreate(indexName).get());
+  for (int i=0; i < iterationCount; i++) {
+    if (randomBoolean() && i > 0) {
+      int docCount=docCounts[i - 1];
+      if (docCount > 0) {
+        int deleteCount=randomIntBetween(1,docCount);
+        logger.info("--> delete {} random documents from {}",deleteCount,indexName);
+        for (int j=0; j < deleteCount; j++) {
+          int doc=randomIntBetween(0,docCount - 1);
+          client().prepareDelete(indexName,indexName,Integer.toString(doc)).get();
+        }
+        client().admin().indices().prepareRefresh(indexName).get();
+      }
+    }
+ else {
+      int docCount=randomIntBetween(10,1000);
+      logger.info("--> add {} random documents to {}",docCount,indexName);
+      addRandomDocuments(indexName,docCount);
+    }
+    docCounts[i]=(int)client().prepareSearch(indexName).setSize(0).get().getHits().totalHits();
+    logger.info("-->  create snapshot {}:{} with {} documents",repoName,snapshotName + "-" + i,docCounts[i]);
+    assertSuccessfulSnapshot(client().admin().cluster().prepareCreateSnapshot(repoName,snapshotName + "-" + i).setWaitForCompletion(true).setIndices(indexName));
+  }
+  int restoreOperations=randomIntBetween(1,3);
+  for (int i=0; i < restoreOperations; i++) {
+    int iterationToRestore=randomIntBetween(0,iterationCount - 1);
+    logger.info("-->  performing restore of the iteration {}",iterationToRestore);
+    logger.info("-->  close index");
+    assertAcked(client().admin().indices().prepareClose(indexName));
+    logger.info("--> restore index from the snapshot");
+    assertSuccessfulRestore(client().admin().cluster().prepareRestoreSnapshot(repoName,snapshotName + "-" + iterationToRestore).setWaitForCompletion(true));
+    ensureGreen();
+    assertHitCount(client().prepareSearch(indexName).setSize(0).get(),docCounts[iterationToRestore]);
+  }
+}

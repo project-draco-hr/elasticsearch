@@ -1,0 +1,60 @@
+{
+  final Metadata.ExtNodeMetadata callenmd=metadata.getExtNodeMetadata(ctx);
+  final ParserRuleContext parent=callenmd.parent;
+  final Metadata.ExternalMetadata parentemd=metadata.getExternalMetadata(parent);
+  final ExtdotContext dotctx=ctx.extdot();
+  final ExtbraceContext bracectx=ctx.extbrace();
+  callenmd.last=parentemd.scope == 0 && dotctx == null && bracectx == null;
+  final String name=ctx.EXTID().getText();
+  if (parentemd.current.sort == Sort.ARRAY) {
+    throw new IllegalArgumentException(Metadata.error(ctx) + "Unexpected call [" + name+ "] on an array.");
+  }
+ else   if (callenmd.last && parentemd.storeExpr != null) {
+    throw new IllegalArgumentException(Metadata.error(ctx) + "Cannot assign a value to a call [" + name+ "].");
+  }
+  final Struct struct=parentemd.current.struct;
+  final List<ExpressionContext> arguments=ctx.arguments().expression();
+  final int size=arguments.size();
+  Type[] types;
+  final Method method=parentemd.statik ? struct.functions.get(name) : struct.methods.get(name);
+  final boolean def=parentemd.current.sort == Sort.DEF;
+  if (method == null && !def) {
+    throw new IllegalArgumentException(Metadata.error(ctx) + "Unknown call [" + name+ "] on type ["+ struct.name+ "].");
+  }
+ else   if (method != null) {
+    types=new Type[method.arguments.size()];
+    method.arguments.toArray(types);
+    callenmd.target=method;
+    callenmd.type=method.rtn;
+    parentemd.statement=!parentemd.read && callenmd.last;
+    parentemd.current=method.rtn;
+    if (size != types.length) {
+      throw new IllegalArgumentException(Metadata.error(ctx) + "When calling [" + name+ "] on type "+ "["+ struct.name+ "] expected ["+ types.length+ "] arguments,"+ " but found ["+ arguments.size()+ "].");
+    }
+  }
+ else {
+    types=new Type[arguments.size()];
+    Arrays.fill(types,definition.defType);
+    callenmd.target=name;
+    callenmd.type=definition.defType;
+    parentemd.statement=!parentemd.read && callenmd.last;
+    parentemd.current=callenmd.type;
+  }
+  for (int argument=0; argument < size; ++argument) {
+    final ExpressionContext exprctx=metadata.updateExpressionTree(arguments.get(argument));
+    final Metadata.ExpressionMetadata expremd=metadata.createExpressionMetadata(exprctx);
+    expremd.to=types[argument];
+    visit(exprctx);
+    markCast(expremd);
+  }
+  parentemd.statik=false;
+  if (dotctx != null) {
+    metadata.createExtNodeMetadata(parent,dotctx);
+    visit(dotctx);
+  }
+ else   if (bracectx != null) {
+    metadata.createExtNodeMetadata(parent,bracectx);
+    visit(bracectx);
+  }
+  return null;
+}

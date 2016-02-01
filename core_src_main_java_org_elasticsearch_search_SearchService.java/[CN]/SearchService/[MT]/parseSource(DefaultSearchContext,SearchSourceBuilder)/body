@@ -108,34 +108,13 @@
     }
   }
   if (source.rescores() != null) {
-    XContentParser completeRescoreParser=null;
     try {
-      XContentBuilder completeRescoreBuilder=XContentFactory.jsonBuilder();
-      completeRescoreBuilder.startObject();
-      completeRescoreBuilder.startArray("rescore");
-      for (      BytesReference rescore : source.rescores()) {
-        XContentParser parser=XContentFactory.xContent(rescore).createParser(rescore);
-        parser.nextToken();
-        completeRescoreBuilder.copyCurrentStructure(parser);
+      for (      RescoreBuilder<?> rescore : source.rescores()) {
+        context.addRescore(rescore.build(context.indexShard().getQueryShardContext()));
       }
-      completeRescoreBuilder.endArray();
-      completeRescoreBuilder.endObject();
-      BytesReference completeRescoreBytes=completeRescoreBuilder.bytes();
-      completeRescoreParser=XContentFactory.xContent(completeRescoreBytes).createParser(completeRescoreBytes);
-      completeRescoreParser.nextToken();
-      completeRescoreParser.nextToken();
-      completeRescoreParser.nextToken();
-      this.elementParsers.get("rescore").parse(completeRescoreParser,context);
     }
- catch (    Exception e) {
-      String sSource="_na_";
-      try {
-        sSource=source.toString();
-      }
- catch (      Throwable e1) {
-      }
-      XContentLocation location=completeRescoreParser != null ? completeRescoreParser.getTokenLocation() : null;
-      throw new SearchParseException(context,"failed to parse rescore source [" + sSource + "]",location,e);
+ catch (    IOException e) {
+      throw new SearchContextException(context,"failed to create RescoreSearchContext",e);
     }
   }
   if (source.fields() != null) {
@@ -224,5 +203,15 @@
   }
   if (source.stats() != null) {
     context.groupStats(source.stats());
+  }
+  if (source.searchAfter() != null && source.searchAfter().length > 0) {
+    if (context.scrollContext() != null) {
+      throw new SearchContextException(context,"`search_after` cannot be used in a scroll context.");
+    }
+    if (context.from() > 0) {
+      throw new SearchContextException(context,"`from` parameter must be set to 0 when `search_after` is used.");
+    }
+    FieldDoc fieldDoc=SearchAfterBuilder.buildFieldDoc(context.sort(),source.searchAfter());
+    context.searchAfter(fieldDoc);
   }
 }

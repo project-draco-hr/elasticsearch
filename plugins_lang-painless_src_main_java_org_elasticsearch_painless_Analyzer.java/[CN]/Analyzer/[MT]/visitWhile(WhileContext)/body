@@ -1,0 +1,36 @@
+{
+  final Metadata.StatementMetadata whilesmd=metadata.getStatementMetadata(ctx);
+  incrementScope();
+  final ExpressionContext exprctx=metadata.updateExpressionTree(ctx.expression());
+  final Metadata.ExpressionMetadata expremd=metadata.createExpressionMetadata(exprctx);
+  expremd.to=definition.booleanType;
+  visit(exprctx);
+  markCast(expremd);
+  boolean continuous=false;
+  if (expremd.postConst != null) {
+    continuous=(boolean)expremd.postConst;
+    if (!continuous) {
+      throw new IllegalArgumentException(Metadata.error(ctx) + "The loop will never be executed.");
+    }
+    if (ctx.empty() != null) {
+      throw new IllegalArgumentException(Metadata.error(ctx) + "The loop will never exit.");
+    }
+  }
+  final BlockContext blockctx=ctx.block();
+  if (blockctx != null) {
+    final Metadata.StatementMetadata blocksmd=metadata.createStatementMetadata(blockctx);
+    blocksmd.beginLoop=true;
+    blocksmd.inLoop=true;
+    visit(blockctx);
+    if (blocksmd.loopEscape && !blocksmd.anyContinue) {
+      throw new IllegalArgumentException(Metadata.error(ctx) + "All paths escape so the loop is not necessary.");
+    }
+    if (continuous && !blocksmd.anyBreak) {
+      whilesmd.methodEscape=true;
+      whilesmd.allLast=true;
+    }
+  }
+  whilesmd.count=1;
+  decrementScope();
+  return null;
+}

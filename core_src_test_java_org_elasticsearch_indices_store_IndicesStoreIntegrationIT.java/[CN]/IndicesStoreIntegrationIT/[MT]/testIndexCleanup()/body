@@ -1,7 +1,7 @@
 {
-  final String masterNode=internalCluster().startNode(Settings.builder().put("node.data",false));
-  final String node_1=internalCluster().startNode(Settings.builder().put("node.master",false));
-  final String node_2=internalCluster().startNode(Settings.builder().put("node.master",false));
+  final String masterNode=internalCluster().startNode(Settings.builder().put(Node.NODE_DATA_SETTING.getKey(),false));
+  final String node_1=internalCluster().startNode(Settings.builder().put(Node.NODE_MASTER_SETTING.getKey(),false));
+  final String node_2=internalCluster().startNode(Settings.builder().put(Node.NODE_MASTER_SETTING.getKey(),false));
   logger.info("--> creating index [test] with one shard and on replica");
   assertAcked(prepareCreate("test").setSettings(Settings.builder().put(indexSettings()).put(IndexMetaData.SETTING_NUMBER_OF_SHARDS,1).put(IndexMetaData.SETTING_NUMBER_OF_REPLICAS,1)));
   ensureGreen("test");
@@ -11,7 +11,7 @@
   assertThat(Files.exists(shardDirectory(node_2,"test",0)),equalTo(true));
   assertThat(Files.exists(indexDirectory(node_2,"test")),equalTo(true));
   logger.info("--> starting node server3");
-  final String node_3=internalCluster().startNode(Settings.builder().put("node.master",false));
+  final String node_3=internalCluster().startNode(Settings.builder().put(Node.NODE_MASTER_SETTING.getKey(),false));
   logger.info("--> running cluster_health");
   ClusterHealthResponse clusterHealth=client().admin().cluster().prepareHealth().setWaitForNodes("4").setWaitForRelocatingShards(0).get();
   assertThat(clusterHealth.isTimedOut(),equalTo(false));
@@ -29,7 +29,7 @@
     CountDownLatch beginRelocationLatch=new CountDownLatch(1);
     CountDownLatch endRelocationLatch=new CountDownLatch(1);
     transportServiceNode3.addTracer(new ReclocationStartEndTracer(logger,beginRelocationLatch,endRelocationLatch));
-    internalCluster().client().admin().cluster().prepareReroute().add(new MoveAllocationCommand(new ShardId("test",0),node_1,node_3)).get();
+    internalCluster().client().admin().cluster().prepareReroute().add(new MoveAllocationCommand("test",0,node_1,node_3)).get();
     beginRelocationLatch.await();
     disruption.startDisrupting();
     endRelocationLatch.await();
@@ -37,7 +37,7 @@
     disruption.stopDisrupting();
   }
  else {
-    internalCluster().client().admin().cluster().prepareReroute().add(new MoveAllocationCommand(new ShardId("test",0),node_1,node_3)).get();
+    internalCluster().client().admin().cluster().prepareReroute().add(new MoveAllocationCommand("test",0,node_1,node_3)).get();
   }
   clusterHealth=client().admin().cluster().prepareHealth().setWaitForRelocatingShards(0).get();
   assertThat(clusterHealth.isTimedOut(),equalTo(false));

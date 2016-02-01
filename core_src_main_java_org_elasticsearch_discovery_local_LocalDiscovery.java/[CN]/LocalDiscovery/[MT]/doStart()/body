@@ -6,7 +6,6 @@ synchronized (clusterGroups) {
       clusterGroups.put(clusterName,clusterGroup);
     }
     logger.debug("Connected to cluster [{}]",clusterName);
-    this.localNode=new DiscoveryNode(settings.get("name"),DiscoveryService.generateNodeId(settings),transportService.boundAddress().publishAddress(),discoveryNodeService.buildAttributes(),version);
     clusterGroup.members().add(this);
     LocalDiscovery firstMaster=null;
     for (    LocalDiscovery localDiscovery : clusterGroup.members()) {
@@ -25,7 +24,7 @@ synchronized (clusterGroups) {
         @Override public ClusterState execute(        ClusterState currentState){
           DiscoveryNodes.Builder nodesBuilder=DiscoveryNodes.builder();
           for (          LocalDiscovery discovery : clusterGroups.get(clusterName).members()) {
-            nodesBuilder.put(discovery.localNode);
+            nodesBuilder.put(discovery.localNode());
           }
           nodesBuilder.localNodeId(master.localNode().id()).masterNodeId(master.localNode().id());
           ClusterBlocks.Builder blocks=ClusterBlocks.builder().blocks(currentState.blocks()).removeGlobalBlock(discoverySettings.getNoMasterBlock());
@@ -41,29 +40,15 @@ synchronized (clusterGroups) {
 );
     }
  else     if (firstMaster != null) {
-      final ClusterState masterState=firstMaster.clusterService.state();
-      clusterService.submitStateUpdateTask("local-disco(detected_master)",new ClusterStateUpdateTask(){
-        @Override public boolean runOnlyOnMaster(){
-          return false;
-        }
-        @Override public ClusterState execute(        ClusterState currentState){
-          DiscoveryNodes.Builder nodesBuilder=DiscoveryNodes.builder(currentState.nodes()).put(localNode).localNodeId(localNode.id());
-          return ClusterState.builder(currentState).metaData(masterState.metaData()).nodes(nodesBuilder).build();
-        }
-        @Override public void onFailure(        String source,        Throwable t){
-          logger.error("unexpected failure during [{}]",t,source);
-        }
-      }
-);
       final LocalDiscovery master=firstMaster;
-      firstMaster.clusterService.submitStateUpdateTask("local-disco-receive(from node[" + localNode + "])",new ClusterStateUpdateTask(){
+      firstMaster.clusterService.submitStateUpdateTask("local-disco-receive(from node[" + localNode() + "])",new ClusterStateUpdateTask(){
         @Override public boolean runOnlyOnMaster(){
           return false;
         }
         @Override public ClusterState execute(        ClusterState currentState){
           DiscoveryNodes.Builder nodesBuilder=DiscoveryNodes.builder();
           for (          LocalDiscovery discovery : clusterGroups.get(clusterName).members()) {
-            nodesBuilder.put(discovery.localNode);
+            nodesBuilder.put(discovery.localNode());
           }
           nodesBuilder.localNodeId(master.localNode().id()).masterNodeId(master.localNode().id());
           return ClusterState.builder(currentState).nodes(nodesBuilder).build();

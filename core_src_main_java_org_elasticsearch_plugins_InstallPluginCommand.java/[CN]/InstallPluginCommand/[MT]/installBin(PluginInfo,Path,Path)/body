@@ -1,0 +1,28 @@
+{
+  if (Files.isDirectory(tmpBinDir) == false) {
+    throw new IOException("bin in plugin " + info.getName() + " is not a directory");
+  }
+  Files.createDirectory(destBinDir);
+  Set<PosixFilePermission> perms=new HashSet<>();
+  PosixFileAttributeView binAttrs=Files.getFileAttributeView(destBinDir.getParent(),PosixFileAttributeView.class);
+  if (binAttrs != null) {
+    perms=new HashSet<>(binAttrs.readAttributes().permissions());
+    perms.add(PosixFilePermission.OWNER_EXECUTE);
+    perms.add(PosixFilePermission.GROUP_EXECUTE);
+    perms.add(PosixFilePermission.OTHERS_EXECUTE);
+  }
+  try (DirectoryStream<Path> stream=Files.newDirectoryStream(tmpBinDir)){
+    for (    Path srcFile : stream) {
+      if (Files.isDirectory(srcFile)) {
+        throw new IOException("Directories not allowed in bin dir for plugin " + info.getName());
+      }
+      Path destFile=destBinDir.resolve(tmpBinDir.relativize(srcFile));
+      Files.copy(srcFile,destFile);
+      if (perms.isEmpty() == false) {
+        PosixFileAttributeView view=Files.getFileAttributeView(destFile,PosixFileAttributeView.class);
+        view.setPermissions(perms);
+      }
+    }
+  }
+   IOUtils.rm(tmpBinDir);
+}
