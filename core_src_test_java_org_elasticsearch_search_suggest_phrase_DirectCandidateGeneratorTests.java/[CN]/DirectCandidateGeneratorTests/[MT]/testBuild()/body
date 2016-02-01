@@ -1,0 +1,50 @@
+{
+  long start=System.currentTimeMillis();
+  IndexSettings idxSettings=IndexSettingsModule.newIndexSettings(randomAsciiOfLengthBetween(1,10),Settings.EMPTY);
+  AnalysisService mockAnalysisService=new AnalysisService(idxSettings,Collections.emptyMap(),Collections.emptyMap(),Collections.emptyMap(),Collections.emptyMap()){
+    @Override public NamedAnalyzer analyzer(    String name){
+      return new NamedAnalyzer(name,new WhitespaceAnalyzer());
+    }
+  }
+;
+  MapperService mockMapperService=new MapperService(idxSettings,mockAnalysisService,null,new IndicesModule().getMapperRegistry(),null){
+    @Override public MappedFieldType fullName(    String fullName){
+      return new StringFieldType();
+    }
+  }
+;
+  QueryShardContext mockShardContext=new QueryShardContext(idxSettings,null,null,null,mockMapperService,null,null,null){
+    @Override public MappedFieldType fieldMapper(    String name){
+      StringFieldMapper.Builder builder=MapperBuilders.stringField(name);
+      return builder.build(new Mapper.BuilderContext(idxSettings.getSettings(),new ContentPath(1))).fieldType();
+    }
+  }
+;
+  mockShardContext.setMapUnmappedFieldAsString(true);
+  for (int runs=0; runs < NUMBER_OF_RUNS; runs++) {
+    DirectCandidateGeneratorBuilder generator=randomCandidateGenerator();
+    DirectCandidateGenerator contextGenerator=generator.build(mockShardContext);
+    XContentBuilder builder=XContentFactory.contentBuilder(randomFrom(XContentType.values()));
+    if (randomBoolean()) {
+      builder.prettyPrint();
+    }
+    generator.toXContent(builder,ToXContent.EMPTY_PARAMS);
+    XContentParser parser=XContentHelper.createParser(builder.bytes());
+    DirectCandidateGenerator secondGenerator=PhraseSuggestParser.parseCandidateGenerator(parser,mockShardContext.getMapperService(),mockShardContext.parseFieldMatcher());
+    assertNotSame(contextGenerator,secondGenerator);
+    assertEquals(contextGenerator.field(),secondGenerator.field());
+    assertEquals(contextGenerator.accuracy(),secondGenerator.accuracy(),Float.MIN_VALUE);
+    assertEquals(contextGenerator.maxTermFreq(),secondGenerator.maxTermFreq(),Float.MIN_VALUE);
+    assertEquals(contextGenerator.maxEdits(),secondGenerator.maxEdits());
+    assertEquals(contextGenerator.maxInspections(),secondGenerator.maxInspections());
+    assertEquals(contextGenerator.minDocFreq(),secondGenerator.minDocFreq(),Float.MIN_VALUE);
+    assertEquals(contextGenerator.minWordLength(),secondGenerator.minWordLength());
+    assertEquals(contextGenerator.postFilter(),secondGenerator.postFilter());
+    assertEquals(contextGenerator.prefixLength(),secondGenerator.prefixLength());
+    assertEquals(contextGenerator.preFilter(),secondGenerator.preFilter());
+    assertEquals(contextGenerator.sort(),secondGenerator.sort());
+    assertEquals(contextGenerator.size(),secondGenerator.size());
+    assertEquals(contextGenerator.stringDistance().getClass(),secondGenerator.stringDistance().getClass());
+    assertEquals(contextGenerator.suggestMode(),secondGenerator.suggestMode());
+  }
+}
