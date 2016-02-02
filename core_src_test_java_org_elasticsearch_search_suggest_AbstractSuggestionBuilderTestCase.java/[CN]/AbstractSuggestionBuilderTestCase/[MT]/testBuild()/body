@@ -1,0 +1,53 @@
+{
+  IndexSettings idxSettings=IndexSettingsModule.newIndexSettings(randomAsciiOfLengthBetween(1,10),Settings.EMPTY);
+  AnalysisService mockAnalysisService=new AnalysisService(idxSettings,Collections.emptyMap(),Collections.emptyMap(),Collections.emptyMap(),Collections.emptyMap()){
+    @Override public NamedAnalyzer analyzer(    String name){
+      return new NamedAnalyzer(name,new WhitespaceAnalyzer());
+    }
+  }
+;
+  MapperService mockMapperService=new MapperService(idxSettings,mockAnalysisService,null,new IndicesModule().getMapperRegistry(),null){
+    @Override public MappedFieldType fullName(    String fullName){
+      return new StringFieldType();
+    }
+  }
+;
+  QueryShardContext mockShardContext=new QueryShardContext(idxSettings,null,null,null,mockMapperService,null,scriptService,null){
+    @Override public MappedFieldType fieldMapper(    String name){
+      StringFieldMapper.Builder builder=MapperBuilders.stringField(name);
+      return builder.build(new Mapper.BuilderContext(idxSettings.getSettings(),new ContentPath(1))).fieldType();
+    }
+  }
+;
+  mockShardContext.setMapUnmappedFieldAsString(true);
+  for (int runs=0; runs < NUMBER_OF_TESTBUILDERS; runs++) {
+    SuggestBuilder suggestBuilder=new SuggestBuilder();
+    SB suggestionBuilder=randomTestBuilder();
+    suggestBuilder.addSuggestion(suggestionBuilder);
+    if (suggestionBuilder.text() == null) {
+      suggestBuilder.setText("This is some global Text");
+    }
+    if (suggestionBuilder.text() != null && suggestionBuilder.prefix() != null) {
+      suggestionBuilder.prefix(null);
+    }
+    XContentBuilder xContentBuilder=XContentFactory.contentBuilder(randomFrom(XContentType.values()));
+    if (randomBoolean()) {
+      xContentBuilder.prettyPrint();
+    }
+    suggestBuilder.toXContent(xContentBuilder,ToXContent.EMPTY_PARAMS);
+    System.out.println(suggestBuilder);
+    XContentParser parser=XContentHelper.createParser(xContentBuilder.bytes());
+    parser.nextToken();
+    SuggestionSearchContext suggestionSearchContext=parseElement.parseInternal(parser,mockMapperService,null,"test",1);
+    SuggestionContext oldSchoolContext=suggestionSearchContext.suggestions().get(suggestionBuilder.name());
+    SuggestionContext newSchoolContext=suggestionBuilder.build(mockShardContext);
+    assertNotSame(oldSchoolContext,newSchoolContext);
+    assertEquals(oldSchoolContext.getAnalyzer().getClass(),newSchoolContext.getAnalyzer().getClass());
+    assertEquals(oldSchoolContext.getField(),newSchoolContext.getField());
+    assertEquals(oldSchoolContext.getShardSize(),newSchoolContext.getShardSize());
+    assertEquals(oldSchoolContext.getSize(),newSchoolContext.getSize());
+    assertEquals(oldSchoolContext.getSuggester().getClass(),newSchoolContext.getSuggester().getClass());
+    assertEquals(oldSchoolContext.getClass(),newSchoolContext.getClass());
+    assertSuggestionContext(oldSchoolContext,newSchoolContext);
+  }
+}
