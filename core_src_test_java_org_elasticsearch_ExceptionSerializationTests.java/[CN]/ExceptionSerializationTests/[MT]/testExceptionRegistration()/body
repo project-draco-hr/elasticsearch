@@ -1,10 +1,10 @@
 {
-  final Set<Class> notRegistered=new HashSet<>();
-  final Set<Class> hasDedicatedWrite=new HashSet<>();
-  final Set<Class> registered=new HashSet<>();
+  final Set<Class<?>> notRegistered=new HashSet<>();
+  final Set<Class<?>> hasDedicatedWrite=new HashSet<>();
+  final Set<Class<?>> registered=new HashSet<>();
   final String path="/org/elasticsearch";
   final Path startPath=PathUtils.get(ElasticsearchException.class.getProtectionDomain().getCodeSource().getLocation().toURI()).resolve("org").resolve("elasticsearch");
-  final Set<? extends Class> ignore=Sets.newHashSet(org.elasticsearch.test.rest.parser.RestTestParseException.class,org.elasticsearch.test.rest.client.RestException.class,CancellableThreadsTests.CustomException.class,org.elasticsearch.rest.BytesRestResponseTests.WithHeadersException.class,AbstractClientHeadersTestCase.InternalException.class);
+  final Set<? extends Class<?>> ignore=Sets.newHashSet(org.elasticsearch.test.rest.parser.RestTestParseException.class,org.elasticsearch.test.rest.client.RestException.class,CancellableThreadsTests.CustomException.class,org.elasticsearch.rest.BytesRestResponseTests.WithHeadersException.class,AbstractClientHeadersTestCase.InternalException.class);
   FileVisitor<Path> visitor=new FileVisitor<Path>(){
     private Path pkgPrefix=PathUtils.get(path).getParent();
     @Override public FileVisitResult preVisitDirectory(    Path dir,    BasicFileAttributes attrs) throws IOException {
@@ -16,33 +16,40 @@
       return FileVisitResult.CONTINUE;
     }
     @Override public FileVisitResult visitFile(    Path file,    BasicFileAttributes attrs) throws IOException {
+      checkFile(file.getFileName().toString());
+      return FileVisitResult.CONTINUE;
+    }
+    private void checkFile(    String filename){
+      if (filename.endsWith(".class") == false) {
+        return;
+      }
       try {
-        String filename=file.getFileName().toString();
-        if (filename.endsWith(".class")) {
-          Class<?> clazz=loadClass(filename);
-          if (ignore.contains(clazz) == false) {
-            if (Modifier.isAbstract(clazz.getModifiers()) == false && Modifier.isInterface(clazz.getModifiers()) == false && isEsException(clazz)) {
-              if (ElasticsearchException.isRegistered((Class<? extends Throwable>)clazz) == false && ElasticsearchException.class.equals(clazz.getEnclosingClass()) == false) {
-                notRegistered.add(clazz);
-              }
- else               if (ElasticsearchException.isRegistered((Class<? extends Throwable>)clazz)) {
-                registered.add(clazz);
-                try {
-                  if (clazz.getMethod("writeTo",StreamOutput.class) != null) {
-                    hasDedicatedWrite.add(clazz);
-                  }
-                }
- catch (                Exception e) {
-                }
-              }
-            }
-          }
-        }
+        checkClass(loadClass(filename));
       }
  catch (      ClassNotFoundException e) {
         throw new RuntimeException(e);
       }
-      return FileVisitResult.CONTINUE;
+    }
+    private void checkClass(    Class<?> clazz){
+      if (ignore.contains(clazz) || isAbstract(clazz.getModifiers()) || isInterface(clazz.getModifiers())) {
+        return;
+      }
+      if (isEsException(clazz) == false) {
+        return;
+      }
+      if (ElasticsearchException.isRegistered(clazz.asSubclass(Throwable.class)) == false && ElasticsearchException.class.equals(clazz.getEnclosingClass()) == false) {
+        notRegistered.add(clazz);
+      }
+ else       if (ElasticsearchException.isRegistered(clazz.asSubclass(Throwable.class))) {
+        registered.add(clazz);
+        try {
+          if (clazz.getMethod("writeTo",StreamOutput.class) != null) {
+            hasDedicatedWrite.add(clazz);
+          }
+        }
+ catch (        Exception e) {
+        }
+      }
     }
     private boolean isEsException(    Class<?> clazz){
       return ElasticsearchException.class.isAssignableFrom(clazz);
