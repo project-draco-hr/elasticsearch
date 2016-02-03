@@ -4,6 +4,7 @@
   clusterService.setState(stateWithActivePrimary(index,true,0));
   logger.debug("--> using initial state:\n{}",clusterService.state().prettyPrint());
   final ClusterState stateWithAddedReplicas=state(index,true,ShardRoutingState.STARTED,randomBoolean() ? ShardRoutingState.INITIALIZING : ShardRoutingState.STARTED);
+  ReplicationTask task=maybeTask();
   final Action actionWithAddedReplicaAfterPrimaryOp=new Action(Settings.EMPTY,"testAction",transportService,clusterService,threadPool){
     @Override protected Tuple<Response,Request> shardOperationOnPrimary(    MetaData metaData,    Request shardRequest) throws Exception {
       final Tuple<Response,Request> operationOnPrimary=super.shardOperationOnPrimary(metaData,shardRequest);
@@ -15,9 +16,10 @@
 ;
   Request request=new Request(shardId);
   PlainActionFuture<Response> listener=new PlainActionFuture<>();
-  TransportReplicationAction<Request,Request,Response>.PrimaryPhase primaryPhase=actionWithAddedReplicaAfterPrimaryOp.new PrimaryPhase(request,createTransportChannel(listener));
+  TransportReplicationAction<Request,Request,Response>.PrimaryPhase primaryPhase=actionWithAddedReplicaAfterPrimaryOp.new PrimaryPhase(task,request,createTransportChannel(listener));
   primaryPhase.run();
   assertThat("request was not processed on primary",request.processedOnPrimary.get(),equalTo(true));
+  assertPhase(task,"replicating");
   Map<String,List<CapturingTransport.CapturedRequest>> capturedRequestsByTargetNode=transport.getCapturedRequestsByTargetNodeAndClear();
   for (  ShardRouting replica : stateWithAddedReplicas.getRoutingTable().shardRoutingTable(index,shardId.id()).replicaShards()) {
     List<CapturingTransport.CapturedRequest> requests=capturedRequestsByTargetNode.get(replica.currentNodeId());

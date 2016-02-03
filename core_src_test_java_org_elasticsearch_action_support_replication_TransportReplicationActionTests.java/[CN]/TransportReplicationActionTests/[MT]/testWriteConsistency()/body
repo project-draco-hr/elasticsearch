@@ -37,17 +37,19 @@ clusterService.setState(state(index,true,ShardRoutingState.STARTED,replicaStates
 logger.debug("using consistency level of [{}], assigned shards [{}], total shards [{}]. expecting op to [{}]. using state: \n{}",request.consistencyLevel(),1 + assignedReplicas,1 + assignedReplicas + unassignedReplicas,passesWriteConsistency ? "succeed" : "retry",clusterService.state().prettyPrint());
 final IndexShardRoutingTable shardRoutingTable=clusterService.state().routingTable().index(index).shard(shardId.id());
 PlainActionFuture<Response> listener=new PlainActionFuture<>();
-TransportReplicationAction.PrimaryPhase primaryPhase=action.new PrimaryPhase(request,createTransportChannel(listener));
+ReplicationTask task=maybeTask();
+TransportReplicationAction.PrimaryPhase primaryPhase=action.new PrimaryPhase(task,request,createTransportChannel(listener));
 if (passesWriteConsistency) {
 assertThat(primaryPhase.checkWriteConsistency(shardRoutingTable.primaryShard().shardId()),nullValue());
 primaryPhase.run();
-assertTrue("operations should have been perform, consistency level is met",request.processedOnPrimary.get());
+assertTrue("operations should have been performed, consistency level is met",request.processedOnPrimary.get());
 if (assignedReplicas > 0) {
 assertIndexShardCounter(2);
 }
  else {
 assertIndexShardCounter(1);
 }
+assertPhase(task,either(equalTo("finished")).or(equalTo("replicating")));
 }
  else {
 assertThat(primaryPhase.checkWriteConsistency(shardRoutingTable.primaryShard().shardId()),notNullValue());
@@ -60,9 +62,10 @@ replicaStates[i]=ShardRoutingState.STARTED;
 }
 clusterService.setState(state(index,true,ShardRoutingState.STARTED,replicaStates));
 listener=new PlainActionFuture<>();
-primaryPhase=action.new PrimaryPhase(request,createTransportChannel(listener));
+primaryPhase=action.new PrimaryPhase(task,request,createTransportChannel(listener));
 primaryPhase.run();
 assertTrue("once the consistency level met, operation should continue",request.processedOnPrimary.get());
 assertIndexShardCounter(2);
+assertPhase(task,"replicating");
 }
 }
