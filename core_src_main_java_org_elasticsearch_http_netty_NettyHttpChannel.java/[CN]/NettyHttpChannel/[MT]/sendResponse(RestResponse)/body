@@ -1,41 +1,7 @@
 {
-  boolean http10=nettyRequest.getProtocolVersion().equals(HttpVersion.HTTP_1_0);
-  boolean close=HttpHeaders.Values.CLOSE.equalsIgnoreCase(nettyRequest.headers().get(HttpHeaders.Names.CONNECTION)) || (http10 && !HttpHeaders.Values.KEEP_ALIVE.equalsIgnoreCase(nettyRequest.headers().get(HttpHeaders.Names.CONNECTION)));
-  HttpResponseStatus status=getStatus(response.status());
-  org.jboss.netty.handler.codec.http.HttpResponse resp;
-  if (http10) {
-    resp=new DefaultHttpResponse(HttpVersion.HTTP_1_0,status);
-    if (!close) {
-      resp.headers().add(HttpHeaders.Names.CONNECTION,"Keep-Alive");
-    }
-  }
- else {
-    resp=new DefaultHttpResponse(HttpVersion.HTTP_1_1,status);
-  }
-  if (RestUtils.isBrowser(nettyRequest.headers().get(USER_AGENT))) {
-    if (SETTING_CORS_ENABLED.get(transport.settings())) {
-      String originHeader=request.header(ORIGIN);
-      if (!Strings.isNullOrEmpty(originHeader)) {
-        if (corsPattern == null) {
-          String allowedOrigins=SETTING_CORS_ALLOW_ORIGIN.get(transport.settings());
-          if (!Strings.isNullOrEmpty(allowedOrigins)) {
-            resp.headers().add(ACCESS_CONTROL_ALLOW_ORIGIN,allowedOrigins);
-          }
-        }
- else {
-          resp.headers().add(ACCESS_CONTROL_ALLOW_ORIGIN,corsPattern.matcher(originHeader).matches() ? originHeader : "null");
-        }
-      }
-      if (nettyRequest.getMethod() == HttpMethod.OPTIONS) {
-        resp.headers().add(ACCESS_CONTROL_MAX_AGE,SETTING_CORS_MAX_AGE.get(transport.settings()));
-        resp.headers().add(ACCESS_CONTROL_ALLOW_METHODS,SETTING_CORS_ALLOW_METHODS.get(transport.settings()));
-        resp.headers().add(ACCESS_CONTROL_ALLOW_HEADERS,SETTING_CORS_ALLOW_HEADERS.get(transport.settings()));
-      }
-      if (SETTING_CORS_ALLOW_CREDENTIALS.get(transport.settings())) {
-        resp.headers().add(ACCESS_CONTROL_ALLOW_CREDENTIALS,"true");
-      }
-    }
-  }
+  HttpResponse resp=newResponse();
+  resp.setStatus(getStatus(response.status()));
+  CorsHandler.setCorsResponseHeaders(nettyRequest,resp,transport.getCorsConfig());
   String opaque=nettyRequest.headers().get("X-Opaque-Id");
   if (opaque != null) {
     resp.headers().add("X-Opaque-Id",opaque);
@@ -87,7 +53,7 @@
       future.addListener(new ReleaseChannelFutureListener((Releasable)content));
       addedReleaseListener=true;
     }
-    if (close) {
+    if (isCloseConnection()) {
       future.addListener(ChannelFutureListener.CLOSE);
     }
   }
