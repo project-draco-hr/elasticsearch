@@ -1,0 +1,32 @@
+{
+  List<Path> deleteOnFailure=new ArrayList<>();
+  deleteOnFailure.add(tmpRoot);
+  try {
+    PluginInfo info=verify(tmpRoot,env);
+    final Path destination=env.pluginsFile().resolve(info.getName());
+    if (Files.exists(destination)) {
+      throw new UserError(CliTool.ExitStatus.USAGE,"plugin directory " + destination.toAbsolutePath() + " already exists. To update the plugin, uninstall it first using 'remove "+ info.getName()+ "' command");
+    }
+    Path tmpBinDir=tmpRoot.resolve("bin");
+    if (Files.exists(tmpBinDir)) {
+      Path destBinDir=env.binFile().resolve(info.getName());
+      deleteOnFailure.add(destBinDir);
+      installBin(info,tmpBinDir,destBinDir);
+    }
+    Path tmpConfigDir=tmpRoot.resolve("config");
+    if (Files.exists(tmpConfigDir)) {
+      installConfig(info,tmpConfigDir,env.configFile().resolve(info.getName()));
+    }
+    Files.move(tmpRoot,destination,StandardCopyOption.ATOMIC_MOVE);
+    terminal.println("-> Installed " + info.getName());
+  }
+ catch (  Exception installProblem) {
+    try {
+      IOUtils.rm(deleteOnFailure.toArray(new Path[0]));
+    }
+ catch (    IOException exceptionWhileRemovingFiles) {
+      installProblem.addSuppressed(exceptionWhileRemovingFiles);
+    }
+    throw installProblem;
+  }
+}
