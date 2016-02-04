@@ -1,7 +1,12 @@
 {
   final String index="test";
   final ShardId shardId=new ShardId(index,"_na_",0);
-  clusterService.setState(stateWithStartedPrimary(index,true,randomInt(5)));
+  ClusterState state=stateWithActivePrimary(index,true,randomInt(5));
+  ShardRouting primaryShard=state.getRoutingTable().shardRoutingTable(shardId).primaryShard();
+  if (primaryShard.relocating() && randomBoolean()) {
+    state=ClusterState.builder(state).nodes(DiscoveryNodes.builder(state.nodes()).localNodeId(primaryShard.relocatingNodeId())).build();
+  }
+  clusterService.setState(state);
   final IndexShardRoutingTable shardRoutingTable=clusterService.state().routingTable().index(index).shard(shardId.id());
   int assignedReplicas=0;
   int totalShards=0;
@@ -15,5 +20,5 @@
       totalShards++;
     }
   }
-  runReplicateTest(shardRoutingTable,assignedReplicas,totalShards);
+  runReplicateTest(state,shardRoutingTable,assignedReplicas,totalShards);
 }

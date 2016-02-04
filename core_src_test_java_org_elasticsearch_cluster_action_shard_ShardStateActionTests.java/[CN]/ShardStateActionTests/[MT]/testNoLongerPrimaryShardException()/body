@@ -1,0 +1,27 @@
+{
+  final String index="test";
+  clusterService.setState(ClusterStateCreationUtils.stateWithActivePrimary(index,true,randomInt(5)));
+  ShardRouting failedShard=getRandomShardRouting(index);
+  String nodeId=randomFrom(clusterService.state().nodes().nodes().keys().toArray(String.class));
+  AtomicReference<Throwable> failure=new AtomicReference<>();
+  CountDownLatch latch=new CountDownLatch(1);
+  ShardRouting sourceFailedShard=TestShardRouting.newShardRouting(failedShard.index(),failedShard.id(),nodeId,randomBoolean(),randomFrom(ShardRoutingState.values()),failedShard.version());
+  shardStateAction.shardFailed(failedShard,sourceFailedShard,"test",getSimulatedFailure(),new ShardStateAction.Listener(){
+    @Override public void onSuccess(){
+      failure.set(null);
+      latch.countDown();
+    }
+    @Override public void onFailure(    Throwable t){
+      failure.set(t);
+      latch.countDown();
+    }
+  }
+);
+  ShardStateAction.NoLongerPrimaryShardException catastrophicError=new ShardStateAction.NoLongerPrimaryShardException(failedShard.shardId(),"source shard [" + sourceFailedShard + " is neither the local allocation nor the primary allocation");
+  CapturingTransport.CapturedRequest[] capturedRequests=transport.getCapturedRequestsAndClear();
+  transport.handleRemoteError(capturedRequests[0].requestId,catastrophicError);
+  latch.await();
+  assertNotNull(failure.get());
+  assertThat(failure.get(),instanceOf(ShardStateAction.NoLongerPrimaryShardException.class));
+  assertThat(failure.get().getMessage(),equalTo(catastrophicError.getMessage()));
+}
