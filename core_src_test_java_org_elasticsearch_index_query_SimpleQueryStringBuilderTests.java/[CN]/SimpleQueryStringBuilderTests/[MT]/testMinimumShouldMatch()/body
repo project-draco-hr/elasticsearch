@@ -1,0 +1,31 @@
+{
+  QueryShardContext shardContext=createShardContext();
+  int numberOfTerms=randomIntBetween(1,4);
+  StringBuilder queryString=new StringBuilder();
+  for (int i=0; i < numberOfTerms; i++) {
+    queryString.append("t" + i + " ");
+  }
+  SimpleQueryStringBuilder simpleQueryStringBuilder=new SimpleQueryStringBuilder(queryString.toString().trim());
+  if (randomBoolean()) {
+    simpleQueryStringBuilder.defaultOperator(Operator.AND);
+  }
+  int numberOfFields=randomIntBetween(1,4);
+  for (int i=0; i < numberOfFields; i++) {
+    simpleQueryStringBuilder.field("f" + i);
+  }
+  int percent=randomIntBetween(1,100);
+  simpleQueryStringBuilder.minimumShouldMatch(percent + "%");
+  Query query=simpleQueryStringBuilder.toQuery(shardContext);
+  if (numberOfFields * numberOfTerms == 1) {
+    assertThat(query,instanceOf(TermQuery.class));
+  }
+ else {
+    assertThat(query,instanceOf(BooleanQuery.class));
+    BooleanQuery boolQuery=(BooleanQuery)query;
+    int expectedMinimumShouldMatch=numberOfTerms * percent / 100;
+    if (simpleQueryStringBuilder.defaultOperator().equals(Operator.AND) && numberOfTerms > 1) {
+      expectedMinimumShouldMatch=0;
+    }
+    assertEquals(expectedMinimumShouldMatch,boolQuery.getMinimumNumberShouldMatch());
+  }
+}
