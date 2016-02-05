@@ -1,0 +1,52 @@
+{
+  if (request instanceof ClearScrollRequest) {
+    ClearScrollRequest clearScroll=(ClearScrollRequest)request;
+    scrollsCleared.addAll(clearScroll.getScrollIds());
+    listener.onResponse((Response)new ClearScrollResponse(true,clearScroll.getScrollIds().size()));
+    return;
+  }
+  if (request instanceof BulkRequest) {
+    BulkRequest bulk=(BulkRequest)request;
+    int toReject;
+    if (bulksAttempts.incrementAndGet() > bulksToReject) {
+      toReject=-1;
+    }
+ else {
+      toReject=randomIntBetween(0,bulk.requests().size() - 1);
+    }
+    BulkItemResponse[] responses=new BulkItemResponse[bulk.requests().size()];
+    for (int i=0; i < bulk.requests().size(); i++) {
+      ActionRequest<?> item=bulk.requests().get(i);
+      String opType;
+      DocWriteResponse response;
+      ShardId shardId=new ShardId(new Index(((ReplicationRequest<?>)item).index(),"uuid"),0);
+      if (item instanceof IndexRequest) {
+        IndexRequest index=(IndexRequest)item;
+        opType=index.opType().lowercase();
+        response=new IndexResponse(shardId,index.type(),index.id(),randomIntBetween(0,Integer.MAX_VALUE),true);
+      }
+ else       if (item instanceof UpdateRequest) {
+        UpdateRequest update=(UpdateRequest)item;
+        opType="update";
+        response=new UpdateResponse(shardId,update.type(),update.id(),randomIntBetween(0,Integer.MAX_VALUE),true);
+      }
+ else       if (item instanceof DeleteRequest) {
+        DeleteRequest delete=(DeleteRequest)item;
+        opType="delete";
+        response=new DeleteResponse(shardId,delete.type(),delete.id(),randomIntBetween(0,Integer.MAX_VALUE),true);
+      }
+ else {
+        throw new RuntimeException("Unknown request:  " + item);
+      }
+      if (i == toReject) {
+        responses[i]=new BulkItemResponse(i,opType,new Failure(response.getIndex(),response.getType(),response.getId(),new EsRejectedExecutionException()));
+      }
+ else {
+        responses[i]=new BulkItemResponse(i,opType,response);
+      }
+    }
+    listener.onResponse((Response)new BulkResponse(responses,1));
+    return;
+  }
+  super.doExecute(action,request,listener);
+}
