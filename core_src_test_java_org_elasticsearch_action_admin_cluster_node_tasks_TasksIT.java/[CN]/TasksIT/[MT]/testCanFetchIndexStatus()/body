@@ -1,0 +1,27 @@
+{
+  ReentrantLock taskFinishLock=new ReentrantLock();
+  taskFinishLock.lock();
+  for (  ClusterService clusterService : internalCluster().getInstances(ClusterService.class)) {
+    ((MockTaskManager)clusterService.getTaskManager()).addListener(new MockTaskManagerListener(){
+      @Override public void onTaskRegistered(      Task task){
+      }
+      @Override public void onTaskUnregistered(      Task task){
+        if (false == task.getAction().startsWith(IndexAction.NAME)) {
+          return;
+        }
+        logger.debug("Blocking {} from being unregistered",task);
+        taskFinishLock.lock();
+        taskFinishLock.unlock();
+      }
+    }
+);
+  }
+  ListenableActionFuture<?> indexFuture=client().prepareIndex("test","test").setSource("test","test").execute();
+  ListTasksResponse tasks=client().admin().cluster().prepareListTasks().setActions("indices:data/write/index*").setDetailed(true).get();
+  taskFinishLock.unlock();
+  indexFuture.get();
+  assertThat(tasks.getTasks(),not(emptyCollectionOf(TaskInfo.class)));
+  for (  TaskInfo task : tasks.getTasks()) {
+    assertNotNull(task.getStatus());
+  }
+}
