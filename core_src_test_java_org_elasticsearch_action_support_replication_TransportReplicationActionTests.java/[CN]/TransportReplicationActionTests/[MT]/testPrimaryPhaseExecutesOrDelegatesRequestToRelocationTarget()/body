@@ -6,11 +6,17 @@
   Request request=new Request(shardId).timeout("1ms");
   PlainActionFuture<Response> listener=new PlainActionFuture<>();
   ReplicationTask task=maybeTask();
-  AtomicBoolean movedToReplication=new AtomicBoolean();
-  TransportReplicationAction.PrimaryPhase primaryPhase=action.new PrimaryPhase(task,request,createTransportChannel(listener)){
-    @Override void finishAndMoveToReplication(    TransportReplicationAction.ReplicationPhase replicationPhase){
-      super.finishAndMoveToReplication(replicationPhase);
-      movedToReplication.set(true);
+  AtomicBoolean executed=new AtomicBoolean();
+  Action.PrimaryOperationTransportHandler primaryPhase=action.new PrimaryOperationTransportHandler(){
+    @Override protected ReplicationOperation createReplicatedOperation(    Request request,    ActionListener<Response> actionListener,    Action.PrimaryShardReference primaryShardReference,    boolean executeOnReplicas){
+      return new NoopReplicationOperation(request,actionListener){
+        public void execute() throws Exception {
+          assertPhase(task,"primary");
+          assertFalse(executed.getAndSet(true));
+          super.execute();
+        }
+      }
+;
     }
   }
 ;
@@ -18,20 +24,26 @@
   boolean executeOnPrimary=true;
   if (primaryShard.relocating() && randomBoolean()) {
     isRelocated.set(true);
-    indexShardRouting.set(primaryShard);
     executeOnPrimary=false;
   }
-  primaryPhase.run();
-  assertThat(request.processedOnPrimary.get(),equalTo(executeOnPrimary));
-  assertThat(movedToReplication.get(),equalTo(executeOnPrimary));
-  if (executeOnPrimary == false) {
+  primaryPhase.messageReceived(request,createTransportChannel(listener),task);
+  if (executeOnPrimary) {
+    assertTrue(executed.get());
+    assertTrue(listener.isDone());
+    listener.get();
+    assertPhase(task,"finished");
+  }
+ else {
+    assertFalse(executed.get());
+    assertIndexShardCounter(0);
     final List<CapturingTransport.CapturedRequest> requests=transport.capturedRequestsByTargetNode().get(primaryShard.relocatingNodeId());
     assertThat(requests,notNullValue());
     assertThat(requests.size(),equalTo(1));
     assertThat("primary request was not delegated to relocation target",requests.get(0).action,equalTo("testAction[p]"));
-    assertPhase(task,"primary");
-  }
- else {
-    assertPhase(task,either(equalTo("finished")).or(equalTo("replicating")));
+    assertPhase(task,"primary_delegation");
+    transport.handleResponse(requests.get(0).requestId,new Response());
+    assertTrue(listener.isDone());
+    listener.get();
+    assertPhase(task,"finished");
   }
 }
