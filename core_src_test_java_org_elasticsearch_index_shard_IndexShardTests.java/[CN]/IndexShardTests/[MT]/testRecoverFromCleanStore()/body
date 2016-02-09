@@ -1,0 +1,28 @@
+{
+  createIndex("test");
+  ensureGreen();
+  IndicesService indicesService=getInstanceFromNode(IndicesService.class);
+  IndexService test=indicesService.indexService("test");
+  final IndexShard shard=test.getShardOrNull(0);
+  client().prepareIndex("test","test","0").setSource("{}").setRefresh(randomBoolean()).get();
+  if (randomBoolean()) {
+    client().admin().indices().prepareFlush().get();
+  }
+  ShardRouting routing=new ShardRouting(shard.routingEntry());
+  test.removeShard(0,"b/c simon says so");
+  ShardRoutingHelper.reinit(routing,UnassignedInfo.Reason.INDEX_CREATED);
+  IndexShard newShard=test.createShard(routing);
+  newShard.updateRoutingEntry(routing,false);
+  DiscoveryNode localNode=new DiscoveryNode("foo",DummyTransportAddress.INSTANCE,Version.CURRENT);
+  newShard.markAsRecovering("store",new RecoveryState(newShard.shardId(),routing.primary(),RecoveryState.Type.STORE,localNode,localNode));
+  assertTrue(newShard.recoverFromStore(localNode));
+  assertEquals(0,newShard.recoveryState().getTranslog().recoveredOperations());
+  assertEquals(0,newShard.recoveryState().getTranslog().totalOperations());
+  assertEquals(0,newShard.recoveryState().getTranslog().totalOperationsOnStart());
+  assertEquals(100.0f,newShard.recoveryState().getTranslog().recoveredPercent(),0.01f);
+  routing=new ShardRouting(routing);
+  ShardRoutingHelper.moveToStarted(routing);
+  newShard.updateRoutingEntry(routing,true);
+  SearchResponse response=client().prepareSearch().get();
+  assertHitCount(response,0);
+}
