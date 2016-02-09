@@ -59,33 +59,14 @@
   context.timeoutInMillis(source.timeoutInMillis());
   context.terminateAfter(source.terminateAfter());
   if (source.aggregations() != null) {
-    XContentParser completeAggregationsParser=null;
     try {
-      XContentBuilder completeAggregationsBuilder=XContentFactory.jsonBuilder();
-      completeAggregationsBuilder.startObject();
-      for (      BytesReference agg : source.aggregations()) {
-        XContentParser parser=XContentFactory.xContent(agg).createParser(agg);
-        parser.nextToken();
-        parser.nextToken();
-        completeAggregationsBuilder.field(parser.currentName());
-        parser.nextToken();
-        completeAggregationsBuilder.copyCurrentStructure(parser);
-      }
-      completeAggregationsBuilder.endObject();
-      BytesReference completeAggregationsBytes=completeAggregationsBuilder.bytes();
-      completeAggregationsParser=XContentFactory.xContent(completeAggregationsBytes).createParser(completeAggregationsBytes);
-      completeAggregationsParser.nextToken();
-      this.elementParsers.get("aggregations").parse(completeAggregationsParser,context);
+      AggregationContext aggContext=new AggregationContext(context);
+      AggregatorFactories factories=source.aggregations().build(aggContext,null);
+      factories.validate();
+      context.aggregations(new SearchContextAggregations(factories));
     }
- catch (    Exception e) {
-      String sSource="_na_";
-      try {
-        sSource=source.toString();
-      }
- catch (      Throwable e1) {
-      }
-      XContentLocation location=completeAggregationsParser != null ? completeAggregationsParser.getTokenLocation() : null;
-      throw new SearchParseException(context,"failed to parse aggregation source [" + sSource + "]",location,e);
+ catch (    IOException e) {
+      throw new AggregationInitializationException("Failed to create aggregators",e);
     }
   }
   if (source.suggest() != null) {
