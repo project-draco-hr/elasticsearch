@@ -8,7 +8,11 @@
 ;
   MapperService mockMapperService=new MapperService(idxSettings,mockAnalysisService,null,new IndicesModule().getMapperRegistry(),null){
     @Override public MappedFieldType fullName(    String fullName){
-      return new StringFieldType();
+      StringFieldType type=new StringFieldType();
+      if (randomBoolean()) {
+        type.setSearchAnalyzer(new NamedAnalyzer("foo",new WhitespaceAnalyzer()));
+      }
+      return type;
     }
   }
 ;
@@ -22,11 +26,10 @@
   mockShardContext.setMapUnmappedFieldAsString(true);
   for (int runs=0; runs < NUMBER_OF_TESTBUILDERS; runs++) {
     SuggestBuilder suggestBuilder=new SuggestBuilder();
-    suggestBuilder.setText(randomAsciiOfLength(10));
     SB suggestionBuilder=randomTestBuilder();
     suggestBuilder.addSuggestion(suggestionBuilder);
     if (suggestionBuilder.text() == null) {
-      suggestBuilder.setText("This is some global Text");
+      suggestBuilder.setGlobalText(randomAsciiOfLengthBetween(5,50));
     }
     if (suggestionBuilder.text() != null && suggestionBuilder.prefix() != null) {
       suggestionBuilder.prefix(null);
@@ -36,27 +39,33 @@
       xContentBuilder.prettyPrint();
     }
     suggestBuilder.toXContent(xContentBuilder,ToXContent.EMPTY_PARAMS);
-    System.out.println(suggestBuilder);
     XContentParser parser=XContentHelper.createParser(xContentBuilder.bytes());
     parser.nextToken();
-    SuggestionSearchContext suggestionSearchContext=parseElement.parseInternal(parser,mockShardContext);
-    SuggestionContext oldSchoolContext=suggestionSearchContext.suggestions().get(suggestionBuilder.name());
-    SuggestionContext newSchoolContext=suggestionBuilder.build(mockShardContext,suggestBuilder.getGlobalText());
-    assertNotSame(oldSchoolContext,newSchoolContext);
-    if (oldSchoolContext.getAnalyzer() == null) {
-      assertNull(newSchoolContext.getAnalyzer());
-    }
- else     if (newSchoolContext.getAnalyzer() == null) {
-      assertNull(oldSchoolContext.getAnalyzer());
-    }
+    SuggestionSearchContext parsedSuggestionSearchContext=parseElement.parseInternal(parser,mockShardContext);
+    SuggestionSearchContext buildSuggestSearchContext=suggestBuilder.build(mockShardContext);
+    assertEquals(parsedSuggestionSearchContext.suggestions().size(),buildSuggestSearchContext.suggestions().size());
+    Iterator<Entry<String,SuggestionContext>> iterator=buildSuggestSearchContext.suggestions().entrySet().iterator();
+    for (    Entry<String,SuggestionContext> entry : parsedSuggestionSearchContext.suggestions().entrySet()) {
+      Entry<String,SuggestionContext> other=iterator.next();
+      assertEquals(entry.getKey(),other.getKey());
+      SuggestionContext oldSchoolContext=entry.getValue();
+      SuggestionContext newSchoolContext=other.getValue();
+      assertNotSame(oldSchoolContext,newSchoolContext);
+      if (oldSchoolContext.getAnalyzer() != null) {
+        assertNotNull(newSchoolContext.getAnalyzer());
+      }
  else {
-      assertEquals(oldSchoolContext.getAnalyzer().getClass(),newSchoolContext.getAnalyzer().getClass());
+        assertNull(newSchoolContext.getAnalyzer());
+      }
+      assertEquals(oldSchoolContext.getField(),newSchoolContext.getField());
+      assertEquals(oldSchoolContext.getPrefix(),newSchoolContext.getPrefix());
+      assertEquals(oldSchoolContext.getRegex(),newSchoolContext.getRegex());
+      assertEquals(oldSchoolContext.getShardSize(),newSchoolContext.getShardSize());
+      assertEquals(oldSchoolContext.getSize(),newSchoolContext.getSize());
+      assertEquals(oldSchoolContext.getSuggester().getClass(),newSchoolContext.getSuggester().getClass());
+      assertEquals(oldSchoolContext.getText(),newSchoolContext.getText());
+      assertEquals(oldSchoolContext.getClass(),newSchoolContext.getClass());
+      assertSuggestionContext(oldSchoolContext,newSchoolContext);
     }
-    assertEquals(oldSchoolContext.getField(),newSchoolContext.getField());
-    assertEquals(oldSchoolContext.getShardSize(),newSchoolContext.getShardSize());
-    assertEquals(oldSchoolContext.getSize(),newSchoolContext.getSize());
-    assertEquals(oldSchoolContext.getSuggester().getClass(),newSchoolContext.getSuggester().getClass());
-    assertEquals(oldSchoolContext.getClass(),newSchoolContext.getClass());
-    assertSuggestionContext(oldSchoolContext,newSchoolContext);
   }
 }
