@@ -1,9 +1,13 @@
 {
   ReentrantLock taskFinishLock=new ReentrantLock();
   taskFinishLock.lock();
+  CountDownLatch taskRegistered=new CountDownLatch(1);
   for (  ClusterService clusterService : internalCluster().getInstances(ClusterService.class)) {
     ((MockTaskManager)clusterService.getTaskManager()).addListener(new MockTaskManagerListener(){
       @Override public void onTaskRegistered(      Task task){
+        if (task.getAction().startsWith(IndexAction.NAME)) {
+          taskRegistered.countDown();
+        }
       }
       @Override public void onTaskUnregistered(      Task task){
         if (false == task.getAction().startsWith(IndexAction.NAME)) {
@@ -17,6 +21,7 @@
 );
   }
   ListenableActionFuture<?> indexFuture=client().prepareIndex("test","test").setSource("test","test").execute();
+  taskRegistered.await(10,TimeUnit.SECONDS);
   ListTasksResponse tasks=client().admin().cluster().prepareListTasks().setActions("indices:data/write/index*").setDetailed(true).get();
   taskFinishLock.unlock();
   indexFuture.get();
