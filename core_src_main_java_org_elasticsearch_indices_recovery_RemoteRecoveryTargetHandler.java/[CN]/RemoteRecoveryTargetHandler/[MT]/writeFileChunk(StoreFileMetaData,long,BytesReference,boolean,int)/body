@@ -1,0 +1,24 @@
+{
+  final long throttleTimeInNanos;
+  final RateLimiter rl=recoverySettings.rateLimiter();
+  if (rl != null) {
+    long bytes=bytesSinceLastPause.addAndGet(content.length());
+    if (bytes > rl.getMinPauseCheckBytes()) {
+      bytesSinceLastPause.addAndGet(-bytes);
+      try {
+        throttleTimeInNanos=rl.pause(bytes);
+        onSourceThrottle.accept(throttleTimeInNanos);
+      }
+ catch (      IOException e) {
+        throw new ElasticsearchException("failed to pause recovery",e);
+      }
+    }
+ else {
+      throttleTimeInNanos=0;
+    }
+  }
+ else {
+    throttleTimeInNanos=0;
+  }
+  transportService.submitRequest(targetNode,RecoveryTargetService.Actions.FILE_CHUNK,new RecoveryFileChunkRequest(recoveryId,shardId,fileMetaData,position,content,lastChunk,totalTranslogOps,throttleTimeInNanos),fileChunkRequestOptions,EmptyTransportResponseHandler.INSTANCE_SAME).txGet();
+}
