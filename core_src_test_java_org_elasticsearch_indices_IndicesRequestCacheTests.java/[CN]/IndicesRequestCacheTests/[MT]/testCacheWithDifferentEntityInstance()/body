@@ -1,0 +1,30 @@
+{
+  IndicesRequestCache cache=new IndicesRequestCache(Settings.EMPTY);
+  AtomicBoolean indexShard=new AtomicBoolean(true);
+  ShardRequestCache requestCacheStats=new ShardRequestCache();
+  Directory dir=newDirectory();
+  IndexWriter writer=new IndexWriter(dir,newIndexWriterConfig());
+  writer.addDocument(newDoc(0,"foo"));
+  DirectoryReader reader=ElasticsearchDirectoryReader.wrap(DirectoryReader.open(writer,true),new ShardId("foo","bar",1));
+  TermQueryBuilder termQuery=new TermQueryBuilder("id","0");
+  TestEntity entity=new TestEntity(requestCacheStats,reader,indexShard,0);
+  BytesReference value=cache.getOrCompute(entity,reader,termQuery.buildAsBytes());
+  assertEquals("foo",value.toUtf8());
+  assertEquals(0,requestCacheStats.stats().getHitCount());
+  assertEquals(1,requestCacheStats.stats().getMissCount());
+  assertEquals(0,requestCacheStats.stats().getEvictions());
+  assertEquals(1,entity.loaded);
+  assertEquals(1,cache.count());
+  assertEquals(1,cache.numRegisteredCloseListeners());
+  final int cacheSize=requestCacheStats.stats().getMemorySize().bytesAsInt();
+  value=cache.getOrCompute(new TestEntity(requestCacheStats,reader,indexShard,0),reader,termQuery.buildAsBytes());
+  assertEquals("foo",value.toUtf8());
+  assertEquals(1,requestCacheStats.stats().getHitCount());
+  assertEquals(1,requestCacheStats.stats().getMissCount());
+  assertEquals(0,requestCacheStats.stats().getEvictions());
+  assertEquals(1,entity.loaded);
+  assertEquals(1,cache.count());
+  assertEquals(cacheSize,requestCacheStats.stats().getMemorySize().bytesAsInt());
+  assertEquals(1,cache.numRegisteredCloseListeners());
+  IOUtils.close(reader,writer,dir,cache);
+}
