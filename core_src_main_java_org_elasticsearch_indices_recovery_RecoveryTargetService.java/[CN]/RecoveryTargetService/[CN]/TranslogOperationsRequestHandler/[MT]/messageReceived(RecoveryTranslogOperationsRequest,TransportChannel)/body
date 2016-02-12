@@ -1,0 +1,42 @@
+{
+  try (RecoveriesCollection.RecoveryRef recoveryRef=onGoingRecoveries.getRecoverySafe(request.recoveryId(),request.shardId())){
+    final ClusterStateObserver observer=new ClusterStateObserver(clusterService,null,logger,threadPool.getThreadContext());
+    final RecoveryTarget recoveryTarget=recoveryRef.status();
+    try {
+      recoveryTarget.indexTranslogOperations(request.operations(),request.totalTranslogOps());
+      channel.sendResponse(TransportResponse.Empty.INSTANCE);
+    }
+ catch (    TranslogRecoveryPerformer.BatchOperationException exception) {
+      MapperException mapperException=(MapperException)ExceptionsHelper.unwrap(exception,MapperException.class);
+      if (mapperException == null) {
+        throw exception;
+      }
+      logger.trace("delaying recovery due to missing mapping changes (rolling back stats for [{}] ops)",exception,exception.completedOperations());
+      observer.waitForNextChange(new ClusterStateObserver.Listener(){
+        @Override public void onNewClusterState(        ClusterState state){
+          try {
+            messageReceived(request,channel);
+          }
+ catch (          Exception e) {
+            onFailure(e);
+          }
+        }
+        protected void onFailure(        Exception e){
+          try {
+            channel.sendResponse(e);
+          }
+ catch (          IOException e1) {
+            logger.warn("failed to send error back to recovery source",e1);
+          }
+        }
+        @Override public void onClusterServiceClose(){
+          onFailure(new ElasticsearchException("cluster service was closed while waiting for mapping updates"));
+        }
+        @Override public void onTimeout(        TimeValue timeout){
+          onFailure(new ElasticsearchTimeoutException("timed out waiting for mapping updates (timeout [" + timeout + "])"));
+        }
+      }
+);
+    }
+  }
+ }
