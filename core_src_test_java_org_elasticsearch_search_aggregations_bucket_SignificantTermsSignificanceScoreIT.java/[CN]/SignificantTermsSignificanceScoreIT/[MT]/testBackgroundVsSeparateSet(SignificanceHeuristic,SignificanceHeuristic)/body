@@ -1,0 +1,20 @@
+{
+  SearchResponse response1=client().prepareSearch(INDEX_NAME).setTypes(DOC_TYPE).addAggregation(terms("class").field(CLASS_FIELD).subAggregation(significantTerms("sig_terms").field(TEXT_FIELD).minDocCount(1).significanceHeuristic(significanceHeuristicExpectingSuperset))).execute().actionGet();
+  assertSearchResponse(response1);
+  SearchResponse response2=client().prepareSearch(INDEX_NAME).setTypes(DOC_TYPE).addAggregation(filter("0",QueryBuilders.termQuery(CLASS_FIELD,"0")).subAggregation(significantTerms("sig_terms").field(TEXT_FIELD).minDocCount(1).backgroundFilter(QueryBuilders.termQuery(CLASS_FIELD,"1")).significanceHeuristic(significanceHeuristicExpectingSeparateSets))).addAggregation(filter("1",QueryBuilders.termQuery(CLASS_FIELD,"1")).subAggregation(significantTerms("sig_terms").field(TEXT_FIELD).minDocCount(1).backgroundFilter(QueryBuilders.termQuery(CLASS_FIELD,"0")).significanceHeuristic(significanceHeuristicExpectingSeparateSets))).execute().actionGet();
+  SignificantTerms sigTerms0=((SignificantTerms)(((StringTerms)response1.getAggregations().get("class")).getBucketByKey("0").getAggregations().asMap().get("sig_terms")));
+  assertThat(sigTerms0.getBuckets().size(),equalTo(2));
+  double score00Background=sigTerms0.getBucketByKey("0").getSignificanceScore();
+  double score01Background=sigTerms0.getBucketByKey("1").getSignificanceScore();
+  SignificantTerms sigTerms1=((SignificantTerms)(((StringTerms)response1.getAggregations().get("class")).getBucketByKey("1").getAggregations().asMap().get("sig_terms")));
+  double score10Background=sigTerms1.getBucketByKey("0").getSignificanceScore();
+  double score11Background=sigTerms1.getBucketByKey("1").getSignificanceScore();
+  double score00SeparateSets=((SignificantTerms)((InternalFilter)response2.getAggregations().get("0")).getAggregations().getAsMap().get("sig_terms")).getBucketByKey("0").getSignificanceScore();
+  double score01SeparateSets=((SignificantTerms)((InternalFilter)response2.getAggregations().get("0")).getAggregations().getAsMap().get("sig_terms")).getBucketByKey("1").getSignificanceScore();
+  double score10SeparateSets=((SignificantTerms)((InternalFilter)response2.getAggregations().get("1")).getAggregations().getAsMap().get("sig_terms")).getBucketByKey("0").getSignificanceScore();
+  double score11SeparateSets=((SignificantTerms)((InternalFilter)response2.getAggregations().get("1")).getAggregations().getAsMap().get("sig_terms")).getBucketByKey("1").getSignificanceScore();
+  assertThat(score00Background,equalTo(score00SeparateSets));
+  assertThat(score01Background,equalTo(score01SeparateSets));
+  assertThat(score10Background,equalTo(score10SeparateSets));
+  assertThat(score11Background,equalTo(score11SeparateSets));
+}
