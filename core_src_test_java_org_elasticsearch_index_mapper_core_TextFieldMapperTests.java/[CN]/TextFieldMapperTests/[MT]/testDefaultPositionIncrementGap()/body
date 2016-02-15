@@ -1,0 +1,21 @@
+{
+  String mapping=XContentFactory.jsonBuilder().startObject().startObject("type").startObject("properties").startObject("field").field("type","text").endObject().endObject().endObject().endObject().string();
+  DocumentMapper mapper=indexService.mapperService().merge("type",new CompressedXContent(mapping),MergeReason.MAPPING_UPDATE,false);
+  assertEquals(mapping,mapper.mappingSource().toString());
+  ParsedDocument doc=mapper.parse("test","type","1",XContentFactory.jsonBuilder().startObject().field("field",new String[]{"a","b"}).endObject().bytes());
+  IndexableField[] fields=doc.rootDoc().getFields("field");
+  assertEquals(2,fields.length);
+  assertEquals("a",fields[0].stringValue());
+  assertEquals("b",fields[1].stringValue());
+  IndexShard shard=indexService.getShard(0);
+  shard.index(new Engine.Index(new Term("_uid","1"),doc));
+  shard.refresh("test");
+  try (Engine.Searcher searcher=shard.acquireSearcher("test")){
+    LeafReader leaf=searcher.getDirectoryReader().leaves().get(0).reader();
+    TermsEnum terms=leaf.terms("field").iterator();
+    assertTrue(terms.seekExact(new BytesRef("b")));
+    PostingsEnum postings=terms.postings(null,PostingsEnum.POSITIONS);
+    assertEquals(0,postings.nextDoc());
+    assertEquals(TextFieldMapper.Defaults.POSITION_INCREMENT_GAP + 1,postings.nextPosition());
+  }
+ }
