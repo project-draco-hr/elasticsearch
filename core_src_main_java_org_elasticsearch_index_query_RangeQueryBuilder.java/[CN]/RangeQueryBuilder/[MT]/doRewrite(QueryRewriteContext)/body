@@ -1,0 +1,34 @@
+{
+  FieldStatsProvider fieldStatsProvider=queryShardContext.getFieldStatsProvider();
+  if (fieldStatsProvider != null) {
+    DateMathParser dateMathParser=format == null ? null : new DateMathParser(format);
+    FieldStatsProvider.Relation relation=fieldStatsProvider.isFieldWithinQuery(fieldName,from,to,includeUpper,includeLower,timeZone,dateMathParser);
+switch (relation) {
+case DISJOINT:
+      return new MatchNoneQueryBuilder();
+case WITHIN:
+    FieldStats<?> fieldStats=fieldStatsProvider.get(fieldName);
+  if (!(fieldStats.getMinValue().equals(from) && fieldStats.getMaxValue().equals(to) && includeUpper&& includeLower)) {
+    RangeQueryBuilder newRangeQuery=new RangeQueryBuilder(fieldName);
+    String dateFormatString=format == null ? null : format.format();
+    if (fieldStats.getMinValue().equals(fieldStats.getMaxValue())) {
+      newRangeQuery.from(fieldStats.getMinValue(),true);
+      newRangeQuery.to(fieldStats.getMaxValue(),true);
+    }
+ else {
+      newRangeQuery.from(fieldStats.getMinValue(),includeLower || fieldStats.match(new IndexConstraint(fieldName,Property.MIN,Comparison.GT,fieldStats.stringValueOf(from,dateFormatString))));
+      newRangeQuery.to(fieldStats.getMaxValue(),includeUpper || fieldStats.match(new IndexConstraint(fieldName,Property.MAX,Comparison.LT,fieldStats.stringValueOf(to,dateFormatString))));
+    }
+    newRangeQuery.format=format;
+    newRangeQuery.timeZone=timeZone;
+    return newRangeQuery;
+  }
+ else {
+    return this;
+  }
+case INTERSECTS:
+break;
+}
+}
+return this;
+}
