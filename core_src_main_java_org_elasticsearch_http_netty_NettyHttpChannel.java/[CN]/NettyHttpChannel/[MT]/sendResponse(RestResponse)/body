@@ -4,42 +4,18 @@
   CorsHandler.setCorsResponseHeaders(nettyRequest,resp,transport.getCorsConfig());
   String opaque=nettyRequest.headers().get("X-Opaque-Id");
   if (opaque != null) {
-    resp.headers().add("X-Opaque-Id",opaque);
+    setHeaderField(resp,"X-Opaque-Id",opaque);
   }
-  Map<String,List<String>> customHeaders=response.getHeaders();
-  if (customHeaders != null) {
-    for (    Map.Entry<String,List<String>> headerEntry : customHeaders.entrySet()) {
-      for (      String headerValue : headerEntry.getValue()) {
-        resp.headers().add(headerEntry.getKey(),headerValue);
-      }
-    }
-  }
+  addCustomHeaders(response,resp);
   BytesReference content=response.content();
   ChannelBuffer buffer;
   boolean addedReleaseListener=false;
   try {
     buffer=content.toChannelBuffer();
     resp.setContent(buffer);
-    if (!resp.headers().contains(HttpHeaders.Names.CONTENT_TYPE)) {
-      resp.headers().add(HttpHeaders.Names.CONTENT_TYPE,response.contentType());
-    }
-    if (!resp.headers().contains(HttpHeaders.Names.CONTENT_LENGTH)) {
-      resp.headers().add(HttpHeaders.Names.CONTENT_LENGTH,String.valueOf(buffer.readableBytes()));
-    }
-    if (transport.resetCookies) {
-      String cookieString=nettyRequest.headers().get(HttpHeaders.Names.COOKIE);
-      if (cookieString != null) {
-        CookieDecoder cookieDecoder=new CookieDecoder();
-        Set<Cookie> cookies=cookieDecoder.decode(cookieString);
-        if (!cookies.isEmpty()) {
-          CookieEncoder cookieEncoder=new CookieEncoder(true);
-          for (          Cookie cookie : cookies) {
-            cookieEncoder.addCookie(cookie);
-          }
-          resp.headers().add(HttpHeaders.Names.SET_COOKIE,cookieEncoder.encode());
-        }
-      }
-    }
+    setHeaderField(resp,HttpHeaders.Names.CONTENT_TYPE,response.contentType(),false);
+    setHeaderField(resp,HttpHeaders.Names.CONTENT_LENGTH,String.valueOf(buffer.readableBytes()),false);
+    addCookies(resp);
     ChannelFuture future;
     if (orderedUpstreamMessageEvent != null) {
       OrderedDownstreamChannelEvent downstreamChannelEvent=new OrderedDownstreamChannelEvent(orderedUpstreamMessageEvent,0,true,resp);
