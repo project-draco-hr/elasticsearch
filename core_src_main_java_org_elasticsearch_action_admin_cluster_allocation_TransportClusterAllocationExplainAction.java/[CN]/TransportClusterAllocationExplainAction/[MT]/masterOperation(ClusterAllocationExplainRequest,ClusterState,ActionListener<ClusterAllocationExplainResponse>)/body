@@ -1,0 +1,37 @@
+{
+  final RoutingNodes routingNodes=state.getRoutingNodes();
+  final RoutingAllocation allocation=new RoutingAllocation(allocationDeciders,routingNodes,state.nodes(),clusterInfoService.getClusterInfo(),System.nanoTime());
+  ShardRouting shardRouting=null;
+  if (request.useAnyUnassignedShard()) {
+    RoutingNodes.UnassignedShards.UnassignedIterator ui=routingNodes.unassigned().iterator();
+    if (ui.hasNext()) {
+      shardRouting=ui.next();
+    }
+  }
+ else {
+    String index=request.getIndex();
+    int shard=request.getShard();
+    if (request.isPrimary()) {
+      shardRouting=allocation.routingTable().shardRoutingTable(index,shard).primaryShard();
+    }
+ else {
+      List<ShardRouting> replicaShardRoutings=allocation.routingTable().shardRoutingTable(index,shard).replicaShards();
+      if (replicaShardRoutings.size() > 0) {
+        shardRouting=replicaShardRoutings.get(0);
+        for (        ShardRouting replica : replicaShardRoutings) {
+          if (replica.unassigned()) {
+            shardRouting=replica;
+            break;
+          }
+        }
+      }
+    }
+  }
+  if (shardRouting == null) {
+    listener.onFailure(new ElasticsearchException("unable to find any shards to explain [{}] in the routing table",request));
+    return;
+  }
+  logger.debug("explaining the allocation for [{}], found shard [{}]",request,shardRouting);
+  ClusterAllocationExplanation cae=explainShard(shardRouting,allocation,routingNodes,request.includeYesDecisions(),shardAllocator);
+  listener.onResponse(new ClusterAllocationExplainResponse(cae));
+}
