@@ -9,13 +9,13 @@
   String privateEncryptionKeyBase64=Base64.encodeAsString(keyPair.getPrivate().getEncoded());
   Client client=client();
   try {
-    PutRepositoryResponse putRepositoryResponse=client.admin().cluster().preparePutRepository("test-repo").setType("s3").setSettings(ImmutableSettings.settingsBuilder().put("base_path",basePath).put("client_side_encryption_key.symmetric",symmetricEncryptionKeyBase64).put("client_side_encryption_key.public",publicEncryptionKeyBase64).put("client_side_encryption_key.private",privateEncryptionKeyBase64).put("chunk_size",randomIntBetween(1000,10000))).get();
+    PutRepositoryResponse putRepositoryResponse=client.admin().cluster().preparePutRepository("test-repo").setType("s3").setSettings(Settings.settingsBuilder().put("base_path",basePath).put("client_side_encryption_key.symmetric",symmetricEncryptionKeyBase64).put("client_side_encryption_key.public",publicEncryptionKeyBase64).put("client_side_encryption_key.private",privateEncryptionKeyBase64).put("chunk_size",randomIntBetween(1000,10000))).get();
     fail("Symmetric and public/private key pairs are exclusive options. An exception should be thrown.");
   }
  catch (  RepositoryException e) {
   }
-  List<ImmutableSettings.Builder> allSettings=Arrays.asList(ImmutableSettings.settingsBuilder().put("base_path",basePath).put("client_side_encryption_key.symmetric",symmetricEncryptionKeyBase64).put("chunk_size",randomIntBetween(1000,10000)),ImmutableSettings.settingsBuilder().put("base_path",basePath).put("client_side_encryption_key.public",publicEncryptionKeyBase64).put("client_side_encryption_key.private",privateEncryptionKeyBase64).put("chunk_size",randomIntBetween(1000,10000)));
-  for (  ImmutableSettings.Builder settings : allSettings) {
+  List<Settings.Builder> allSettings=Arrays.asList(Settings.settingsBuilder().put("base_path",basePath).put("client_side_encryption_key.symmetric",symmetricEncryptionKeyBase64).put("chunk_size",randomIntBetween(1000,10000)),Settings.settingsBuilder().put("base_path",basePath).put("client_side_encryption_key.public",publicEncryptionKeyBase64).put("client_side_encryption_key.private",privateEncryptionKeyBase64).put("chunk_size",randomIntBetween(1000,10000)));
+  for (  Settings.Builder settings : allSettings) {
     PutRepositoryResponse putRepositoryResponse=client.admin().cluster().preparePutRepository("test-repo").setType("s3").setSettings(settings).get();
     createIndex("test-idx-1");
     for (int i=0; i < 100; i++) {
@@ -25,11 +25,10 @@
     CreateSnapshotResponse createSnapshotResponse=client.admin().cluster().prepareCreateSnapshot("test-repo","test-snap").setWaitForCompletion(true).setIndices("test-idx-1").get();
     assertThat(createSnapshotResponse.getSnapshotInfo().successfulShards(),greaterThan(0));
     assertThat(createSnapshotResponse.getSnapshotInfo().successfulShards(),equalTo(createSnapshotResponse.getSnapshotInfo().totalShards()));
-    assertMetadataFileIsEncrypted("test-snap");
     cluster().wipeIndices("test-idx-1");
     RestoreSnapshotResponse restoreSnapshotResponse=client.admin().cluster().prepareRestoreSnapshot("test-repo","test-snap").setWaitForCompletion(true).setIndices("test-idx-1").execute().actionGet();
     ensureGreen();
-    assertThat(client.prepareCount("test-idx-1").get().getCount(),equalTo(100L));
+    assertThat(client.prepareSearch("test-idx-1").setSize(0).get().getHits().totalHits(),equalTo(100L));
     ClusterState clusterState=client.admin().cluster().prepareState().get().getState();
     assertThat(clusterState.getMetaData().hasIndex("test-idx-1"),equalTo(true));
     cluster().wipeIndices("test-idx-1");
