@@ -4,15 +4,10 @@
   ShardSuggestMetric suggestMetric=indexShard.getSuggestMetric();
   suggestMetric.preSuggest();
   long startTime=System.nanoTime();
-  XContentParser parser=null;
   try (Engine.Searcher searcher=indexShard.acquireSearcher("suggest")){
-    BytesReference suggest=request.suggest();
-    if (suggest != null && suggest.length() > 0) {
-      parser=XContentFactory.xContent(suggest).createParser(suggest);
-      if (parser.nextToken() != XContentParser.Token.START_OBJECT) {
-        throw new IllegalArgumentException("suggest content missing");
-      }
-      final SuggestionSearchContext context=suggestPhase.parseElement().parseInternal(parser,indexService.newQueryShardContext());
+    SuggestBuilder suggest=request.suggest();
+    if (suggest != null) {
+      final SuggestionSearchContext context=suggest.build(indexService.newQueryShardContext());
       final Suggest result=suggestPhase.execute(context,searcher.searcher());
       return new ShardSuggestResponse(request.shardId(),result);
     }
@@ -22,9 +17,6 @@
     throw new ElasticsearchException("failed to execute suggest",ex);
   }
  finally {
-    if (parser != null) {
-      parser.close();
-    }
     suggestMetric.postSuggest(System.nanoTime() - startTime);
   }
 }

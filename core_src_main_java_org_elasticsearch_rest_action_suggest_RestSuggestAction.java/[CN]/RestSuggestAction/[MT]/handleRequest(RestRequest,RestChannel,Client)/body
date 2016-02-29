@@ -2,8 +2,14 @@
   SuggestRequest suggestRequest=new SuggestRequest(Strings.splitStringByCommaToArray(request.param("index")));
   suggestRequest.indicesOptions(IndicesOptions.fromRequest(request,suggestRequest.indicesOptions()));
   if (RestActions.hasBodyContent(request)) {
-    suggestRequest.suggest(RestActions.getRestContent(request));
-  }
+    final BytesReference sourceBytes=RestActions.getRestContent(request);
+    try (XContentParser parser=XContentFactory.xContent(sourceBytes).createParser(sourceBytes)){
+      final QueryParseContext context=new QueryParseContext(queryRegistry);
+      context.reset(parser);
+      context.parseFieldMatcher(parseFieldMatcher);
+      suggestRequest.suggest(SuggestBuilder.fromXContent(context,suggesters,true));
+    }
+   }
  else {
     throw new IllegalArgumentException("no content or source provided to execute suggestion");
   }
