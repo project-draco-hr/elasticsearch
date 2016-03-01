@@ -1,0 +1,15 @@
+{
+  CreateIndexRequestBuilder create=client().admin().indices().prepareCreate("test").setSettings("refresh_interval",-1);
+  create.addMapping("test","{\"dynamic\": \"false\"}");
+  assertAcked(create);
+  ensureYellow();
+  indexRandom(true,client().prepareIndex("test","test","1").setSource("foo","a"),client().prepareIndex("test","test","2").setSource("foo","a"),client().prepareIndex("test","test","3").setSource("foo","b"),client().prepareIndex("test","test","4").setSource("foo","c"));
+  assertHitCount(client().prepareSearch("test").setQuery(matchQuery("foo","a")).setSize(0).get(),0);
+  assertAcked(client().admin().indices().preparePutMapping("test").setType("test").setSource("{\"test\": {\"properties\":{\"foo\": {\"type\": \"string\"}}}}"));
+  UpdateByQueryRequestBuilder update=request().source("test");
+  if (refresh != null) {
+    update.refresh(refresh);
+  }
+  assertThat(update.get(),responseMatcher().updated(4));
+  assertHitCount(client().prepareSearch("test").setQuery(matchQuery("foo","a")).setSize(0).get(),visible ? 2 : 0);
+}
