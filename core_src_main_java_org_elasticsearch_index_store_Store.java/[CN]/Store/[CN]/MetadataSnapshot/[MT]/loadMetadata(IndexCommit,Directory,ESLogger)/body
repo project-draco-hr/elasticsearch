@@ -1,13 +1,12 @@
 {
   long numDocs;
   Map<String,StoreFileMetaData> builder=new HashMap<>();
-  Map<String,String> checksumMap=readLegacyChecksums(directory).v1();
   Map<String,String> commitUserDataBuilder=new HashMap<>();
   try {
     final SegmentInfos segmentCommitInfos=Store.readSegmentsInfo(commit,directory);
     numDocs=Lucene.getNumDocs(segmentCommitInfos);
     commitUserDataBuilder.putAll(segmentCommitInfos.getUserData());
-    @SuppressWarnings("deprecation") Version maxVersion=Version.LUCENE_4_0;
+    @SuppressWarnings("deprecation") Version maxVersion=segmentCommitInfos.getMinSegmentLuceneVersion();
     for (    SegmentCommitInfo info : segmentCommitInfos) {
       final Version version=info.info.getVersion();
       if (version == null) {
@@ -17,28 +16,23 @@
         maxVersion=version;
       }
       for (      String file : info.files()) {
-        String legacyChecksum=checksumMap.get(file);
-        if (version.onOrAfter(FIRST_LUCENE_CHECKSUM_VERSION)) {
+        if (version.onOrAfter(StoreFileMetaData.FIRST_LUCENE_CHECKSUM_VERSION)) {
           checksumFromLuceneFile(directory,file,builder,logger,version,SEGMENT_INFO_EXTENSION.equals(IndexFileNames.getExtension(file)));
         }
  else {
-          builder.put(file,new StoreFileMetaData(file,directory.fileLength(file),legacyChecksum,version));
+          throw new IllegalStateException("version must be onOrAfter: " + StoreFileMetaData.FIRST_LUCENE_CHECKSUM_VERSION + " but was: "+ version);
         }
       }
     }
+    if (maxVersion == null) {
+      maxVersion=StoreFileMetaData.FIRST_LUCENE_CHECKSUM_VERSION;
+    }
     final String segmentsFile=segmentCommitInfos.getSegmentsFileName();
-    String legacyChecksum=checksumMap.get(segmentsFile);
-    if (maxVersion.onOrAfter(FIRST_LUCENE_CHECKSUM_VERSION)) {
+    if (maxVersion.onOrAfter(StoreFileMetaData.FIRST_LUCENE_CHECKSUM_VERSION)) {
       checksumFromLuceneFile(directory,segmentsFile,builder,logger,maxVersion,true);
     }
  else {
-      final BytesRefBuilder fileHash=new BytesRefBuilder();
-      final long length;
-      try (final IndexInput in=directory.openInput(segmentsFile,IOContext.READONCE)){
-        length=in.length();
-        hashFile(fileHash,new InputStreamIndexInput(in,length),length);
-      }
-       builder.put(segmentsFile,new StoreFileMetaData(segmentsFile,length,legacyChecksum,maxVersion,fileHash.get()));
+      throw new IllegalStateException("version must be onOrAfter: " + StoreFileMetaData.FIRST_LUCENE_CHECKSUM_VERSION + " but was: "+ maxVersion);
     }
   }
  catch (  CorruptIndexException|IndexNotFoundException|IndexFormatTooOldException|IndexFormatTooNewException ex) {
