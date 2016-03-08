@@ -6,7 +6,7 @@
   boolean reverse=false;
   MultiValueMode sortMode=null;
   NestedInnerQueryParseSupport nestedHelper=null;
-  final boolean indexCreatedBeforeV2_0=context.indexShard().indexSettings().getIndexVersionCreated().before(Version.V_2_0_0);
+  final boolean indexCreatedBeforeV2_0=context.indexVersionCreated().before(Version.V_2_0_0);
   boolean coerce=GeoDistanceSortBuilder.DEFAULT_COERCE;
   boolean ignoreMalformed=GeoDistanceSortBuilder.DEFAULT_IGNORE_MALFORMED;
   XContentParser.Token token;
@@ -93,27 +93,27 @@
   if (sortMode == MultiValueMode.SUM) {
     throw new IllegalArgumentException("sort_mode [sum] isn't supported for sorting by geo distance");
   }
-  MappedFieldType fieldType=context.smartNameFieldType(fieldName);
+  MappedFieldType fieldType=context.fieldMapper(fieldName);
   if (fieldType == null) {
     throw new IllegalArgumentException("failed to find mapper for [" + fieldName + "] for geo distance based sort");
   }
   final MultiValueMode finalSortMode=sortMode;
-  final IndexGeoPointFieldData geoIndexFieldData=context.fieldData().getForField(fieldType);
+  final IndexGeoPointFieldData geoIndexFieldData=context.getForField(fieldType);
   final FixedSourceDistance[] distances=new FixedSourceDistance[geoPoints.size()];
   for (int i=0; i < geoPoints.size(); i++) {
     distances[i]=geoDistance.fixedSourceDistance(geoPoints.get(i).lat(),geoPoints.get(i).lon(),unit);
   }
   final Nested nested;
   if (nestedHelper != null && nestedHelper.getPath() != null) {
-    BitSetProducer rootDocumentsFilter=context.bitsetFilterCache().getBitSetProducer(Queries.newNonNestedFilter());
-    Query innerDocumentsFilter;
+    BitSetProducer rootDocumentsFilter=context.bitsetFilter(Queries.newNonNestedFilter());
+    Query innerDocumentsQuery;
     if (nestedHelper.filterFound()) {
-      innerDocumentsFilter=nestedHelper.getInnerFilter();
+      innerDocumentsQuery=nestedHelper.getInnerFilter();
     }
  else {
-      innerDocumentsFilter=nestedHelper.getNestedObjectMapper().nestedTypeFilter();
+      innerDocumentsQuery=nestedHelper.getNestedObjectMapper().nestedTypeFilter();
     }
-    nested=new Nested(rootDocumentsFilter,context.searcher().createNormalizedWeight(innerDocumentsFilter,false));
+    nested=new Nested(rootDocumentsFilter,innerDocumentsQuery);
   }
  else {
     nested=null;
