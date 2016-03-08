@@ -1,0 +1,88 @@
+{
+  UpdateRequest updateRequest=(UpdateRequest)item.request();
+  preVersions[requestIndex]=updateRequest.version();
+  preVersionTypes[requestIndex]=updateRequest.versionType();
+  for (int updateAttemptsCount=0; updateAttemptsCount <= updateRequest.retryOnConflict(); updateAttemptsCount++) {
+    UpdateResult updateResult;
+    try {
+      updateResult=shardUpdateOperation(metaData,request,updateRequest,indexShard);
+    }
+ catch (    Throwable t) {
+      updateResult=new UpdateResult(null,null,false,t,null);
+    }
+    if (updateResult.success()) {
+      if (updateResult.writeResult != null) {
+        location=locationToSync(location,updateResult.writeResult.location);
+      }
+switch (updateResult.result.operation()) {
+case UPSERT:
+case INDEX:
+        WriteResult<IndexResponse> result=updateResult.writeResult;
+      IndexRequest indexRequest=updateResult.request();
+    BytesReference indexSourceAsBytes=indexRequest.source();
+  IndexResponse indexResponse=result.response();
+UpdateResponse updateResponse=new UpdateResponse(indexResponse.getShardInfo(),indexResponse.getShardId(),indexResponse.getType(),indexResponse.getId(),indexResponse.getVersion(),indexResponse.isCreated());
+if (updateRequest.fields() != null && updateRequest.fields().length > 0) {
+Tuple<XContentType,Map<String,Object>> sourceAndContent=XContentHelper.convertToMap(indexSourceAsBytes,true);
+updateResponse.setGetResult(updateHelper.extractGetResult(updateRequest,request.index(),indexResponse.getVersion(),sourceAndContent.v2(),sourceAndContent.v1(),indexSourceAsBytes));
+}
+item=request.items()[requestIndex]=new BulkItemRequest(request.items()[requestIndex].id(),indexRequest);
+setResponse(item,new BulkItemResponse(item.id(),OP_TYPE_UPDATE,updateResponse));
+break;
+case DELETE:
+WriteResult<DeleteResponse> writeResult=updateResult.writeResult;
+DeleteResponse response=writeResult.response();
+DeleteRequest deleteRequest=updateResult.request();
+updateResponse=new UpdateResponse(response.getShardInfo(),response.getShardId(),response.getType(),response.getId(),response.getVersion(),false);
+updateResponse.setGetResult(updateHelper.extractGetResult(updateRequest,request.index(),response.getVersion(),updateResult.result.updatedSourceAsMap(),updateResult.result.updateSourceContentType(),null));
+item=request.items()[requestIndex]=new BulkItemRequest(request.items()[requestIndex].id(),deleteRequest);
+setResponse(item,new BulkItemResponse(item.id(),OP_TYPE_UPDATE,updateResponse));
+break;
+case NONE:
+setResponse(item,new BulkItemResponse(item.id(),OP_TYPE_UPDATE,updateResult.noopResult));
+item.setIgnoreOnReplica();
+break;
+}
+break;
+}
+ else if (updateResult.failure()) {
+Throwable t=updateResult.error;
+if (updateResult.retry) {
+if (updateAttemptsCount >= updateRequest.retryOnConflict()) {
+setResponse(item,new BulkItemResponse(item.id(),OP_TYPE_UPDATE,new BulkItemResponse.Failure(request.index(),updateRequest.type(),updateRequest.id(),t)));
+}
+}
+ else {
+if (retryPrimaryException(t)) {
+for (int j=0; j < requestIndex; j++) {
+applyVersion(request.items()[j],preVersions[j],preVersionTypes[j]);
+}
+throw (ElasticsearchException)t;
+}
+if (item.getPrimaryResponse() != null && isConflictException(t)) {
+setResponse(item,item.getPrimaryResponse());
+}
+ else if (updateResult.result == null) {
+setResponse(item,new BulkItemResponse(item.id(),OP_TYPE_UPDATE,new BulkItemResponse.Failure(request.index(),updateRequest.type(),updateRequest.id(),t)));
+}
+ else {
+switch (updateResult.result.operation()) {
+case UPSERT:
+case INDEX:
+IndexRequest indexRequest=updateResult.request();
+logFailure(t,"index",request.shardId(),indexRequest);
+setResponse(item,new BulkItemResponse(item.id(),OP_TYPE_UPDATE,new BulkItemResponse.Failure(request.index(),indexRequest.type(),indexRequest.id(),t)));
+break;
+case DELETE:
+DeleteRequest deleteRequest=updateResult.request();
+logFailure(t,"delete",request.shardId(),deleteRequest);
+setResponse(item,new BulkItemResponse(item.id(),OP_TYPE_DELETE,new BulkItemResponse.Failure(request.index(),deleteRequest.type(),deleteRequest.id(),t)));
+break;
+}
+}
+break;
+}
+}
+}
+return Tuple.tuple(location,item);
+}

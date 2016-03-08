@@ -1,0 +1,21 @@
+{
+  boolean asc=randomBoolean();
+  SearchResponse response=client().prepareSearch("test").setTypes("book").setSearchType(SearchType.QUERY_AND_FETCH).addAggregation(terms("genres").field("genre").order(Terms.Order.aggregation("sample>max_price.value",asc)).subAggregation(sampler("sample").shardSize(100).subAggregation(max("max_price").field("price")))).execute().actionGet();
+  assertSearchResponse(response);
+  Terms genres=response.getAggregations().get("genres");
+  Collection<Bucket> genreBuckets=genres.getBuckets();
+  assertThat(genreBuckets.size(),greaterThan(1));
+  double lastMaxPrice=asc ? Double.MIN_VALUE : Double.MAX_VALUE;
+  for (  Terms.Bucket genreBucket : genres.getBuckets()) {
+    Sampler sample=genreBucket.getAggregations().get("sample");
+    Max maxPriceInGenre=sample.getAggregations().get("max_price");
+    double price=maxPriceInGenre.getValue();
+    if (asc) {
+      assertThat(price,greaterThanOrEqualTo(lastMaxPrice));
+    }
+ else {
+      assertThat(price,lessThanOrEqualTo(lastMaxPrice));
+    }
+    lastMaxPrice=price;
+  }
+}

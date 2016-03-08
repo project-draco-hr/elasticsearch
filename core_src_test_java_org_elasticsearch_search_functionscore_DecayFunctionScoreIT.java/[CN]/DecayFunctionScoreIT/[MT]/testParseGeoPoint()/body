@@ -1,19 +1,20 @@
 {
-  assertAcked(prepareCreate("test").addMapping("type1",jsonBuilder().startObject().startObject("type1").startObject("properties").startObject("test").field("type","string").endObject().startObject("loc").field("type","geo_point").endObject().endObject().endObject().endObject()));
+  assertAcked(prepareCreate("test").addMapping("type1",jsonBuilder().startObject().startObject("type1").startObject("properties").startObject("test").field("type","text").endObject().startObject("loc").field("type","geo_point").endObject().endObject().endObject().endObject()));
   ensureYellow();
   client().prepareIndex().setType("type1").setId("1").setIndex("test").setSource(jsonBuilder().startObject().field("test","value").startObject("loc").field("lat",20).field("lon",11).endObject().endObject()).setRefresh(true).get();
+  FunctionScoreQueryBuilder baseQuery=functionScoreQuery(constantScoreQuery(termQuery("test","value")),ScoreFunctionBuilders.weightFactorFunction(randomIntBetween(1,10)));
   GeoPoint point=new GeoPoint(20,11);
-  ActionFuture<SearchResponse> response=client().search(searchRequest().searchType(SearchType.QUERY_THEN_FETCH).source(searchSource().query(functionScoreQuery(termQuery("test","value"),gaussDecayFunction("loc",point,"1000km")).boostMode(CombineFunction.MULTIPLY))));
+  ActionFuture<SearchResponse> response=client().search(searchRequest().searchType(SearchType.QUERY_THEN_FETCH).source(searchSource().query(functionScoreQuery(baseQuery,gaussDecayFunction("loc",point,"1000km")).boostMode(CombineFunction.REPLACE))));
   SearchResponse sr=response.actionGet();
   SearchHits sh=sr.getHits();
   assertThat(sh.getTotalHits(),equalTo((long)(1)));
   assertThat(sh.getAt(0).getId(),equalTo("1"));
-  assertThat((double)sh.getAt(0).score(),closeTo(0.30685282,1.e-5));
+  assertThat((double)sh.getAt(0).score(),closeTo(1.0,1.e-5));
   float[] coords={11,20};
-  response=client().search(searchRequest().searchType(SearchType.QUERY_THEN_FETCH).source(searchSource().query(functionScoreQuery(termQuery("test","value"),gaussDecayFunction("loc",coords,"1000km")).boostMode(CombineFunction.MULTIPLY))));
+  response=client().search(searchRequest().searchType(SearchType.QUERY_THEN_FETCH).source(searchSource().query(functionScoreQuery(baseQuery,gaussDecayFunction("loc",coords,"1000km")).boostMode(CombineFunction.REPLACE))));
   sr=response.actionGet();
   sh=sr.getHits();
   assertThat(sh.getTotalHits(),equalTo((long)(1)));
   assertThat(sh.getAt(0).getId(),equalTo("1"));
-  assertThat((double)sh.getAt(0).score(),closeTo(0.30685282,1.e-5));
+  assertThat((double)sh.getAt(0).score(),closeTo(1.0f,1.e-5));
 }

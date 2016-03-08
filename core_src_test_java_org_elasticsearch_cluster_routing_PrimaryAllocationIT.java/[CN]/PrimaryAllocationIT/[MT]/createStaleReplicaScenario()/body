@@ -1,2 +1,45 @@
 {
+  logger.info("--> starting 3 nodes, 1 master, 2 data");
+  String master=internalCluster().startMasterOnlyNode(Settings.EMPTY);
+  internalCluster().startDataOnlyNodesAsync(2).get();
+  assertAcked(client().admin().indices().prepareCreate("test").setSettings(Settings.builder().put("index.number_of_shards",1).put("index.number_of_replicas",1)).get());
+  ensureGreen();
+  logger.info("--> indexing...");
+  client().prepareIndex("test","type1").setSource(jsonBuilder().startObject().field("field","value1").endObject()).get();
+  refresh();
+  ClusterState state=client().admin().cluster().prepareState().all().get().getState();
+  List<ShardRouting> shards=state.routingTable().allShards("test");
+  assertThat(shards.size(),equalTo(2));
+  final String primaryNode;
+  final String replicaNode;
+  if (shards.get(0).primary()) {
+    primaryNode=state.getRoutingNodes().node(shards.get(0).currentNodeId()).node().name();
+    replicaNode=state.getRoutingNodes().node(shards.get(1).currentNodeId()).node().name();
+  }
+ else {
+    primaryNode=state.getRoutingNodes().node(shards.get(1).currentNodeId()).node().name();
+    replicaNode=state.getRoutingNodes().node(shards.get(0).currentNodeId()).node().name();
+  }
+  NetworkDisconnectPartition partition=new NetworkDisconnectPartition(new HashSet<>(Arrays.asList(master,replicaNode)),Collections.singleton(primaryNode),random());
+  internalCluster().setDisruptionScheme(partition);
+  logger.info("--> partitioning node with primary shard from rest of cluster");
+  partition.startDisrupting();
+  ensureStableCluster(2,master);
+  logger.info("--> index a document into previous replica shard (that is now primary)");
+  client(replicaNode).prepareIndex("test","type1").setSource(jsonBuilder().startObject().field("field","value1").endObject()).get();
+  logger.info("--> shut down node that has new acknowledged document");
+  internalCluster().stopRandomNode(InternalTestCluster.nameFilter(replicaNode));
+  ensureStableCluster(1,master);
+  partition.stopDisrupting();
+  logger.info("--> waiting for node with old primary shard to rejoin the cluster");
+  ensureStableCluster(2,master);
+  logger.info("--> check that old primary shard does not get promoted to primary again");
+  client(master).admin().cluster().prepareReroute().get();
+  assertBusy(new Runnable(){
+    @Override public void run(){
+      assertThat(internalCluster().getInstance(GatewayAllocator.class,master).getNumberOfInFlightFetch(),equalTo(0));
+    }
+  }
+);
+  assertThat(client(master).admin().cluster().prepareReroute().get().getState().getRoutingNodes().unassigned().size(),equalTo(2));
 }
