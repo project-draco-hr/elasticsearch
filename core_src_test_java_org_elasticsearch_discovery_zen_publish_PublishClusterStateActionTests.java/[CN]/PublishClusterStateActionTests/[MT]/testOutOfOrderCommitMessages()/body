@@ -2,22 +2,30 @@
   MockNode node=createMockNode("node").setAsMaster();
   final CapturingTransportChannel channel=new CapturingTransportChannel();
   List<ClusterState> states=new ArrayList<>();
-  final int numOfStates=scaledRandomIntBetween(3,10);
+  final int numOfStates=scaledRandomIntBetween(3,25);
   for (int i=1; i <= numOfStates; i++) {
     states.add(ClusterState.builder(node.clusterState).version(i).stateUUID(ClusterState.UNKNOWN_UUID).build());
   }
   final ClusterState finalState=states.get(numOfStates - 1);
   Collections.shuffle(states,random());
-  logger.info("--> publishing states");
+  List<ClusterState> orderedSubsequence=new ArrayList<>();
+  long version=0;
   for (  ClusterState state : states) {
+    if (state.version() >= version) {
+      orderedSubsequence.add(state);
+      version=state.version();
+    }
+  }
+  logger.info("--> publishing states");
+  for (  ClusterState state : orderedSubsequence) {
     node.action.handleIncomingClusterStateRequest(new BytesTransportRequest(PublishClusterStateAction.serializeFullClusterState(state,Version.CURRENT),Version.CURRENT),channel);
     assertThat(channel.response.get(),equalTo((TransportResponse)TransportResponse.Empty.INSTANCE));
     assertThat(channel.error.get(),nullValue());
     channel.clear();
   }
   logger.info("--> committing states");
-  Randomness.shuffle(states);
-  for (  ClusterState state : states) {
+  Randomness.shuffle(orderedSubsequence);
+  for (  ClusterState state : orderedSubsequence) {
     node.action.handleCommitRequest(new PublishClusterStateAction.CommitClusterStateRequest(state.stateUUID()),channel);
     assertThat(channel.response.get(),equalTo((TransportResponse)TransportResponse.Empty.INSTANCE));
     if (channel.error.get() != null) {
