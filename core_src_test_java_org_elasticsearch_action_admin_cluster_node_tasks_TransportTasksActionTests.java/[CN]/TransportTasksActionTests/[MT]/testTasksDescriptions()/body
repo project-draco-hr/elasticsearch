@@ -1,23 +1,28 @@
 {
+  long minimalStartTime=System.currentTimeMillis();
   setupTestNodes(Settings.EMPTY);
   connectNodes(testNodes);
   CountDownLatch checkLatch=new CountDownLatch(1);
   ActionFuture<NodesResponse> future=startBlockingTestNodesAction(checkLatch);
+  long maximumStartTimeNanos=System.nanoTime();
   TestNode testNode=testNodes[randomIntBetween(0,testNodes.length - 1)];
   ListTasksRequest listTasksRequest=new ListTasksRequest();
-  listTasksRequest.actions("testAction[n]");
+  listTasksRequest.setActions("testAction[n]");
   ListTasksResponse response=testNode.transportListTasksAction.execute(listTasksRequest).get();
   assertEquals(testNodes.length,response.getPerNodeTasks().size());
   for (  Map.Entry<DiscoveryNode,List<TaskInfo>> entry : response.getPerNodeTasks().entrySet()) {
     assertEquals(1,entry.getValue().size());
     assertNull(entry.getValue().get(0).getDescription());
   }
-  listTasksRequest.detailed(true);
+  long minimalDurationNanos=System.nanoTime() - maximumStartTimeNanos;
+  listTasksRequest.setDetailed(true);
   response=testNode.transportListTasksAction.execute(listTasksRequest).get();
   assertEquals(testNodes.length,response.getPerNodeTasks().size());
   for (  Map.Entry<DiscoveryNode,List<TaskInfo>> entry : response.getPerNodeTasks().entrySet()) {
     assertEquals(1,entry.getValue().size());
     assertEquals("CancellableNodeRequest[Test Request, true]",entry.getValue().get(0).getDescription());
+    assertThat(entry.getValue().get(0).getStartTime(),greaterThanOrEqualTo(minimalStartTime));
+    assertThat(entry.getValue().get(0).getRunningTimeNanos(),greaterThanOrEqualTo(minimalDurationNanos));
   }
   checkLatch.countDown();
   NodesResponse responses=future.get();

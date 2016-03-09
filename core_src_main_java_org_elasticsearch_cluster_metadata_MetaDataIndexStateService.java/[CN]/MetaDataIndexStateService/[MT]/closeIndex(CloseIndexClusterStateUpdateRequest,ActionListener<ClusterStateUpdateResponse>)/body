@@ -8,7 +8,7 @@
       return new ClusterStateUpdateResponse(acknowledged);
     }
     @Override public ClusterState execute(    ClusterState currentState){
-      List<String> indicesToClose=new ArrayList<>();
+      Set<String> indicesToClose=new HashSet<>();
       for (      String index : request.indices()) {
         IndexMetaData indexMetaData=currentState.metaData().index(index);
         if (indexMetaData == null) {
@@ -20,6 +20,25 @@
       }
       if (indicesToClose.isEmpty()) {
         return currentState;
+      }
+      RestoreInProgress restore=currentState.custom(RestoreInProgress.TYPE);
+      if (restore != null) {
+        Set<String> indicesToFail=null;
+        for (        RestoreInProgress.Entry entry : restore.entries()) {
+          for (          ObjectObjectCursor<ShardId,RestoreInProgress.ShardRestoreStatus> shard : entry.shards()) {
+            if (!shard.value.state().completed()) {
+              if (indicesToClose.contains(shard.key.getIndexName())) {
+                if (indicesToFail == null) {
+                  indicesToFail=new HashSet<>();
+                }
+                indicesToFail.add(shard.key.getIndexName());
+              }
+            }
+          }
+        }
+        if (indicesToFail != null) {
+          throw new IllegalArgumentException("Cannot close indices that are being restored: " + indicesToFail);
+        }
       }
       logger.info("closing indices [{}]",indicesAsString);
       MetaData.Builder mdBuilder=MetaData.builder(currentState.metaData());
