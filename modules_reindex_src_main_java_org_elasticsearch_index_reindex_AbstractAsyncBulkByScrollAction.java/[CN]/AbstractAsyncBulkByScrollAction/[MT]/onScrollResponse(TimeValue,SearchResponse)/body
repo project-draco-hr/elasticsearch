@@ -13,8 +13,14 @@
     total=min(total,mainRequest.getSize());
   }
   task.setTotal(total);
-  threadPool.generic().execute(new AbstractRunnable(){
+  task.countThrottle(delay);
+  threadPool.schedule(delay,ThreadPool.Names.GENERIC,threadPool.getThreadContext().preserveContext(new AbstractRunnable(){
     @Override protected void doRun() throws Exception {
+      if (task.isCancelled()) {
+        finishHim(null);
+        return;
+      }
+      lastBatchStartTime.set(System.nanoTime());
       SearchHit[] docs=searchResponse.getHits().getHits();
       logger.debug("scroll returned [{}] documents with a scroll id of [{}]",docs.length,searchResponse.getScrollId());
       if (docs.length == 0) {
@@ -31,7 +37,7 @@
       }
       BulkRequest request=buildBulk(docsIterable);
       if (request.requests().isEmpty()) {
-        startNextScroll();
+        startNextScroll(0);
         return;
       }
       request.timeout(mainRequest.getTimeout());
@@ -45,5 +51,5 @@
       finishHim(t);
     }
   }
-);
+));
 }
