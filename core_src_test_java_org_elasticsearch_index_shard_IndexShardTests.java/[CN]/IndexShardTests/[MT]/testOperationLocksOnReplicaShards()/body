@@ -1,0 +1,53 @@
+{
+  assertAcked(client().admin().indices().prepareCreate("test").setSettings(Settings.builder().put("index.number_of_shards",1).put("index.number_of_replicas",0)).get());
+  ensureGreen("test");
+  IndicesService indicesService=getInstanceFromNode(IndicesService.class);
+  IndexService indexService=indicesService.indexServiceSafe(resolveIndex("test"));
+  IndexShard indexShard=indexService.getShardOrNull(0);
+  long primaryTerm=indexShard.getPrimaryTerm();
+  final ShardRouting temp=indexShard.routingEntry();
+  final ShardRouting newShardRouting;
+switch (randomInt(2)) {
+case 0:
+    newShardRouting=TestShardRouting.newShardRouting(temp.index(),temp.id(),temp.currentNodeId(),null,false,ShardRoutingState.STARTED,AllocationId.newRelocation(temp.allocationId()));
+  indexShard.updateRoutingEntry(newShardRouting,false);
+break;
+case 1:
+final boolean relocating=randomBoolean();
+newShardRouting=TestShardRouting.newShardRouting(temp.index(),temp.id(),temp.currentNodeId(),relocating ? "sourceNode" : null,relocating ? randomBoolean() : false,ShardRoutingState.INITIALIZING,relocating ? AllocationId.newRelocation(temp.allocationId()) : temp.allocationId());
+indexShard.updateRoutingEntry(newShardRouting,false);
+break;
+case 2:
+newShardRouting=TestShardRouting.newShardRouting(temp.index(),temp.id(),temp.currentNodeId(),"otherNode",false,ShardRoutingState.RELOCATING,AllocationId.newRelocation(temp.allocationId()));
+indexShard.updateRoutingEntry(newShardRouting,false);
+indexShard.relocated("test");
+break;
+default :
+throw new UnsupportedOperationException("get your numbers straight");
+}
+logger.info("updated shard routing to {}",newShardRouting);
+assertEquals(0,indexShard.getActiveOperationsCount());
+if (newShardRouting.primary() == false) {
+try {
+indexShard.acquirePrimaryOperationLock();
+fail("shard shouldn't accept primary ops");
+}
+ catch (IllegalStateException ignored) {
+}
+}
+Releasable operation1=indexShard.acquireReplicaOperationLock(primaryTerm);
+assertEquals(1,indexShard.getActiveOperationsCount());
+Releasable operation2=indexShard.acquireReplicaOperationLock(primaryTerm);
+assertEquals(2,indexShard.getActiveOperationsCount());
+try {
+indexShard.acquireReplicaOperationLock(primaryTerm - 1);
+fail("you can not increment the operation counter with an older primary term");
+}
+ catch (IllegalArgumentException e) {
+assertThat(e.getMessage(),containsString("operation term"));
+assertThat(e.getMessage(),containsString("too old"));
+}
+indexShard.acquireReplicaOperationLock(primaryTerm + 1 + randomInt(20)).close();
+Releasables.close(operation1,operation2);
+assertEquals(0,indexShard.getActiveOperationsCount());
+}
