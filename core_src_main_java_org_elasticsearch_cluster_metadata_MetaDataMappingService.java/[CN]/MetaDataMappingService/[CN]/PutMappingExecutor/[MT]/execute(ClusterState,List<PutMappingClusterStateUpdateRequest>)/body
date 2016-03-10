@@ -1,22 +1,27 @@
 {
-  Set<String> indicesToClose=new HashSet<>();
+  Set<Index> indicesToClose=new HashSet<>();
   BatchResult.Builder<PutMappingClusterStateUpdateRequest> builder=BatchResult.builder();
   try {
     for (    PutMappingClusterStateUpdateRequest request : tasks) {
-      for (      String index : request.indices()) {
-        final IndexMetaData indexMetaData=currentState.metaData().index(index);
-        if (indexMetaData != null && indicesService.hasIndex(index) == false) {
-          indicesToClose.add(index);
-          IndexService indexService=indicesService.createIndex(nodeServicesProvider,indexMetaData,Collections.emptyList());
-          for (          ObjectCursor<MappingMetaData> mapping : indexMetaData.getMappings().values()) {
-            indexService.mapperService().merge(mapping.value.type(),mapping.value.source(),MapperService.MergeReason.MAPPING_RECOVERY,request.updateAllTypes());
+      final List<Index> indices=new ArrayList<>(request.indices().length);
+      try {
+        for (        String index : request.indices()) {
+          final IndexMetaData indexMetaData=currentState.metaData().index(index);
+          if (indexMetaData != null) {
+            if (indicesService.hasIndex(indexMetaData.getIndex()) == false) {
+              indicesToClose.add(indexMetaData.getIndex());
+              IndexService indexService=indicesService.createIndex(nodeServicesProvider,indexMetaData,Collections.emptyList());
+              for (              ObjectCursor<MappingMetaData> mapping : indexMetaData.getMappings().values()) {
+                indexService.mapperService().merge(mapping.value.type(),mapping.value.source(),MapperService.MergeReason.MAPPING_RECOVERY,request.updateAllTypes());
+              }
+            }
+            indices.add(indexMetaData.getIndex());
+          }
+ else {
+            throw new IndexNotFoundException(index);
           }
         }
-      }
-    }
-    for (    PutMappingClusterStateUpdateRequest request : tasks) {
-      try {
-        currentState=applyRequest(currentState,request);
+        currentState=applyRequest(currentState,request,indices);
         builder.success(request);
       }
  catch (      Throwable t) {
@@ -26,7 +31,7 @@
     return builder.build(currentState);
   }
   finally {
-    for (    String index : indicesToClose) {
+    for (    Index index : indicesToClose) {
       indicesService.removeIndex(index,"created for mapping processing");
     }
   }
