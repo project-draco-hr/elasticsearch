@@ -1,2 +1,52 @@
 {
+  FieldMapper fieldMapper=context.docMapper().mappers().getMapper(field);
+  if (fieldMapper != null) {
+    fieldMapper.parse(context);
+  }
+ else {
+    context=context.overridePath(new ContentPath(0));
+    final String[] paths=Strings.splitStringToArray(field,'.');
+    final String fieldName=paths[paths.length - 1];
+    ObjectMapper mapper=context.root();
+    ObjectMapper[] mappers=new ObjectMapper[paths.length - 1];
+    if (paths.length > 1) {
+      ObjectMapper parent=context.root();
+      for (int i=0; i < paths.length - 1; i++) {
+        mapper=context.docMapper().objectMappers().get(context.path().pathAsText(paths[i]));
+        if (mapper == null) {
+          ObjectMapper.Dynamic dynamic=parent.dynamic();
+          if (dynamic == null) {
+            dynamic=dynamicOrDefault(context.root().dynamic());
+          }
+switch (dynamic) {
+case STRICT:
+            throw new StrictDynamicMappingException(parent.fullPath(),paths[i]);
+case TRUE:
+          Mapper.Builder builder=context.root().findTemplateBuilder(context,paths[i],"object");
+        if (builder == null) {
+          if (!(parent instanceof RootObjectMapper) && parent.dynamic() != ObjectMapper.Defaults.DYNAMIC) {
+            ((ObjectMapper.Builder)builder).dynamic(parent.dynamic());
+          }
+          builder=new ObjectMapper.Builder(paths[i]).enabled(true);
+        }
+      Mapper.BuilderContext builderContext=new Mapper.BuilderContext(context.indexSettings(),context.path());
+    mapper=(ObjectMapper)builder.build(builderContext);
+  if (mapper.nested() != ObjectMapper.Nested.NO) {
+    throw new MapperParsingException("It is forbidden to create dynamic nested objects ([" + context.path().pathAsText(paths[i]) + "]) through `copy_to`");
+  }
+context.addDynamicMapper(mapper);
+break;
+case FALSE:
+break;
+default :
+throw new AssertionError("Unexpected dynamic type " + dynamic);
+}
+}
+context.path().add(paths[i]);
+mappers[i]=mapper;
+parent=mapper;
+}
+}
+parseDynamicValue(context,mapper,fieldName,context.parser().currentToken());
+}
 }

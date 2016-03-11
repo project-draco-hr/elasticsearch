@@ -1,0 +1,31 @@
+{
+  IngestStats ingestStats=executionService.stats();
+  assertThat(ingestStats.getStatsPerPipeline().size(),equalTo(0));
+  assertThat(ingestStats.getTotalStats().getIngestCount(),equalTo(0L));
+  assertThat(ingestStats.getTotalStats().getIngestCurrent(),equalTo(0L));
+  assertThat(ingestStats.getTotalStats().getIngestFailedCount(),equalTo(0L));
+  assertThat(ingestStats.getTotalStats().getIngestTimeInMillis(),equalTo(0L));
+  when(store.get("_id1")).thenReturn(new Pipeline("_id1",null,new CompoundProcessor()));
+  when(store.get("_id2")).thenReturn(new Pipeline("_id2",null,new CompoundProcessor()));
+  Map<String,PipelineConfiguration> configurationMap=new HashMap<>();
+  configurationMap.put("_id1",new PipelineConfiguration("_id1",new BytesArray("{}")));
+  configurationMap.put("_id2",new PipelineConfiguration("_id2",new BytesArray("{}")));
+  executionService.updatePipelineStats(new IngestMetadata(configurationMap));
+  Consumer<Throwable> failureHandler=mock(Consumer.class);
+  Consumer<Boolean> completionHandler=mock(Consumer.class);
+  IndexRequest indexRequest=new IndexRequest("_index");
+  indexRequest.setPipeline("_id1");
+  executionService.executeIndexRequest(indexRequest,failureHandler,completionHandler);
+  ingestStats=executionService.stats();
+  assertThat(ingestStats.getStatsPerPipeline().size(),equalTo(2));
+  assertThat(ingestStats.getStatsPerPipeline().get("_id1").getIngestCount(),equalTo(1L));
+  assertThat(ingestStats.getStatsPerPipeline().get("_id2").getIngestCount(),equalTo(0L));
+  assertThat(ingestStats.getTotalStats().getIngestCount(),equalTo(1L));
+  indexRequest.setPipeline("_id2");
+  executionService.executeIndexRequest(indexRequest,failureHandler,completionHandler);
+  ingestStats=executionService.stats();
+  assertThat(ingestStats.getStatsPerPipeline().size(),equalTo(2));
+  assertThat(ingestStats.getStatsPerPipeline().get("_id1").getIngestCount(),equalTo(1L));
+  assertThat(ingestStats.getStatsPerPipeline().get("_id2").getIngestCount(),equalTo(1L));
+  assertThat(ingestStats.getTotalStats().getIngestCount(),equalTo(2L));
+}
