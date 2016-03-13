@@ -1,0 +1,52 @@
+{
+  initLoggerPrefix();
+  elasticsearchSettings(esSettings);
+  INSTANCE=new Bootstrap();
+  Environment environment=initialSettings(daemonize,pathHome,pidFile);
+  Settings settings=environment.settings();
+  LogConfigurator.configure(settings,true);
+  checkForCustomConfFile();
+  if (environment.pidFile() != null) {
+    PidFile.create(environment.pidFile(),true);
+  }
+  if (JvmInfo.jvmInfo().getVmName().toLowerCase(Locale.ROOT).contains("client")) {
+    ESLogger logger=Loggers.getLogger(Bootstrap.class);
+    logger.warn("jvm uses the client vm, make sure to run `java` with the server vm for best performance by adding `-server` to the command line");
+  }
+  try {
+    if (daemonize) {
+      Loggers.disableConsoleLogging();
+      closeSystOut();
+    }
+    JVMCheck.check();
+    checkLucene();
+    INSTANCE.setup(true,settings,environment);
+    INSTANCE.start();
+    if (daemonize) {
+      closeSysError();
+    }
+  }
+ catch (  Throwable e) {
+    if (!daemonize) {
+      Loggers.disableConsoleLogging();
+    }
+    ESLogger logger=Loggers.getLogger(Bootstrap.class);
+    if (INSTANCE.node != null) {
+      logger=Loggers.getLogger(Bootstrap.class,INSTANCE.node.settings().get("node.name"));
+    }
+    if (e instanceof CreationException) {
+      ByteArrayOutputStream os=new ByteArrayOutputStream();
+      PrintStream ps=new PrintStream(os,false,"UTF-8");
+      new StartupError(e).printStackTrace(ps);
+      ps.flush();
+      logger.error("Guice Exception: {}",os.toString("UTF-8"));
+    }
+ else {
+      logger.error("Exception",e);
+    }
+    if (!daemonize) {
+      Loggers.enableConsoleLogging();
+    }
+    throw e;
+  }
+}
