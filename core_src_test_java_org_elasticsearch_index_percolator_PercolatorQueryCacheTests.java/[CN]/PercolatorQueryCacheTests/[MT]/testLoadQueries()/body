@@ -1,0 +1,33 @@
+{
+  Directory directory=newDirectory();
+  IndexWriter indexWriter=new IndexWriter(directory,newIndexWriterConfig(new MockAnalyzer(random())));
+  boolean legacyFormat=randomBoolean();
+  Version version=legacyFormat ? Version.V_2_0_0 : Version.CURRENT;
+  storeQuery("0",indexWriter,termQuery("field1","value1"),true,legacyFormat);
+  storeQuery("1",indexWriter,wildcardQuery("field1","v*"),true,legacyFormat);
+  storeQuery("2",indexWriter,boolQuery().must(termQuery("field1","value1")).must(termQuery("field2","value2")),true,legacyFormat);
+  Document doc=new Document();
+  doc.add(new StringField("dummy","value",Field.Store.YES));
+  indexWriter.addDocument(doc);
+  storeQuery("4",indexWriter,termQuery("field2","value2"),true,legacyFormat);
+  storeQuery("5",indexWriter,termQuery("field2","value2"),false,legacyFormat);
+  storeQuery("6",indexWriter,termQuery("field3","value3"),true,legacyFormat);
+  indexWriter.forceMerge(1);
+  indexWriter.deleteDocuments(new Term("id","6"));
+  indexWriter.close();
+  ShardId shardId=new ShardId("_index",ClusterState.UNKNOWN_UUID,0);
+  IndexReader indexReader=ElasticsearchDirectoryReader.wrap(DirectoryReader.open(directory),shardId);
+  assertThat(indexReader.leaves().size(),equalTo(1));
+  assertThat(indexReader.numDeletedDocs(),equalTo(1));
+  assertThat(indexReader.maxDoc(),equalTo(7));
+  initialize("field1","type=keyword","field2","type=keyword","field3","type=keyword");
+  PercolatorQueryCache.QueriesLeaf leaf=cache.loadQueries(indexReader.leaves().get(0),version);
+  assertThat(leaf.queries.size(),equalTo(5));
+  assertThat(leaf.getQuery(0),equalTo(new TermQuery(new Term("field1","value1"))));
+  assertThat(leaf.getQuery(1),equalTo(new WildcardQuery(new Term("field1","v*"))));
+  assertThat(leaf.getQuery(2),equalTo(new BooleanQuery.Builder().add(new TermQuery(new Term("field1","value1")),BooleanClause.Occur.MUST).add(new TermQuery(new Term("field2","value2")),BooleanClause.Occur.MUST).build()));
+  assertThat(leaf.getQuery(4),equalTo(new TermQuery(new Term("field2","value2"))));
+  assertThat(leaf.getQuery(6),equalTo(new TermQuery(new Term("field3","value3"))));
+  indexReader.close();
+  directory.close();
+}

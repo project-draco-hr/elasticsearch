@@ -1,0 +1,18 @@
+{
+  createIndex("test",client().admin().indices().prepareCreate("test").addMapping("type","field1","type=text"));
+  client().prepareIndex("test",PercolatorFieldMapper.TYPE_NAME,"1").setSource(jsonBuilder().startObject().field("query",matchQuery("field1","brown fox")).endObject()).execute().actionGet();
+  client().prepareIndex("test",PercolatorFieldMapper.TYPE_NAME,"2").setSource(jsonBuilder().startObject().field("query",matchQuery("field1","lazy dog")).endObject()).execute().actionGet();
+  client().prepareIndex("test",PercolatorFieldMapper.TYPE_NAME,"3").setSource(jsonBuilder().startObject().field("query",termQuery("field1","jumps")).endObject()).execute().actionGet();
+  client().prepareIndex("test",PercolatorFieldMapper.TYPE_NAME,"4").setSource(jsonBuilder().startObject().field("query",termQuery("field1","dog")).endObject()).execute().actionGet();
+  client().prepareIndex("test",PercolatorFieldMapper.TYPE_NAME,"5").setSource(jsonBuilder().startObject().field("query",termQuery("field1","fox")).endObject()).execute().actionGet();
+  client().admin().indices().prepareRefresh().get();
+  BytesReference document=jsonBuilder().startObject().field("field1","The quick brown fox jumps over the lazy dog").endObject().bytes();
+  SearchResponse searchResponse=client().prepareSearch().setQuery(percolatorQuery("type",document)).highlighter(new HighlightBuilder().field("field1")).addSort("_uid",SortOrder.ASC).get();
+  assertHitCount(searchResponse,5);
+  assertThat(searchResponse.getHits().getAt(0).getHighlightFields().get("field1").fragments()[0].string(),equalTo("The quick <em>brown</em> <em>fox</em> jumps over the lazy dog"));
+  assertThat(searchResponse.getHits().getAt(1).getHighlightFields().get("field1").fragments()[0].string(),equalTo("The quick brown fox jumps over the <em>lazy</em> <em>dog</em>"));
+  assertThat(searchResponse.getHits().getAt(2).getHighlightFields().get("field1").fragments()[0].string(),equalTo("The quick brown fox <em>jumps</em> over the lazy dog"));
+  assertThat(searchResponse.getHits().getAt(3).getHighlightFields().get("field1").fragments()[0].string(),equalTo("The quick brown fox jumps over the lazy <em>dog</em>"));
+  assertThat(searchResponse.getHits().getAt(4).getHighlightFields().get("field1").fragments()[0].string(),equalTo("The quick brown <em>fox</em> jumps over the lazy dog"));
+  ;
+}
