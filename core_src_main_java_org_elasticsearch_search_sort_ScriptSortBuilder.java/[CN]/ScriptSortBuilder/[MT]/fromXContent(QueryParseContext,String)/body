@@ -1,0 +1,78 @@
+{
+  ScriptParameterParser scriptParameterParser=new ScriptParameterParser();
+  XContentParser parser=context.parser();
+  ParseFieldMatcher parseField=context.parseFieldMatcher();
+  Script script=null;
+  ScriptSortType type=null;
+  SortMode sortMode=null;
+  SortOrder order=null;
+  QueryBuilder<?> nestedFilter=null;
+  String nestedPath=null;
+  Map<String,Object> params=new HashMap<>();
+  XContentParser.Token token;
+  String currentName=parser.currentName();
+  while ((token=parser.nextToken()) != XContentParser.Token.END_OBJECT) {
+    if (token == XContentParser.Token.FIELD_NAME) {
+      currentName=parser.currentName();
+    }
+ else     if (token == XContentParser.Token.START_OBJECT) {
+      if (parseField.match(currentName,ScriptField.SCRIPT)) {
+        script=Script.parse(parser,parseField);
+      }
+ else       if (parseField.match(currentName,PARAMS_FIELD)) {
+        params=parser.map();
+      }
+ else       if (parseField.match(currentName,NESTED_FILTER_FIELD)) {
+        nestedFilter=context.parseInnerQueryBuilder();
+      }
+ else {
+        throw new ParsingException(parser.getTokenLocation(),"[" + NAME + "] failed to parse field ["+ currentName+ "]");
+      }
+    }
+ else     if (token.isValue()) {
+      if (parseField.match(currentName,ORDER_FIELD)) {
+        order=SortOrder.fromString(parser.text());
+      }
+ else       if (scriptParameterParser.token(currentName,token,parser,parseField)) {
+      }
+ else       if (parseField.match(currentName,TYPE_FIELD)) {
+        type=ScriptSortType.fromString(parser.text());
+      }
+ else       if (parseField.match(currentName,SORTMODE_FIELD)) {
+        sortMode=SortMode.fromString(parser.text());
+      }
+ else       if (parseField.match(currentName,NESTED_PATH_FIELD)) {
+        nestedPath=parser.text();
+      }
+ else {
+        throw new ParsingException(parser.getTokenLocation(),"[" + NAME + "] failed to parse field ["+ currentName+ "]");
+      }
+    }
+ else {
+      throw new ParsingException(parser.getTokenLocation(),"[" + NAME + "] unexpected token ["+ token+ "]");
+    }
+  }
+  if (script == null) {
+    ScriptParameterValue scriptValue=scriptParameterParser.getDefaultScriptParameterValue();
+    if (scriptValue != null) {
+      if (params == null) {
+        params=new HashMap<>();
+      }
+      script=new Script(scriptValue.script(),scriptValue.scriptType(),scriptParameterParser.lang(),params);
+    }
+  }
+  ScriptSortBuilder result=new ScriptSortBuilder(script,type);
+  if (order != null) {
+    result.order(order);
+  }
+  if (sortMode != null) {
+    result.sortMode(sortMode);
+  }
+  if (nestedFilter != null) {
+    result.setNestedFilter(nestedFilter);
+  }
+  if (nestedPath != null) {
+    result.setNestedPath(nestedPath);
+  }
+  return result;
+}
