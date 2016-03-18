@@ -1,0 +1,24 @@
+{
+  Version version=VersionUtils.randomVersionBetween(random(),Version.V_2_0_0,Version.CURRENT);
+  Settings settings=Settings.settingsBuilder().put(IndexMetaData.SETTING_VERSION_CREATED,version).build();
+  assertAcked(prepareCreate("index").setSettings(settings).addMapping("type",LOCATION_FIELD,"type=geo_point"));
+  XContentBuilder d1Builder=jsonBuilder();
+  GeoPoint[] d1Points={new GeoPoint(0,1),new GeoPoint(0,4),new GeoPoint(0,10)};
+  createShuffeldJSONArray(d1Builder,d1Points);
+  XContentBuilder d2Builder=jsonBuilder();
+  GeoPoint[] d2Points={new GeoPoint(0,1),new GeoPoint(0,5),new GeoPoint(0,6)};
+  createShuffeldJSONArray(d2Builder,d2Points);
+  logger.info("d1: {}",d1Builder);
+  logger.info("d2: {}",d2Builder);
+  indexRandom(true,client().prepareIndex("index","type","d1").setSource(d1Builder),client().prepareIndex("index","type","d2").setSource(d2Builder));
+  ensureYellow();
+  GeoPoint q=new GeoPoint(0,0);
+  SearchResponse searchResponse=client().prepareSearch().setQuery(matchAllQuery()).addSort(new GeoDistanceSortBuilder(LOCATION_FIELD,q).sortMode(SortMode.AVG).order(SortOrder.ASC).geoDistance(GeoDistance.PLANE).unit(DistanceUnit.KILOMETERS)).execute().actionGet();
+  assertOrderedSearchHits(searchResponse,"d2","d1");
+  assertThat((Double)searchResponse.getHits().getAt(0).getSortValues()[0],closeTo(GeoDistance.PLANE.calculate(0,0,0,4,DistanceUnit.KILOMETERS),0.01d));
+  assertThat((Double)searchResponse.getHits().getAt(1).getSortValues()[0],closeTo(GeoDistance.PLANE.calculate(0,0,0,5,DistanceUnit.KILOMETERS),0.01d));
+  searchResponse=client().prepareSearch().setQuery(matchAllQuery()).addSort(new GeoDistanceSortBuilder(LOCATION_FIELD,q).sortMode(SortMode.MEDIAN).order(SortOrder.ASC).geoDistance(GeoDistance.PLANE).unit(DistanceUnit.KILOMETERS)).execute().actionGet();
+  assertOrderedSearchHits(searchResponse,"d1","d2");
+  assertThat((Double)searchResponse.getHits().getAt(0).getSortValues()[0],closeTo(GeoDistance.PLANE.calculate(0,0,0,4,DistanceUnit.KILOMETERS),0.01d));
+  assertThat((Double)searchResponse.getHits().getAt(1).getSortValues()[0],closeTo(GeoDistance.PLANE.calculate(0,0,0,5,DistanceUnit.KILOMETERS),0.01d));
+}
