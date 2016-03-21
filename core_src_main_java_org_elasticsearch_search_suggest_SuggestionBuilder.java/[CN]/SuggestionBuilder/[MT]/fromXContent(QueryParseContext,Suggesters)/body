@@ -1,0 +1,49 @@
+{
+  XContentParser parser=parseContext.parser();
+  ParseFieldMatcher parsefieldMatcher=parseContext.parseFieldMatcher();
+  XContentParser.Token token;
+  String currentFieldName=null;
+  String suggestText=null;
+  String prefix=null;
+  String regex=null;
+  SuggestionBuilder<?> suggestionBuilder=null;
+  while ((token=parser.nextToken()) != XContentParser.Token.END_OBJECT) {
+    if (token == XContentParser.Token.FIELD_NAME) {
+      currentFieldName=parser.currentName();
+    }
+ else     if (token.isValue()) {
+      if (parsefieldMatcher.match(currentFieldName,TEXT_FIELD)) {
+        suggestText=parser.text();
+      }
+ else       if (parsefieldMatcher.match(currentFieldName,PREFIX_FIELD)) {
+        prefix=parser.text();
+      }
+ else       if (parsefieldMatcher.match(currentFieldName,REGEX_FIELD)) {
+        regex=parser.text();
+      }
+ else {
+        throw new ParsingException(parser.getTokenLocation(),"suggestion does not support [" + currentFieldName + "]");
+      }
+    }
+ else     if (token == XContentParser.Token.START_OBJECT) {
+      SuggestionBuilder<?> suggestParser=suggesters.getSuggestionPrototype(currentFieldName);
+      if (suggestParser == null) {
+        throw new ParsingException(parser.getTokenLocation(),"suggestion [" + currentFieldName + "] not supported");
+      }
+      suggestionBuilder=suggestParser.innerFromXContent(parseContext);
+    }
+  }
+  if (suggestionBuilder == null) {
+    throw new ElasticsearchParseException("missing suggestion object");
+  }
+  if (suggestText != null) {
+    suggestionBuilder.text(suggestText);
+  }
+  if (prefix != null) {
+    suggestionBuilder.prefix(prefix);
+  }
+  if (regex != null) {
+    suggestionBuilder.regex(regex);
+  }
+  return suggestionBuilder;
+}

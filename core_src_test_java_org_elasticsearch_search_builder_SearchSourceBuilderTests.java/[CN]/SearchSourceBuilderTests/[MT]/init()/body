@@ -4,8 +4,9 @@
   namedWriteableRegistry=new NamedWriteableRegistry();
   index=new Index(randomAsciiOfLengthBetween(1,10),"_na_");
   Settings indexSettings=Settings.settingsBuilder().put(IndexMetaData.SETTING_VERSION_CREATED,version).build();
-  final TestClusterService clusterService=new TestClusterService();
-  clusterService.setState(new ClusterState.Builder(clusterService.state()).metaData(new MetaData.Builder().put(new IndexMetaData.Builder(index.getName()).settings(indexSettings).numberOfShards(1).numberOfReplicas(0))));
+  final ThreadPool threadPool=new ThreadPool(settings);
+  final ClusterService clusterService=createClusterService(threadPool);
+  setState(clusterService,new ClusterState.Builder(clusterService.state()).metaData(new MetaData.Builder().put(new IndexMetaData.Builder(index.getName()).settings(indexSettings).numberOfShards(1).numberOfReplicas(0))));
   SettingsModule settingsModule=new SettingsModule(settings);
   settingsModule.registerSetting(InternalSettingsPlugin.VERSION_CREATED);
   ScriptModule scriptModule=new ScriptModule(){
@@ -34,15 +35,13 @@
   }
 ;
   scriptModule.prepareSettings(settingsModule);
-  injector=new ModulesBuilder().add(new EnvironmentModule(new Environment(settings)),settingsModule,new ThreadPoolModule(new ThreadPool(settings)),scriptModule,new IndicesModule(){
+  injector=new ModulesBuilder().add(new EnvironmentModule(new Environment(settings)),settingsModule,new ThreadPoolModule(threadPool),scriptModule,new IndicesModule(){
     @Override protected void configure(){
       bindMapperExtension();
     }
   }
 ,new SearchModule(settings,namedWriteableRegistry){
     @Override protected void configureSearch(){
-    }
-    @Override protected void configureSuggesters(){
     }
   }
 ,new IndexSettingsModule(index,settings),new AbstractModule(){
@@ -54,6 +53,7 @@
   }
 ).createInjector();
   aggParsers=injector.getInstance(AggregatorParsers.class);
+  suggesters=injector.getInstance(Suggesters.class);
   currentTypes=new String[randomIntBetween(0,5)];
   for (int i=0; i < currentTypes.length; i++) {
     String type=randomAsciiOfLengthBetween(1,10);

@@ -1,16 +1,27 @@
 {
   if (Files.isDirectory(tmpConfigDir) == false) {
-    throw new UserError(CliTool.ExitStatus.IO_ERROR,"config in plugin " + info.getName() + " is not a directory");
+    throw new UserError(ExitCodes.IO_ERROR,"config in plugin " + info.getName() + " is not a directory");
   }
   Files.createDirectories(destConfigDir);
+  final PosixFileAttributes destConfigDirAttributes;
+  if (Constants.WINDOWS) {
+    destConfigDirAttributes=null;
+  }
+ else {
+    destConfigDirAttributes=Files.getFileAttributeView(destConfigDir.getParent(),PosixFileAttributeView.class).readAttributes();
+    setOwnerGroup(destConfigDir,destConfigDirAttributes);
+  }
   try (DirectoryStream<Path> stream=Files.newDirectoryStream(tmpConfigDir)){
     for (    Path srcFile : stream) {
       if (Files.isDirectory(srcFile)) {
-        throw new UserError(CliTool.ExitStatus.DATA_ERROR,"Directories not allowed in config dir for plugin " + info.getName());
+        throw new UserError(ExitCodes.DATA_ERROR,"Directories not allowed in config dir for plugin " + info.getName());
       }
       Path destFile=destConfigDir.resolve(tmpConfigDir.relativize(srcFile));
       if (Files.exists(destFile) == false) {
         Files.copy(srcFile,destFile);
+        if (Constants.WINDOWS == false) {
+          setOwnerGroup(destFile,destConfigDirAttributes);
+        }
       }
     }
   }

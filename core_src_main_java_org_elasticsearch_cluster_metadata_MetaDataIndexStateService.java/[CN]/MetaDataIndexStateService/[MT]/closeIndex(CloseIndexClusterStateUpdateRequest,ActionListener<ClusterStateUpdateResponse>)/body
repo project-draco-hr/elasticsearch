@@ -8,30 +8,30 @@
       return new ClusterStateUpdateResponse(acknowledged);
     }
     @Override public ClusterState execute(    ClusterState currentState){
-      List<String> indicesToClose=new ArrayList<>();
-      for (      String index : request.indices()) {
-        IndexMetaData indexMetaData=currentState.metaData().index(index);
-        if (indexMetaData == null) {
-          throw new IndexNotFoundException(index);
-        }
+      Set<IndexMetaData> indicesToClose=new HashSet<>();
+      for (      Index index : request.indices()) {
+        final IndexMetaData indexMetaData=currentState.metaData().getIndexSafe(index);
         if (indexMetaData.getState() != IndexMetaData.State.CLOSE) {
-          indicesToClose.add(index);
+          indicesToClose.add(indexMetaData);
         }
       }
       if (indicesToClose.isEmpty()) {
         return currentState;
       }
+      RestoreService.checkIndexClosing(currentState,indicesToClose);
+      SnapshotsService.checkIndexClosing(currentState,indicesToClose);
       logger.info("closing indices [{}]",indicesAsString);
       MetaData.Builder mdBuilder=MetaData.builder(currentState.metaData());
       ClusterBlocks.Builder blocksBuilder=ClusterBlocks.builder().blocks(currentState.blocks());
-      for (      String index : indicesToClose) {
-        mdBuilder.put(IndexMetaData.builder(currentState.metaData().index(index)).state(IndexMetaData.State.CLOSE));
-        blocksBuilder.addIndexBlock(index,INDEX_CLOSED_BLOCK);
+      for (      IndexMetaData openIndexMetadata : indicesToClose) {
+        final String indexName=openIndexMetadata.getIndex().getName();
+        mdBuilder.put(IndexMetaData.builder(openIndexMetadata).state(IndexMetaData.State.CLOSE));
+        blocksBuilder.addIndexBlock(indexName,INDEX_CLOSED_BLOCK);
       }
       ClusterState updatedState=ClusterState.builder(currentState).metaData(mdBuilder).blocks(blocksBuilder).build();
       RoutingTable.Builder rtBuilder=RoutingTable.builder(currentState.routingTable());
-      for (      String index : indicesToClose) {
-        rtBuilder.remove(index);
+      for (      IndexMetaData index : indicesToClose) {
+        rtBuilder.remove(index.getIndex().getName());
       }
       RoutingAllocation.Result routingResult=allocationService.reroute(ClusterState.builder(updatedState).routingTable(rtBuilder.build()).build(),"indices closed [" + indicesAsString + "]");
       return ClusterState.builder(updatedState).routingResult(routingResult).build();

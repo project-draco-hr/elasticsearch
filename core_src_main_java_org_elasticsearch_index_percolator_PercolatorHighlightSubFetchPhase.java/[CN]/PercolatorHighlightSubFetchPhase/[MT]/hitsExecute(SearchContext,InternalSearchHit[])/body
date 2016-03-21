@@ -1,0 +1,23 @@
+{
+  PercolatorQuery percolatorQuery=locatePercolatorQuery(context.query());
+  if (percolatorQuery == null) {
+    throw new IllegalStateException("couldn't locate percolator query");
+  }
+  List<LeafReaderContext> ctxs=context.searcher().getIndexReader().leaves();
+  PercolatorQueryCache queriesRegistry=context.percolatorQueryCache();
+  IndexSearcher percolatorIndexSearcher=percolatorQuery.getPercolatorIndexSearcher();
+  LeafReaderContext percolatorLeafReaderContext=percolatorIndexSearcher.getIndexReader().leaves().get(0);
+  FetchSubPhase.HitContext hitContext=new FetchSubPhase.HitContext();
+  SubSearchContext subSearchContext=createSubSearchContext(context,percolatorLeafReaderContext,percolatorQuery.getDocumentSource());
+  for (  InternalSearchHit hit : hits) {
+    if (PercolatorFieldMapper.TYPE_NAME.equals(hit.getType())) {
+      LeafReaderContext ctx=ctxs.get(ReaderUtil.subIndex(hit.docId(),ctxs));
+      Query query=queriesRegistry.getQueries(ctx).getQuery(hit.docId() - ctx.docBase);
+      subSearchContext.parsedQuery(new ParsedQuery(query));
+      hitContext.reset(new InternalSearchHit(0,"unknown",new Text(percolatorQuery.getDocumentType()),Collections.emptyMap()),percolatorLeafReaderContext,0,percolatorIndexSearcher);
+      hitContext.cache().clear();
+      highlightPhase.hitExecute(subSearchContext,hitContext);
+      hit.highlightFields().putAll(hitContext.hit().getHighlightFields());
+    }
+  }
+}
