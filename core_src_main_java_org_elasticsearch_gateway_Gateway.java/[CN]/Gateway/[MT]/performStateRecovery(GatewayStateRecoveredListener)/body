@@ -1,2 +1,45 @@
 {
+  String[] nodesIds=clusterService.state().nodes().masterNodes().keys().toArray(String.class);
+  logger.trace("performing state recovery from {}",Arrays.toString(nodesIds));
+  TransportNodesListGatewayMetaState.NodesGatewayMetaState nodesState=listGatewayMetaState.list(nodesIds,null).actionGet();
+  int requiredAllocation=Math.max(1,minimumMasterNodesProvider.get());
+  if (nodesState.failures().length > 0) {
+    for (    FailedNodeException failedNodeException : nodesState.failures()) {
+      logger.warn("failed to fetch state from node",failedNodeException);
+    }
+  }
+  MetaData electedGlobalState=null;
+  int found=0;
+  for (  TransportNodesListGatewayMetaState.NodeGatewayMetaState nodeState : nodesState) {
+    if (nodeState.metaData() == null) {
+      continue;
+    }
+    found++;
+    if (electedGlobalState == null) {
+      electedGlobalState=nodeState.metaData();
+    }
+ else     if (nodeState.metaData().version() > electedGlobalState.version()) {
+      electedGlobalState=nodeState.metaData();
+    }
+  }
+  if (found < requiredAllocation) {
+    listener.onFailure("found [" + found + "] metadata states, required ["+ requiredAllocation+ "]");
+    return;
+  }
+  MetaData.Builder metaDataBuilder=MetaData.builder(electedGlobalState);
+  for (  IndexMetaData indexMetaData : electedGlobalState) {
+    try {
+      if (indexMetaData.getState() == IndexMetaData.State.OPEN) {
+        indicesService.verifyIndexMetadata(nodeServicesProvider,indexMetaData);
+      }
+    }
+ catch (    Exception e) {
+      logger.warn("recovering index {} failed - recovering as closed",e,indexMetaData.getIndex());
+      indexMetaData=IndexMetaData.builder(indexMetaData).state(IndexMetaData.State.CLOSE).build();
+      metaDataBuilder.put(indexMetaData,true);
+    }
+  }
+  ClusterState.Builder builder=ClusterState.builder(clusterService.state().getClusterName());
+  builder.metaData(metaDataBuilder);
+  listener.onSuccess(builder.build());
 }
