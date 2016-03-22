@@ -1,2 +1,34 @@
 {
+  if (!lifecycle.started()) {
+    throw new IllegalStateException("Can't create an index [" + indexMetaData.getIndex() + "], node is closed");
+  }
+  if (indexMetaData.getIndexUUID().equals(IndexMetaData.INDEX_UUID_NA_VALUE)) {
+    throw new IllegalArgumentException("index must have a real UUID found value: [" + indexMetaData.getIndexUUID() + "]");
+  }
+  final Index index=indexMetaData.getIndex();
+  if (hasIndex(index)) {
+    throw new IndexAlreadyExistsException(index);
+  }
+  List<IndexEventListener> finalListeners=new ArrayList<>(builtInListeners);
+  final IndexEventListener onStoreClose=new IndexEventListener(){
+    @Override public void onStoreClosed(    ShardId shardId){
+      indicesQueryCache.onClose(shardId);
+    }
+  }
+;
+  finalListeners.add(onStoreClose);
+  finalListeners.add(oldShardsStats);
+  final IndexService indexService=createIndexService("create index",nodeServicesProvider,indexMetaData,indicesQueryCache,indicesFieldDataCache,finalListeners,indexingMemoryController);
+  boolean success=false;
+  try {
+    indexService.getIndexEventListener().afterIndexCreated(indexService);
+    indices=newMapBuilder(indices).put(index.getUUID(),indexService).immutableMap();
+    success=true;
+    return indexService;
+  }
+  finally {
+    if (success == false) {
+      indexService.close("plugins_failed",true);
+    }
+  }
 }

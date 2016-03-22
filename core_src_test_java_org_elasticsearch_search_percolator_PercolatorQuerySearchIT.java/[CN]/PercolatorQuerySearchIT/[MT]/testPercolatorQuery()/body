@@ -1,0 +1,25 @@
+{
+  createIndex("test",client().admin().indices().prepareCreate("test").addMapping("type","field1","type=keyword","field2","type=keyword"));
+  client().prepareIndex("test",PercolatorFieldMapper.TYPE_NAME,"1").setSource(jsonBuilder().startObject().field("query",matchAllQuery()).endObject()).get();
+  client().prepareIndex("test",PercolatorFieldMapper.TYPE_NAME,"2").setSource(jsonBuilder().startObject().field("query",matchQuery("field1","value")).endObject()).get();
+  client().prepareIndex("test",PercolatorFieldMapper.TYPE_NAME,"3").setSource(jsonBuilder().startObject().field("query",boolQuery().must(matchQuery("field1","value")).must(matchQuery("field2","value"))).endObject()).get();
+  client().admin().indices().prepareRefresh().get();
+  BytesReference source=jsonBuilder().startObject().endObject().bytes();
+  logger.info("percolating empty doc");
+  SearchResponse response=client().prepareSearch().setQuery(percolatorQuery("type",source)).get();
+  assertHitCount(response,1);
+  assertThat(response.getHits().getAt(0).getId(),equalTo("1"));
+  source=jsonBuilder().startObject().field("field1","value").endObject().bytes();
+  logger.info("percolating doc with 1 field");
+  response=client().prepareSearch().setQuery(percolatorQuery("type",source)).addSort("_uid",SortOrder.ASC).get();
+  assertHitCount(response,2);
+  assertThat(response.getHits().getAt(0).getId(),equalTo("1"));
+  assertThat(response.getHits().getAt(1).getId(),equalTo("2"));
+  source=jsonBuilder().startObject().field("field1","value").field("field2","value").endObject().bytes();
+  logger.info("percolating doc with 2 fields");
+  response=client().prepareSearch().setQuery(percolatorQuery("type",source)).addSort("_uid",SortOrder.ASC).get();
+  assertHitCount(response,3);
+  assertThat(response.getHits().getAt(0).getId(),equalTo("1"));
+  assertThat(response.getHits().getAt(1).getId(),equalTo("2"));
+  assertThat(response.getHits().getAt(2).getId(),equalTo("3"));
+}
