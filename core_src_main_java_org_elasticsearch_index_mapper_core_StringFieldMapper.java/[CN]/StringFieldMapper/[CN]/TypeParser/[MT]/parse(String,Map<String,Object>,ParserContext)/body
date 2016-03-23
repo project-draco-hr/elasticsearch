@@ -20,6 +20,28 @@
           node.put("norms",TypeParsers.nodeBooleanValue("omit_norms",omitNorms,parserContext) == false);
         }
       }
+{
+        Object fielddataO=node.get("fielddata");
+        if (fielddataO instanceof Map) {
+          Map<?,?> fielddata=(Map<?,?>)fielddataO;
+          if (keyword == false) {
+            node.put("fielddata","disabled".equals(fielddata.get("format")) == false);
+            Map<?,?> fielddataFilter=(Map<?,?>)fielddata.get("filter");
+            if (fielddataFilter != null) {
+              Map<?,?> frequencyFilter=(Map<?,?>)fielddataFilter.get("frequency");
+              frequencyFilter.keySet().retainAll(Arrays.asList("min","max","min_segment_size"));
+              node.put("fielddata_frequency_filter",frequencyFilter);
+            }
+          }
+ else {
+            node.remove("fielddata");
+          }
+          final Object loading=fielddata.get("loading");
+          if (loading != null) {
+            node.put("eager_global_ordinals","eager_global_ordinals".equals(loading));
+          }
+        }
+      }
       if (keyword) {
         return new KeywordFieldMapper.TypeParser().parse(fieldName,node,parserContext);
       }
@@ -48,6 +70,21 @@ break;
 default :
 throw new IllegalArgumentException("Can't parse [index] value [" + index + "] for field ["+ fieldName+ "], expected [true], [false], [no], [not_analyzed] or [analyzed]");
 }
+}
+final Object fielddataObject=node.get("fielddata");
+if (fielddataObject instanceof Map) {
+Map<?,?> fielddata=(Map<?,?>)fielddataObject;
+final Object loading=fielddata.get("loading");
+if (loading != null) {
+node.put("eager_global_ordinals","eager_global_ordinals".equals(loading));
+}
+Map<?,?> fielddataFilter=(Map<?,?>)fielddata.get("filter");
+if (fielddataFilter != null) {
+Map<?,?> frequencyFilter=(Map<?,?>)fielddataFilter.get("frequency");
+frequencyFilter.keySet().retainAll(Arrays.asList("min","max","min_segment_size"));
+node.put("fielddata_frequency_filter",frequencyFilter);
+}
+node.put("fielddata","disabled".equals(fielddata.get("format")) == false);
 }
 parseTextField(builder,fieldName,node,parserContext);
 for (Iterator<Map.Entry<String,Object>> iterator=node.entrySet().iterator(); iterator.hasNext(); ) {
@@ -80,6 +117,23 @@ iterator.remove();
 }
  else if (propName.equals("ignore_above")) {
 builder.ignoreAbove(XContentMapValues.nodeIntegerValue(propNode,-1));
+iterator.remove();
+}
+ else if (propName.equals("fielddata")) {
+builder.fielddata(XContentMapValues.nodeBooleanValue(propNode));
+iterator.remove();
+}
+ else if (propName.equals("eager_global_ordinals")) {
+builder.eagerGlobalOrdinals(XContentMapValues.nodeBooleanValue(propNode));
+iterator.remove();
+}
+ else if (propName.equals("fielddata_frequency_filter")) {
+Map<?,?> frequencyFilter=(Map<?,?>)propNode;
+double minFrequency=XContentMapValues.nodeDoubleValue(frequencyFilter.remove("min"),0);
+double maxFrequency=XContentMapValues.nodeDoubleValue(frequencyFilter.remove("max"),Integer.MAX_VALUE);
+int minSegmentSize=XContentMapValues.nodeIntegerValue(frequencyFilter.remove("min_segment_size"),0);
+builder.fielddataFrequencyFilter(minFrequency,maxFrequency,minSegmentSize);
+DocumentMapperParser.checkNoRemainingFields(propName,frequencyFilter,parserContext.indexVersionCreated());
 iterator.remove();
 }
  else if (parseMultiField(builder,fieldName,parserContext,propName,propNode)) {

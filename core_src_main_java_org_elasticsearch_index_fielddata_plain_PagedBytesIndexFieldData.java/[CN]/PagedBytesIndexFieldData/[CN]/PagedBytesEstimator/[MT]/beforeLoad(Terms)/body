@@ -1,18 +1,23 @@
 {
-  final float acceptableTransientOverheadRatio=fieldDataType.getSettings().getAsFloat(FilterSettingFields.ACCEPTABLE_TRANSIENT_OVERHEAD_RATIO,OrdinalsBuilder.DEFAULT_ACCEPTABLE_OVERHEAD_RATIO);
   LeafReader reader=context.reader();
-  if (acceptableTransientOverheadRatio != OrdinalsBuilder.DEFAULT_ACCEPTABLE_OVERHEAD_RATIO || fieldDataType.getSettings().getAsDouble(FilterSettingFields.FREQUENCY_MIN,0d) != 0d || fieldDataType.getSettings().getAsDouble(FilterSettingFields.FREQUENCY_MAX,0d) != 0d || fieldDataType.getSettings().getAsDouble(FilterSettingFields.FREQUENCY_MIN_SEGMENT_SIZE,0d) != 0d || fieldDataType.getSettings().get(FilterSettingFields.REGEX_PATTERN) != null) {
+  TermsEnum iterator=terms.iterator();
+  TermsEnum filteredIterator=filter(terms,iterator,reader);
+  final boolean filtered=iterator != filteredIterator;
+  iterator=filteredIterator;
+  if (filtered) {
     if (logger.isTraceEnabled()) {
       logger.trace("Filter exists, can't circuit break normally, using RamAccountingTermsEnum");
     }
-    return new RamAccountingTermsEnum(filter(terms,reader),breaker,this,this.fieldName);
+    return new RamAccountingTermsEnum(iterator,breaker,this,this.fieldName);
   }
  else {
     estimatedBytes=this.estimateStringFieldData();
     if (estimatedBytes == 0) {
-      return new RamAccountingTermsEnum(filter(terms,reader),breaker,this,this.fieldName);
+      iterator=new RamAccountingTermsEnum(iterator,breaker,this,this.fieldName);
     }
-    breaker.addEstimateBytesAndMaybeBreak(estimatedBytes,fieldName);
-    return filter(terms,reader);
+ else {
+      breaker.addEstimateBytesAndMaybeBreak(estimatedBytes,fieldName);
+    }
+    return iterator;
   }
 }
