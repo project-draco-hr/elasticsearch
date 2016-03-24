@@ -1,25 +1,25 @@
 {
-  SuggestRequest suggestRequest=new SuggestRequest(Strings.splitStringByCommaToArray(request.param("index")));
-  suggestRequest.indicesOptions(IndicesOptions.fromRequest(request,suggestRequest.indicesOptions()));
+  final SearchRequest searchRequest=new SearchRequest(Strings.splitStringByCommaToArray(request.param("index")),new SearchSourceBuilder());
+  searchRequest.indicesOptions(IndicesOptions.fromRequest(request,searchRequest.indicesOptions()));
   if (RestActions.hasBodyContent(request)) {
     final BytesReference sourceBytes=RestActions.getRestContent(request);
     try (XContentParser parser=XContentFactory.xContent(sourceBytes).createParser(sourceBytes)){
       final QueryParseContext context=new QueryParseContext(queryRegistry);
       context.reset(parser);
       context.parseFieldMatcher(parseFieldMatcher);
-      suggestRequest.suggest(SuggestBuilder.fromXContent(context,suggesters));
+      searchRequest.source().suggest(SuggestBuilder.fromXContent(context,suggesters));
     }
    }
  else {
     throw new IllegalArgumentException("no content or source provided to execute suggestion");
   }
-  suggestRequest.routing(request.param("routing"));
-  suggestRequest.preference(request.param("preference"));
-  client.suggest(suggestRequest,new RestBuilderListener<SuggestResponse>(channel){
-    @Override public RestResponse buildResponse(    SuggestResponse response,    XContentBuilder builder) throws Exception {
+  searchRequest.routing(request.param("routing"));
+  searchRequest.preference(request.param("preference"));
+  client.search(searchRequest,new RestBuilderListener<SearchResponse>(channel){
+    @Override public RestResponse buildResponse(    SearchResponse response,    XContentBuilder builder) throws Exception {
       RestStatus restStatus=RestStatus.status(response.getSuccessfulShards(),response.getTotalShards(),response.getShardFailures());
       builder.startObject();
-      buildBroadcastShardsHeader(builder,request,response);
+      buildBroadcastShardsHeader(builder,request,response.getTotalShards(),response.getSuccessfulShards(),response.getFailedShards(),response.getShardFailures());
       Suggest suggest=response.getSuggest();
       if (suggest != null) {
         suggest.toInnerXContent(builder,request);
