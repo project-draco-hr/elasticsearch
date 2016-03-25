@@ -1,0 +1,39 @@
+{
+  assertAcked(client().admin().indices().prepareCreate("test").setSettings(Settings.builder().put("index.number_of_shards",1).put("index.number_of_replicas",0)).get());
+  ensureGreen("test");
+  IndicesService indicesService=getInstanceFromNode(IndicesService.class);
+  IndexService indexService=indicesService.indexServiceSafe(resolveIndex("test"));
+  IndexShard indexShard=indexService.getShardOrNull(0);
+  long primaryTerm=indexShard.getPrimaryTerm();
+  ShardRouting temp=indexShard.routingEntry();
+  final ShardRouting newPrimaryShardRouting;
+  if (randomBoolean()) {
+    newPrimaryShardRouting=TestShardRouting.newShardRouting(temp.index(),temp.id(),temp.currentNodeId(),"other node",true,ShardRoutingState.INITIALIZING,AllocationId.newRelocation(temp.allocationId()));
+  }
+ else   if (randomBoolean()) {
+    ShardRouting newReplicaShardRouting=TestShardRouting.newShardRouting(temp.index(),temp.id(),temp.currentNodeId(),null,false,ShardRoutingState.STARTED,temp.allocationId());
+    indexShard.updateRoutingEntry(newReplicaShardRouting,false);
+    primaryTerm=primaryTerm + 1;
+    indexShard.updatePrimaryTerm(primaryTerm);
+    newPrimaryShardRouting=TestShardRouting.newShardRouting(temp.index(),temp.id(),temp.currentNodeId(),null,true,ShardRoutingState.STARTED,temp.allocationId());
+  }
+ else {
+    newPrimaryShardRouting=temp;
+  }
+  indexShard.updateRoutingEntry(newPrimaryShardRouting,false);
+  assertEquals(0,indexShard.getActiveOperationsCount());
+  if (newPrimaryShardRouting.isRelocationTarget() == false) {
+    try {
+      indexShard.acquireReplicaOperationLock(primaryTerm);
+      fail("shard shouldn't accept operations as replica");
+    }
+ catch (    IllegalStateException ignored) {
+    }
+  }
+  Releasable operation1=indexShard.acquirePrimaryOperationLock();
+  assertEquals(1,indexShard.getActiveOperationsCount());
+  Releasable operation2=indexShard.acquirePrimaryOperationLock();
+  assertEquals(2,indexShard.getActiveOperationsCount());
+  Releasables.close(operation1,operation2);
+  assertEquals(0,indexShard.getActiveOperationsCount());
+}
