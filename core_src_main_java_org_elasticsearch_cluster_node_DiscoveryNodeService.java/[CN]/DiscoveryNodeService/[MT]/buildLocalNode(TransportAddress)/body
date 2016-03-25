@@ -1,4 +1,31 @@
 {
   final String nodeId=generateNodeId(settings);
-  return new DiscoveryNode(settings.get("node.name"),nodeId,publishAddress,buildAttributes(),version);
+  Map<String,String> attributes=new HashMap<>(Node.NODE_ATTRIBUTES.get(this.settings).getAsMap());
+  if (attributes.containsKey("client")) {
+    throw new IllegalArgumentException("node.client setting is no longer supported, use " + Node.NODE_MASTER_SETTING.getKey() + ", "+ Node.NODE_DATA_SETTING.getKey()+ " and "+ Node.NODE_INGEST_SETTING.getKey()+ " explicitly instead");
+  }
+  attributes.remove("name");
+  Set<DiscoveryNode.Role> roles=new HashSet<>();
+  for (  DiscoveryNode.Role role : DiscoveryNode.Role.values()) {
+    String isRoleEnabled=attributes.remove(role.getRoleName());
+    if (isRoleEnabled == null || Booleans.parseBooleanExact(isRoleEnabled)) {
+      roles.add(role);
+    }
+  }
+  for (  CustomAttributesProvider provider : customAttributesProviders) {
+    try {
+      Map<String,String> customAttributes=provider.buildAttributes();
+      if (customAttributes != null) {
+        for (        Map.Entry<String,String> entry : customAttributes.entrySet()) {
+          if (!attributes.containsKey(entry.getKey())) {
+            attributes.put(entry.getKey(),entry.getValue());
+          }
+        }
+      }
+    }
+ catch (    Exception e) {
+      logger.warn("failed to build custom attributes from provider [{}]",e,provider);
+    }
+  }
+  return new DiscoveryNode(Node.NODE_NAME_SETTING.get(settings),nodeId,publishAddress,attributes,Collections.unmodifiableSet(roles),version);
 }
