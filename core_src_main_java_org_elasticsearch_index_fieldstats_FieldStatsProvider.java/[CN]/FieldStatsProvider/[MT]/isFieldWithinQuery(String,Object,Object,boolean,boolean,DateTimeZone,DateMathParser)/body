@@ -1,0 +1,50 @@
+{
+  MappedFieldType mappedFieldType=mapperService.fullName(fieldName);
+  FieldStats<?> fieldStats=get(fieldName);
+  if (fieldStats == null) {
+    return Relation.DISJOINT;
+  }
+ else {
+    String fromString=null;
+    if (from != null) {
+      if (mappedFieldType instanceof DateFieldType) {
+        long millis=((DateFieldType)mappedFieldType).parseToMilliseconds(from,!includeLower,timeZone,dateMathParser);
+        fromString=fieldStats.stringValueOf(millis,null);
+      }
+ else       if (mappedFieldType instanceof IpFieldType) {
+        if (from instanceof BytesRef) {
+          from=((BytesRef)from).utf8ToString();
+        }
+        long ipAsLong=((IpFieldType)mappedFieldType).value(from);
+        fromString=fieldStats.stringValueOf(ipAsLong,null);
+      }
+ else {
+        fromString=fieldStats.stringValueOf(from,null);
+      }
+    }
+    String toString=null;
+    if (to != null) {
+      if (mappedFieldType instanceof DateFieldType) {
+        long millis=((DateFieldType)mappedFieldType).parseToMilliseconds(to,includeUpper,timeZone,dateMathParser);
+        toString=fieldStats.stringValueOf(millis,null);
+      }
+ else       if (mappedFieldType instanceof IpFieldType) {
+        if (to instanceof BytesRef) {
+          to=((BytesRef)to).utf8ToString();
+        }
+        long ipAsLong=((IpFieldType)mappedFieldType).value(to);
+        toString=fieldStats.stringValueOf(ipAsLong,null);
+      }
+ else {
+        toString=fieldStats.stringValueOf(to,null);
+      }
+    }
+    if ((from == null || fieldStats.match(new IndexConstraint(fieldName,Property.MIN,includeLower ? Comparison.GTE : Comparison.GT,fromString))) && (to == null || fieldStats.match(new IndexConstraint(fieldName,Property.MAX,includeUpper ? Comparison.LTE : Comparison.LT,toString)))) {
+      return Relation.WITHIN;
+    }
+ else     if ((to != null && fieldStats.match(new IndexConstraint(fieldName,Property.MIN,includeUpper ? Comparison.GT : Comparison.GTE,toString))) || (from != null && fieldStats.match(new IndexConstraint(fieldName,Property.MAX,includeLower ? Comparison.LT : Comparison.LTE,fromString)))) {
+      return Relation.DISJOINT;
+    }
+  }
+  return Relation.INTERSECTS;
+}

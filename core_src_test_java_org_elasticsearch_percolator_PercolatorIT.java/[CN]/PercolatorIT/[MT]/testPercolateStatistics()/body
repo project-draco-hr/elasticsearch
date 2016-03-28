@@ -2,7 +2,8 @@
   client().admin().indices().prepareCreate("test").execute().actionGet();
   ensureGreen();
   logger.info("--> register a query");
-  client().prepareIndex("test",PercolatorService.TYPE_NAME,"1").setSource(jsonBuilder().startObject().field("query",matchAllQuery()).endObject()).execute().actionGet();
+  client().prepareIndex("test",PercolatorFieldMapper.TYPE_NAME,"1").setSource(jsonBuilder().startObject().field("query",matchAllQuery()).endObject()).execute().actionGet();
+  client().prepareIndex("test2",PercolatorFieldMapper.TYPE_NAME,"1").setSource(jsonBuilder().startObject().field("query",matchAllQuery()).endObject()).execute().actionGet();
   refresh();
   logger.info("--> First percolate request");
   PercolateResponse response=client().preparePercolate().setIndices("test").setDocumentType("type").setSource(jsonBuilder().startObject().startObject("doc").field("field","val").endObject().endObject()).execute().actionGet();
@@ -10,52 +11,5 @@
   assertThat(convertFromTextArray(response.getMatches(),"test"),arrayContaining("1"));
   NumShards numShards=getNumShards("test");
   IndicesStatsResponse indicesResponse=client().admin().indices().prepareStats("test").execute().actionGet();
-  assertThat(indicesResponse.getTotal().getPercolate().getCount(),equalTo((long)numShards.numPrimaries));
-  assertThat(indicesResponse.getTotal().getPercolate().getCurrent(),equalTo(0L));
-  assertThat(indicesResponse.getTotal().getPercolate().getNumQueries(),equalTo((long)numShards.dataCopies));
-  assertThat(indicesResponse.getTotal().getPercolate().getMemorySizeInBytes(),equalTo(-1L));
-  NodesStatsResponse nodesResponse=client().admin().cluster().prepareNodesStats().execute().actionGet();
-  long percolateCount=0;
-  for (  NodeStats nodeStats : nodesResponse) {
-    percolateCount+=nodeStats.getIndices().getPercolate().getCount();
-  }
-  assertThat(percolateCount,equalTo((long)numShards.numPrimaries));
-  logger.info("--> Second percolate request");
-  response=client().preparePercolate().setIndices("test").setDocumentType("type").setSource(jsonBuilder().startObject().startObject("doc").field("field","val").endObject().endObject()).execute().actionGet();
-  assertMatchCount(response,1L);
-  assertThat(response.getMatches(),arrayWithSize(1));
-  assertThat(convertFromTextArray(response.getMatches(),"test"),arrayContaining("1"));
-  indicesResponse=client().admin().indices().prepareStats().setPercolate(true).execute().actionGet();
-  assertThat(indicesResponse.getTotal().getPercolate().getCount(),equalTo((long)numShards.numPrimaries * 2));
-  assertThat(indicesResponse.getTotal().getPercolate().getCurrent(),equalTo(0L));
-  assertThat(indicesResponse.getTotal().getPercolate().getNumQueries(),equalTo((long)numShards.dataCopies));
-  assertThat(indicesResponse.getTotal().getPercolate().getMemorySizeInBytes(),equalTo(-1L));
-  percolateCount=0;
-  nodesResponse=client().admin().cluster().prepareNodesStats().execute().actionGet();
-  for (  NodeStats nodeStats : nodesResponse) {
-    percolateCount+=nodeStats.getIndices().getPercolate().getCount();
-  }
-  assertThat(percolateCount,equalTo((long)numShards.numPrimaries * 2));
-  boolean moreThanOneMs=false;
-  int counter=3;
-  do {
-    indicesResponse=client().admin().indices().prepareStats("test").execute().actionGet();
-    if (indicesResponse.getTotal().getPercolate().getTimeInMillis() > 0) {
-      moreThanOneMs=true;
-      break;
-    }
-    logger.info("--> {}th percolate request",counter);
-    response=client().preparePercolate().setIndices("test").setDocumentType("type").setSource(jsonBuilder().startObject().startObject("doc").field("field","val").endObject().endObject()).execute().actionGet();
-    assertThat(response.getMatches(),arrayWithSize(1));
-    assertThat(convertFromTextArray(response.getMatches(),"test"),arrayContaining("1"));
-  }
- while (++counter <= 1000);
-  assertTrue("Something is off, we should have spent at least 1ms on percolating...",moreThanOneMs);
-  long percolateSumTime=0;
-  nodesResponse=client().admin().cluster().prepareNodesStats().execute().actionGet();
-  for (  NodeStats nodeStats : nodesResponse) {
-    percolateCount+=nodeStats.getIndices().getPercolate().getCount();
-    percolateSumTime+=nodeStats.getIndices().getPercolate().getTimeInMillis();
-  }
-  assertThat(percolateSumTime,greaterThan(0L));
+  assertThat(indicesResponse.getTotal().getPercolatorCache().getNumQueries(),equalTo((long)numShards.dataCopies));
 }

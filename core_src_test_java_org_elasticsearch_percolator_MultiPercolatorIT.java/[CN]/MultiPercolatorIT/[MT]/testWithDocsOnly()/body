@@ -1,11 +1,10 @@
 {
   createIndex("test");
   ensureGreen();
-  NumShards test=getNumShards("test");
   int numQueries=randomIntBetween(50,100);
   logger.info("--> register a queries");
   for (int i=0; i < numQueries; i++) {
-    client().prepareIndex("test",PercolatorService.TYPE_NAME,Integer.toString(i)).setSource(jsonBuilder().startObject().field("query",matchAllQuery()).endObject()).execute().actionGet();
+    client().prepareIndex("test",PercolatorFieldMapper.TYPE_NAME,Integer.toString(i)).setSource(jsonBuilder().startObject().field("query",matchAllQuery()).endObject()).execute().actionGet();
   }
   refresh();
   MultiPercolateRequestBuilder builder=client().prepareMultiPercolate();
@@ -27,13 +26,8 @@
   response=builder.execute().actionGet();
   assertThat(response.items().length,equalTo(numPercolateRequest));
   for (  MultiPercolateResponse.Item item : response) {
-    assertThat(item.isFailure(),equalTo(false));
-    assertThat(item.getResponse().getSuccessfulShards(),equalTo(0));
-    assertThat(item.getResponse().getShardFailures().length,equalTo(test.numPrimaries));
-    for (    ShardOperationFailedException shardFailure : item.getResponse().getShardFailures()) {
-      assertThat(shardFailure.reason(),containsString("Failed to derive xcontent"));
-      assertThat(shardFailure.status().getStatus(),equalTo(400));
-    }
+    assertThat(item.isFailure(),equalTo(true));
+    assertThat(item.getFailure(),notNullValue());
   }
   builder=client().prepareMultiPercolate();
   for (int i=0; i < numPercolateRequest; i++) {

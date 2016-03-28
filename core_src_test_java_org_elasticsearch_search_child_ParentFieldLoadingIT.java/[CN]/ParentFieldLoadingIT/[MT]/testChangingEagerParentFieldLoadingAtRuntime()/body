@@ -6,8 +6,9 @@
   refresh();
   ClusterStatsResponse response=client().admin().cluster().prepareClusterStats().get();
   assertThat(response.getIndicesStats().getFieldData().getMemorySizeInBytes(),equalTo(0L));
-  PutMappingResponse putMappingResponse=client().admin().indices().preparePutMapping("test").setType("child").setSource(childMapping(MappedFieldType.Loading.EAGER_GLOBAL_ORDINALS)).setUpdateAllTypes(true).get();
+  PutMappingResponse putMappingResponse=client().admin().indices().preparePutMapping("test").setType("child").setSource(childMapping(true)).setUpdateAllTypes(true).get();
   assertAcked(putMappingResponse);
+  Index test=resolveIndex("test");
   assertBusy(new Runnable(){
     @Override public void run(){
       ClusterState clusterState=internalCluster().clusterService().state();
@@ -15,12 +16,12 @@
       String nodeName=clusterState.getNodes().get(shardRouting.currentNodeId()).getName();
       boolean verified=false;
       IndicesService indicesService=internalCluster().getInstance(IndicesService.class,nodeName);
-      IndexService indexService=indicesService.indexService("test");
+      IndexService indexService=indicesService.indexService(test);
       if (indexService != null) {
         MapperService mapperService=indexService.mapperService();
         DocumentMapper documentMapper=mapperService.documentMapper("child");
         if (documentMapper != null) {
-          verified=documentMapper.parentFieldMapper().fieldType().fieldDataType().getLoading() == MappedFieldType.Loading.EAGER_GLOBAL_ORDINALS;
+          verified=documentMapper.parentFieldMapper().fieldType().eagerGlobalOrdinals();
         }
       }
       assertTrue(verified);

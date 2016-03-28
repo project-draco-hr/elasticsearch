@@ -1,0 +1,49 @@
+{
+  Directory directory=newDirectory();
+  IndexWriter indexWriter=new IndexWriter(directory,newIndexWriterConfig(new MockAnalyzer(random())).setMergePolicy(NoMergePolicy.INSTANCE));
+  storeQuery("0",indexWriter,termQuery("a","0"),true,false);
+  storeQuery("1",indexWriter,termQuery("a","1"),true,false);
+  storeQuery("2",indexWriter,termQuery("a","2"),true,false);
+  indexWriter.flush();
+  storeQuery("3",indexWriter,termQuery("a","3"),true,false);
+  storeQuery("4",indexWriter,termQuery("a","4"),true,false);
+  storeQuery("5",indexWriter,termQuery("a","5"),true,false);
+  indexWriter.flush();
+  storeQuery("6",indexWriter,termQuery("a","6"),true,false);
+  storeQuery("7",indexWriter,termQuery("a","7"),true,false);
+  storeQuery("8",indexWriter,termQuery("a","8"),true,false);
+  indexWriter.flush();
+  indexWriter.close();
+  ShardId shardId=new ShardId("_index",ClusterState.UNKNOWN_UUID,0);
+  IndexReader indexReader=ElasticsearchDirectoryReader.wrap(DirectoryReader.open(directory),shardId);
+  assertThat(indexReader.leaves().size(),equalTo(3));
+  assertThat(indexReader.maxDoc(),equalTo(9));
+  initialize("a","type=keyword");
+  try {
+    cache.getQueries(indexReader.leaves().get(0));
+    fail("IllegalStateException expected");
+  }
+ catch (  IllegalStateException e) {
+    assertThat(e.getMessage(),equalTo("queries not loaded, queries should be have been preloaded during index warming..."));
+  }
+  IndexShard indexShard=mockIndexShard();
+  ThreadPool threadPool=mockThreadPool();
+  IndexWarmer.Listener listener=cache.createListener(threadPool);
+  listener.warmReader(indexShard,new Engine.Searcher("test",new IndexSearcher(indexReader)));
+  PercolatorQueryCacheStats stats=cache.getStats(shardId);
+  assertThat(stats.getNumQueries(),equalTo(9L));
+  PercolatorQuery.QueryRegistry.Leaf leaf=cache.getQueries(indexReader.leaves().get(0));
+  assertThat(leaf.getQuery(0),equalTo(new TermQuery(new Term("a","0"))));
+  assertThat(leaf.getQuery(1),equalTo(new TermQuery(new Term("a","1"))));
+  assertThat(leaf.getQuery(2),equalTo(new TermQuery(new Term("a","2"))));
+  leaf=cache.getQueries(indexReader.leaves().get(1));
+  assertThat(leaf.getQuery(0),equalTo(new TermQuery(new Term("a","3"))));
+  assertThat(leaf.getQuery(1),equalTo(new TermQuery(new Term("a","4"))));
+  assertThat(leaf.getQuery(2),equalTo(new TermQuery(new Term("a","5"))));
+  leaf=cache.getQueries(indexReader.leaves().get(2));
+  assertThat(leaf.getQuery(0),equalTo(new TermQuery(new Term("a","6"))));
+  assertThat(leaf.getQuery(1),equalTo(new TermQuery(new Term("a","7"))));
+  assertThat(leaf.getQuery(2),equalTo(new TermQuery(new Term("a","8"))));
+  indexReader.close();
+  directory.close();
+}

@@ -1,10 +1,13 @@
 {
-  IndexService indexService=indicesService.indexServiceSafe(request.index());
-  IndexShard indexShard=indexService.getShard(request.shardId());
-  SearchShardTarget shardTarget=new SearchShardTarget(clusterService.localNode().id(),indexShard.shardId().getIndex(),request.shardId());
+  IndexService indexService=indicesService.indexServiceSafe(request.shardId().getIndex());
+  IndexShard indexShard=indexService.getShard(request.shardId().getId());
+  SearchShardTarget shardTarget=new SearchShardTarget(clusterService.localNode().id(),indexShard.shardId());
   Engine.Searcher engineSearcher=searcher == null ? indexShard.acquireSearcher("search") : searcher;
   DefaultSearchContext context=new DefaultSearchContext(idGenerator.incrementAndGet(),request,shardTarget,engineSearcher,indexService,indexShard,scriptService,pageCacheRecycler,bigArrays,threadPool.estimatedTimeInMillisCounter(),parseFieldMatcher,defaultSearchTimeout,fetchPhase);
+  context.getQueryShardContext().setFieldStatsProvider(new FieldStatsProvider(engineSearcher,indexService.mapperService()));
   SearchContext.setCurrent(context);
+  request.rewrite(context.getQueryShardContext());
+  context.resetNowInMillisUsed();
   try {
     if (request.scroll() != null) {
       context.scrollContext(new ScrollContext());
@@ -17,7 +20,7 @@
         QueryParseContext queryParseContext=new QueryParseContext(indicesService.getIndicesQueryRegistry());
         queryParseContext.reset(parser);
         queryParseContext.parseFieldMatcher(parseFieldMatcher);
-        parseSource(context,SearchSourceBuilder.parseSearchSource(parser,queryParseContext,aggParsers));
+        parseSource(context,SearchSourceBuilder.parseSearchSource(parser,queryParseContext,aggParsers,suggesters));
       }
      }
     parseSource(context,request.source());

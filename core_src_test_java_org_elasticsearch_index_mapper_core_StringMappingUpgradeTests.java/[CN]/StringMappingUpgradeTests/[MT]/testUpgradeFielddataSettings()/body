@@ -1,0 +1,21 @@
+{
+  IndexService indexService=createIndex("test");
+  DocumentMapperParser parser=indexService.mapperService().documentMapperParser();
+  String format=randomFrom("paged_bytes","disabled");
+  String loading=randomFrom("lazy","eager","eager_global_ordinals");
+  boolean keyword=random().nextBoolean();
+  String mapping=XContentFactory.jsonBuilder().startObject().startObject("type").startObject("properties").startObject("field").field("type","string").field("index",keyword ? "not_analyzed" : "analyzed").startObject("fielddata").field("format",format).field("loading",loading).startObject("filter").startObject("frequency").field("min",3).endObject().endObject().endObject().endObject().endObject().endObject().endObject().string();
+  DocumentMapper mapper=parser.parse("type",new CompressedXContent(mapping));
+  FieldMapper field=mapper.mappers().getMapper("field");
+  if (keyword) {
+    assertThat(field,instanceOf(KeywordFieldMapper.class));
+  }
+ else {
+    assertThat(field,instanceOf(TextFieldMapper.class));
+    TextFieldType fieldType=(TextFieldType)field.fieldType();
+    assertEquals("disabled".equals(format) == false,fieldType.fielddata());
+    assertEquals(3,fieldType.fielddataMinFrequency(),0d);
+    assertEquals(Integer.MAX_VALUE,fieldType.fielddataMaxFrequency(),0d);
+  }
+  assertEquals("eager_global_ordinals".equals(loading),field.fieldType().eagerGlobalOrdinals());
+}

@@ -1,0 +1,28 @@
+{
+  String fieldName=randomAsciiOfLengthBetween(1,20);
+  RangeQueryBuilder query=new RangeQueryBuilder(fieldName);
+  double queryFromValue=randomDoubleBetween(-1000000.0,1000000.0,true);
+  double queryToValue=randomDoubleBetween(queryFromValue,2000000,true);
+  double shardMinValue=randomDoubleBetween(queryFromValue,queryToValue,true);
+  double shardMaxValue=randomDoubleBetween(shardMinValue,queryToValue,true);
+  query.from(queryFromValue);
+  query.to(queryToValue);
+  QueryShardContext queryShardContext=queryShardContext();
+  FieldStatsProvider fieldStatsProvider=new FieldStatsProvider(null,null){
+    @Override public Relation isFieldWithinQuery(    String fieldName,    Object from,    Object to,    boolean includeLower,    boolean includeUpper,    DateTimeZone timeZone,    DateMathParser dateMathParser) throws IOException {
+      return Relation.WITHIN;
+    }
+    @SuppressWarnings("unchecked") @Override public <T extends Comparable<T>>FieldStats<T> get(    String field) throws IOException {
+      assertThat(field,equalTo(fieldName));
+      return (FieldStats<T>)new FieldStats.Double(randomLong(),randomLong(),randomLong(),randomLong(),shardMinValue,shardMaxValue);
+    }
+  }
+;
+  queryShardContext.setFieldStatsProvider(fieldStatsProvider);
+  QueryBuilder<?> rewritten=query.rewrite(queryShardContext);
+  assertThat(rewritten,instanceOf(RangeQueryBuilder.class));
+  RangeQueryBuilder rewrittenRange=(RangeQueryBuilder)rewritten;
+  assertThat(rewrittenRange.fieldName(),equalTo(fieldName));
+  assertThat(rewrittenRange.from(),equalTo(null));
+  assertThat(rewrittenRange.to(),equalTo(null));
+}
