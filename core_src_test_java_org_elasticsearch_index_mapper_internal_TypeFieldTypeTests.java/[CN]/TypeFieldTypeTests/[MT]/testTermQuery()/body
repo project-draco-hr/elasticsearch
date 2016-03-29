@@ -1,0 +1,24 @@
+{
+  Directory dir=newDirectory();
+  IndexWriter w=new IndexWriter(dir,newIndexWriterConfig());
+  Document doc=new Document();
+  StringField type=new StringField(TypeFieldMapper.NAME,"my_type",Store.NO);
+  doc.add(type);
+  w.addDocument(doc);
+  w.addDocument(doc);
+  IndexReader reader=DirectoryReader.open(w);
+  TypeFieldMapper.TypeFieldType ft=new TypeFieldMapper.TypeFieldType();
+  ft.setName(TypeFieldMapper.NAME);
+  Query query=ft.termQuery("my_type",null);
+  assertEquals(new MatchAllDocsQuery(),query.rewrite(reader));
+  Query userQuery=new PhraseQuery("body","quick","fox");
+  Query filteredQuery=new BooleanQuery.Builder().add(userQuery,Occur.MUST).add(query,Occur.FILTER).build();
+  Query rewritten=new IndexSearcher(reader).rewrite(filteredQuery);
+  assertEquals(userQuery,rewritten);
+  type.setStringValue("my_type2");
+  w.addDocument(doc);
+  reader.close();
+  reader=DirectoryReader.open(w);
+  assertEquals(new ConstantScoreQuery(new TermQuery(new Term(TypeFieldMapper.NAME,"my_type"))),query.rewrite(reader));
+  IOUtils.close(reader,w,dir);
+}
