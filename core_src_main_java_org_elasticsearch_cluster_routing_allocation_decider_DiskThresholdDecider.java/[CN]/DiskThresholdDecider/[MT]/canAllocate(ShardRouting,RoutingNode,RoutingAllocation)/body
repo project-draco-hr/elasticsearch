@@ -21,19 +21,19 @@
       if (logger.isDebugEnabled()) {
         logger.debug("less than the required {} free bytes threshold ({} bytes free) on node {}, preventing allocation",freeBytesThresholdLow,freeBytes,node.nodeId());
       }
-      return allocation.decision(Decision.NO,NAME,"less than required [%s] free on node, free: [%s]",freeBytesThresholdLow,new ByteSizeValue(freeBytes));
+      return allocation.decision(Decision.NO,NAME,"the node is above the low watermark and has less than required [%s] free, free: [%s]",freeBytesThresholdLow,new ByteSizeValue(freeBytes));
     }
  else     if (freeBytes > freeBytesThresholdHigh.bytes()) {
       if (logger.isDebugEnabled()) {
         logger.debug("less than the required {} free bytes threshold ({} bytes free) on node {}, " + "but allowing allocation because primary has never been allocated",freeBytesThresholdLow,freeBytes,node.nodeId());
       }
-      return allocation.decision(Decision.YES,NAME,"primary has never been allocated before");
+      return allocation.decision(Decision.YES,NAME,"the node is above the low watermark, but this primary shard has never been allocated before");
     }
  else {
       if (logger.isDebugEnabled()) {
         logger.debug("less than the required {} free bytes threshold ({} bytes free) on node {}, " + "preventing allocation even though primary has never been allocated",freeBytesThresholdHigh,freeBytes,node.nodeId());
       }
-      return allocation.decision(Decision.NO,NAME,"less than required [%s] free on node, free: [%s]",freeBytesThresholdHigh,new ByteSizeValue(freeBytes));
+      return allocation.decision(Decision.NO,NAME,"the node is above the high watermark even though this shard has never been allocated " + "and has less than required [%s] free on node, free: [%s]",freeBytesThresholdHigh,new ByteSizeValue(freeBytes));
     }
   }
   if (freeDiskPercentage < freeDiskThresholdLow) {
@@ -41,31 +41,31 @@
       if (logger.isDebugEnabled()) {
         logger.debug("more than the allowed {} used disk threshold ({} used) on node [{}], preventing allocation",Strings.format1Decimals(usedDiskThresholdLow,"%"),Strings.format1Decimals(usedDiskPercentage,"%"),node.nodeId());
       }
-      return allocation.decision(Decision.NO,NAME,"more than allowed [%s%%] used disk on node, free: [%s%%]",usedDiskThresholdLow,freeDiskPercentage);
+      return allocation.decision(Decision.NO,NAME,"the node is above the low watermark and has more than allowed [%s%%] used disk, free: [%s%%]",usedDiskThresholdLow,freeDiskPercentage);
     }
  else     if (freeDiskPercentage > freeDiskThresholdHigh) {
       if (logger.isDebugEnabled()) {
         logger.debug("more than the allowed {} used disk threshold ({} used) on node [{}], " + "but allowing allocation because primary has never been allocated",Strings.format1Decimals(usedDiskThresholdLow,"%"),Strings.format1Decimals(usedDiskPercentage,"%"),node.nodeId());
       }
-      return allocation.decision(Decision.YES,NAME,"primary has never been allocated before");
+      return allocation.decision(Decision.YES,NAME,"the node is above the low watermark, but this primary shard has never been allocated before");
     }
  else {
       if (logger.isDebugEnabled()) {
         logger.debug("less than the required {} free bytes threshold ({} bytes free) on node {}, " + "preventing allocation even though primary has never been allocated",Strings.format1Decimals(freeDiskThresholdHigh,"%"),Strings.format1Decimals(freeDiskPercentage,"%"),node.nodeId());
       }
-      return allocation.decision(Decision.NO,NAME,"more than allowed [%s%%] used disk on node, free: [%s%%]",usedDiskThresholdHigh,freeDiskPercentage);
+      return allocation.decision(Decision.NO,NAME,"the node is above the high watermark even though this shard has never been allocated " + "and has more than allowed [%s%%] used disk, free: [%s%%]",usedDiskThresholdHigh,freeDiskPercentage);
     }
   }
   final long shardSize=getShardSize(shardRouting,allocation.clusterInfo());
   double freeSpaceAfterShard=freeDiskPercentageAfterShardAssigned(usage,shardSize);
   long freeBytesAfterShard=freeBytes - shardSize;
   if (freeBytesAfterShard < freeBytesThresholdHigh.bytes()) {
-    logger.warn("after allocating, node [{}] would have less than the required {} free bytes threshold ({} bytes free), preventing allocation",node.nodeId(),freeBytesThresholdHigh,freeBytesAfterShard);
-    return allocation.decision(Decision.NO,NAME,"after allocation less than required [%s] free on node, free: [%s]",freeBytesThresholdLow,new ByteSizeValue(freeBytesAfterShard));
+    logger.warn("after allocating, node [{}] would have less than the required " + "{} free bytes threshold ({} bytes free), preventing allocation",node.nodeId(),freeBytesThresholdHigh,freeBytesAfterShard);
+    return allocation.decision(Decision.NO,NAME,"after allocating the shard to this node, it would be above the high watermark " + "and have less than required [%s] free, free: [%s]",freeBytesThresholdLow,new ByteSizeValue(freeBytesAfterShard));
   }
   if (freeSpaceAfterShard < freeDiskThresholdHigh) {
-    logger.warn("after allocating, node [{}] would have more than the allowed {} free disk threshold ({} free), preventing allocation",node.nodeId(),Strings.format1Decimals(freeDiskThresholdHigh,"%"),Strings.format1Decimals(freeSpaceAfterShard,"%"));
-    return allocation.decision(Decision.NO,NAME,"after allocation more than allowed [%s%%] used disk on node, free: [%s%%]",usedDiskThresholdLow,freeSpaceAfterShard);
+    logger.warn("after allocating, node [{}] would have more than the allowed " + "{} free disk threshold ({} free), preventing allocation",node.nodeId(),Strings.format1Decimals(freeDiskThresholdHigh,"%"),Strings.format1Decimals(freeSpaceAfterShard,"%"));
+    return allocation.decision(Decision.NO,NAME,"after allocating the shard to this node, it would be above the high watermark " + "and have more than allowed [%s%%] used disk, free: [%s%%]",usedDiskThresholdLow,freeSpaceAfterShard);
   }
-  return allocation.decision(Decision.YES,NAME,"enough disk for shard on node, free: [%s]",new ByteSizeValue(freeBytes));
+  return allocation.decision(Decision.YES,NAME,"enough disk for shard on node, free: [%s], shard size: [%s], free after allocating shard: [%s]",new ByteSizeValue(freeBytes),new ByteSizeValue(shardSize),new ByteSizeValue(freeBytesAfterShard));
 }
