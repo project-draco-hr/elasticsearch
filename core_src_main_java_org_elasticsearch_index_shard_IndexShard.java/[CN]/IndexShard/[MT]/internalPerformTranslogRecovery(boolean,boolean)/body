@@ -12,15 +12,22 @@
     }
   }
   recoveryState.setStage(RecoveryState.Stage.TRANSLOG);
-  engineConfig.setEnableGcDeletes(false);
-  engineConfig.setCreate(indexExists == false);
-  if (skipTranslogRecovery == false) {
-    active.set(true);
+  final EngineConfig.OpenMode openMode;
+  if (indexExists == false) {
+    openMode=EngineConfig.OpenMode.CREATE_INDEX_AND_TRANSLOG;
   }
-  engineConfig.setForceNewTranslog(skipTranslogRecovery);
-  Engine newEngine=createNewEngine(engineConfig);
+ else   if (skipTranslogRecovery) {
+    openMode=EngineConfig.OpenMode.OPEN_INDEX_CREATE_TRANSLOG;
+  }
+ else {
+    openMode=EngineConfig.OpenMode.OPEN_INDEX_AND_TRANSLOG;
+  }
+  final EngineConfig config=newEngineConfig(openMode,translogConfig,cachingPolicy,new IndexShardRecoveryPerformer(shardId,mapperService,logger));
+  config.setEnableGcDeletes(false);
+  Engine newEngine=createNewEngine(config);
   verifyNotClosed();
-  if (skipTranslogRecovery == false) {
+  if (openMode == EngineConfig.OpenMode.OPEN_INDEX_AND_TRANSLOG) {
+    active.set(true);
     newEngine.recoverFromTranslog();
   }
 }
