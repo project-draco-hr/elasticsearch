@@ -1,22 +1,24 @@
 {
-  if (value != null) {
-    String term;
-    if (value instanceof BytesRef) {
-      term=((BytesRef)value).utf8ToString();
-    }
- else {
-      term=value.toString();
-    }
-    long[] fromTo;
-    if (term.contains("/")) {
-      fromTo=Cidrs.cidrMaskToMinMax(term);
-    }
- else {
-      fromTo=Cidrs.cidrMaskToMinMax(term + "/32");
-    }
-    if (fromTo != null) {
-      return rangeQuery(fromTo[0] == 0 ? null : fromTo[0],fromTo[1] == InternalIPv4Range.MAX_IP ? null : fromTo[1],true,false);
-    }
+  if (value instanceof InetAddress) {
+    return InetAddressPoint.newExactQuery(name(),(InetAddress)value);
   }
-  return super.termQuery(value,context);
+ else {
+    if (value instanceof BytesRef) {
+      value=((BytesRef)value).utf8ToString();
+    }
+    String term=value.toString();
+    if (term.contains("/")) {
+      String[] fields=term.split("/");
+      if (fields.length == 2) {
+        InetAddress address=InetAddresses.forString(fields[0]);
+        int prefixLength=Integer.parseInt(fields[1]);
+        return InetAddressPoint.newPrefixQuery(name(),address,prefixLength);
+      }
+ else {
+        throw new IllegalArgumentException("Expected [ip/prefix] but was [" + term + "]");
+      }
+    }
+    InetAddress address=InetAddresses.forString(term);
+    return InetAddressPoint.newExactQuery(name(),address);
+  }
 }
