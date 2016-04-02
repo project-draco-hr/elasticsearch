@@ -17,30 +17,46 @@
     }
     builder.endArray();
   }
-  builder.startObject("nodes");
-  for (  Map.Entry<DiscoveryNode,List<TaskInfo>> entry : getPerNodeTasks().entrySet()) {
-    DiscoveryNode node=entry.getKey();
-    builder.startObject(node.getId(),XContentBuilder.FieldCaseConversion.NONE);
-    builder.field("name",node.name());
-    builder.field("transport_address",node.address().toString());
-    builder.field("host",node.getHostName());
-    builder.field("ip",node.getAddress());
-    if (!node.attributes().isEmpty()) {
-      builder.startObject("attributes");
-      for (      ObjectObjectCursor<String,String> attr : node.attributes()) {
-        builder.field(attr.key,attr.value,XContentBuilder.FieldCaseConversion.NONE);
+  String groupBy=params.param("group_by","nodes");
+  if ("nodes".equals(groupBy)) {
+    builder.startObject("nodes");
+    for (    Map.Entry<DiscoveryNode,List<TaskInfo>> entry : getPerNodeTasks().entrySet()) {
+      DiscoveryNode node=entry.getKey();
+      builder.startObject(node.getId(),XContentBuilder.FieldCaseConversion.NONE);
+      builder.field("name",node.getName());
+      builder.field("transport_address",node.getAddress().toString());
+      builder.field("host",node.getHostName());
+      builder.field("ip",node.getAddress());
+      builder.startArray("roles");
+      for (      DiscoveryNode.Role role : node.getRoles()) {
+        builder.value(role.getRoleName());
+      }
+      builder.endArray();
+      if (!node.getAttributes().isEmpty()) {
+        builder.startObject("attributes");
+        for (        Map.Entry<String,String> attrEntry : node.getAttributes().entrySet()) {
+          builder.field(attrEntry.getKey(),attrEntry.getValue(),XContentBuilder.FieldCaseConversion.NONE);
+        }
+        builder.endObject();
+      }
+      builder.startObject("tasks");
+      for (      TaskInfo task : entry.getValue()) {
+        builder.startObject(task.getTaskId().toString(),XContentBuilder.FieldCaseConversion.NONE);
+        task.toXContent(builder,params);
+        builder.endObject();
       }
       builder.endObject();
+      builder.endObject();
     }
+  }
+ else   if ("parents".equals(groupBy)) {
     builder.startObject("tasks");
-    for (    TaskInfo task : entry.getValue()) {
-      builder.startObject(task.getTaskId().toString(),XContentBuilder.FieldCaseConversion.NONE);
-      task.toXContent(builder,params);
+    for (    TaskGroup group : getTaskGroups()) {
+      builder.startObject(group.getTaskInfo().getTaskId().toString(),XContentBuilder.FieldCaseConversion.NONE);
+      group.toXContent(builder,params);
       builder.endObject();
     }
     builder.endObject();
-    builder.endObject();
   }
-  builder.endObject();
   return builder;
 }

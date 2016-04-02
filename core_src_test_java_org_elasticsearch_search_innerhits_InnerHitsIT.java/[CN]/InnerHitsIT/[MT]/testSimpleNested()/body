@@ -1,12 +1,12 @@
 {
-  assertAcked(prepareCreate("articles").addMapping("article",jsonBuilder().startObject().startObject("article").startObject("properties").startObject("comments").field("type","nested").startObject("properties").startObject("message").field("type","text").endObject().endObject().endObject().startObject("title").field("type","text").endObject().endObject().endObject().endObject()));
+  assertAcked(prepareCreate("articles").addMapping("article",jsonBuilder().startObject().startObject("article").startObject("properties").startObject("comments").field("type","nested").startObject("properties").startObject("message").field("type","text").field("fielddata",true).endObject().endObject().endObject().startObject("title").field("type","text").endObject().endObject().endObject().endObject()));
   List<IndexRequestBuilder> requests=new ArrayList<>();
   requests.add(client().prepareIndex("articles","article","1").setSource(jsonBuilder().startObject().field("title","quick brown fox").startArray("comments").startObject().field("message","fox eat quick").endObject().startObject().field("message","fox ate rabbit x y z").endObject().startObject().field("message","rabbit got away").endObject().endArray().endObject()));
   requests.add(client().prepareIndex("articles","article","2").setSource(jsonBuilder().startObject().field("title","big gray elephant").startArray("comments").startObject().field("message","elephant captured").endObject().startObject().field("message","mice squashed by elephant x").endObject().startObject().field("message","elephant scared by mice x y").endObject().endArray().endObject()));
   indexRandom(true,requests);
   InnerHitsBuilder innerHitsBuilder=new InnerHitsBuilder();
-  innerHitsBuilder.addNestedInnerHits("comment","comments",new InnerHitsBuilder.InnerHit().setQuery(matchQuery("comments.message","fox")));
-  SearchRequest[] searchRequests=new SearchRequest[]{client().prepareSearch("articles").setQuery(nestedQuery("comments",matchQuery("comments.message","fox")).innerHit(new QueryInnerHits("comment",null))).request(),client().prepareSearch("articles").setQuery(nestedQuery("comments",matchQuery("comments.message","fox"))).innerHits(innerHitsBuilder).request()};
+  innerHitsBuilder.addInnerHit("comment",new InnerHitBuilder().setNestedPath("comments").setQuery(matchQuery("comments.message","fox")));
+  SearchRequest[] searchRequests=new SearchRequest[]{client().prepareSearch("articles").setQuery(nestedQuery("comments",matchQuery("comments.message","fox")).innerHit(new InnerHitBuilder().setName("comment"))).request(),client().prepareSearch("articles").setQuery(nestedQuery("comments",matchQuery("comments.message","fox"))).innerHits(innerHitsBuilder).request()};
   for (  SearchRequest searchRequest : searchRequests) {
     SearchResponse response=client().search(searchRequest).actionGet();
     assertNoFailures(response);
@@ -24,8 +24,8 @@
     assertThat(innerHits.getAt(1).getNestedIdentity().getOffset(),equalTo(1));
   }
   innerHitsBuilder=new InnerHitsBuilder();
-  innerHitsBuilder.addNestedInnerHits("comment","comments",new InnerHitsBuilder.InnerHit().setQuery(matchQuery("comments.message","elephant")));
-  searchRequests=new SearchRequest[]{client().prepareSearch("articles").setQuery(nestedQuery("comments",matchQuery("comments.message","elephant"))).innerHits(innerHitsBuilder).request(),client().prepareSearch("articles").setQuery(nestedQuery("comments",matchQuery("comments.message","elephant")).innerHit(new QueryInnerHits("comment",null))).request(),client().prepareSearch("articles").setQuery(nestedQuery("comments",matchQuery("comments.message","elephant")).innerHit(new QueryInnerHits("comment",new InnerHitsBuilder.InnerHit().addSort("_doc",SortOrder.DESC)))).request()};
+  innerHitsBuilder.addInnerHit("comment",new InnerHitBuilder().setQuery(matchQuery("comments.message","elephant")).setNestedPath("comments"));
+  searchRequests=new SearchRequest[]{client().prepareSearch("articles").setQuery(nestedQuery("comments",matchQuery("comments.message","elephant"))).innerHits(innerHitsBuilder).request(),client().prepareSearch("articles").setQuery(nestedQuery("comments",matchQuery("comments.message","elephant")).innerHit(new InnerHitBuilder().setName("comment"))).request(),client().prepareSearch("articles").setQuery(nestedQuery("comments",matchQuery("comments.message","elephant")).innerHit(new InnerHitBuilder().setName("comment").addSort(new FieldSortBuilder("_doc").order(SortOrder.DESC)))).request()};
   for (  SearchRequest searchRequest : searchRequests) {
     SearchResponse response=client().search(searchRequest).actionGet();
     assertNoFailures(response);
@@ -46,15 +46,17 @@
     assertThat(innerHits.getAt(2).getNestedIdentity().getField().string(),equalTo("comments"));
     assertThat(innerHits.getAt(2).getNestedIdentity().getOffset(),equalTo(2));
   }
-  InnerHitsBuilder.InnerHit innerHit=new InnerHitsBuilder.InnerHit();
-  innerHit.highlighter(new HighlightBuilder().field("comments.message"));
+  InnerHitBuilder innerHit=new InnerHitBuilder();
+  innerHit.setNestedPath("comments");
+  innerHit.setQuery(matchQuery("comments.message","fox"));
+  innerHit.setHighlightBuilder(new HighlightBuilder().field("comments.message"));
   innerHit.setExplain(true);
   innerHit.addFieldDataField("comments.message");
   innerHit.addScriptField("script",new Script("5",ScriptService.ScriptType.INLINE,MockScriptEngine.NAME,Collections.emptyMap()));
   innerHit.setSize(1);
   innerHitsBuilder=new InnerHitsBuilder();
-  innerHitsBuilder.addNestedInnerHits("comments","comments",new InnerHitsBuilder.InnerHit().setQuery(matchQuery("comments.message","fox")).highlighter(new HighlightBuilder().field("comments.message")).setExplain(true).addFieldDataField("comments.message").addScriptField("script",new Script("5",ScriptService.ScriptType.INLINE,MockScriptEngine.NAME,Collections.emptyMap())).setSize(1));
-  searchRequests=new SearchRequest[]{client().prepareSearch("articles").setQuery(nestedQuery("comments",matchQuery("comments.message","fox"))).innerHits(innerHitsBuilder).request(),client().prepareSearch("articles").setQuery(nestedQuery("comments",matchQuery("comments.message","fox")).innerHit(new QueryInnerHits(null,innerHit))).request()};
+  innerHitsBuilder.addInnerHit("comments",innerHit);
+  searchRequests=new SearchRequest[]{client().prepareSearch("articles").setQuery(nestedQuery("comments",matchQuery("comments.message","fox"))).innerHits(innerHitsBuilder).request(),client().prepareSearch("articles").setQuery(nestedQuery("comments",matchQuery("comments.message","fox")).innerHit(new InnerHitBuilder().setHighlightBuilder(new HighlightBuilder().field("comments.message")).setExplain(true).addFieldDataField("comments.message").addScriptField("script",new Script("5",ScriptService.ScriptType.INLINE,MockScriptEngine.NAME,Collections.emptyMap())).setSize(1))).request()};
   for (  SearchRequest searchRequest : searchRequests) {
     SearchResponse response=client().search(searchRequest).actionGet();
     assertNoFailures(response);

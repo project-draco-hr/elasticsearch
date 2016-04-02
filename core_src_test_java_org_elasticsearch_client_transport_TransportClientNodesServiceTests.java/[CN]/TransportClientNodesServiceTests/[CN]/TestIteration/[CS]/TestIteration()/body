@@ -1,6 +1,6 @@
 {
   threadPool=new ThreadPool("transport-client-nodes-service-tests");
-  transport=new FailAndRetryMockTransport<TestResponse>(getRandom()){
+  transport=new FailAndRetryMockTransport<TestResponse>(random()){
     @Override public List<String> getLocalAddresses(){
       return Collections.emptyList();
     }
@@ -9,11 +9,29 @@
     }
   }
 ;
-  transportService=new TransportService(Settings.EMPTY,transport,threadPool);
+  transportService=new TransportService(Settings.EMPTY,transport,threadPool){
+    @Override public <T extends TransportResponse>void sendRequest(    DiscoveryNode node,    String action,    TransportRequest request,    final TransportResponseHandler<T> handler){
+      if (TransportLivenessAction.NAME.equals(action)) {
+        super.sendRequest(node,action,request,wrapLivenessResponseHandler(handler,node));
+      }
+ else {
+        super.sendRequest(node,action,request,handler);
+      }
+    }
+    @Override public <T extends TransportResponse>void sendRequest(    DiscoveryNode node,    String action,    TransportRequest request,    TransportRequestOptions options,    TransportResponseHandler<T> handler){
+      if (TransportLivenessAction.NAME.equals(action)) {
+        super.sendRequest(node,action,request,options,wrapLivenessResponseHandler(handler,node));
+      }
+ else {
+        super.sendRequest(node,action,request,options,handler);
+      }
+    }
+  }
+;
   transportService.start();
   transportService.acceptIncomingRequests();
   transportClientNodesService=new TransportClientNodesService(Settings.EMPTY,ClusterName.DEFAULT,transportService,threadPool,Version.CURRENT);
-  nodesCount=randomIntBetween(1,10);
+  this.nodesCount=randomIntBetween(1,10);
   for (int i=0; i < nodesCount; i++) {
     transportClientNodesService.addTransportAddresses(new LocalTransportAddress("node" + i));
   }
