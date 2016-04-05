@@ -15,14 +15,22 @@
     channel.clear();
   }
   logger.info("--> committing states");
+  long largestVersionSeen=Long.MIN_VALUE;
   Randomness.shuffle(states);
   for (  ClusterState state : states) {
     node.action.handleCommitRequest(new PublishClusterStateAction.CommitClusterStateRequest(state.stateUUID()),channel);
-    assertThat(channel.response.get(),equalTo((TransportResponse)TransportResponse.Empty.INSTANCE));
-    if (channel.error.get() != null) {
-      throw channel.error.get();
+    if (largestVersionSeen < state.getVersion()) {
+      assertThat(channel.response.get(),equalTo((TransportResponse)TransportResponse.Empty.INSTANCE));
+      if (channel.error.get() != null) {
+        throw channel.error.get();
+      }
+      largestVersionSeen=state.getVersion();
     }
+ else {
+      assertNotNull(channel.error.get());
+      assertThat(channel.error.get(),instanceOf(IllegalStateException.class));
+    }
+    channel.clear();
   }
-  channel.clear();
   assertSameState(node.clusterState,finalState);
 }
