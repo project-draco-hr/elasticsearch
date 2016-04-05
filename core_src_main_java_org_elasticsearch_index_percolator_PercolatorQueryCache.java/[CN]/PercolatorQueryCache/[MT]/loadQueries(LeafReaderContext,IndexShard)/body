@@ -1,0 +1,53 @@
+{
+  Version indexVersionCreated=indexShard.indexSettings().getIndexVersionCreated();
+  MapperService mapperService=indexShard.mapperService();
+  LeafReader leafReader=context.reader();
+  ShardId shardId=ShardUtils.extractShardId(leafReader);
+  if (shardId == null) {
+    throw new IllegalStateException("can't resolve shard id");
+  }
+  if (indexSettings.getIndex().equals(shardId.getIndex()) == false) {
+    String message="Trying to load queries for index " + shardId.getIndex() + " with cache of index "+ indexSettings.getIndex();
+    throw new IllegalStateException(message);
+  }
+  IntObjectHashMap<Query> queries=new IntObjectHashMap<>();
+  boolean legacyLoading=indexVersionCreated.before(Version.V_5_0_0_alpha1);
+  if (legacyLoading) {
+    PostingsEnum postings=leafReader.postings(new Term(TypeFieldMapper.NAME,LEGACY_TYPE_NAME),PostingsEnum.NONE);
+    if (postings != null) {
+      LegacyQueryFieldVisitor visitor=new LegacyQueryFieldVisitor();
+      for (int docId=postings.nextDoc(); docId != DocIdSetIterator.NO_MORE_DOCS; docId=postings.nextDoc()) {
+        leafReader.document(docId,visitor);
+        queries.put(docId,parseLegacyPercolatorDocument(docId,visitor.source));
+        visitor.source=null;
+      }
+    }
+  }
+ else {
+    IndexSearcher indexSearcher=new IndexSearcher(leafReader);
+    for (    DocumentMapper documentMapper : mapperService.docMappers(false)) {
+      Weight queryWeight=indexSearcher.createNormalizedWeight(documentMapper.typeFilter(),false);
+      for (      FieldMapper fieldMapper : documentMapper.mappers()) {
+        if (fieldMapper instanceof PercolatorFieldMapper) {
+          PercolatorFieldType fieldType=(PercolatorFieldType)fieldMapper.fieldType();
+          BinaryDocValues binaryDocValues=leafReader.getBinaryDocValues(fieldType.getQueryBuilderFieldName());
+          if (binaryDocValues != null) {
+            Scorer scorer=queryWeight.scorer(leafReader.getContext());
+            if (scorer != null) {
+              DocIdSetIterator iterator=scorer.iterator();
+              for (int docId=iterator.nextDoc(); docId != DocIdSetIterator.NO_MORE_DOCS; docId=iterator.nextDoc()) {
+                BytesRef qbSource=binaryDocValues.get(docId);
+                if (qbSource.length > 0) {
+                  queries.put(docId,parseQueryBuilder(docId,qbSource));
+                }
+              }
+            }
+          }
+          break;
+        }
+      }
+    }
+  }
+  leafReader.addCoreClosedListener(this);
+  return new QueriesLeaf(shardId,queries);
+}
