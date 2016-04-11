@@ -1,7 +1,7 @@
 {
-  Settings indexSettings=Settings.settingsBuilder().put(IndexMetaData.SETTING_VERSION_CREATED,Version.CURRENT).build();
+  Settings indexSettings=Settings.builder().put(IndexMetaData.SETTING_VERSION_CREATED,Version.CURRENT).build();
   IndexSettings idxSettings=IndexSettingsModule.newIndexSettings(randomAsciiOfLengthBetween(1,10),indexSettings);
-  QueryShardContext mockShardContext=new QueryShardContext(idxSettings,null,null,null,null,null,indicesQueriesRegistry,null){
+  QueryShardContext mockShardContext=new QueryShardContext(idxSettings,null,null,null,null,null,indicesQueriesRegistry,null,null){
     @Override public MappedFieldType fieldMapper(    String name){
       TextFieldMapper.Builder builder=new TextFieldMapper.Builder(name);
       return builder.build(new Mapper.BuilderContext(idxSettings.getSettings(),new ContentPath(1))).fieldType();
@@ -9,15 +9,14 @@
   }
 ;
   for (int runs=0; runs < NUMBER_OF_TESTBUILDERS; runs++) {
-    RescoreBuilder<?> rescoreBuilder=randomRescoreBuilder();
+    QueryRescorerBuilder rescoreBuilder=randomRescoreBuilder();
     QueryRescoreContext rescoreContext=rescoreBuilder.build(mockShardContext);
-    XContentParser parser=createParser(rescoreBuilder);
-    QueryRescoreContext parsedRescoreContext=(QueryRescoreContext)new RescoreParseElement().parseSingleRescoreContext(parser,mockShardContext);
-    assertNotSame(rescoreContext,parsedRescoreContext);
-    assertEquals(rescoreContext.window(),parsedRescoreContext.window());
-    assertEquals(rescoreContext.query(),parsedRescoreContext.query());
-    assertEquals(rescoreContext.queryWeight(),parsedRescoreContext.queryWeight(),Float.MIN_VALUE);
-    assertEquals(rescoreContext.rescoreQueryWeight(),parsedRescoreContext.rescoreQueryWeight(),Float.MIN_VALUE);
-    assertEquals(rescoreContext.scoreMode(),parsedRescoreContext.scoreMode());
+    int expectedWindowSize=rescoreBuilder.windowSize() == null ? QueryRescoreContext.DEFAULT_WINDOW_SIZE : rescoreBuilder.windowSize().intValue();
+    assertEquals(expectedWindowSize,rescoreContext.window());
+    Query expectedQuery=QueryBuilder.rewriteQuery(rescoreBuilder.getRescoreQuery(),mockShardContext).toQuery(mockShardContext);
+    assertEquals(expectedQuery,rescoreContext.query());
+    assertEquals(rescoreBuilder.getQueryWeight(),rescoreContext.queryWeight(),Float.MIN_VALUE);
+    assertEquals(rescoreBuilder.getRescoreQueryWeight(),rescoreContext.rescoreQueryWeight(),Float.MIN_VALUE);
+    assertEquals(rescoreBuilder.getScoreMode(),rescoreContext.scoreMode());
   }
 }

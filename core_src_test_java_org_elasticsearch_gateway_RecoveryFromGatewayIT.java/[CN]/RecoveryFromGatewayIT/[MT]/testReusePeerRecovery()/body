@@ -1,5 +1,5 @@
 {
-  final Settings settings=settingsBuilder().put(MockFSIndexStore.INDEX_CHECK_INDEX_ON_CLOSE_SETTING.getKey(),false).put("gateway.recover_after_nodes",4).put(ThrottlingAllocationDecider.CLUSTER_ROUTING_ALLOCATION_NODE_CONCURRENT_INCOMING_RECOVERIES_SETTING.getKey(),4).put(ThrottlingAllocationDecider.CLUSTER_ROUTING_ALLOCATION_NODE_CONCURRENT_OUTGOING_RECOVERIES_SETTING.getKey(),4).put(MockFSDirectoryService.CRASH_INDEX_SETTING.getKey(),false).build();
+  final Settings settings=Settings.builder().put(MockFSIndexStore.INDEX_CHECK_INDEX_ON_CLOSE_SETTING.getKey(),false).put("gateway.recover_after_nodes",4).put(ThrottlingAllocationDecider.CLUSTER_ROUTING_ALLOCATION_NODE_CONCURRENT_INCOMING_RECOVERIES_SETTING.getKey(),4).put(ThrottlingAllocationDecider.CLUSTER_ROUTING_ALLOCATION_NODE_CONCURRENT_OUTGOING_RECOVERIES_SETTING.getKey(),4).put(MockFSDirectoryService.CRASH_INDEX_SETTING.getKey(),false).build();
   internalCluster().startNodesAsync(4,settings).get();
   assertAcked(prepareCreate("test").setSettings(Settings.builder().put(indexSettings()).put(EnableAllocationDecider.INDEX_ROUTING_REBALANCE_ENABLE_SETTING.getKey(),EnableAllocationDecider.Rebalance.NONE)));
   ensureGreen();
@@ -20,7 +20,7 @@
   boolean useSyncIds=randomBoolean();
   if (useSyncIds == false) {
     logger.info("--> disabling allocation while the cluster is shut down");
-    client().admin().cluster().prepareUpdateSettings().setTransientSettings(settingsBuilder().put(EnableAllocationDecider.CLUSTER_ROUTING_ALLOCATION_ENABLE_SETTING.getKey(),EnableAllocationDecider.Allocation.NONE)).get();
+    client().admin().cluster().prepareUpdateSettings().setTransientSettings(Settings.builder().put(EnableAllocationDecider.CLUSTER_ROUTING_ALLOCATION_ENABLE_SETTING.getKey(),EnableAllocationDecider.Allocation.NONE)).get();
     logger.info("--> full cluster restart");
     internalCluster().fullRestart();
     logger.info("--> waiting for cluster to return to green after first shutdown");
@@ -32,11 +32,13 @@
     assertSyncIdsNotNull();
   }
   logger.info("--> disabling allocation while the cluster is shut down{}",useSyncIds ? "" : " a second time");
-  client().admin().cluster().prepareUpdateSettings().setTransientSettings(settingsBuilder().put(EnableAllocationDecider.CLUSTER_ROUTING_ALLOCATION_ENABLE_SETTING.getKey(),EnableAllocationDecider.Allocation.NONE)).get();
+  client().admin().cluster().prepareUpdateSettings().setTransientSettings(Settings.builder().put(EnableAllocationDecider.CLUSTER_ROUTING_ALLOCATION_ENABLE_SETTING.getKey(),EnableAllocationDecider.Allocation.NONE)).get();
+  Map<String,long[]> primaryTerms=assertAndCapturePrimaryTerms(null);
   logger.info("--> full cluster restart");
   internalCluster().fullRestart();
   logger.info("--> waiting for cluster to return to green after {}shutdown",useSyncIds ? "" : "second ");
   ensureGreen();
+  primaryTerms=assertAndCapturePrimaryTerms(primaryTerms);
   if (useSyncIds) {
     assertSyncIdsNotNull();
   }
@@ -49,7 +51,7 @@
       }
     }
     if (!recoveryState.getPrimary() && (useSyncIds == false)) {
-      logger.info("--> replica shard {} recovered from {} to {}, recovered {}, reuse {}",recoveryState.getShardId().getId(),recoveryState.getSourceNode().name(),recoveryState.getTargetNode().name(),recoveryState.getIndex().recoveredBytes(),recoveryState.getIndex().reusedBytes());
+      logger.info("--> replica shard {} recovered from {} to {}, recovered {}, reuse {}",recoveryState.getShardId().getId(),recoveryState.getSourceNode().getName(),recoveryState.getTargetNode().getName(),recoveryState.getIndex().recoveredBytes(),recoveryState.getIndex().reusedBytes());
       assertThat("no bytes should be recovered",recoveryState.getIndex().recoveredBytes(),equalTo(recovered));
       assertThat("data should have been reused",recoveryState.getIndex().reusedBytes(),greaterThan(0L));
       assertThat("all bytes should be reused except of the segments file",recoveryState.getIndex().reusedBytes(),equalTo(recoveryState.getIndex().totalBytes() - recovered));
@@ -59,7 +61,7 @@
     }
  else {
       if (useSyncIds && !recoveryState.getPrimary()) {
-        logger.info("--> replica shard {} recovered from {} to {} using sync id, recovered {}, reuse {}",recoveryState.getShardId().getId(),recoveryState.getSourceNode().name(),recoveryState.getTargetNode().name(),recoveryState.getIndex().recoveredBytes(),recoveryState.getIndex().reusedBytes());
+        logger.info("--> replica shard {} recovered from {} to {} using sync id, recovered {}, reuse {}",recoveryState.getShardId().getId(),recoveryState.getSourceNode().getName(),recoveryState.getTargetNode().getName(),recoveryState.getIndex().recoveredBytes(),recoveryState.getIndex().reusedBytes());
       }
       assertThat(recoveryState.getIndex().recoveredBytes(),equalTo(0L));
       assertThat(recoveryState.getIndex().reusedBytes(),equalTo(recoveryState.getIndex().totalBytes()));

@@ -1,31 +1,31 @@
 {
   if (awarenessAttributes.length == 0) {
-    return allocation.decision(Decision.YES,NAME,"no allocation awareness enabled");
+    return allocation.decision(Decision.YES,NAME,"allocation awareness is not enabled");
   }
   IndexMetaData indexMetaData=allocation.metaData().getIndexSafe(shardRouting.index());
   int shardCount=indexMetaData.getNumberOfReplicas() + 1;
   for (  String awarenessAttribute : awarenessAttributes) {
-    if (!node.node().attributes().containsKey(awarenessAttribute)) {
-      return allocation.decision(Decision.NO,NAME,"node does not contain awareness attribute: [%s]",awarenessAttribute);
+    if (!node.node().getAttributes().containsKey(awarenessAttribute)) {
+      return allocation.decision(Decision.NO,NAME,"node does not contain the awareness attribute: [%s]",awarenessAttribute);
     }
     ObjectIntHashMap<String> nodesPerAttribute=allocation.routingNodes().nodesPerAttributesCounts(awarenessAttribute);
     ObjectIntHashMap<String> shardPerAttribute=new ObjectIntHashMap<>();
     for (    ShardRouting assignedShard : allocation.routingNodes().assignedShards(shardRouting)) {
       if (assignedShard.started() || assignedShard.initializing()) {
         RoutingNode routingNode=allocation.routingNodes().node(assignedShard.currentNodeId());
-        shardPerAttribute.addTo(routingNode.node().attributes().get(awarenessAttribute),1);
+        shardPerAttribute.addTo(routingNode.node().getAttributes().get(awarenessAttribute),1);
       }
     }
     if (moveToNode) {
       if (shardRouting.assignedToNode()) {
         String nodeId=shardRouting.relocating() ? shardRouting.relocatingNodeId() : shardRouting.currentNodeId();
         if (!node.nodeId().equals(nodeId)) {
-          shardPerAttribute.putOrAdd(allocation.routingNodes().node(nodeId).node().attributes().get(awarenessAttribute),0,-1);
-          shardPerAttribute.addTo(node.node().attributes().get(awarenessAttribute),1);
+          shardPerAttribute.putOrAdd(allocation.routingNodes().node(nodeId).node().getAttributes().get(awarenessAttribute),0,-1);
+          shardPerAttribute.addTo(node.node().getAttributes().get(awarenessAttribute),1);
         }
       }
  else {
-        shardPerAttribute.addTo(node.node().attributes().get(awarenessAttribute),1);
+        shardPerAttribute.addTo(node.node().getAttributes().get(awarenessAttribute),1);
       }
     }
     int numberOfAttributes=nodesPerAttribute.size();
@@ -48,13 +48,13 @@
       requiredCountPerAttribute=averagePerAttribute;
     }
     int leftoverPerAttribute=totalLeftover == 0 ? 0 : 1;
-    int currentNodeCount=shardPerAttribute.get(node.node().attributes().get(awarenessAttribute));
+    int currentNodeCount=shardPerAttribute.get(node.node().getAttributes().get(awarenessAttribute));
     if (currentNodeCount > (requiredCountPerAttribute + leftoverPerAttribute)) {
-      return allocation.decision(Decision.NO,NAME,"too many shards on node for attribute: [%s], required per attribute: [%d], node count: [%d], leftover: [%d]",awarenessAttribute,requiredCountPerAttribute,currentNodeCount,leftoverPerAttribute);
+      return allocation.decision(Decision.NO,NAME,"there are too many shards on the node for attribute [%s], there are [%d] total shards for the index " + " and [%d] total attributes values, expected the node count [%d] to be lower or equal to the required " + "number of shards per attribute [%d] plus leftover [%d]",awarenessAttribute,shardCount,numberOfAttributes,currentNodeCount,requiredCountPerAttribute,leftoverPerAttribute);
     }
     if (currentNodeCount <= requiredCountPerAttribute) {
       continue;
     }
   }
-  return allocation.decision(Decision.YES,NAME,"node meets awareness requirements");
+  return allocation.decision(Decision.YES,NAME,"node meets all awareness attribute requirements");
 }

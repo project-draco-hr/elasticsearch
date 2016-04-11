@@ -1,16 +1,18 @@
 {
   AtomicReference<TimeValue> capturedDelay=new AtomicReference<>();
+  AtomicReference<Runnable> capturedCommand=new AtomicReference<>();
   threadPool.shutdown();
   threadPool=new ThreadPool(getTestName()){
     @Override public ScheduledFuture<?> schedule(    TimeValue delay,    String name,    Runnable command){
       capturedDelay.set(delay);
+      capturedCommand.set(command);
       return null;
     }
   }
 ;
   DummyAbstractAsyncBulkByScrollAction action=new DummyAbstractAsyncBulkByScrollAction();
   action.setScroll(scrollId());
-  mainRequest.setRequestsPerSecond(1f);
+  task.rethrottle(1f);
   action.setLastBatchStartTime(System.nanoTime());
   action.startNextScroll(100);
   assertThat(client.lastScroll.get().request.scroll().keepAlive().seconds(),either(equalTo(110L)).or(equalTo(109L)));
@@ -19,4 +21,6 @@
   InternalSearchResponse searchResponse=new InternalSearchResponse(hits,null,null,null,false,false);
   client.lastScroll.get().listener.onResponse(new SearchResponse(searchResponse,scrollId(),5,4,randomLong(),null));
   assertThat(capturedDelay.get().seconds(),either(equalTo(100L)).or(equalTo(99L)));
+  capturedCommand.get().run();
+  assertEquals(capturedDelay.get(),task.getStatus().getThrottled());
 }

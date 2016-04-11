@@ -6,9 +6,20 @@
     @Override public Explanation explain(    LeafReaderContext leafReaderContext,    int docId) throws IOException {
       Scorer scorer=scorer(leafReaderContext);
       if (scorer != null) {
-        int result=scorer.iterator().advance(docId);
+        TwoPhaseIterator twoPhaseIterator=scorer.twoPhaseIterator();
+        int result=twoPhaseIterator.approximation().advance(docId);
         if (result == docId) {
-          return Explanation.match(scorer.score(),"PercolatorQuery");
+          if (twoPhaseIterator.matches()) {
+            if (needsScores) {
+              QueryRegistry.Leaf percolatorQueries=queryRegistry.getQueries(leafReaderContext);
+              Query query=percolatorQueries.getQuery(docId);
+              Explanation detail=percolatorIndexSearcher.explain(query,0);
+              return Explanation.match(scorer.score(),"PercolatorQuery",detail);
+            }
+ else {
+              return Explanation.match(scorer.score(),"PercolatorQuery");
+            }
+          }
         }
       }
       return Explanation.noMatch("PercolatorQuery");
@@ -25,41 +36,43 @@
         return null;
       }
       final QueryRegistry.Leaf percolatorQueries=queryRegistry.getQueries(leafReaderContext);
-      return new Scorer(this){
-        @Override public DocIdSetIterator iterator(){
-          return TwoPhaseIterator.asDocIdSetIterator(twoPhaseIterator());
-        }
-        @Override public TwoPhaseIterator twoPhaseIterator(){
-          return new TwoPhaseIterator(approximation.iterator()){
-            @Override public boolean matches() throws IOException {
-              return matchDocId(approximation.docID());
-            }
-            @Override public float matchCost(){
-              return MATCH_COST;
-            }
-          }
-;
-        }
-        @Override public float score() throws IOException {
-          return approximation.score();
-        }
-        @Override public int freq() throws IOException {
-          return approximation.freq();
-        }
-        @Override public int docID(){
-          return approximation.docID();
-        }
-        boolean matchDocId(        int docId) throws IOException {
-          Query query=percolatorQueries.getQuery(docId);
-          if (query != null) {
-            return Lucene.exists(percolatorIndexSearcher,query);
-          }
+      if (needsScores) {
+        return new BaseScorer(this,approximation,percolatorQueries,percolatorIndexSearcher){
+          float score;
+          @Override boolean matchDocId(          int docId) throws IOException {
+            Query query=percolatorQueries.getQuery(docId);
+            if (query != null) {
+              TopDocs topDocs=percolatorIndexSearcher.search(query,1);
+              if (topDocs.totalHits > 0) {
+                score=topDocs.scoreDocs[0].score;
+                return true;
+              }
  else {
-            return false;
+                return false;
+              }
+            }
+ else {
+              return false;
+            }
+          }
+          @Override public float score() throws IOException {
+            return score;
           }
         }
-      }
 ;
+      }
+ else {
+        return new BaseScorer(this,approximation,percolatorQueries,percolatorIndexSearcher){
+          @Override public float score() throws IOException {
+            return 0f;
+          }
+          boolean matchDocId(          int docId) throws IOException {
+            Query query=percolatorQueries.getQuery(docId);
+            return query != null && Lucene.exists(percolatorIndexSearcher,query);
+          }
+        }
+;
+      }
     }
   }
 ;
