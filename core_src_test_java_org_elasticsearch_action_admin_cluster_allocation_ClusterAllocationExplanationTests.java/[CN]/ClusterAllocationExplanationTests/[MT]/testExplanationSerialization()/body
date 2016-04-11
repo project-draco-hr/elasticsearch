@@ -12,7 +12,13 @@
     nodeToWeight.put(dn,randomFloat());
   }
   long remainingDelay=randomIntBetween(0,500);
-  ClusterAllocationExplanation cae=new ClusterAllocationExplanation(shard,true,"assignedNode",null,nodeToDecisions,nodeToWeight,remainingDelay);
+  DiscoveryNode nodeWithStore=new DiscoveryNode("node-1",DummyTransportAddress.INSTANCE,emptyMap(),emptySet(),Version.CURRENT);
+  IndicesShardStoresResponse.StoreStatus storeStatus=new IndicesShardStoresResponse.StoreStatus(nodeWithStore,42,"eggplant",IndicesShardStoresResponse.StoreStatus.AllocationStatus.PRIMARY,new ElasticsearchException("stuff's broke, yo"));
+  List<IndicesShardStoresResponse.StoreStatus> storeStatusList=Collections.singletonList(storeStatus);
+  Set<String> allocationIds=new HashSet<>();
+  allocationIds.add("eggplant");
+  allocationIds.add("potato");
+  ClusterAllocationExplanation cae=new ClusterAllocationExplanation(shard,true,"assignedNode",null,nodeToDecisions,nodeToWeight,remainingDelay,storeStatusList,allocationIds);
   BytesStreamOutput out=new BytesStreamOutput();
   cae.writeTo(out);
   StreamInput in=StreamInput.wrap(out.bytes());
@@ -25,6 +31,15 @@
   for (  Map.Entry<DiscoveryNode,Decision> entry : cae2.getNodeDecisions().entrySet()) {
     assertEquals(nodeToDecisions.get(entry.getKey()),entry.getValue());
   }
+  for (  Map.Entry<DiscoveryNode,IndicesShardStoresResponse.StoreStatus> entry : cae2.getNodeStoreStatus().entrySet()) {
+    assertEquals(nodeWithStore,entry.getKey());
+    IndicesShardStoresResponse.StoreStatus status=entry.getValue();
+    assertEquals(storeStatus.getLegacyVersion(),status.getLegacyVersion());
+    assertEquals(storeStatus.getAllocationId(),status.getAllocationId());
+    assertEquals(storeStatus.getAllocationStatus(),status.getAllocationStatus());
+    assertEquals(ExceptionsHelper.detailedMessage(storeStatus.getStoreException()),ExceptionsHelper.detailedMessage(status.getStoreException()));
+  }
   assertEquals(nodeToWeight,cae2.getNodeWeights());
   assertEquals(remainingDelay,cae2.getRemainingDelayNanos());
+  assertEquals(allocationIds,cae2.getActiveAllocationIds());
 }
