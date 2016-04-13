@@ -1,0 +1,46 @@
+{
+  ByteSizeValue inFlightRequestsLimit=new ByteSizeValue(8,ByteSizeUnit.KB);
+  if (noopBreakerUsed()) {
+    logger.info("--> noop breakers used, skipping test");
+    return;
+  }
+  internalCluster().ensureAtLeastNumDataNodes(2);
+  NodesStatsResponse nodeStats=client().admin().cluster().prepareNodesStats().get();
+  List<NodeStats> dataNodeStats=new ArrayList<>();
+  for (  NodeStats stat : nodeStats.getNodes()) {
+    if (stat.getNode().isDataNode()) {
+      dataNodeStats.add(stat);
+    }
+  }
+  assertThat(dataNodeStats.size(),greaterThanOrEqualTo(2));
+  Collections.shuffle(dataNodeStats,random());
+  NodeStats targetNode=dataNodeStats.get(0);
+  NodeStats sourceNode=dataNodeStats.get(1);
+  assertAcked(prepareCreate("index").setSettings(Settings.builder().put(IndexMetaData.SETTING_NUMBER_OF_REPLICAS,0).put(IndexMetaData.SETTING_NUMBER_OF_SHARDS,1).put("index.routing.allocation.include._name",targetNode.getNode().getName()).put(EnableAllocationDecider.INDEX_ROUTING_REBALANCE_ENABLE_SETTING.getKey(),EnableAllocationDecider.Rebalance.NONE)));
+  Client client=client(sourceNode.getNode().getName());
+  int numRequests=inFlightRequestsLimit.bytesAsInt();
+  BulkRequest bulkRequest=new BulkRequest();
+  for (int i=0; i < numRequests; i++) {
+    IndexRequest indexRequest=new IndexRequest("index","type",Integer.toString(i));
+    indexRequest.source("field","value","num",i);
+    bulkRequest.add(indexRequest);
+  }
+  Settings limitSettings=Settings.builder().put(HierarchyCircuitBreakerService.IN_FLIGHT_REQUESTS_CIRCUIT_BREAKER_LIMIT_SETTING.getKey(),inFlightRequestsLimit).build();
+  assertAcked(client().admin().cluster().prepareUpdateSettings().setTransientSettings(limitSettings));
+  try {
+    BulkResponse response=client.bulk(bulkRequest).actionGet();
+    if (!response.hasFailures()) {
+      fail("Should have thrown CircuitBreakingException");
+    }
+ else {
+      for (      BulkItemResponse bulkItemResponse : response) {
+        Throwable cause=ExceptionsHelper.unwrapCause(bulkItemResponse.getFailure().getCause());
+        assertThat(cause,instanceOf(CircuitBreakingException.class));
+        assertEquals(((CircuitBreakingException)cause).getByteLimit(),inFlightRequestsLimit.bytes());
+      }
+    }
+  }
+ catch (  CircuitBreakingException ex) {
+    assertEquals(ex.getByteLimit(),inFlightRequestsLimit.bytes());
+  }
+}
