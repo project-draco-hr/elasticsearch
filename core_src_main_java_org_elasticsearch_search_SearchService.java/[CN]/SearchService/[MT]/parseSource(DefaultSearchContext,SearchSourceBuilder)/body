@@ -12,11 +12,24 @@
       context.queryBoost(indexBoost);
     }
   }
+  Map<String,InnerHitBuilder> innerHitBuilders=new HashMap<>();
   if (source.query() != null) {
+    InnerHitBuilder.extractInnerHits(source.query(),innerHitBuilders);
     context.parsedQuery(queryShardContext.toQuery(source.query()));
   }
   if (source.postFilter() != null) {
+    InnerHitBuilder.extractInnerHits(source.postFilter(),innerHitBuilders);
     context.parsedPostFilter(queryShardContext.toQuery(source.postFilter()));
+  }
+  if (innerHitBuilders.size() > 0) {
+    for (    Map.Entry<String,InnerHitBuilder> entry : innerHitBuilders.entrySet()) {
+      try {
+        entry.getValue().build(context,context.innerHits());
+      }
+ catch (      IOException e) {
+        throw new SearchContextException(context,"failed to build inner_hits",e);
+      }
+    }
   }
   if (source.sorts() != null) {
     try {
@@ -90,22 +103,6 @@
     }
  catch (    IOException e) {
       throw new SearchContextException(context,"failed to create SearchContextHighlighter",e);
-    }
-  }
-  if (source.innerHits() != null) {
-    for (    Map.Entry<String,InnerHitBuilder> entry : source.innerHits().getInnerHitsBuilders().entrySet()) {
-      try {
-        queryShardContext.reset();
-        InnerHitBuilder innerHitBuilder=entry.getValue();
-        InnerHitsContext innerHitsContext=context.innerHits();
-        innerHitBuilder.buildTopLevel(context,queryShardContext,innerHitsContext);
-      }
- catch (      IOException e) {
-        throw new SearchContextException(context,"failed to create InnerHitsContext",e);
-      }
- finally {
-        queryShardContext.reset();
-      }
     }
   }
   if (source.scriptFields() != null) {
