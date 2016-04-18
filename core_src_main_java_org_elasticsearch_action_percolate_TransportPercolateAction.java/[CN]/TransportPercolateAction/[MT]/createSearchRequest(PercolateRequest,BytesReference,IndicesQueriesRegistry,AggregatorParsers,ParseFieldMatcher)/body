@@ -82,15 +82,15 @@
   }
   PercolatorQueryBuilder percolatorQueryBuilder=new PercolatorQueryBuilder(percolateRequest.documentType(),documentSource);
   if (querySource != null) {
-    QueryParseContext queryParseContext=new QueryParseContext(queryRegistry);
-    queryParseContext.reset(XContentHelper.createParser(querySource));
-    queryParseContext.parseFieldMatcher(parseFieldMatcher);
-    QueryBuilder<?> queryBuilder=queryParseContext.parseInnerQueryBuilder();
-    BoolQueryBuilder boolQueryBuilder=QueryBuilders.boolQuery();
-    boolQueryBuilder.must(queryBuilder);
-    boolQueryBuilder.filter(percolatorQueryBuilder);
-    searchSource.field("query",boolQueryBuilder);
-  }
+    try (XContentParser parser=XContentHelper.createParser(querySource)){
+      QueryParseContext queryParseContext=new QueryParseContext(queryRegistry,parser,parseFieldMatcher);
+      QueryBuilder<?> queryBuilder=queryParseContext.parseInnerQueryBuilder();
+      BoolQueryBuilder boolQueryBuilder=QueryBuilders.boolQuery();
+      boolQueryBuilder.must(queryBuilder);
+      boolQueryBuilder.filter(percolatorQueryBuilder);
+      searchSource.field("query",boolQueryBuilder);
+    }
+   }
  else {
     searchSource.field("query",new ConstantScoreQueryBuilder(percolatorQueryBuilder).boost(0f));
   }
@@ -98,10 +98,8 @@
   searchSource.flush();
   BytesReference source=searchSource.bytes();
   SearchSourceBuilder searchSourceBuilder=new SearchSourceBuilder();
-  QueryParseContext context=new QueryParseContext(queryRegistry);
   try (XContentParser parser=XContentFactory.xContent(XContentType.JSON).createParser(source)){
-    context.reset(parser);
-    context.parseFieldMatcher(parseFieldMatcher);
+    QueryParseContext context=new QueryParseContext(queryRegistry,parser,parseFieldMatcher);
     searchSourceBuilder.parseXContent(context,aggParsers,null);
     searchRequest.source(searchSourceBuilder);
     return searchRequest;
