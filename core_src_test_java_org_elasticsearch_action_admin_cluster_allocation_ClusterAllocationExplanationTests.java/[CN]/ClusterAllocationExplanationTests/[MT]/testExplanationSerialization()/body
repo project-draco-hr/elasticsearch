@@ -12,13 +12,10 @@
     nodeToWeight.put(dn,randomFloat());
   }
   long remainingDelay=randomIntBetween(0,500);
-  DiscoveryNode nodeWithStore=new DiscoveryNode("node-1",DummyTransportAddress.INSTANCE,emptyMap(),emptySet(),Version.CURRENT);
-  IndicesShardStoresResponse.StoreStatus storeStatus=new IndicesShardStoresResponse.StoreStatus(nodeWithStore,42,"eggplant",IndicesShardStoresResponse.StoreStatus.AllocationStatus.PRIMARY,new ElasticsearchException("stuff's broke, yo"));
-  List<IndicesShardStoresResponse.StoreStatus> storeStatusList=Collections.singletonList(storeStatus);
-  Set<String> allocationIds=new HashSet<>();
-  allocationIds.add("eggplant");
-  allocationIds.add("potato");
-  ClusterAllocationExplanation cae=new ClusterAllocationExplanation(shard,true,"assignedNode",null,nodeToDecisions,nodeToWeight,remainingDelay,storeStatusList,allocationIds);
+  Map<DiscoveryNode,NodeExplanation> nodeExplanations=new HashMap<>(1);
+  NodeExplanation ne=makeNodeExplanation("bar",true);
+  nodeExplanations.put(ne.getNode(),ne);
+  ClusterAllocationExplanation cae=new ClusterAllocationExplanation(shard,true,"assignedNode",remainingDelay,null,nodeExplanations);
   BytesStreamOutput out=new BytesStreamOutput();
   cae.writeTo(out);
   StreamInput in=StreamInput.wrap(out.bytes());
@@ -28,20 +25,13 @@
   assertTrue(cae2.isAssigned());
   assertEquals("assignedNode",cae2.getAssignedNodeId());
   assertNull(cae2.getUnassignedInfo());
-  assertEquals(remainingDelay,cae2.getRemainingDelayNanos());
-  assertEquals(allocationIds,cae2.getActiveAllocationIds());
-  for (  Map.Entry<DiscoveryNode,ClusterAllocationExplanation.NodeExplanation> entry : cae2.getNodeExplanations().entrySet()) {
+  assertEquals(remainingDelay,cae2.getRemainingDelayMillis());
+  for (  Map.Entry<DiscoveryNode,NodeExplanation> entry : cae2.getNodeExplanations().entrySet()) {
     DiscoveryNode node=entry.getKey();
-    ClusterAllocationExplanation.NodeExplanation explanation=entry.getValue();
+    NodeExplanation explanation=entry.getValue();
     IndicesShardStoresResponse.StoreStatus status=explanation.getStoreStatus();
-    if (status != null) {
-      assertEquals(nodeWithStore,node);
-      assertEquals(storeStatus.getLegacyVersion(),status.getLegacyVersion());
-      assertEquals(storeStatus.getAllocationId(),status.getAllocationId());
-      assertEquals(storeStatus.getAllocationStatus(),status.getAllocationStatus());
-      assertEquals(ExceptionsHelper.detailedMessage(storeStatus.getStoreException()),ExceptionsHelper.detailedMessage(status.getStoreException()));
-    }
-    assertEquals(nodeToDecisions.get(node),explanation.getDecision());
-    assertEquals(nodeToWeight.get(node),explanation.getWeight());
+    assertNotNull(explanation.getStoreStatus());
+    assertNotNull(explanation.getDecision());
+    assertNotNull(explanation.getWeight());
   }
 }
