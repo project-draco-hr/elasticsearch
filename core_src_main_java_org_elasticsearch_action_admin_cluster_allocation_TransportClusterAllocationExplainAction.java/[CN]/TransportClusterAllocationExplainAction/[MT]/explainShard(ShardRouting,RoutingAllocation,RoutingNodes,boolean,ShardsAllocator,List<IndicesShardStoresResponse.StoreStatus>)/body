@@ -11,12 +11,27 @@
       nodeToDecision.put(discoNode,d);
     }
   }
-  long remainingDelayNanos=0;
+  long remainingDelayMillis=0;
   final MetaData metadata=allocation.metaData();
   final IndexMetaData indexMetaData=metadata.index(shard.index());
   if (ui != null) {
     final Settings indexSettings=indexMetaData.getSettings();
-    remainingDelayNanos=ui.getRemainingDelay(System.nanoTime(),metadata.settings(),indexSettings);
+    long remainingDelayNanos=ui.getRemainingDelay(System.nanoTime(),metadata.settings(),indexSettings);
+    remainingDelayMillis=TimeValue.timeValueNanos(remainingDelayNanos).millis();
   }
-  return new ClusterAllocationExplanation(shard.shardId(),shard.primary(),shard.currentNodeId(),ui,nodeToDecision,shardAllocator.weighShard(allocation,shard),remainingDelayNanos,shardStores,indexMetaData.activeAllocationIds(shard.getId()));
+  Map<DiscoveryNode,Float> weights=shardAllocator.weighShard(allocation,shard);
+  Map<DiscoveryNode,IndicesShardStoresResponse.StoreStatus> nodeToStatus=new HashMap<>(shardStores.size());
+  for (  IndicesShardStoresResponse.StoreStatus status : shardStores) {
+    nodeToStatus.put(status.getNode(),status);
+  }
+  Map<DiscoveryNode,NodeExplanation> explanations=new HashMap<>(shardStores.size());
+  for (  Map.Entry<DiscoveryNode,Decision> entry : nodeToDecision.entrySet()) {
+    DiscoveryNode node=entry.getKey();
+    Decision decision=entry.getValue();
+    Float weight=weights.get(node);
+    IndicesShardStoresResponse.StoreStatus storeStatus=nodeToStatus.get(node);
+    NodeExplanation nodeExplanation=calculateNodeExplanation(shard,indexMetaData,node,decision,weight,storeStatus,shard.currentNodeId(),indexMetaData.activeAllocationIds(shard.getId()));
+    explanations.put(node,nodeExplanation);
+  }
+  return new ClusterAllocationExplanation(shard.shardId(),shard.primary(),shard.currentNodeId(),remainingDelayMillis,ui,explanations);
 }
