@@ -1,10 +1,29 @@
 {
-  NodeExplanation ne=makeNodeExplanation("foo",true);
-  assertEquals("the shard is already assigned to this node",ne.getFinalExplanation());
-  assertEquals(ClusterAllocationExplanation.FinalDecision.ALREADY_ASSIGNED,ne.getFinalDecision());
-  assertEquals(ClusterAllocationExplanation.StoreCopy.AVAILABLE,ne.getStoreCopy());
-  ne=makeNodeExplanation("foo",false);
-  assertEquals("the shard is already assigned to this node",ne.getFinalExplanation());
-  assertEquals(ClusterAllocationExplanation.FinalDecision.ALREADY_ASSIGNED,ne.getFinalDecision());
-  assertEquals(ClusterAllocationExplanation.StoreCopy.UNKNOWN,ne.getStoreCopy());
+  Exception e=new IOException("stuff's broke, yo");
+  Exception corruptE=new CorruptIndexException("stuff's corrupt, yo","");
+  Float nodeWeight=randomFloat();
+  Set<String> activeAllocationIds=new HashSet<>();
+  activeAllocationIds.add("eggplant");
+  IndicesShardStoresResponse.StoreStatus storeStatus=new IndicesShardStoresResponse.StoreStatus(node,42,"eggplant",IndicesShardStoresResponse.StoreStatus.AllocationStatus.PRIMARY,e);
+  NodeExplanation ne=TransportClusterAllocationExplainAction.calculateNodeExplanation(primaryShard,indexMetaData,node,yesDecision,nodeWeight,storeStatus,"",activeAllocationIds);
+  assertExplanations(ne,"the copy of the shard cannot be read",ClusterAllocationExplanation.FinalDecision.NO,ClusterAllocationExplanation.StoreCopy.IO_ERROR);
+  ne=TransportClusterAllocationExplainAction.calculateNodeExplanation(primaryShard,indexMetaData,node,yesDecision,nodeWeight,null,"",activeAllocationIds);
+  assertExplanations(ne,"the shard can be assigned",ClusterAllocationExplanation.FinalDecision.YES,ClusterAllocationExplanation.StoreCopy.NONE);
+  ne=TransportClusterAllocationExplainAction.calculateNodeExplanation(primaryShard,indexMetaData,node,noDecision,nodeWeight,null,"",activeAllocationIds);
+  assertExplanations(ne,"the shard cannot be assigned because one or more allocation decider returns a 'NO' decision",ClusterAllocationExplanation.FinalDecision.NO,ClusterAllocationExplanation.StoreCopy.NONE);
+  storeStatus=new IndicesShardStoresResponse.StoreStatus(node,42,"eggplant",IndicesShardStoresResponse.StoreStatus.AllocationStatus.PRIMARY,null);
+  ne=TransportClusterAllocationExplainAction.calculateNodeExplanation(primaryShard,indexMetaData,node,noDecision,nodeWeight,storeStatus,"",activeAllocationIds);
+  assertExplanations(ne,"the shard cannot be assigned because one or more allocation decider returns a 'NO' decision",ClusterAllocationExplanation.FinalDecision.NO,ClusterAllocationExplanation.StoreCopy.AVAILABLE);
+  storeStatus=new IndicesShardStoresResponse.StoreStatus(node,42,"eggplant",IndicesShardStoresResponse.StoreStatus.AllocationStatus.PRIMARY,corruptE);
+  ne=TransportClusterAllocationExplainAction.calculateNodeExplanation(primaryShard,indexMetaData,node,yesDecision,nodeWeight,storeStatus,"",activeAllocationIds);
+  assertExplanations(ne,"the copy of the shard is corrupt",ClusterAllocationExplanation.FinalDecision.NO,ClusterAllocationExplanation.StoreCopy.CORRUPT);
+  storeStatus=new IndicesShardStoresResponse.StoreStatus(node,42,"banana",IndicesShardStoresResponse.StoreStatus.AllocationStatus.PRIMARY,null);
+  ne=TransportClusterAllocationExplainAction.calculateNodeExplanation(primaryShard,indexMetaData,node,yesDecision,nodeWeight,storeStatus,"",activeAllocationIds);
+  assertExplanations(ne,"the copy of the shard is stale, allocation ids do not match",ClusterAllocationExplanation.FinalDecision.NO,ClusterAllocationExplanation.StoreCopy.STALE);
+  storeStatus=new IndicesShardStoresResponse.StoreStatus(node,42,"eggplant",IndicesShardStoresResponse.StoreStatus.AllocationStatus.PRIMARY,null);
+  ne=TransportClusterAllocationExplainAction.calculateNodeExplanation(primaryShard,indexMetaData,node,yesDecision,nodeWeight,storeStatus,"node-0",activeAllocationIds);
+  assertExplanations(ne,"the shard is already assigned to this node",ClusterAllocationExplanation.FinalDecision.ALREADY_ASSIGNED,ClusterAllocationExplanation.StoreCopy.AVAILABLE);
+  storeStatus=new IndicesShardStoresResponse.StoreStatus(node,42,"eggplant",IndicesShardStoresResponse.StoreStatus.AllocationStatus.PRIMARY,null);
+  ne=TransportClusterAllocationExplainAction.calculateNodeExplanation(primaryShard,indexMetaData,node,yesDecision,nodeWeight,storeStatus,"",activeAllocationIds);
+  assertExplanations(ne,"the shard can be assigned and the node contains a valid copy of the shard data",ClusterAllocationExplanation.FinalDecision.YES,ClusterAllocationExplanation.StoreCopy.AVAILABLE);
 }
