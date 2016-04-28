@@ -1,0 +1,36 @@
+{
+  if (running.compareAndSet(false,true)) {
+    try {
+      Iterator<StatefulConnection> connectionIterator=nextUnfilteredConnection().iterator();
+      if (connectionIterator.hasNext()) {
+        sniff(connectionIterator,nodeFilter);
+      }
+ else {
+        StatefulConnection connection=lastResortConnection();
+        logger.info("no healthy nodes available, trying " + connection.getNode());
+        sniff(Stream.of(connection).iterator(),nodeFilter);
+      }
+    }
+ catch (    Throwable t) {
+      logger.error("error while sniffing nodes",t);
+    }
+ finally {
+      try {
+        this.scheduledFuture.cancel(false);
+        if (this.failure) {
+          this.scheduledFuture=this.scheduledExecutorService.schedule(this,sniffAfterFailureDelay,TimeUnit.MILLISECONDS);
+          this.failure=false;
+        }
+ else {
+          this.scheduledFuture=this.scheduledExecutorService.schedule(this,sniffInterval,TimeUnit.MILLISECONDS);
+        }
+      }
+ catch (      Throwable t) {
+        logger.error("error while scheduling next sniffer task",t);
+      }
+ finally {
+        running.set(false);
+      }
+    }
+  }
+}
