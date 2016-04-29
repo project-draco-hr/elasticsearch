@@ -1,0 +1,21 @@
+{
+  logger.debug("[{}][{}] allocated on [{}], but can no longer be allocated on it, moving...",shardRouting.index(),shardRouting.id(),routingNode.node());
+  sorter.reset(shardRouting.getIndexName());
+  for (  ModelNode currentNode : sorter.modelNodes) {
+    if (currentNode != sourceNode) {
+      RoutingNode target=currentNode.getRoutingNode();
+      Decision allocationDecision=allocation.deciders().canAllocate(shardRouting,target,allocation);
+      if (allocationDecision.type() == Type.YES) {
+        sourceNode.removeShard(shardRouting);
+        ShardRouting targetRelocatingShard=routingNodes.relocate(shardRouting,target.nodeId(),allocation.clusterInfo().getShardSize(shardRouting,ShardRouting.UNAVAILABLE_EXPECTED_SHARD_SIZE));
+        currentNode.addShard(targetRelocatingShard);
+        if (logger.isTraceEnabled()) {
+          logger.trace("Moved shard [{}] to node [{}]",shardRouting,routingNode.node());
+        }
+        return true;
+      }
+    }
+  }
+  logger.debug("[{}][{}] can't move",shardRouting.index(),shardRouting.id());
+  return false;
+}

@@ -1,14 +1,15 @@
 {
-  IndexService indexService=indicesService.indexServiceSafe(request.concreteIndex());
-  IndexShard indexShard=indexService.getShard(request.shardId());
+  final ShardId shardId=request.getShardId();
+  final IndexService indexService=indicesService.indexServiceSafe(shardId.getIndex());
+  final IndexShard indexShard=indexService.getShard(shardId.getId());
   final UpdateHelper.Result result=updateHelper.prepare(request,indexShard);
 switch (result.operation()) {
 case UPSERT:
-    IndexRequest upsertRequest=new IndexRequest(result.action(),request);
+    IndexRequest upsertRequest=result.action();
   final BytesReference upsertSourceBytes=upsertRequest.source();
 indexAction.execute(upsertRequest,new ActionListener<IndexResponse>(){
   @Override public void onResponse(  IndexResponse response){
-    UpdateResponse update=new UpdateResponse(response.getShardInfo(),response.getIndex(),response.getType(),response.getId(),response.getVersion(),response.isCreated());
+    UpdateResponse update=new UpdateResponse(response.getShardInfo(),response.getShardId(),response.getType(),response.getId(),response.getVersion(),response.isCreated());
     if (request.fields() != null && request.fields().length > 0) {
       Tuple<XContentType,Map<String,Object>> sourceAndContent=XContentHelper.convertToMap(upsertSourceBytes,true);
       update.setGetResult(updateHelper.extractGetResult(request,request.concreteIndex(),response.getVersion(),sourceAndContent.v2(),sourceAndContent.v1(),upsertSourceBytes));
@@ -22,7 +23,7 @@ indexAction.execute(upsertRequest,new ActionListener<IndexResponse>(){
     e=ExceptionsHelper.unwrapCause(e);
     if (e instanceof VersionConflictEngineException) {
       if (retryCount < request.retryOnConflict()) {
-        logger.trace("Retry attempt [{}] of [{}] on version conflict on [{}][{}][{}]",retryCount + 1,request.retryOnConflict(),request.index(),request.shardId(),request.id());
+        logger.trace("Retry attempt [{}] of [{}] on version conflict on [{}][{}][{}]",retryCount + 1,request.retryOnConflict(),request.index(),request.getShardId(),request.id());
         threadPool.executor(executor()).execute(new ActionRunnable<UpdateResponse>(listener){
           @Override protected void doRun(){
             shardOperation(request,listener,retryCount + 1);
@@ -38,11 +39,11 @@ indexAction.execute(upsertRequest,new ActionListener<IndexResponse>(){
 );
 break;
 case INDEX:
-IndexRequest indexRequest=new IndexRequest(result.action(),request);
+IndexRequest indexRequest=result.action();
 final BytesReference indexSourceBytes=indexRequest.source();
 indexAction.execute(indexRequest,new ActionListener<IndexResponse>(){
 @Override public void onResponse(IndexResponse response){
-UpdateResponse update=new UpdateResponse(response.getShardInfo(),response.getIndex(),response.getType(),response.getId(),response.getVersion(),response.isCreated());
+UpdateResponse update=new UpdateResponse(response.getShardInfo(),response.getShardId(),response.getType(),response.getId(),response.getVersion(),response.isCreated());
 update.setGetResult(updateHelper.extractGetResult(request,request.concreteIndex(),response.getVersion(),result.updatedSourceAsMap(),result.updateSourceContentType(),indexSourceBytes));
 listener.onResponse(update);
 }
@@ -65,10 +66,9 @@ listener.onFailure(e);
 );
 break;
 case DELETE:
-DeleteRequest deleteRequest=new DeleteRequest(result.action(),request);
-deleteAction.execute(deleteRequest,new ActionListener<DeleteResponse>(){
+deleteAction.execute(result.action(),new ActionListener<DeleteResponse>(){
 @Override public void onResponse(DeleteResponse response){
-UpdateResponse update=new UpdateResponse(response.getShardInfo(),response.getIndex(),response.getType(),response.getId(),response.getVersion(),false);
+UpdateResponse update=new UpdateResponse(response.getShardInfo(),response.getShardId(),response.getType(),response.getId(),response.getVersion(),false);
 update.setGetResult(updateHelper.extractGetResult(request,request.concreteIndex(),response.getVersion(),result.updatedSourceAsMap(),result.updateSourceContentType(),null));
 listener.onResponse(update);
 }
@@ -92,11 +92,11 @@ listener.onFailure(e);
 break;
 case NONE:
 UpdateResponse update=result.action();
-IndexService indexServiceOrNull=indicesService.indexService(request.concreteIndex());
+IndexService indexServiceOrNull=indicesService.indexService(shardId.getIndex());
 if (indexServiceOrNull != null) {
-IndexShard shard=indexService.getShardOrNull(request.shardId());
+IndexShard shard=indexService.getShardOrNull(shardId.getId());
 if (shard != null) {
-shard.indexingService().noopUpdate(request.type());
+shard.noopUpdate(request.type());
 }
 }
 listener.onResponse(update);

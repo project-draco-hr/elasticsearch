@@ -1,0 +1,27 @@
+{
+  DeleteRequest deleteRequest=(DeleteRequest)item.request();
+  preVersions[requestIndex]=deleteRequest.version();
+  preVersionTypes[requestIndex]=deleteRequest.versionType();
+  try {
+    final WriteResult<DeleteResponse> writeResult=TransportDeleteAction.executeDeleteRequestOnPrimary(deleteRequest,indexShard);
+    DeleteResponse deleteResponse=writeResult.response();
+    location=locationToSync(location,writeResult.location);
+    setResponse(item,new BulkItemResponse(item.id(),OP_TYPE_DELETE,deleteResponse));
+  }
+ catch (  Throwable e) {
+    if (retryPrimaryException(e)) {
+      for (int j=0; j < requestIndex; j++) {
+        applyVersion(request.items()[j],preVersions[j],preVersionTypes[j]);
+      }
+      throw (ElasticsearchException)e;
+    }
+    logFailure(e,"delete",request.shardId(),deleteRequest);
+    if (item.getPrimaryResponse() != null && isConflictException(e)) {
+      setResponse(item,item.getPrimaryResponse());
+    }
+ else {
+      setResponse(item,new BulkItemResponse(item.id(),OP_TYPE_DELETE,new BulkItemResponse.Failure(request.index(),deleteRequest.type(),deleteRequest.id(),e)));
+    }
+  }
+  return location;
+}

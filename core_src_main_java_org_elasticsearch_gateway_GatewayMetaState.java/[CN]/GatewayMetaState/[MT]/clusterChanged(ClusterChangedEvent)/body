@@ -1,5 +1,4 @@
 {
-  Set<String> relevantIndices=new HashSet<>();
   final ClusterState state=event.state();
   if (state.blocks().disableStatePersistence()) {
     this.previousMetaData=null;
@@ -7,12 +6,13 @@
     return;
   }
   MetaData newMetaData=state.metaData();
+  Set<Index> relevantIndices=Collections.emptySet();
   boolean success=true;
-  if (state.nodes().localNode().masterNode() || state.nodes().localNode().dataNode()) {
+  if (state.nodes().getLocalNode().isMasterNode() || state.nodes().getLocalNode().isDataNode()) {
     if (previousMetaData == null) {
       try {
         if (isDataOnlyNode(state)) {
-          Set<String> newPreviouslyWrittenIndices=new HashSet<>(previouslyWrittenIndices.size());
+          Set<Index> newPreviouslyWrittenIndices=new HashSet<>(previouslyWrittenIndices.size());
           for (          IndexMetaData indexMetaData : newMetaData) {
             IndexMetaData indexMetaDataOnDisk=null;
             if (indexMetaData.getState().equals(IndexMetaData.State.CLOSE)) {
@@ -38,12 +38,11 @@
         success=false;
       }
     }
-    Iterable<IndexMetaWriteInfo> writeInfo;
     relevantIndices=getRelevantIndices(event.state(),event.previousState(),previouslyWrittenIndices);
-    writeInfo=resolveStatesToBeWritten(previouslyWrittenIndices,relevantIndices,previousMetaData,event.state().metaData());
+    final Iterable<IndexMetaWriteInfo> writeInfo=resolveStatesToBeWritten(previouslyWrittenIndices,relevantIndices,previousMetaData,event.state().metaData());
     for (    IndexMetaWriteInfo indexMetaWrite : writeInfo) {
       try {
-        metaStateService.writeIndex(indexMetaWrite.reason,indexMetaWrite.newMetaData,indexMetaWrite.previousMetaData);
+        metaStateService.writeIndex(indexMetaWrite.reason,indexMetaWrite.newMetaData);
       }
  catch (      Throwable e) {
         success=false;

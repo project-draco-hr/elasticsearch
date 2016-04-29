@@ -1,0 +1,28 @@
+{
+  final String index="test";
+  final ShardId shardId=new ShardId(index,"_na_",0);
+  ClusterState state=state(index,true,ShardRoutingState.RELOCATING);
+  String primaryTargetNodeId=state.getRoutingTable().shardRoutingTable(shardId).primaryShard().relocatingNodeId();
+  state=ClusterState.builder(state).nodes(DiscoveryNodes.builder(state.nodes()).localNodeId(primaryTargetNodeId)).build();
+  setState(clusterService,state);
+  Request request=new Request(shardId).timeout("1ms");
+  PlainActionFuture<Response> listener=new PlainActionFuture<>();
+  ReplicationTask task=maybeTask();
+  AtomicBoolean executed=new AtomicBoolean();
+  Action.PrimaryOperationTransportHandler primaryPhase=action.new PrimaryOperationTransportHandler(){
+    @Override protected ReplicationOperation createReplicatedOperation(    Request request,    ActionListener<Response> actionListener,    Action.PrimaryShardReference primaryShardReference,    boolean executeOnReplicas){
+      return new NoopReplicationOperation(request,actionListener){
+        public void execute() throws Exception {
+          assertPhase(task,"primary");
+          assertFalse(executed.getAndSet(true));
+          super.execute();
+        }
+      }
+;
+    }
+  }
+;
+  primaryPhase.messageReceived(request,createTransportChannel(listener),task);
+  assertThat(executed.get(),equalTo(true));
+  assertPhase(task,"finished");
+}

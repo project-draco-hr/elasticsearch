@@ -1,0 +1,29 @@
+{
+  logger.info("--> starting one node");
+  internalCluster().startNode();
+  client().prepareIndex("test","type1","1").setSource("field1","value1").setRefresh(true).execute().actionGet();
+  logger.info("--> waiting for green status");
+  if (usually()) {
+    ensureYellow();
+  }
+ else {
+    internalCluster().startNode();
+    client().admin().cluster().health(Requests.clusterHealthRequest().waitForGreenStatus().waitForEvents(Priority.LANGUID).waitForRelocatingShards(0).waitForNodes("2")).actionGet();
+  }
+  ClusterState state=client().admin().cluster().prepareState().get().getState();
+  MetaData metaData=state.getMetaData();
+  for (  NodeEnvironment nodeEnv : internalCluster().getInstances(NodeEnvironment.class)) {
+    MetaData brokenMeta=MetaData.builder(metaData).persistentSettings(Settings.builder().put(metaData.persistentSettings()).put("this.is.unknown",true).put(ElectMasterService.DISCOVERY_ZEN_MINIMUM_MASTER_NODES_SETTING.getKey(),"broken").build()).build();
+    MetaData.FORMAT.write(brokenMeta,metaData.version(),nodeEnv.nodeDataPaths());
+  }
+  internalCluster().fullRestart();
+  ensureYellow("test");
+  state=client().admin().cluster().prepareState().get().getState();
+  assertEquals("true",state.metaData().persistentSettings().get("archived.this.is.unknown"));
+  assertEquals("broken",state.metaData().persistentSettings().get("archived." + ElectMasterService.DISCOVERY_ZEN_MINIMUM_MASTER_NODES_SETTING.getKey()));
+  client().admin().cluster().prepareUpdateSettings().setPersistentSettings(Settings.builder().putNull("archived.*")).get();
+  state=client().admin().cluster().prepareState().get().getState();
+  assertNull(state.metaData().persistentSettings().get("archived.this.is.unknown"));
+  assertNull(state.metaData().persistentSettings().get("archived." + ElectMasterService.DISCOVERY_ZEN_MINIMUM_MASTER_NODES_SETTING.getKey()));
+  assertHitCount(client().prepareSearch().setQuery(matchAllQuery()).get(),1L);
+}

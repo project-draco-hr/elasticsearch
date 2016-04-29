@@ -1,27 +1,14 @@
 {
   boolean changed=false;
-  RoutingNodes routingNodes=allocation.routingNodes();
+  final RoutingNodes routingNodes=allocation.routingNodes();
   if (routingNodes.unassigned().getNumPrimaries() == 0) {
     return changed;
   }
-  List<ShardRouting> shardsToFail=new ArrayList<>();
   for (  ShardRouting shardEntry : routingNodes.unassigned()) {
     if (shardEntry.primary()) {
-      for (      ShardRouting routing : routingNodes.assignedShards(shardEntry)) {
-        if (!routing.primary() && routing.initializing()) {
-          shardsToFail.add(routing);
-        }
-      }
-    }
-  }
-  for (  ShardRouting shardToFail : shardsToFail) {
-    changed|=applyFailedShard(allocation,shardToFail,false,new UnassignedInfo(UnassignedInfo.Reason.ALLOCATION_FAILED,"primary failed while replica initializing",null,allocation.getCurrentNanoTime(),System.currentTimeMillis()));
-  }
-  for (  ShardRouting shardEntry : routingNodes.unassigned()) {
-    if (shardEntry.primary()) {
+      changed|=failReplicasForUnassignedPrimary(allocation,shardEntry);
       ShardRouting candidate=allocation.routingNodes().activeReplica(shardEntry);
       if (candidate != null) {
-        IndexMetaData index=allocation.metaData().index(candidate.index());
         routingNodes.swapPrimaryFlag(shardEntry,candidate);
         if (candidate.relocatingNodeId() != null) {
           changed=true;
@@ -35,6 +22,7 @@
             }
           }
         }
+        IndexMetaData index=allocation.metaData().getIndexSafe(candidate.index());
         if (IndexMetaData.isIndexUsingShadowReplicas(index.getSettings())) {
           routingNodes.reinitShadowPrimary(candidate);
           changed=true;

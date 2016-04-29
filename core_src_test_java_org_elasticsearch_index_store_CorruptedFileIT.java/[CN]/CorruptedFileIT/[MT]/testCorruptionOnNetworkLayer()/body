@@ -2,7 +2,7 @@
   int numDocs=scaledRandomIntBetween(100,1000);
   internalCluster().ensureAtLeastNumDataNodes(2);
   if (cluster().numDataNodes() < 3) {
-    internalCluster().startNode(Settings.builder().put("node.data",true).put("node.client",false).put("node.master",false));
+    internalCluster().startNode(Settings.builder().put(Node.NODE_DATA_SETTING.getKey(),true).put(Node.NODE_MASTER_SETTING.getKey(),false));
   }
   NodesStatsResponse nodeStats=client().admin().cluster().prepareNodesStats().get();
   List<NodeStats> dataNodeStats=new ArrayList<>();
@@ -12,10 +12,10 @@
     }
   }
   assertThat(dataNodeStats.size(),greaterThanOrEqualTo(2));
-  Collections.shuffle(dataNodeStats,getRandom());
+  Collections.shuffle(dataNodeStats,random());
   NodeStats primariesNode=dataNodeStats.get(0);
   NodeStats unluckyNode=dataNodeStats.get(1);
-  assertAcked(prepareCreate("test").setSettings(Settings.builder().put(IndexMetaData.SETTING_NUMBER_OF_REPLICAS,"0").put(IndexMetaData.SETTING_NUMBER_OF_SHARDS,between(1,4)).put(MockFSIndexStore.CHECK_INDEX_ON_CLOSE,false).put("index.routing.allocation.include._name",primariesNode.getNode().name()).put(EnableAllocationDecider.INDEX_ROUTING_REBALANCE_ENABLE,EnableAllocationDecider.Rebalance.NONE)));
+  assertAcked(prepareCreate("test").setSettings(Settings.builder().put(IndexMetaData.SETTING_NUMBER_OF_REPLICAS,"0").put(IndexMetaData.SETTING_NUMBER_OF_SHARDS,between(1,4)).put(MockFSIndexStore.INDEX_CHECK_INDEX_ON_CLOSE_SETTING.getKey(),false).put("index.routing.allocation.include._name",primariesNode.getNode().getName()).put(EnableAllocationDecider.INDEX_ROUTING_REBALANCE_ENABLE_SETTING.getKey(),EnableAllocationDecider.Rebalance.NONE)));
   ensureGreen();
   IndexRequestBuilder[] builders=new IndexRequestBuilder[numDocs];
   for (int i=0; i < builders.length; i++) {
@@ -28,10 +28,10 @@
   assertHitCount(countResponse,numDocs);
   final boolean truncate=randomBoolean();
   for (  NodeStats dataNode : dataNodeStats) {
-    MockTransportService mockTransportService=((MockTransportService)internalCluster().getInstance(TransportService.class,dataNode.getNode().name()));
-    mockTransportService.addDelegate(internalCluster().getInstance(TransportService.class,unluckyNode.getNode().name()),new MockTransportService.DelegateTransport(mockTransportService.original()){
+    MockTransportService mockTransportService=((MockTransportService)internalCluster().getInstance(TransportService.class,dataNode.getNode().getName()));
+    mockTransportService.addDelegate(internalCluster().getInstance(TransportService.class,unluckyNode.getNode().getName()),new MockTransportService.DelegateTransport(mockTransportService.original()){
       @Override public void sendRequest(      DiscoveryNode node,      long requestId,      String action,      TransportRequest request,      TransportRequestOptions options) throws IOException, TransportException {
-        if (action.equals(RecoveryTarget.Actions.FILE_CHUNK)) {
+        if (action.equals(RecoveryTargetService.Actions.FILE_CHUNK)) {
           RecoveryFileChunkRequest req=(RecoveryFileChunkRequest)request;
           if (truncate && req.length() > 1) {
             BytesArray array=new BytesArray(req.content().array(),req.content().arrayOffset(),(int)req.length() - 1);

@@ -1,53 +1,46 @@
 {
-  final ClusterState clusterState=clusterService.state();
-  clusterState.blocks().globalBlockedRaiseException(ClusterBlockLevel.READ);
-  final List<Object> percolateRequests=new ArrayList<>(request.requests().size());
-  final IntArrayList getRequestSlots=new IntArrayList();
-  List<GetRequest> existingDocsRequests=new ArrayList<>();
-  for (int slot=0; slot < request.requests().size(); slot++) {
-    PercolateRequest percolateRequest=request.requests().get(slot);
-    percolateRequest.startTime=System.currentTimeMillis();
-    percolateRequests.add(percolateRequest);
-    if (percolateRequest.getRequest() != null) {
-      existingDocsRequests.add(percolateRequest.getRequest());
-      getRequestSlots.add(slot);
+  List<Tuple<Integer,GetRequest>> getRequests=new ArrayList<>();
+  for (int i=0; i < request.requests().size(); i++) {
+    GetRequest getRequest=request.requests().get(i).getRequest();
+    if (getRequest != null) {
+      getRequests.add(new Tuple<>(i,getRequest));
     }
   }
-  if (!existingDocsRequests.isEmpty()) {
-    final MultiGetRequest multiGetRequest=new MultiGetRequest(request);
-    for (    GetRequest getRequest : existingDocsRequests) {
-      multiGetRequest.add(new MultiGetRequest.Item(getRequest.index(),getRequest.type(),getRequest.id()).routing(getRequest.routing()));
-    }
-    multiGetAction.execute(multiGetRequest,new ActionListener<MultiGetResponse>(){
-      @Override public void onResponse(      MultiGetResponse multiGetItemResponses){
-        for (int i=0; i < multiGetItemResponses.getResponses().length; i++) {
-          MultiGetItemResponse itemResponse=multiGetItemResponses.getResponses()[i];
-          int slot=getRequestSlots.get(i);
-          if (!itemResponse.isFailed()) {
-            GetResponse getResponse=itemResponse.getResponse();
-            if (getResponse.isExists()) {
-              PercolateRequest originalRequest=(PercolateRequest)percolateRequests.get(slot);
-              percolateRequests.set(slot,new PercolateRequest(originalRequest,getResponse.getSourceAsBytesRef()));
-            }
+  if (getRequests.isEmpty()) {
+    innerDoExecute(request,listener,Collections.emptyMap(),new HashMap<>());
+  }
  else {
-              logger.trace("mpercolate existing doc, item[{}] doesn't exist",slot);
-              percolateRequests.set(slot,new DocumentMissingException(null,getResponse.getType(),getResponse.getId()));
-            }
+    MultiGetRequest multiGetRequest=new MultiGetRequest();
+    for (    Tuple<Integer,GetRequest> tuple : getRequests) {
+      GetRequest getRequest=tuple.v2();
+      multiGetRequest.add(new MultiGetRequest.Item(getRequest.index(),getRequest.type(),getRequest.id()));
+    }
+    client.multiGet(multiGetRequest,new ActionListener<MultiGetResponse>(){
+      @Override public void onResponse(      MultiGetResponse response){
+        Map<Integer,BytesReference> getResponseSources=new HashMap<>(response.getResponses().length);
+        Map<Integer,MultiPercolateResponse.Item> preFailures=new HashMap<>();
+        for (int i=0; i < response.getResponses().length; i++) {
+          MultiGetItemResponse itemResponse=response.getResponses()[i];
+          int originalSlot=getRequests.get(i).v1();
+          if (itemResponse.isFailed()) {
+            preFailures.put(originalSlot,new MultiPercolateResponse.Item(itemResponse.getFailure().getFailure()));
           }
  else {
-            logger.trace("mpercolate existing doc, item[{}] failure {}",slot,itemResponse.getFailure());
-            percolateRequests.set(slot,itemResponse.getFailure());
+            if (itemResponse.getResponse().isExists()) {
+              getResponseSources.put(originalSlot,itemResponse.getResponse().getSourceAsBytesRef());
+            }
+ else {
+              GetRequest getRequest=getRequests.get(i).v2();
+              preFailures.put(originalSlot,new MultiPercolateResponse.Item(new ResourceNotFoundException("percolate document [{}/{}/{}] doesn't exist",getRequest.index(),getRequest.type(),getRequest.id())));
+            }
           }
         }
-        new ASyncAction(request,percolateRequests,listener,clusterState).run();
+        innerDoExecute(request,listener,getResponseSources,preFailures);
       }
       @Override public void onFailure(      Throwable e){
         listener.onFailure(e);
       }
     }
 );
-  }
- else {
-    new ASyncAction(request,percolateRequests,listener,clusterState).run();
   }
 }

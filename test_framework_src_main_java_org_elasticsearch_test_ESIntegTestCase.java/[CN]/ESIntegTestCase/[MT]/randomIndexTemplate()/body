@@ -1,0 +1,41 @@
+{
+  if (cluster().size() > 0) {
+    Settings.Builder randomSettingsBuilder=setRandomIndexSettings(random(),Settings.builder());
+    if (isInternalCluster()) {
+      randomSettingsBuilder.put(INDEX_TEST_SEED_SETTING.getKey(),random().nextLong());
+    }
+    randomSettingsBuilder.put(SETTING_NUMBER_OF_SHARDS,numberOfShards()).put(SETTING_NUMBER_OF_REPLICAS,numberOfReplicas());
+    SuppressCodecs annotation=getClass().getAnnotation(SuppressCodecs.class);
+    if (annotation != null && annotation.value().length == 1 && "*".equals(annotation.value()[0])) {
+      randomSettingsBuilder.put("index.codec",randomFrom(CodecService.DEFAULT_CODEC,CodecService.BEST_COMPRESSION_CODEC));
+    }
+ else {
+      randomSettingsBuilder.put("index.codec",CodecService.LUCENE_DEFAULT_CODEC);
+    }
+    XContentBuilder mappings=null;
+    if (frequently() && randomDynamicTemplates()) {
+      mappings=XContentFactory.jsonBuilder().startObject().startObject("_default_");
+      if (randomBoolean()) {
+        mappings.startObject(TimestampFieldMapper.NAME).field("enabled",randomBoolean());
+        mappings.endObject();
+      }
+      mappings.endObject().endObject();
+    }
+    for (    String setting : randomSettingsBuilder.internalMap().keySet()) {
+      assertThat("non index. prefix setting set on index template, its a node setting...",setting,startsWith("index."));
+    }
+    randomSettingsBuilder.put(UnassignedInfo.INDEX_DELAYED_NODE_LEFT_TIMEOUT_SETTING.getKey(),0);
+    if (randomBoolean()) {
+      randomSettingsBuilder.put(IndexModule.INDEX_QUERY_CACHE_ENABLED_SETTING.getKey(),randomBoolean());
+    }
+    if (randomBoolean()) {
+      randomSettingsBuilder.put(IndexModule.INDEX_QUERY_CACHE_EVERYTHING_SETTING.getKey(),randomBoolean());
+    }
+    PutIndexTemplateRequestBuilder putTemplate=client().admin().indices().preparePutTemplate("random_index_template").setTemplate("*").setOrder(0).setSettings(randomSettingsBuilder);
+    if (mappings != null) {
+      logger.info("test using _default_ mappings: [{}]",mappings.bytes().toUtf8());
+      putTemplate.addMapping("_default_",mappings);
+    }
+    assertAcked(putTemplate.execute().actionGet());
+  }
+}

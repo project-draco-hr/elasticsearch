@@ -1,0 +1,27 @@
+{
+  try (ReleasableLock lock=readLock.acquire()){
+    ensureOpen();
+    final long versionMapBytes=versionMap.ramBytesUsedForRefresh();
+    final long indexingBufferBytes=indexWriter.ramBytesUsed();
+    final boolean useRefresh=versionMapRefreshPending.get() || (indexingBufferBytes / 4 < versionMapBytes);
+    if (useRefresh) {
+      logger.debug("use refresh to write indexing buffer (heap size=[{}]), to also clear version map (heap size=[{}])",new ByteSizeValue(indexingBufferBytes),new ByteSizeValue(versionMapBytes));
+      refresh("write indexing buffer");
+    }
+ else {
+      logger.debug("use IndexWriter.flush to write indexing buffer (heap size=[{}]) since version map is small (heap size=[{}])",new ByteSizeValue(indexingBufferBytes),new ByteSizeValue(versionMapBytes));
+      indexWriter.flush();
+    }
+  }
+ catch (  AlreadyClosedException e) {
+    ensureOpen();
+    maybeFailEngine("writeIndexingBuffer",e);
+  }
+catch (  EngineClosedException e) {
+    throw e;
+  }
+catch (  Throwable t) {
+    failEngine("writeIndexingBuffer failed",t);
+    throw new RefreshFailedEngineException(shardId,t);
+  }
+}

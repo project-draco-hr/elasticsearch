@@ -1,0 +1,170 @@
+{
+  if (source == null) {
+    return;
+  }
+  QueryShardContext queryShardContext=context.getQueryShardContext();
+  context.from(source.from());
+  context.size(source.size());
+  ObjectFloatHashMap<String> indexBoostMap=source.indexBoost();
+  if (indexBoostMap != null) {
+    Float indexBoost=indexBoostMap.get(context.shardTarget().index());
+    if (indexBoost != null) {
+      context.queryBoost(indexBoost);
+    }
+  }
+  Map<String,InnerHitBuilder> innerHitBuilders=new HashMap<>();
+  if (source.query() != null) {
+    InnerHitBuilder.extractInnerHits(source.query(),innerHitBuilders);
+    context.parsedQuery(queryShardContext.toQuery(source.query()));
+  }
+  if (source.postFilter() != null) {
+    InnerHitBuilder.extractInnerHits(source.postFilter(),innerHitBuilders);
+    context.parsedPostFilter(queryShardContext.toQuery(source.postFilter()));
+  }
+  if (innerHitBuilders.size() > 0) {
+    for (    Map.Entry<String,InnerHitBuilder> entry : innerHitBuilders.entrySet()) {
+      try {
+        entry.getValue().build(context,context.innerHits());
+      }
+ catch (      IOException e) {
+        throw new SearchContextException(context,"failed to build inner_hits",e);
+      }
+    }
+  }
+  if (source.sorts() != null) {
+    try {
+      Optional<Sort> optionalSort=SortBuilder.buildSort(source.sorts(),context.getQueryShardContext());
+      if (optionalSort.isPresent()) {
+        context.sort(optionalSort.get());
+      }
+    }
+ catch (    IOException e) {
+      throw new SearchContextException(context,"failed to create sort elements",e);
+    }
+  }
+  context.trackScores(source.trackScores());
+  if (source.minScore() != null) {
+    context.minimumScore(source.minScore());
+  }
+  if (source.profile()) {
+    context.setProfilers(new Profilers(context.searcher()));
+  }
+  context.timeoutInMillis(source.timeoutInMillis());
+  context.terminateAfter(source.terminateAfter());
+  if (source.aggregations() != null) {
+    try {
+      AggregationContext aggContext=new AggregationContext(context);
+      AggregatorFactories factories=source.aggregations().build(aggContext,null);
+      factories.validate();
+      context.aggregations(new SearchContextAggregations(factories));
+    }
+ catch (    IOException e) {
+      throw new AggregationInitializationException("Failed to create aggregators",e);
+    }
+  }
+  if (source.suggest() != null) {
+    try {
+      context.suggest(source.suggest().build(queryShardContext));
+    }
+ catch (    IOException e) {
+      throw new SearchContextException(context,"failed to create SuggestionSearchContext",e);
+    }
+  }
+  if (source.rescores() != null) {
+    try {
+      for (      RescoreBuilder<?> rescore : source.rescores()) {
+        context.addRescore(rescore.build(queryShardContext));
+      }
+    }
+ catch (    IOException e) {
+      throw new SearchContextException(context,"failed to create RescoreSearchContext",e);
+    }
+  }
+  if (source.fields() != null) {
+    context.fieldNames().addAll(source.fields());
+  }
+  if (source.explain() != null) {
+    context.explain(source.explain());
+  }
+  if (source.fetchSource() != null) {
+    context.fetchSourceContext(source.fetchSource());
+  }
+  if (source.fieldDataFields() != null) {
+    FieldDataFieldsContext fieldDataFieldsContext=context.getFetchSubPhaseContext(FieldDataFieldsFetchSubPhase.CONTEXT_FACTORY);
+    for (    String field : source.fieldDataFields()) {
+      fieldDataFieldsContext.add(new FieldDataField(field));
+    }
+    fieldDataFieldsContext.setHitExecutionNeeded(true);
+  }
+  if (source.highlighter() != null) {
+    HighlightBuilder highlightBuilder=source.highlighter();
+    try {
+      context.highlight(highlightBuilder.build(queryShardContext));
+    }
+ catch (    IOException e) {
+      throw new SearchContextException(context,"failed to create SearchContextHighlighter",e);
+    }
+  }
+  if (source.scriptFields() != null) {
+    for (    org.elasticsearch.search.builder.SearchSourceBuilder.ScriptField field : source.scriptFields()) {
+      SearchScript searchScript=context.scriptService().search(context.lookup(),field.script(),ScriptContext.Standard.SEARCH,Collections.emptyMap(),context.getQueryShardContext().getClusterState());
+      context.scriptFields().add(new ScriptField(field.fieldName(),searchScript,field.ignoreFailure()));
+    }
+  }
+  if (source.ext() != null) {
+    XContentParser extParser=null;
+    try {
+      extParser=XContentFactory.xContent(source.ext()).createParser(source.ext());
+      XContentParser.Token token=extParser.nextToken();
+      String currentFieldName=null;
+      while ((token=extParser.nextToken()) != XContentParser.Token.END_OBJECT) {
+        if (token == XContentParser.Token.FIELD_NAME) {
+          currentFieldName=extParser.currentName();
+        }
+ else {
+          SearchParseElement parseElement=this.elementParsers.get(currentFieldName);
+          if (parseElement == null) {
+            if (currentFieldName != null && currentFieldName.equals("suggest")) {
+              throw new SearchParseException(context,"suggest is not supported in [ext], please use SearchSourceBuilder#suggest(SuggestBuilder) instead",extParser.getTokenLocation());
+            }
+            throw new SearchParseException(context,"Unknown element [" + currentFieldName + "] in [ext]",extParser.getTokenLocation());
+          }
+ else {
+            parseElement.parse(extParser,context);
+          }
+        }
+      }
+    }
+ catch (    Exception e) {
+      String sSource="_na_";
+      try {
+        sSource=source.toString();
+      }
+ catch (      Throwable e1) {
+      }
+      XContentLocation location=extParser != null ? extParser.getTokenLocation() : null;
+      throw new SearchParseException(context,"failed to parse ext source [" + sSource + "]",location,e);
+    }
+ finally {
+      if (extParser != null) {
+        extParser.close();
+      }
+    }
+  }
+  if (source.version() != null) {
+    context.version(source.version());
+  }
+  if (source.stats() != null) {
+    context.groupStats(source.stats());
+  }
+  if (source.searchAfter() != null && source.searchAfter().length > 0) {
+    if (context.scrollContext() != null) {
+      throw new SearchContextException(context,"`search_after` cannot be used in a scroll context.");
+    }
+    if (context.from() > 0) {
+      throw new SearchContextException(context,"`from` parameter must be set to 0 when `search_after` is used.");
+    }
+    FieldDoc fieldDoc=SearchAfterBuilder.buildFieldDoc(context.sort(),source.searchAfter());
+    context.searchAfter(fieldDoc);
+  }
+}

@@ -9,14 +9,15 @@
   logger.info("--> slowing down recoveries");
   slowDownRecovery(shardSize);
   logger.info("--> move shard from: {} to: {}",nodeA,nodeB);
-  client().admin().cluster().prepareReroute().add(new MoveAllocationCommand(new ShardId(INDEX_NAME,0),nodeA,nodeB)).execute().actionGet().getState();
+  client().admin().cluster().prepareReroute().add(new MoveAllocationCommand(INDEX_NAME,0,nodeA,nodeB)).execute().actionGet().getState();
   logger.info("--> waiting for recovery to start both on source and target");
+  final Index index=resolveIndex(INDEX_NAME);
   assertBusy(new Runnable(){
     @Override public void run(){
       IndicesService indicesService=internalCluster().getInstance(IndicesService.class,nodeA);
-      assertThat(indicesService.indexServiceSafe(INDEX_NAME).getShard(0).recoveryStats().currentAsSource(),equalTo(1));
+      assertThat(indicesService.indexServiceSafe(index).getShard(0).recoveryStats().currentAsSource(),equalTo(1));
       indicesService=internalCluster().getInstance(IndicesService.class,nodeB);
-      assertThat(indicesService.indexServiceSafe(INDEX_NAME).getShard(0).recoveryStats().currentAsTarget(),equalTo(1));
+      assertThat(indicesService.indexServiceSafe(index).getShard(0).recoveryStats().currentAsTarget(),equalTo(1));
     }
   }
 );
@@ -29,7 +30,7 @@
   assertThat(nodeBRecoveryStates.size(),equalTo(1));
   assertRecoveryState(nodeARecoveryStates.get(0),0,Type.STORE,Stage.DONE,nodeA,nodeA,false);
   validateIndexRecoveryState(nodeARecoveryStates.get(0).getIndex());
-  assertOnGoingRecoveryState(nodeBRecoveryStates.get(0),0,Type.RELOCATION,nodeA,nodeB,false);
+  assertOnGoingRecoveryState(nodeBRecoveryStates.get(0),0,Type.PRIMARY_RELOCATION,nodeA,nodeB,false);
   validateIndexRecoveryState(nodeBRecoveryStates.get(0).getIndex());
   logger.info("--> request node recovery stats");
   NodesStatsResponse statsResponse=client().admin().cluster().prepareNodesStats().clear().setIndices(new CommonStatsFlags(CommonStatsFlags.Flag.Recovery)).get();
@@ -37,12 +38,12 @@
   long nodeBThrottling=Long.MAX_VALUE;
   for (  NodeStats nodeStats : statsResponse.getNodes()) {
     final RecoveryStats recoveryStats=nodeStats.getIndices().getRecoveryStats();
-    if (nodeStats.getNode().name().equals(nodeA)) {
+    if (nodeStats.getNode().getName().equals(nodeA)) {
       assertThat("node A should have ongoing recovery as source",recoveryStats.currentAsSource(),equalTo(1));
       assertThat("node A should not have ongoing recovery as target",recoveryStats.currentAsTarget(),equalTo(0));
       nodeAThrottling=recoveryStats.throttleTime().millis();
     }
-    if (nodeStats.getNode().name().equals(nodeB)) {
+    if (nodeStats.getNode().getName().equals(nodeB)) {
       assertThat("node B should not have ongoing recovery as source",recoveryStats.currentAsSource(),equalTo(0));
       assertThat("node B should have ongoing recovery as target",recoveryStats.currentAsTarget(),equalTo(1));
       nodeBThrottling=recoveryStats.throttleTime().millis();
@@ -57,10 +58,10 @@
       assertThat(statsResponse.getNodes(),arrayWithSize(2));
       for (      NodeStats nodeStats : statsResponse.getNodes()) {
         final RecoveryStats recoveryStats=nodeStats.getIndices().getRecoveryStats();
-        if (nodeStats.getNode().name().equals(nodeA)) {
+        if (nodeStats.getNode().getName().equals(nodeA)) {
           assertThat("node A throttling should increase",recoveryStats.throttleTime().millis(),greaterThan(finalNodeAThrottling));
         }
-        if (nodeStats.getNode().name().equals(nodeB)) {
+        if (nodeStats.getNode().getName().equals(nodeB)) {
           assertThat("node B throttling should increase",recoveryStats.throttleTime().millis(),greaterThan(finalNodeBThrottling));
         }
       }
@@ -73,7 +74,7 @@
   response=client().admin().indices().prepareRecoveries(INDEX_NAME).execute().actionGet();
   recoveryStates=response.shardRecoveryStates().get(INDEX_NAME);
   assertThat(recoveryStates.size(),equalTo(1));
-  assertRecoveryState(recoveryStates.get(0),0,Type.RELOCATION,Stage.DONE,nodeA,nodeB,false);
+  assertRecoveryState(recoveryStates.get(0),0,Type.PRIMARY_RELOCATION,Stage.DONE,nodeA,nodeB,false);
   validateIndexRecoveryState(recoveryStates.get(0).getIndex());
   statsResponse=client().admin().cluster().prepareNodesStats().clear().setIndices(new CommonStatsFlags(CommonStatsFlags.Flag.Recovery)).get();
   assertThat(statsResponse.getNodes(),arrayWithSize(2));
@@ -81,15 +82,15 @@
     final RecoveryStats recoveryStats=nodeStats.getIndices().getRecoveryStats();
     assertThat(recoveryStats.currentAsSource(),equalTo(0));
     assertThat(recoveryStats.currentAsTarget(),equalTo(0));
-    if (nodeStats.getNode().name().equals(nodeA)) {
-      assertThat("node A throttling should be >0",recoveryStats.throttleTime().millis(),greaterThan(0l));
+    if (nodeStats.getNode().getName().equals(nodeA)) {
+      assertThat("node A throttling should be >0",recoveryStats.throttleTime().millis(),greaterThan(0L));
     }
-    if (nodeStats.getNode().name().equals(nodeB)) {
-      assertThat("node B throttling should be >0 ",recoveryStats.throttleTime().millis(),greaterThan(0l));
+    if (nodeStats.getNode().getName().equals(nodeB)) {
+      assertThat("node B throttling should be >0 ",recoveryStats.throttleTime().millis(),greaterThan(0L));
     }
   }
   logger.info("--> bump replica count");
-  client().admin().indices().prepareUpdateSettings(INDEX_NAME).setSettings(settingsBuilder().put("number_of_replicas",1)).execute().actionGet();
+  client().admin().indices().prepareUpdateSettings(INDEX_NAME).setSettings(Settings.builder().put("number_of_replicas",1)).execute().actionGet();
   ensureGreen();
   statsResponse=client().admin().cluster().prepareNodesStats().clear().setIndices(new CommonStatsFlags(CommonStatsFlags.Flag.Recovery)).get();
   assertThat(statsResponse.getNodes(),arrayWithSize(2));
@@ -97,11 +98,11 @@
     final RecoveryStats recoveryStats=nodeStats.getIndices().getRecoveryStats();
     assertThat(recoveryStats.currentAsSource(),equalTo(0));
     assertThat(recoveryStats.currentAsTarget(),equalTo(0));
-    if (nodeStats.getNode().name().equals(nodeA)) {
-      assertThat("node A throttling should be >0",recoveryStats.throttleTime().millis(),greaterThan(0l));
+    if (nodeStats.getNode().getName().equals(nodeA)) {
+      assertThat("node A throttling should be >0",recoveryStats.throttleTime().millis(),greaterThan(0L));
     }
-    if (nodeStats.getNode().name().equals(nodeB)) {
-      assertThat("node B throttling should be >0 ",recoveryStats.throttleTime().millis(),greaterThan(0l));
+    if (nodeStats.getNode().getName().equals(nodeB)) {
+      assertThat("node B throttling should be >0 ",recoveryStats.throttleTime().millis(),greaterThan(0L));
     }
   }
   logger.info("--> start node C");
@@ -110,7 +111,7 @@
   logger.info("--> slowing down recoveries");
   slowDownRecovery(shardSize);
   logger.info("--> move replica shard from: {} to: {}",nodeA,nodeC);
-  client().admin().cluster().prepareReroute().add(new MoveAllocationCommand(new ShardId(INDEX_NAME,0),nodeA,nodeC)).execute().actionGet().getState();
+  client().admin().cluster().prepareReroute().add(new MoveAllocationCommand(INDEX_NAME,0,nodeA,nodeC)).execute().actionGet().getState();
   response=client().admin().indices().prepareRecoveries(INDEX_NAME).execute().actionGet();
   recoveryStates=response.shardRecoveryStates().get(INDEX_NAME);
   nodeARecoveryStates=findRecoveriesForTargetNode(nodeA,recoveryStates);
@@ -121,7 +122,7 @@
   assertThat(nodeCRecoveryStates.size(),equalTo(1));
   assertRecoveryState(nodeARecoveryStates.get(0),0,Type.REPLICA,Stage.DONE,nodeB,nodeA,false);
   validateIndexRecoveryState(nodeARecoveryStates.get(0).getIndex());
-  assertRecoveryState(nodeBRecoveryStates.get(0),0,Type.RELOCATION,Stage.DONE,nodeA,nodeB,false);
+  assertRecoveryState(nodeBRecoveryStates.get(0),0,Type.PRIMARY_RELOCATION,Stage.DONE,nodeA,nodeB,false);
   validateIndexRecoveryState(nodeBRecoveryStates.get(0).getIndex());
   assertOnGoingRecoveryState(nodeCRecoveryStates.get(0),0,Type.REPLICA,nodeB,nodeC,false);
   validateIndexRecoveryState(nodeCRecoveryStates.get(0).getIndex());
@@ -136,7 +137,7 @@
   assertThat(nodeBRecoveryStates.size(),equalTo(1));
   nodeCRecoveryStates=findRecoveriesForTargetNode(nodeC,recoveryStates);
   assertThat(nodeCRecoveryStates.size(),equalTo(1));
-  assertRecoveryState(nodeBRecoveryStates.get(0),0,Type.RELOCATION,Stage.DONE,nodeA,nodeB,false);
+  assertRecoveryState(nodeBRecoveryStates.get(0),0,Type.PRIMARY_RELOCATION,Stage.DONE,nodeA,nodeB,false);
   validateIndexRecoveryState(nodeBRecoveryStates.get(0).getIndex());
   assertRecoveryState(nodeCRecoveryStates.get(0),0,Type.REPLICA,Stage.DONE,nodeB,nodeC,false);
   validateIndexRecoveryState(nodeCRecoveryStates.get(0).getIndex());

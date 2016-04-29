@@ -1,16 +1,16 @@
 {
-  createIndex("test");
+  prepareCreate(INDEX_NAME).addMapping(TYPE_NAME,"query","type=percolator").get();
   ensureGreen();
-  NumShards test=getNumShards("test");
   int numQueries=randomIntBetween(50,100);
   logger.info("--> register a queries");
   for (int i=0; i < numQueries; i++) {
-    client().prepareIndex("test",PercolatorService.TYPE_NAME,Integer.toString(i)).setSource(jsonBuilder().startObject().field("query",matchAllQuery()).endObject()).execute().actionGet();
+    client().prepareIndex(INDEX_NAME,TYPE_NAME,Integer.toString(i)).setSource(jsonBuilder().startObject().field("query",matchAllQuery()).endObject()).execute().actionGet();
   }
+  refresh();
   MultiPercolateRequestBuilder builder=client().prepareMultiPercolate();
   int numPercolateRequest=randomIntBetween(50,100);
   for (int i=0; i < numPercolateRequest; i++) {
-    builder.add(client().preparePercolate().setIndices("test").setDocumentType("type").setPercolateDoc(docBuilder().setDoc(jsonBuilder().startObject().field("field","a").endObject())));
+    builder.add(client().preparePercolate().setIndices(INDEX_NAME).setDocumentType("type").setSize(numQueries).setPercolateDoc(docBuilder().setDoc(jsonBuilder().startObject().field("field","a").endObject())));
   }
   MultiPercolateResponse response=builder.execute().actionGet();
   assertThat(response.items().length,equalTo(numPercolateRequest));
@@ -21,24 +21,19 @@
   }
   builder=client().prepareMultiPercolate();
   for (int i=0; i < numPercolateRequest; i++) {
-    builder.add(client().preparePercolate().setIndices("test").setDocumentType("type").setSource("illegal json"));
+    builder.add(client().preparePercolate().setIndices(INDEX_NAME).setDocumentType("type").setSource("illegal json"));
   }
   response=builder.execute().actionGet();
   assertThat(response.items().length,equalTo(numPercolateRequest));
   for (  MultiPercolateResponse.Item item : response) {
-    assertThat(item.isFailure(),equalTo(false));
-    assertThat(item.getResponse().getSuccessfulShards(),equalTo(0));
-    assertThat(item.getResponse().getShardFailures().length,equalTo(test.numPrimaries));
-    for (    ShardOperationFailedException shardFailure : item.getResponse().getShardFailures()) {
-      assertThat(shardFailure.reason(),containsString("Failed to derive xcontent"));
-      assertThat(shardFailure.status().getStatus(),equalTo(400));
-    }
+    assertThat(item.isFailure(),equalTo(true));
+    assertThat(item.getFailure(),notNullValue());
   }
   builder=client().prepareMultiPercolate();
   for (int i=0; i < numPercolateRequest; i++) {
-    builder.add(client().preparePercolate().setIndices("test").setDocumentType("type").setSource("illegal json"));
+    builder.add(client().preparePercolate().setIndices(INDEX_NAME).setDocumentType("type").setSource("illegal json"));
   }
-  builder.add(client().preparePercolate().setIndices("test").setDocumentType("type").setPercolateDoc(docBuilder().setDoc(jsonBuilder().startObject().field("field","a").endObject())));
+  builder.add(client().preparePercolate().setSize(numQueries).setIndices(INDEX_NAME).setDocumentType("type").setPercolateDoc(docBuilder().setDoc(jsonBuilder().startObject().field("field","a").endObject())));
   response=builder.execute().actionGet();
   assertThat(response.items().length,equalTo(numPercolateRequest + 1));
   assertThat(response.items()[numPercolateRequest].isFailure(),equalTo(false));

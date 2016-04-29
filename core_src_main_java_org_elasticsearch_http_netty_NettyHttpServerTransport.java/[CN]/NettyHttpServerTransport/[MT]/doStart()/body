@@ -7,53 +7,17 @@
     serverBootstrap=new ServerBootstrap(new NioServerSocketChannelFactory(Executors.newCachedThreadPool(daemonThreadFactory(settings,"http_server_boss")),Executors.newCachedThreadPool(daemonThreadFactory(settings,"http_server_worker")),workerCount));
   }
   serverBootstrap.setPipelineFactory(configureServerChannelPipelineFactory());
-  if (!"default".equals(tcpNoDelay)) {
-    serverBootstrap.setOption("child.tcpNoDelay",Booleans.parseBoolean(tcpNoDelay,null));
-  }
-  if (!"default".equals(tcpKeepAlive)) {
-    serverBootstrap.setOption("child.keepAlive",Booleans.parseBoolean(tcpKeepAlive,null));
-  }
-  if (tcpSendBufferSize != null && tcpSendBufferSize.bytes() > 0) {
+  serverBootstrap.setOption("child.tcpNoDelay",tcpNoDelay);
+  serverBootstrap.setOption("child.keepAlive",tcpKeepAlive);
+  if (tcpSendBufferSize.bytes() > 0) {
     serverBootstrap.setOption("child.sendBufferSize",tcpSendBufferSize.bytes());
   }
-  if (tcpReceiveBufferSize != null && tcpReceiveBufferSize.bytes() > 0) {
+  if (tcpReceiveBufferSize.bytes() > 0) {
     serverBootstrap.setOption("child.receiveBufferSize",tcpReceiveBufferSize.bytes());
   }
   serverBootstrap.setOption("receiveBufferSizePredictorFactory",receiveBufferSizePredictorFactory);
   serverBootstrap.setOption("child.receiveBufferSizePredictorFactory",receiveBufferSizePredictorFactory);
   serverBootstrap.setOption("reuseAddress",reuseAddress);
   serverBootstrap.setOption("child.reuseAddress",reuseAddress);
-  InetAddress hostAddresses[];
-  try {
-    hostAddresses=networkService.resolveBindHostAddresses(bindHosts);
-  }
- catch (  IOException e) {
-    throw new BindHttpException("Failed to resolve host [" + Arrays.toString(bindHosts) + "]",e);
-  }
-  List<InetSocketTransportAddress> boundAddresses=new ArrayList<>(hostAddresses.length);
-  for (  InetAddress address : hostAddresses) {
-    boundAddresses.add(bindAddress(address));
-  }
-  final InetAddress publishInetAddress;
-  try {
-    publishInetAddress=networkService.resolvePublishHostAddresses(publishHosts);
-  }
- catch (  Exception e) {
-    throw new BindTransportException("Failed to resolve publish address",e);
-  }
-  if (0 == publishPort) {
-    for (    InetSocketTransportAddress boundAddress : boundAddresses) {
-      InetAddress boundInetAddress=boundAddress.address().getAddress();
-      if (boundInetAddress.isAnyLocalAddress() || boundInetAddress.equals(publishInetAddress)) {
-        publishPort=boundAddress.getPort();
-        break;
-      }
-    }
-  }
-  if (0 == publishPort) {
-    throw new BindHttpException("Publish address [" + publishInetAddress + "] does not match any of the bound addresses ["+ boundAddresses+ "]");
-  }
-  final InetSocketAddress publishAddress=new InetSocketAddress(publishInetAddress,publishPort);
-  ;
-  this.boundAddress=new BoundTransportAddress(boundAddresses.toArray(new TransportAddress[boundAddresses.size()]),new InetSocketTransportAddress(publishAddress));
+  this.boundAddress=createBoundHttpAddress();
 }

@@ -1,0 +1,66 @@
+{
+  final boolean indexCreatedBeforeV2_0=context.indexVersionCreated().before(Version.V_2_0_0);
+  List<GeoPoint> localPoints=new ArrayList<GeoPoint>();
+  for (  GeoPoint geoPoint : this.points) {
+    localPoints.add(new GeoPoint(geoPoint));
+  }
+  if (!indexCreatedBeforeV2_0 && !ignoreMalformed) {
+    for (    GeoPoint point : localPoints) {
+      if (GeoUtils.isValidLatitude(point.lat()) == false) {
+        throw new ElasticsearchParseException("illegal latitude value [{}] for [GeoDistanceSort] for field [{}].",point.lat(),fieldName);
+      }
+      if (GeoUtils.isValidLongitude(point.lon()) == false) {
+        throw new ElasticsearchParseException("illegal longitude value [{}] for [GeoDistanceSort] for field [{}].",point.lon(),fieldName);
+      }
+    }
+  }
+  if (coerce) {
+    for (    GeoPoint point : localPoints) {
+      GeoUtils.normalizePoint(point,coerce,coerce);
+    }
+  }
+  boolean reverse=(order == SortOrder.DESC);
+  final MultiValueMode finalSortMode;
+  if (sortMode == null) {
+    finalSortMode=reverse ? MultiValueMode.MAX : MultiValueMode.MIN;
+  }
+ else {
+    finalSortMode=MultiValueMode.fromString(sortMode.toString());
+  }
+  MappedFieldType fieldType=context.fieldMapper(fieldName);
+  if (fieldType == null) {
+    throw new IllegalArgumentException("failed to find mapper for [" + fieldName + "] for geo distance based sort");
+  }
+  final IndexGeoPointFieldData geoIndexFieldData=context.getForField(fieldType);
+  final FixedSourceDistance[] distances=new FixedSourceDistance[localPoints.size()];
+  for (int i=0; i < localPoints.size(); i++) {
+    distances[i]=geoDistance.fixedSourceDistance(localPoints.get(i).lat(),localPoints.get(i).lon(),unit);
+  }
+  final Nested nested=resolveNested(context,nestedPath,nestedFilter);
+  IndexFieldData.XFieldComparatorSource geoDistanceComparatorSource=new IndexFieldData.XFieldComparatorSource(){
+    @Override public SortField.Type reducedType(){
+      return SortField.Type.DOUBLE;
+    }
+    @Override public FieldComparator<?> newComparator(    String fieldname,    int numHits,    int sortPos,    boolean reversed) throws IOException {
+      return new FieldComparator.DoubleComparator(numHits,null,null){
+        @Override protected NumericDocValues getNumericDocValues(        LeafReaderContext context,        String field) throws IOException {
+          final MultiGeoPointValues geoPointValues=geoIndexFieldData.load(context).getGeoPointValues();
+          final SortedNumericDoubleValues distanceValues=GeoDistance.distanceValues(geoPointValues,distances);
+          final NumericDoubleValues selectedValues;
+          if (nested == null) {
+            selectedValues=finalSortMode.select(distanceValues,Double.MAX_VALUE);
+          }
+ else {
+            final BitSet rootDocs=nested.rootDocs(context);
+            final DocIdSetIterator innerDocs=nested.innerDocs(context);
+            selectedValues=finalSortMode.select(distanceValues,Double.MAX_VALUE,rootDocs,innerDocs,context.reader().maxDoc());
+          }
+          return selectedValues.getRawDoubleValues();
+        }
+      }
+;
+    }
+  }
+;
+  return new SortField(fieldName,geoDistanceComparatorSource,reverse);
+}

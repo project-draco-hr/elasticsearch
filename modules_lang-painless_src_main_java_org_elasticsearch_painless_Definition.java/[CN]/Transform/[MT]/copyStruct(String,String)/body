@@ -1,0 +1,60 @@
+{
+  final Struct owner=structs.get(struct);
+  if (owner == null) {
+    throw new IllegalArgumentException("Owner struct [" + struct + "] not defined for copy.");
+  }
+  for (int count=0; count < children.length; ++count) {
+    final Struct child=structs.get(children[count]);
+    if (struct == null) {
+      throw new IllegalArgumentException("Child struct [" + children[count] + "]"+ " not defined for copy to owner struct ["+ owner.name+ "].");
+    }
+    try {
+      owner.clazz.asSubclass(child.clazz);
+    }
+ catch (    ClassCastException exception) {
+      throw new ClassCastException("Child struct [" + child.name + "]"+ " is not a super type of owner struct ["+ owner.name+ "] in copy.");
+    }
+    final boolean object=child.clazz.equals(Object.class) && java.lang.reflect.Modifier.isInterface(owner.clazz.getModifiers());
+    for (    final Method method : child.methods.values()) {
+      if (owner.methods.get(method.name) == null) {
+        final Class<?> clazz=object ? Object.class : owner.clazz;
+        java.lang.reflect.Method reflect;
+        MethodHandle handle;
+        try {
+          reflect=clazz.getMethod(method.method.getName(),method.reflect.getParameterTypes());
+        }
+ catch (        NoSuchMethodException exception) {
+          throw new IllegalArgumentException("Method [" + method.method.getName() + "] not found for"+ " class ["+ owner.clazz.getName()+ "] with arguments "+ Arrays.toString(method.reflect.getParameterTypes())+ ".");
+        }
+        try {
+          handle=MethodHandles.publicLookup().in(owner.clazz).findVirtual(owner.clazz,method.method.getName(),MethodType.methodType(method.reflect.getReturnType(),method.reflect.getParameterTypes()));
+        }
+ catch (        NoSuchMethodException|IllegalAccessException exception) {
+          throw new IllegalArgumentException("Method [" + method.method.getName() + "] not found for"+ " class ["+ owner.clazz.getName()+ "] with arguments "+ Arrays.toString(method.reflect.getParameterTypes())+ ".");
+        }
+        owner.methods.put(method.name,new Method(method.name,owner,method.rtn,method.arguments,method.method,reflect,handle));
+      }
+    }
+    for (    final Field field : child.members.values()) {
+      if (owner.members.get(field.name) == null) {
+        java.lang.reflect.Field reflect;
+        MethodHandle getter;
+        MethodHandle setter;
+        try {
+          reflect=owner.clazz.getField(field.reflect.getName());
+        }
+ catch (        NoSuchFieldException exception) {
+          throw new IllegalArgumentException("Field [" + field.reflect.getName() + "]"+ " not found for class ["+ owner.clazz.getName()+ "].");
+        }
+        try {
+          getter=MethodHandles.publicLookup().in(owner.clazz).findGetter(owner.clazz,field.name,field.type.clazz);
+          setter=MethodHandles.publicLookup().in(owner.clazz).findSetter(owner.clazz,field.name,field.type.clazz);
+        }
+ catch (        NoSuchFieldException|IllegalAccessException exception) {
+          throw new IllegalArgumentException("Getter/Setter [" + field.name + "]"+ " not found for class ["+ owner.clazz.getName()+ "].");
+        }
+        owner.members.put(field.name,new Field(field.name,owner,field.type,field.generic,reflect,getter,setter));
+      }
+    }
+  }
+}

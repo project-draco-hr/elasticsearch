@@ -1,5 +1,4 @@
 {
-  final ToXContent.Params params=ToXContent.EMPTY_PARAMS;
   final Path[] dirs=new Path[randomIntBetween(1,5)];
   int numStates=randomIntBetween(1,5);
   int numLegacy=randomIntBetween(0,numStates);
@@ -8,7 +7,7 @@
     meta.add(randomMeta());
   }
   Set<Path> corruptedFiles=new HashSet<>();
-  MetaDataStateFormat<MetaData> format=MetaStateService.globalStateFormat(randomFrom(XContentType.values()),params);
+  MetaDataStateFormat<MetaData> format=metaDataFormat(randomFrom(XContentType.values()));
   for (int i=0; i < dirs.length; i++) {
     dirs[i]=createTempDir();
     Files.createDirectories(dirs[i].resolve(MetaDataStateFormat.STATE_DIR_NAME));
@@ -21,7 +20,7 @@
  else {
         try (XContentBuilder xcontentBuilder=XContentFactory.contentBuilder(type,Files.newOutputStream(dirs[i].resolve(MetaDataStateFormat.STATE_DIR_NAME).resolve("global-" + j)))){
           xcontentBuilder.startObject();
-          MetaData.Builder.toXContent(meta.get(j),xcontentBuilder,params);
+          MetaData.Builder.toXContent(meta.get(j),xcontentBuilder,ToXContent.EMPTY_PARAMS);
           xcontentBuilder.endObject();
         }
        }
@@ -36,7 +35,7 @@
     }
   }
   List<Path> dirList=Arrays.asList(dirs);
-  Collections.shuffle(dirList,getRandom());
+  Collections.shuffle(dirList,random());
   MetaData loadedMetaData=format.loadLatestState(logger,dirList.toArray(new Path[0]));
   MetaData latestMetaData=meta.get(numStates - 1);
   assertThat(loadedMetaData.clusterUUID(),not(equalTo("_na_")));
@@ -44,12 +43,13 @@
   ImmutableOpenMap<String,IndexMetaData> indices=loadedMetaData.indices();
   assertThat(indices.size(),equalTo(latestMetaData.indices().size()));
   for (  IndexMetaData original : latestMetaData) {
-    IndexMetaData deserialized=indices.get(original.getIndex());
+    IndexMetaData deserialized=indices.get(original.getIndex().getName());
     assertThat(deserialized,notNullValue());
     assertThat(deserialized.getVersion(),equalTo(original.getVersion()));
     assertThat(deserialized.getNumberOfReplicas(),equalTo(original.getNumberOfReplicas()));
     assertThat(deserialized.getNumberOfShards(),equalTo(original.getNumberOfShards()));
   }
+  assertThat(loadedMetaData.indexGraveyard(),equalTo(latestMetaData.indexGraveyard()));
   if (numStates > numLegacy) {
     for (int i=0; i < dirs.length; i++) {
       Path file=dirs[i].resolve(MetaDataStateFormat.STATE_DIR_NAME).resolve("global-" + (numStates - 1) + ".st");
@@ -63,7 +63,7 @@
       fail("latest version can not be read");
     }
  catch (    ElasticsearchException ex) {
-      assertThat(ex.getCause(),instanceOf(CorruptStateException.class));
+      assertThat(ExceptionsHelper.unwrap(ex,CorruptStateException.class),notNullValue());
     }
   }
 }

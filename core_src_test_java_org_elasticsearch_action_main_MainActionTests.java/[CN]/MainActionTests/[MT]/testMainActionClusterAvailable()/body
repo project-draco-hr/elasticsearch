@@ -1,0 +1,34 @@
+{
+  final ClusterService clusterService=mock(ClusterService.class);
+  final ClusterName clusterName=new ClusterName("elasticsearch");
+  final Settings settings=Settings.builder().put("node.name","my-node").build();
+  final boolean available=randomBoolean();
+  ClusterBlocks blocks;
+  if (available) {
+    if (randomBoolean()) {
+      blocks=ClusterBlocks.EMPTY_CLUSTER_BLOCK;
+    }
+ else {
+      blocks=ClusterBlocks.builder().addGlobalBlock(new ClusterBlock(randomIntBetween(1,16),"test global block 400",randomBoolean(),randomBoolean(),RestStatus.BAD_REQUEST,ClusterBlockLevel.ALL)).build();
+    }
+  }
+ else {
+    blocks=ClusterBlocks.builder().addGlobalBlock(new ClusterBlock(randomIntBetween(1,16),"test global block 503",randomBoolean(),randomBoolean(),RestStatus.SERVICE_UNAVAILABLE,ClusterBlockLevel.ALL)).build();
+  }
+  ClusterState state=ClusterState.builder(clusterName).blocks(blocks).build();
+  when(clusterService.state()).thenReturn(state);
+  TransportMainAction action=new TransportMainAction(settings,mock(ThreadPool.class),mock(TransportService.class),mock(ActionFilters.class),mock(IndexNameExpressionResolver.class),clusterService,Version.CURRENT);
+  AtomicReference<MainResponse> responseRef=new AtomicReference<>();
+  action.doExecute(new MainRequest(),new ActionListener<MainResponse>(){
+    @Override public void onResponse(    MainResponse mainResponse){
+      responseRef.set(mainResponse);
+    }
+    @Override public void onFailure(    Throwable e){
+      logger.error("unexpected error",e);
+    }
+  }
+);
+  assertNotNull(responseRef.get());
+  assertEquals(available,responseRef.get().isAvailable());
+  verify(clusterService,times(1)).state();
+}

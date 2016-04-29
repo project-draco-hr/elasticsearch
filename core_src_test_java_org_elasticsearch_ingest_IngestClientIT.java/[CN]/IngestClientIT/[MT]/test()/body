@@ -1,0 +1,24 @@
+{
+  BytesReference source=jsonBuilder().startObject().field("description","my_pipeline").startArray("processors").startObject().startObject("test").endObject().endObject().endArray().endObject().bytes();
+  PutPipelineRequest putPipelineRequest=new PutPipelineRequest("_id",source);
+  client().admin().cluster().putPipeline(putPipelineRequest).get();
+  GetPipelineRequest getPipelineRequest=new GetPipelineRequest("_id");
+  GetPipelineResponse getResponse=client().admin().cluster().getPipeline(getPipelineRequest).get();
+  assertThat(getResponse.isFound(),is(true));
+  assertThat(getResponse.pipelines().size(),equalTo(1));
+  assertThat(getResponse.pipelines().get(0).getId(),equalTo("_id"));
+  client().prepareIndex("test","type","1").setPipeline("_id").setSource("field","value","fail",false).get();
+  Map<String,Object> doc=client().prepareGet("test","type","1").get().getSourceAsMap();
+  assertThat(doc.get("field"),equalTo("value"));
+  assertThat(doc.get("processed"),equalTo(true));
+  client().prepareBulk().add(client().prepareIndex("test","type","2").setSource("field","value2","fail",false).setPipeline("_id")).get();
+  doc=client().prepareGet("test","type","2").get().getSourceAsMap();
+  assertThat(doc.get("field"),equalTo("value2"));
+  assertThat(doc.get("processed"),equalTo(true));
+  DeletePipelineRequest deletePipelineRequest=new DeletePipelineRequest("_id");
+  WritePipelineResponse response=client().admin().cluster().deletePipeline(deletePipelineRequest).get();
+  assertThat(response.isAcknowledged(),is(true));
+  getResponse=client().admin().cluster().prepareGetPipeline("_id").get();
+  assertThat(getResponse.isFound(),is(false));
+  assertThat(getResponse.pipelines().size(),equalTo(0));
+}

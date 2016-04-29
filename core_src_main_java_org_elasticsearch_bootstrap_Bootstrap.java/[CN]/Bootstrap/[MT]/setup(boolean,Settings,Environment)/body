@@ -1,19 +1,26 @@
 {
-  initializeNatives(environment.tmpFile(),settings.getAsBoolean("bootstrap.mlockall",false),settings.getAsBoolean("bootstrap.seccomp",true),settings.getAsBoolean("bootstrap.ctrlhandler",true));
+  initializeNatives(environment.tmpFile(),BootstrapSettings.MLOCKALL_SETTING.get(settings),BootstrapSettings.SECCOMP_SETTING.get(settings),BootstrapSettings.CTRLHANDLER_SETTING.get(settings));
   initializeProbes();
   if (addShutdownHook) {
     Runtime.getRuntime().addShutdownHook(new Thread(){
       @Override public void run(){
-        if (node != null) {
-          node.close();
+        try {
+          IOUtils.close(node);
+        }
+ catch (        IOException ex) {
+          throw new ElasticsearchException("failed to stop node",ex);
         }
       }
     }
 );
   }
   JarHell.checkJarHell();
-  setupSecurity(settings,environment);
-  Settings nodeSettings=Settings.settingsBuilder().put(settings).put(InternalSettingsPreparer.IGNORE_SYSTEM_PROPERTIES_SETTING,true).build();
-  NodeBuilder nodeBuilder=NodeBuilder.nodeBuilder().settings(nodeSettings);
-  node=nodeBuilder.build();
+  Security.configure(environment,BootstrapSettings.SECURITY_FILTER_BAD_DEFAULTS_SETTING.get(settings));
+  Settings nodeSettings=Settings.builder().put(settings).put(InternalSettingsPreparer.IGNORE_SYSTEM_PROPERTIES_SETTING.getKey(),true).build();
+  node=new Node(nodeSettings){
+    @Override protected void validateNodeBeforeAcceptingRequests(    Settings settings,    BoundTransportAddress boundTransportAddress){
+      BootstrapCheck.check(settings,boundTransportAddress);
+    }
+  }
+;
 }

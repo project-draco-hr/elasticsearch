@@ -1,0 +1,42 @@
+{
+  this.mapperService=mapperService;
+  this.type=mapping.root().name();
+  this.typeText=new Text(this.type);
+  final IndexSettings indexSettings=mapperService.getIndexSettings();
+  this.mapping=mapping;
+  this.documentParser=new DocumentParser(indexSettings,mapperService.documentMapperParser(),this);
+  if (metadataMapper(ParentFieldMapper.class).active()) {
+    metadataMapper(RoutingFieldMapper.class).markAsRequired();
+  }
+  List<ObjectMapper> newObjectMappers=new ArrayList<>();
+  List<FieldMapper> newFieldMappers=new ArrayList<>();
+  for (  MetadataFieldMapper metadataMapper : this.mapping.metadataMappers) {
+    if (metadataMapper instanceof FieldMapper) {
+      newFieldMappers.add(metadataMapper);
+    }
+  }
+  MapperUtils.collect(this.mapping.root,newObjectMappers,newFieldMappers);
+  final AnalysisService analysisService=mapperService.analysisService();
+  this.fieldMappers=new DocumentFieldMappers(newFieldMappers,analysisService.defaultIndexAnalyzer(),analysisService.defaultSearchAnalyzer(),analysisService.defaultSearchQuoteAnalyzer());
+  Map<String,ObjectMapper> builder=new HashMap<>();
+  for (  ObjectMapper objectMapper : newObjectMappers) {
+    ObjectMapper previous=builder.put(objectMapper.fullPath(),objectMapper);
+    if (previous != null) {
+      throw new IllegalStateException("duplicate key " + objectMapper.fullPath() + " encountered");
+    }
+  }
+  boolean hasNestedObjects=false;
+  this.objectMappers=Collections.unmodifiableMap(builder);
+  for (  ObjectMapper objectMapper : newObjectMappers) {
+    if (objectMapper.nested().isNested()) {
+      hasNestedObjects=true;
+    }
+  }
+  this.hasNestedObjects=hasNestedObjects;
+  try {
+    mappingSource=new CompressedXContent(this,XContentType.JSON,ToXContent.EMPTY_PARAMS);
+  }
+ catch (  Exception e) {
+    throw new ElasticsearchGenerationException("failed to serialize source for type [" + type + "]",e);
+  }
+}

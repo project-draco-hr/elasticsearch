@@ -15,14 +15,14 @@
   indexRandom(true,indexRequestBuilders);
   int suggestionSize=randomIntBetween(1,numDocs);
   int numRequestedPayloadFields=randomIntBetween(2,numPayloadFields);
-  String[] payloadFields=new String[numRequestedPayloadFields];
+  List<String> payloadFields=new ArrayList<>(numRequestedPayloadFields);
   for (int i=0; i < numRequestedPayloadFields; i++) {
-    payloadFields[i]="test_field" + i;
+    payloadFields.add("test_field" + i + ".keyword");
   }
-  CompletionSuggestionBuilder prefix=SuggestBuilders.completionSuggestion("foo").field(FIELD).prefix("sugg").size(suggestionSize).payload(payloadFields);
-  SuggestResponse suggestResponse=client().prepareSuggest(INDEX).addSuggestion(prefix).execute().actionGet();
-  assertNoFailures(suggestResponse);
-  CompletionSuggestion completionSuggestion=suggestResponse.getSuggest().getSuggestion("foo");
+  CompletionSuggestionBuilder prefix=SuggestBuilders.completionSuggestion(FIELD).prefix("sugg").size(suggestionSize).payload(payloadFields);
+  SearchResponse searchResponse=client().prepareSearch(INDEX).suggest(new SuggestBuilder().addSuggestion("foo",prefix)).execute().actionGet();
+  assertNoFailures(searchResponse);
+  CompletionSuggestion completionSuggestion=searchResponse.getSuggest().getSuggestion("foo");
   CompletionSuggestion.Entry options=completionSuggestion.getEntries().get(0);
   assertThat(options.getOptions().size(),equalTo(suggestionSize));
   int id=numDocs;
@@ -30,7 +30,7 @@
     assertThat(option.getText().toString(),equalTo("suggestion" + id));
     assertThat(option.getPayload().size(),equalTo(numRequestedPayloadFields));
     for (int i=0; i < numRequestedPayloadFields; i++) {
-      List<Object> fieldValue=option.getPayload().get("test_field" + i);
+      List<Object> fieldValue=option.getPayload().get("test_field" + i + ".keyword");
       assertNotNull(fieldValue);
       assertThat(fieldValue.size(),equalTo(1));
       assertThat((String)fieldValue.get(0),equalTo(i + "value" + id));

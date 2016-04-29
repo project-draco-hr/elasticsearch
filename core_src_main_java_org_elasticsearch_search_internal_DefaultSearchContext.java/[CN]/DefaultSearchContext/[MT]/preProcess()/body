@@ -1,34 +1,32 @@
 {
+  if (hasOnlySuggest()) {
+    return;
+  }
   if (scrollContext == null) {
     long from=from() == -1 ? 0 : from();
     long size=size() == -1 ? 10 : size();
     long resultWindow=from + size;
-    int maxResultWindow=indexService.getIndexSettings().getSettings().getAsInt(MAX_RESULT_WINDOW,Defaults.MAX_RESULT_WINDOW);
+    int maxResultWindow=indexService.getIndexSettings().getMaxResultWindow();
     if (resultWindow > maxResultWindow) {
-      throw new QueryPhaseExecutionException(this,"Result window is too large, from + size must be less than or equal to: [" + maxResultWindow + "] but was ["+ resultWindow+ "]. See the scroll api for a more efficient way to request large data sets. "+ "This limit can be set by changing the ["+ DefaultSearchContext.MAX_RESULT_WINDOW+ "] index level parameter.");
+      throw new QueryPhaseExecutionException(this,"Result window is too large, from + size must be less than or equal to: [" + maxResultWindow + "] but was ["+ resultWindow+ "]. See the scroll api for a more efficient way to request large data sets. "+ "This limit can be set by changing the ["+ IndexSettings.MAX_RESULT_WINDOW_SETTING.getKey()+ "] index level setting.");
     }
   }
-  aliasFilter=indexService.aliasFilter(indexShard.getQueryShardContext(),request.filteringAliases());
+  if (rescore != null) {
+    int maxWindow=indexService.getIndexSettings().getMaxRescoreWindow();
+    for (    RescoreSearchContext rescoreContext : rescore) {
+      if (rescoreContext.window() > maxWindow) {
+        throw new QueryPhaseExecutionException(this,"Rescore window [" + rescoreContext.window() + "] is too large. It must "+ "be less than ["+ maxWindow+ "]. This prevents allocating massive heaps for storing the results to be "+ "rescored. This limit can be set by chaning the ["+ IndexSettings.MAX_RESCORE_WINDOW_SETTING.getKey()+ "] index level setting.");
+      }
+    }
+  }
+  aliasFilter=indexService.aliasFilter(queryShardContext,request.filteringAliases());
   if (query() == null) {
     parsedQuery(ParsedQuery.parsedMatchAllQuery());
   }
   if (queryBoost() != AbstractQueryBuilder.DEFAULT_BOOST) {
     parsedQuery(new ParsedQuery(new FunctionScoreQuery(query(),new WeightFactorFunction(queryBoost)),parsedQuery()));
   }
-  Query searchFilter=searchFilter(types());
-  if (searchFilter != null) {
-    if (Queries.isConstantMatchAllQuery(query())) {
-      Query q=new ConstantScoreQuery(searchFilter);
-      if (query().getBoost() != AbstractQueryBuilder.DEFAULT_BOOST) {
-        q=new BoostQuery(q,query().getBoost());
-      }
-      parsedQuery(new ParsedQuery(q,parsedQuery()));
-    }
- else {
-      BooleanQuery filtered=new BooleanQuery.Builder().add(query(),Occur.MUST).add(searchFilter,Occur.FILTER).build();
-      parsedQuery(new ParsedQuery(filtered,parsedQuery()));
-    }
-  }
+  filteredQuery(buildFilteredQuery());
   try {
     this.query=searcher().rewrite(this.query);
   }

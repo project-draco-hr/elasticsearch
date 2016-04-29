@@ -1,0 +1,43 @@
+{
+  final ClusterState state=clusterService.state();
+  final Index[] concreteIndices=indexNameExpressionResolver.concreteIndices(state,indicesOptions,aliasesOrIndices);
+  final Map<String,List<ShardsSyncedFlushResult>> results=ConcurrentCollections.newConcurrentMap();
+  int totalNumberOfShards=0;
+  int numberOfShards=0;
+  for (  Index index : concreteIndices) {
+    final IndexMetaData indexMetaData=state.metaData().getIndexSafe(index);
+    totalNumberOfShards+=indexMetaData.getTotalNumberOfShards();
+    numberOfShards+=indexMetaData.getNumberOfShards();
+    results.put(index.getName(),Collections.synchronizedList(new ArrayList<>()));
+  }
+  if (numberOfShards == 0) {
+    listener.onResponse(new SyncedFlushResponse(results));
+    return;
+  }
+  final int finalTotalNumberOfShards=totalNumberOfShards;
+  final CountDown countDown=new CountDown(numberOfShards);
+  for (  final Index concreteIndex : concreteIndices) {
+    final String index=concreteIndex.getName();
+    final IndexMetaData indexMetaData=state.metaData().getIndexSafe(concreteIndex);
+    final int indexNumberOfShards=indexMetaData.getNumberOfShards();
+    for (int shard=0; shard < indexNumberOfShards; shard++) {
+      final ShardId shardId=new ShardId(indexMetaData.getIndex(),shard);
+      attemptSyncedFlush(shardId,new ActionListener<ShardsSyncedFlushResult>(){
+        @Override public void onResponse(        ShardsSyncedFlushResult syncedFlushResult){
+          results.get(index).add(syncedFlushResult);
+          if (countDown.countDown()) {
+            listener.onResponse(new SyncedFlushResponse(results));
+          }
+        }
+        @Override public void onFailure(        Throwable e){
+          logger.debug("{} unexpected error while executing synced flush",shardId);
+          results.get(index).add(new ShardsSyncedFlushResult(shardId,finalTotalNumberOfShards,e.getMessage()));
+          if (countDown.countDown()) {
+            listener.onResponse(new SyncedFlushResponse(results));
+          }
+        }
+      }
+);
+    }
+  }
+}

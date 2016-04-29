@@ -89,35 +89,16 @@
   if (analyzer == null) {
     throw new IllegalArgumentException("failed to find analyzer");
   }
-  List<AnalyzeResponse.AnalyzeToken> tokens=new ArrayList<>();
-  int lastPosition=-1;
-  int lastOffset=0;
-  for (  String text : request.text()) {
-    try (TokenStream stream=analyzer.tokenStream(field,text)){
-      stream.reset();
-      CharTermAttribute term=stream.addAttribute(CharTermAttribute.class);
-      PositionIncrementAttribute posIncr=stream.addAttribute(PositionIncrementAttribute.class);
-      OffsetAttribute offset=stream.addAttribute(OffsetAttribute.class);
-      TypeAttribute type=stream.addAttribute(TypeAttribute.class);
-      while (stream.incrementToken()) {
-        int increment=posIncr.getPositionIncrement();
-        if (increment > 0) {
-          lastPosition=lastPosition + increment;
-        }
-        tokens.add(new AnalyzeResponse.AnalyzeToken(term.toString(),lastPosition,lastOffset + offset.startOffset(),lastOffset + offset.endOffset(),type.type()));
-      }
-      stream.end();
-      lastOffset+=offset.endOffset();
-      lastPosition+=posIncr.getPositionIncrement();
-      lastPosition+=analyzer.getPositionIncrementGap(field);
-      lastOffset+=analyzer.getOffsetGap(field);
-    }
- catch (    IOException e) {
-      throw new ElasticsearchException("failed to analyze",e);
-    }
+  List<AnalyzeResponse.AnalyzeToken> tokens=null;
+  DetailAnalyzeResponse detail=null;
+  if (request.explain()) {
+    detail=detailAnalyze(request,analyzer,field);
+  }
+ else {
+    tokens=simpleAnalyze(request,analyzer,field);
   }
   if (closeAnalyzer) {
     analyzer.close();
   }
-  return new AnalyzeResponse(tokens);
+  return new AnalyzeResponse(tokens,detail);
 }

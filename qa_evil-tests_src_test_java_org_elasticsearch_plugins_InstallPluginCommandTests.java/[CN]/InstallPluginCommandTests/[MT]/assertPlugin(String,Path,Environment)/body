@@ -1,0 +1,47 @@
+{
+  Path got=env.pluginsFile().resolve(name);
+  assertTrue("dir " + name + " exists",Files.exists(got));
+  if (isPosix) {
+    Set<PosixFilePermission> perms=Files.getPosixFilePermissions(got);
+    assertThat(perms,containsInAnyOrder(PosixFilePermission.OWNER_READ,PosixFilePermission.OWNER_WRITE,PosixFilePermission.OWNER_EXECUTE,PosixFilePermission.GROUP_READ,PosixFilePermission.GROUP_EXECUTE,PosixFilePermission.OTHERS_READ,PosixFilePermission.OTHERS_EXECUTE));
+  }
+  assertTrue("jar was copied",Files.exists(got.resolve("plugin.jar")));
+  assertFalse("bin was not copied",Files.exists(got.resolve("bin")));
+  assertFalse("config was not copied",Files.exists(got.resolve("config")));
+  if (Files.exists(original.resolve("bin"))) {
+    Path binDir=env.binFile().resolve(name);
+    assertTrue("bin dir exists",Files.exists(binDir));
+    assertTrue("bin is a dir",Files.isDirectory(binDir));
+    PosixFileAttributes binAttributes=null;
+    if (isPosix) {
+      binAttributes=Files.readAttributes(env.binFile(),PosixFileAttributes.class);
+    }
+    try (DirectoryStream<Path> stream=Files.newDirectoryStream(binDir)){
+      for (      Path file : stream) {
+        assertFalse("not a dir",Files.isDirectory(file));
+        if (isPosix) {
+          PosixFileAttributes attributes=Files.readAttributes(file,PosixFileAttributes.class);
+          assertEquals(InstallPluginCommand.DIR_AND_EXECUTABLE_PERMS,attributes.permissions());
+        }
+      }
+    }
+   }
+  if (Files.exists(original.resolve("config"))) {
+    Path configDir=env.configFile().resolve(name);
+    assertTrue("config dir exists",Files.exists(configDir));
+    assertTrue("config is a dir",Files.isDirectory(configDir));
+    if (isPosix) {
+      Path configRoot=env.configFile();
+      PosixFileAttributes configAttributes=Files.getFileAttributeView(configRoot,PosixFileAttributeView.class).readAttributes();
+      PosixFileAttributes attributes=Files.getFileAttributeView(configDir,PosixFileAttributeView.class).readAttributes();
+      assertThat(attributes.owner(),equalTo(configAttributes.owner()));
+      assertThat(attributes.group(),equalTo(configAttributes.group()));
+    }
+    try (DirectoryStream<Path> stream=Files.newDirectoryStream(configDir)){
+      for (      Path file : stream) {
+        assertFalse("not a dir",Files.isDirectory(file));
+      }
+    }
+   }
+  assertInstallCleaned(env);
+}

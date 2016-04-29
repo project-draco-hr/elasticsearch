@@ -1,0 +1,41 @@
+{
+  setupTestNodes(Settings.EMPTY);
+  connectNodes(testNodes);
+  CountDownLatch checkLatch=new CountDownLatch(1);
+  CountDownLatch responseLatch=new CountDownLatch(1);
+  Task task=startBlockingTestNodesAction(checkLatch,new ActionListener<NodesResponse>(){
+    @Override public void onResponse(    NodesResponse nodeResponses){
+      responseLatch.countDown();
+    }
+    @Override public void onFailure(    Throwable e){
+      responseLatch.countDown();
+    }
+  }
+);
+  String actionName="testAction";
+  CancelTasksRequest request=new CancelTasksRequest();
+  request.setNodesIds(testNodes[0].discoveryNode.getId());
+  request.setReason("Testing Cancellation");
+  request.setActions(actionName);
+  CancelTasksResponse response=testNodes[randomIntBetween(0,testNodes.length - 1)].transportCancelTasksAction.execute(request).get();
+  assertEquals(0,response.getTasks().size());
+  assertEquals(0,response.getTaskFailures().size());
+  assertEquals(0,response.getNodeFailures().size());
+  request=new CancelTasksRequest();
+  request.setReason("Testing Cancellation");
+  request.setTaskId(new TaskId(testNodes[0].discoveryNode.getId(),task.getId()));
+  response=testNodes[randomIntBetween(0,testNodes.length - 1)].transportCancelTasksAction.execute(request).get();
+  assertEquals(0,response.getTasks().size());
+  assertEquals(0,response.getTaskFailures().size());
+  assertEquals(1,response.getNodeFailures().size());
+  assertThat(response.getNodeFailures().get(0).getDetailedMessage(),containsString("doesn't support cancellation"));
+  ListTasksRequest listTasksRequest=new ListTasksRequest();
+  listTasksRequest.setActions(actionName);
+  ListTasksResponse listResponse=testNodes[randomIntBetween(0,testNodes.length - 1)].transportListTasksAction.execute(listTasksRequest).get();
+  assertEquals(1,listResponse.getPerNodeTasks().size());
+  for (  TaskInfo taskInfo : listResponse.getTasks()) {
+    assertFalse(taskInfo.isCancellable());
+  }
+  checkLatch.countDown();
+  responseLatch.await(10,TimeUnit.SECONDS);
+}

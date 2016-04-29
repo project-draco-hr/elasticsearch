@@ -1,0 +1,39 @@
+{
+  if (store.tryIncRef()) {
+    logger.info("start check index");
+    try {
+      Directory dir=store.directory();
+      if (!Lucene.indexExists(dir)) {
+        return;
+      }
+      try (CheckIndex checkIndex=new CheckIndex(dir)){
+        BytesStreamOutput os=new BytesStreamOutput();
+        PrintStream out=new PrintStream(os,false,StandardCharsets.UTF_8.name());
+        checkIndex.setInfoStream(out);
+        out.flush();
+        CheckIndex.Status status=checkIndex.checkIndex();
+        if (!status.clean) {
+          ESTestCase.checkIndexFailed=true;
+          logger.warn("check index [failure] index files={}\n{}",Arrays.toString(dir.listAll()),new String(os.bytes().toBytes(),StandardCharsets.UTF_8));
+          throw new IOException("index check failure");
+        }
+ else {
+          if (logger.isDebugEnabled()) {
+            logger.debug("check index [success]\n{}",new String(os.bytes().toBytes(),StandardCharsets.UTF_8));
+          }
+        }
+      }
+ catch (      LockObtainFailedException e) {
+        ESTestCase.checkIndexFailed=true;
+        throw new IllegalStateException("IndexWriter is still open on shard " + shardId,e);
+      }
+    }
+ catch (    Exception e) {
+      logger.warn("failed to check index",e);
+    }
+ finally {
+      logger.info("end check index");
+      store.decRef();
+    }
+  }
+}

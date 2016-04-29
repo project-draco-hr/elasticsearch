@@ -1,0 +1,83 @@
+{
+  CreateIndexRequestBuilder builder=prepareCreate("test").setSettings(Settings.builder().put(indexSettings()).put(SETTING_NUMBER_OF_SHARDS,1).put("index.analysis.analyzer.text.tokenizer","standard").putArray("index.analysis.analyzer.text.filter","lowercase","my_shingle").put("index.analysis.filter.my_shingle.type","shingle").put("index.analysis.filter.my_shingle.output_unigrams",true).put("index.analysis.filter.my_shingle.min_shingle_size",2).put("index.analysis.filter.my_shingle.max_shingle_size",3));
+  XContentBuilder mapping=XContentFactory.jsonBuilder().startObject().startObject("type1").startObject("properties").startObject("title").field("type","text").field("analyzer","text").endObject().endObject().endObject().endObject();
+  assertAcked(builder.addMapping("type1",mapping));
+  ensureGreen();
+  List<String> titles=new ArrayList<>();
+  titles.add("United States House of Representatives Elections in Washington 1789");
+  for (int year=1790; year < 2014; year+=2) {
+    titles.add("United States House of Representatives Elections in Washington " + year);
+  }
+  for (int year=0; year < 2015; year++) {
+    titles.add(Integer.toString(year));
+  }
+  titles.add("State");
+  titles.add("Houses of Parliament");
+  titles.add("Representative Government");
+  titles.add("Election");
+  titles.add("Washington's Birthday");
+  titles.add("Unified Modeling Language");
+  titles.add("Unite Against Fascism");
+  titles.add("Stated Income Tax");
+  titles.add("Media organizations housed within colleges");
+  titles.add("Untied shoelaces");
+  titles.add("Unit circle");
+  titles.add("Untitled");
+  titles.add("Unicef");
+  titles.add("Unrated");
+  titles.add("UniRed");
+  titles.add("Jalan Uniten???Dengkil");
+  titles.add("UNITAS");
+  titles.add("UNITER");
+  titles.add("Un-Led-Ed");
+  titles.add("STATS LLC");
+  titles.add("Staples");
+  titles.add("Skates");
+  titles.add("Statues of the Liberators");
+  titles.add("Staten Island");
+  titles.add("Statens Museum for Kunst");
+  titles.add("Hause");
+  titles.add("Hose");
+  titles.add("Hoses");
+  titles.add("Howse Peak");
+  titles.add("The Hoose-Gow");
+  titles.add("Hooser");
+  titles.add("Electron");
+  titles.add("Electors");
+  titles.add("Evictions");
+  titles.add("Coronal mass ejection");
+  titles.add("Wasington");
+  titles.add("Warrington");
+  titles.add("Waddington");
+  titles.add("Watlington");
+  titles.add("Waplington");
+  titles.add("Washing of the Spears");
+  for (char c='A'; c <= 'Z'; c++) {
+    titles.add("List of former members of the United States House of Representatives (" + c + ")");
+    titles.add("Washington " + c + ". Lastname");
+    titles.add("United " + c);
+    titles.add("States " + c);
+    titles.add("House " + c);
+    titles.add("Elections " + c);
+    titles.add("2006 " + c);
+    titles.add(c + " United");
+    titles.add(c + " States");
+    titles.add(c + " House");
+    titles.add(c + " Elections");
+    titles.add(c + " 2006");
+  }
+  List<IndexRequestBuilder> builders=new ArrayList<>();
+  for (  String title : titles) {
+    builders.add(client().prepareIndex("test","type1").setSource("title",title));
+  }
+  indexRandom(true,builders);
+  PhraseSuggestionBuilder suggest=phraseSuggestion("title").addCandidateGenerator(candidateGenerator("title").suggestMode("always").maxTermFreq(.99f).size(1000).maxInspections(1000)).confidence(0f).maxErrors(2f).shardSize(30000).size(30000);
+  Suggest searchSuggest=searchSuggest("united states house of representatives elections in washington 2006","title",suggest);
+  assertSuggestion(searchSuggest,0,0,"title","united states house of representatives elections in washington 2006");
+  assertSuggestionSize(searchSuggest,0,25480,"title");
+  suggest.size(1);
+  long start=System.currentTimeMillis();
+  searchSuggest=searchSuggest("united states house of representatives elections in washington 2006","title",suggest);
+  long total=System.currentTimeMillis() - start;
+  assertSuggestion(searchSuggest,0,0,"title","united states house of representatives elections in washington 2006");
+}

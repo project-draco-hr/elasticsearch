@@ -1,5 +1,5 @@
 {
-  boolean omitNorms=false;
+  boolean norms=true;
   boolean stored=false;
   boolean enabled=true;
   boolean tv_stored=false;
@@ -15,7 +15,7 @@
     allDefault=false;
     mappingBuilder.startObject("_all");
     if (randomBoolean()) {
-      booleanOptionList.add(new Tuple<>("omit_norms",omitNorms=randomBoolean()));
+      booleanOptionList.add(new Tuple<>("norms",norms=randomBoolean()));
     }
     if (randomBoolean()) {
       booleanOptionList.add(new Tuple<>("store",stored=randomBoolean()));
@@ -35,46 +35,42 @@
     if (randomBoolean()) {
       booleanOptionList.add(new Tuple<>("store_term_vector_payloads",tv_payloads=randomBoolean()));
     }
-    Collections.shuffle(booleanOptionList,getRandom());
+    Collections.shuffle(booleanOptionList,random());
     for (    Tuple<String,Boolean> option : booleanOptionList) {
       mappingBuilder.field(option.v1(),option.v2().booleanValue());
     }
     tv_stored|=tv_positions || tv_payloads || tv_offsets;
     if (randomBoolean()) {
-      mappingBuilder.field("similarity",similarity=randomBoolean() ? "BM25" : "TF/IDF");
+      mappingBuilder.field("similarity",similarity="BM25");
     }
     mappingBuilder.endObject();
   }
   DocumentMapperParser parser=createIndex("test").mapperService().documentMapperParser();
   String mapping=mappingBuilder.endObject().endObject().bytes().toUtf8();
-  logger.info(mapping);
-  DocumentMapper docMapper=parser.parse(mapping);
+  logger.info("Mapping: {}",mapping);
+  DocumentMapper docMapper=parser.parse("test",new CompressedXContent(mapping));
   String builtMapping=docMapper.mappingSource().string();
-  DocumentMapper builtDocMapper=parser.parse(builtMapping);
+  DocumentMapper builtDocMapper=parser.parse("test",new CompressedXContent(builtMapping));
   byte[] json=jsonBuilder().startObject().field("foo","bar").field("foobar","foobar").endObject().bytes().toBytes();
   Document doc=builtDocMapper.parse("test","test","1",new BytesArray(json)).rootDoc();
-  AllField field=(AllField)doc.getField("_all");
+  IndexableField[] fields=doc.getFields("_all");
   if (enabled) {
-    assertThat(field.fieldType().omitNorms(),equalTo(omitNorms));
-    assertThat(field.fieldType().stored(),equalTo(stored));
-    assertThat(field.fieldType().storeTermVectorOffsets(),equalTo(tv_offsets));
-    assertThat(field.fieldType().storeTermVectorPayloads(),equalTo(tv_payloads));
-    assertThat(field.fieldType().storeTermVectorPositions(),equalTo(tv_positions));
-    assertThat(field.fieldType().storeTermVectors(),equalTo(tv_stored));
-    AllEntries allEntries=field.getAllEntries();
-    assertThat(allEntries.fields().size(),equalTo(2));
-    assertThat(allEntries.fields().contains("foobar"),equalTo(true));
-    assertThat(allEntries.fields().contains("foo"),equalTo(true));
-    if (!stored) {
-      assertThat(field.stringValue(),nullValue());
+    assertThat(fields.length,equalTo(2));
+    String[] expected=new String[]{"bar","foobar"};
+    for (int i=0; i < fields.length; i++) {
+      assertThat(fields[i].fieldType().omitNorms(),equalTo(!norms));
+      assertThat(fields[i].fieldType().stored(),equalTo(stored));
+      assertThat(fields[i].fieldType().storeTermVectorOffsets(),equalTo(tv_offsets));
+      assertThat(fields[i].fieldType().storeTermVectorPayloads(),equalTo(tv_payloads));
+      assertThat(fields[i].fieldType().storeTermVectorPositions(),equalTo(tv_positions));
+      assertThat(fields[i].fieldType().storeTermVectors(),equalTo(tv_stored));
+      assertThat(fields[i].stringValue(),equalTo(expected[i]));
     }
-    String text=stored ? field.stringValue() : "bar foobar";
-    assertThat(text.trim(),equalTo(allEntries.buildText().trim()));
   }
  else {
-    assertThat(field,nullValue());
+    assertThat(fields.length,equalTo(0));
   }
-  if (similarity == null || similarity.equals("TF/IDF")) {
+  if (similarity == null) {
     assertThat(builtDocMapper.allFieldMapper().fieldType().similarity(),nullValue());
   }
  else {

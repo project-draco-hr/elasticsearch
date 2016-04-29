@@ -1,0 +1,56 @@
+{
+  List<Query> queries=new ArrayList<>();
+  Term[] terms=new Term[blendedFields.length];
+  float[] blendedBoost=new float[blendedFields.length];
+  int i=0;
+  for (  FieldAndFieldType ft : blendedFields) {
+    Query query;
+    try {
+      query=ft.fieldType.termQuery(value,null);
+    }
+ catch (    IllegalArgumentException e) {
+      continue;
+    }
+    float boost=ft.boost;
+    while (query instanceof BoostQuery) {
+      BoostQuery bq=(BoostQuery)query;
+      query=bq.getQuery();
+      boost*=bq.getBoost();
+    }
+    if (query.getClass() == TermQuery.class) {
+      terms[i]=((TermQuery)query).getTerm();
+      blendedBoost[i]=boost;
+      i++;
+    }
+ else {
+      if (boost != 1f) {
+        query=new BoostQuery(query,boost);
+      }
+      queries.add(query);
+    }
+  }
+  if (i > 0) {
+    terms=Arrays.copyOf(terms,i);
+    blendedBoost=Arrays.copyOf(blendedBoost,i);
+    if (commonTermsCutoff != null) {
+      queries.add(BlendedTermQuery.commonTermsBlendedQuery(terms,blendedBoost,false,commonTermsCutoff));
+    }
+ else     if (tieBreaker == 1.0f) {
+      queries.add(BlendedTermQuery.booleanBlendedQuery(terms,blendedBoost,false));
+    }
+ else {
+      queries.add(BlendedTermQuery.dismaxBlendedQuery(terms,blendedBoost,tieBreaker));
+    }
+  }
+  if (queries.size() == 1) {
+    return queries.get(0);
+  }
+ else {
+    BooleanQuery.Builder bq=new BooleanQuery.Builder();
+    bq.setDisableCoord(true);
+    for (    Query query : queries) {
+      bq.add(query,Occur.SHOULD);
+    }
+    return bq.build();
+  }
+}

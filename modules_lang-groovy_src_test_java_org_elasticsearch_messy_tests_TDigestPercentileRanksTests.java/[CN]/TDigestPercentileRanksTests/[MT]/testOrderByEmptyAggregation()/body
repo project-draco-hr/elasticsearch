@@ -1,0 +1,21 @@
+{
+  SearchResponse searchResponse=client().prepareSearch("idx").setQuery(matchAllQuery()).addAggregation(terms("terms").field("value").order(Terms.Order.compound(Terms.Order.aggregation("filter>ranks.99",true))).subAggregation(filter("filter",termQuery("value",100)).subAggregation(percentileRanks("ranks").method(PercentilesMethod.TDIGEST).values(99).field("value")))).get();
+  assertHitCount(searchResponse,10);
+  Terms terms=searchResponse.getAggregations().get("terms");
+  assertThat(terms,notNullValue());
+  List<Terms.Bucket> buckets=terms.getBuckets();
+  assertThat(buckets,notNullValue());
+  assertThat(buckets.size(),equalTo(10));
+  for (int i=0; i < 10; i++) {
+    Terms.Bucket bucket=buckets.get(i);
+    assertThat(bucket,notNullValue());
+    assertThat(bucket.getKeyAsNumber(),equalTo((long)i + 1));
+    assertThat(bucket.getDocCount(),equalTo(1L));
+    Filter filter=bucket.getAggregations().get("filter");
+    assertThat(filter,notNullValue());
+    assertThat(filter.getDocCount(),equalTo(0L));
+    PercentileRanks ranks=filter.getAggregations().get("ranks");
+    assertThat(ranks,notNullValue());
+    assertThat(ranks.percent(99),equalTo(Double.NaN));
+  }
+}

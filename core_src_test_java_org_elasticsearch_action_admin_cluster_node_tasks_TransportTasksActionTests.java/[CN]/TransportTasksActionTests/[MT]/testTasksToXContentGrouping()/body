@@ -1,0 +1,29 @@
+{
+  setupTestNodes(Settings.EMPTY);
+  connectNodes(testNodes);
+  ListTasksRequest listTasksRequest=new ListTasksRequest();
+  listTasksRequest.setActions(ListTasksAction.NAME + "*");
+  ListTasksResponse response=testNodes[0].transportListTasksAction.execute(listTasksRequest).get();
+  assertEquals(testNodes.length + 1,response.getTasks().size());
+  Map<String,Object> byNodes=serialize(response,new ToXContent.MapParams(Collections.singletonMap("group_by","nodes")));
+  byNodes=(Map<String,Object>)byNodes.get("nodes");
+  assertEquals(testNodes.length,byNodes.size());
+  Map<String,Object> firstNode=(Map<String,Object>)byNodes.get(testNodes[0].discoveryNode.getId());
+  firstNode=(Map<String,Object>)firstNode.get("tasks");
+  assertEquals(2,firstNode.size());
+  for (int i=1; i < testNodes.length; i++) {
+    Map<String,Object> otherNode=(Map<String,Object>)byNodes.get(testNodes[i].discoveryNode.getId());
+    otherNode=(Map<String,Object>)otherNode.get("tasks");
+    assertEquals(1,otherNode.size());
+  }
+  Map<String,Object> byParent=serialize(response,new ToXContent.MapParams(Collections.singletonMap("group_by","parents")));
+  byParent=(Map<String,Object>)byParent.get("tasks");
+  assertEquals(1,byParent.size());
+  Map<String,Object> topTask=(Map<String,Object>)byParent.values().iterator().next();
+  List<Object> children=(List<Object>)topTask.get("children");
+  assertEquals(testNodes.length,children.size());
+  for (int i=0; i < testNodes.length; i++) {
+    Map<String,Object> child=(Map<String,Object>)children.get(i);
+    assertNull(child.get("children"));
+  }
+}

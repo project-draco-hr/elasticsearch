@@ -2,13 +2,14 @@
   List<String> nodes=internalCluster().startNodesAsync(2).get();
   final String masterNode=internalCluster().getMasterName();
   final String nonMasterNode=nodes.get(0).equals(masterNode) ? nodes.get(1) : nodes.get(0);
-  final String masterId=internalCluster().clusterService(masterNode).localNode().id();
-  final String nonMasterId=internalCluster().clusterService(nonMasterNode).localNode().id();
+  final String masterId=internalCluster().clusterService(masterNode).localNode().getId();
+  final String nonMasterId=internalCluster().clusterService(nonMasterNode).localNode().getId();
   final int numShards=scaledRandomIntBetween(2,10);
   assertAcked(prepareCreate("test").setSettings(Settings.builder().put(IndexMetaData.SETTING_NUMBER_OF_REPLICAS,0).put(IndexMetaData.SETTING_NUMBER_OF_SHARDS,numShards)));
   ensureGreen("test");
   waitNoPendingTasksOnAll();
   ClusterStateResponse stateResponse=client().admin().cluster().prepareState().get();
+  final Index index=stateResponse.getState().metaData().index("test").getIndex();
   RoutingNode routingNode=stateResponse.getState().getRoutingNodes().node(nonMasterId);
   final int[] node2Shards=new int[routingNode.numberOfOwningShards()];
   int i=0;
@@ -17,20 +18,12 @@
     i++;
   }
   logger.info("Node [{}] has shards: {}",nonMasterNode,Arrays.toString(node2Shards));
-  final long shardVersions[]=new long[numShards];
-  final int shardIds[]=new int[numShards];
-  i=0;
-  for (  ShardRouting shardRouting : stateResponse.getState().getRoutingTable().allShards("test")) {
-    shardVersions[i]=shardRouting.version();
-    shardIds[i]=shardRouting.getId();
-    i++;
-  }
-  client().admin().cluster().prepareUpdateSettings().setTransientSettings(settingsBuilder().put(EnableAllocationDecider.CLUSTER_ROUTING_REBALANCE_ENABLE,EnableAllocationDecider.Rebalance.NONE)).get();
+  client().admin().cluster().prepareUpdateSettings().setTransientSettings(Settings.builder().put(EnableAllocationDecider.CLUSTER_ROUTING_REBALANCE_ENABLE_SETTING.getKey(),EnableAllocationDecider.Rebalance.NONE)).get();
   internalCluster().getInstance(ClusterService.class,nonMasterNode).submitStateUpdateTask("test",new ClusterStateUpdateTask(Priority.IMMEDIATE){
     @Override public ClusterState execute(    ClusterState currentState) throws Exception {
-      IndexRoutingTable.Builder indexRoutingTableBuilder=IndexRoutingTable.builder("test");
+      IndexRoutingTable.Builder indexRoutingTableBuilder=IndexRoutingTable.builder(index);
       for (int i=0; i < numShards; i++) {
-        indexRoutingTableBuilder.addIndexShard(new IndexShardRoutingTable.Builder(new ShardId("test",i)).addShard(TestShardRouting.newShardRouting("test",i,masterId,true,ShardRoutingState.STARTED,shardVersions[shardIds[i]])).build());
+        indexRoutingTableBuilder.addIndexShard(new IndexShardRoutingTable.Builder(new ShardId(index,i)).addShard(TestShardRouting.newShardRouting("test",i,masterId,true,ShardRoutingState.STARTED)).build());
       }
       return ClusterState.builder(currentState).routingTable(RoutingTable.builder().add(indexRoutingTableBuilder).build()).build();
     }
@@ -44,6 +37,6 @@
   waitNoPendingTasksOnAll();
   logger.info("Checking if shards aren't removed");
   for (  int shard : node2Shards) {
-    assertTrue(waitForShardDeletion(nonMasterNode,"test",shard));
+    assertTrue(waitForShardDeletion(nonMasterNode,index,shard));
   }
 }

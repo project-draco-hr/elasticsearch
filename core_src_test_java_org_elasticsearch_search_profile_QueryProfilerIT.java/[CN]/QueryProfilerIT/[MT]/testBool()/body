@@ -1,0 +1,42 @@
+{
+  createIndex("test");
+  ensureGreen();
+  int numDocs=randomIntBetween(100,150);
+  IndexRequestBuilder[] docs=new IndexRequestBuilder[numDocs];
+  for (int i=0; i < numDocs; i++) {
+    docs[i]=client().prepareIndex("test","type1",String.valueOf(i)).setSource("field1",English.intToEnglish(i),"field2",i);
+  }
+  indexRandom(true,docs);
+  QueryBuilder q=QueryBuilders.boolQuery().must(QueryBuilders.matchQuery("field1","one")).must(QueryBuilders.matchQuery("field1","two"));
+  SearchResponse resp=client().prepareSearch().setQuery(q).setProfile(true).setSearchType(SearchType.QUERY_THEN_FETCH).execute().actionGet();
+  Map<String,List<ProfileShardResult>> p=resp.getProfileResults();
+  assertNotNull(p);
+  assertThat("Profile response should not be an empty array",resp.getProfileResults().size(),not(0));
+  for (  Map.Entry<String,List<ProfileShardResult>> shardResult : resp.getProfileResults().entrySet()) {
+    for (    ProfileShardResult searchProfiles : shardResult.getValue()) {
+      for (      ProfileResult result : searchProfiles.getQueryResults()) {
+        assertEquals(result.getQueryName(),"BooleanQuery");
+        assertEquals(result.getLuceneDescription(),"+field1:one +field1:two");
+        assertThat(result.getTime(),greaterThan(0L));
+        assertNotNull(result.getTimeBreakdown());
+        assertEquals(result.getProfiledChildren().size(),2);
+        List<ProfileResult> children=result.getProfiledChildren();
+        assertEquals(children.size(),2);
+        ProfileResult childProfile=children.get(0);
+        assertEquals(childProfile.getQueryName(),"TermQuery");
+        assertEquals(childProfile.getLuceneDescription(),"field1:one");
+        assertThat(childProfile.getTime(),greaterThan(0L));
+        assertNotNull(childProfile.getTimeBreakdown());
+        assertEquals(childProfile.getProfiledChildren().size(),0);
+        childProfile=children.get(1);
+        assertEquals(childProfile.getQueryName(),"TermQuery");
+        assertEquals(childProfile.getLuceneDescription(),"field1:two");
+        assertThat(childProfile.getTime(),greaterThan(0L));
+        assertNotNull(childProfile.getTimeBreakdown());
+      }
+      CollectorResult result=searchProfiles.getCollectorResult();
+      assertThat(result.getName(),not(isEmptyOrNullString()));
+      assertThat(result.getTime(),greaterThan(0L));
+    }
+  }
+}

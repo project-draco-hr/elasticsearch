@@ -1,31 +1,32 @@
 {
-  NamedAnalyzer indexAnalyzer=builder.fieldType().indexAnalyzer();
-  NamedAnalyzer searchAnalyzer=builder.fieldType().searchAnalyzer();
+  NamedAnalyzer indexAnalyzer=null;
+  NamedAnalyzer searchAnalyzer=null;
+  NamedAnalyzer searchQuoteAnalyzer=null;
   for (Iterator<Map.Entry<String,Object>> iterator=fieldNode.entrySet().iterator(); iterator.hasNext(); ) {
     Map.Entry<String,Object> entry=iterator.next();
-    final String propName=Strings.toUnderscoreCase(entry.getKey());
+    final String propName=entry.getKey();
     final Object propNode=entry.getValue();
     if (propName.equals("term_vector")) {
       parseTermVector(name,propNode.toString(),builder);
       iterator.remove();
     }
  else     if (propName.equals("store_term_vectors")) {
-      builder.storeTermVectors(nodeBooleanValue(propNode));
+      builder.storeTermVectors(nodeBooleanValue("store_term_vectors",propNode,parserContext));
       iterator.remove();
     }
  else     if (propName.equals("store_term_vector_offsets")) {
-      builder.storeTermVectorOffsets(nodeBooleanValue(propNode));
+      builder.storeTermVectorOffsets(nodeBooleanValue("store_term_vector_offsets",propNode,parserContext));
       iterator.remove();
     }
  else     if (propName.equals("store_term_vector_positions")) {
-      builder.storeTermVectorPositions(nodeBooleanValue(propNode));
+      builder.storeTermVectorPositions(nodeBooleanValue("store_term_vector_positions",propNode,parserContext));
       iterator.remove();
     }
  else     if (propName.equals("store_term_vector_payloads")) {
-      builder.storeTermVectorPayloads(nodeBooleanValue(propNode));
+      builder.storeTermVectorPayloads(nodeBooleanValue("store_term_vector_payloads",propNode,parserContext));
       iterator.remove();
     }
- else     if (propName.equals("analyzer") || propName.equals("index_analyzer") && parserContext.indexVersionCreated().before(Version.V_2_0_0_beta1)) {
+ else     if (propName.equals("analyzer")) {
       NamedAnalyzer analyzer=parserContext.analysisService().analyzer(propNode.toString());
       if (analyzer == null) {
         throw new MapperParsingException("analyzer [" + propNode.toString() + "] not found for field ["+ name+ "]");
@@ -41,15 +42,34 @@
       searchAnalyzer=analyzer;
       iterator.remove();
     }
-  }
-  if (indexAnalyzer == null) {
-    if (searchAnalyzer != null) {
-      throw new MapperParsingException("analyzer on field [" + name + "] must be set when search_analyzer is set");
+ else     if (propName.equals("search_quote_analyzer")) {
+      NamedAnalyzer analyzer=parserContext.analysisService().analyzer(propNode.toString());
+      if (analyzer == null) {
+        throw new MapperParsingException("analyzer [" + propNode.toString() + "] not found for field ["+ name+ "]");
+      }
+      searchQuoteAnalyzer=analyzer;
+      iterator.remove();
     }
   }
- else   if (searchAnalyzer == null) {
+  if (indexAnalyzer == null && searchAnalyzer != null) {
+    throw new MapperParsingException("analyzer on field [" + name + "] must be set when search_analyzer is set");
+  }
+  if (searchAnalyzer == null && searchQuoteAnalyzer != null) {
+    throw new MapperParsingException("analyzer and search_analyzer on field [" + name + "] must be set when search_quote_analyzer is set");
+  }
+  if (searchAnalyzer == null) {
     searchAnalyzer=indexAnalyzer;
   }
-  builder.indexAnalyzer(indexAnalyzer);
-  builder.searchAnalyzer(searchAnalyzer);
+  if (searchQuoteAnalyzer == null) {
+    searchQuoteAnalyzer=searchAnalyzer;
+  }
+  if (indexAnalyzer != null) {
+    builder.indexAnalyzer(indexAnalyzer);
+  }
+  if (searchAnalyzer != null) {
+    builder.searchAnalyzer(searchAnalyzer);
+  }
+  if (searchQuoteAnalyzer != null) {
+    builder.searchQuoteAnalyzer(searchQuoteAnalyzer);
+  }
 }

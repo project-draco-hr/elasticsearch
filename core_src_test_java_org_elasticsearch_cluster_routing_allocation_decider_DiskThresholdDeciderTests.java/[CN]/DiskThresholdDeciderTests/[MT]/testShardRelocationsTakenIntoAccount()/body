@@ -1,5 +1,5 @@
 {
-  Settings diskSettings=settingsBuilder().put(DiskThresholdDecider.CLUSTER_ROUTING_ALLOCATION_DISK_THRESHOLD_ENABLED,true).put(DiskThresholdDecider.CLUSTER_ROUTING_ALLOCATION_INCLUDE_RELOCATIONS,true).put(DiskThresholdDecider.CLUSTER_ROUTING_ALLOCATION_LOW_DISK_WATERMARK,0.7).put(DiskThresholdDecider.CLUSTER_ROUTING_ALLOCATION_HIGH_DISK_WATERMARK,0.8).build();
+  Settings diskSettings=Settings.builder().put(DiskThresholdDecider.CLUSTER_ROUTING_ALLOCATION_DISK_THRESHOLD_ENABLED_SETTING.getKey(),true).put(DiskThresholdDecider.CLUSTER_ROUTING_ALLOCATION_INCLUDE_RELOCATIONS_SETTING.getKey(),true).put(DiskThresholdDecider.CLUSTER_ROUTING_ALLOCATION_LOW_DISK_WATERMARK_SETTING.getKey(),0.7).put(DiskThresholdDecider.CLUSTER_ROUTING_ALLOCATION_HIGH_DISK_WATERMARK_SETTING.getKey(),0.8).build();
   ImmutableOpenMap.Builder<String,DiskUsage> usagesBuilder=ImmutableOpenMap.builder();
   usagesBuilder.put("node1",new DiskUsage("node1","n1","/dev/null",100,40));
   usagesBuilder.put("node2",new DiskUsage("node2","n2","/dev/null",100,40));
@@ -22,7 +22,7 @@
     }
   }
 ;
-  AllocationService strategy=new AllocationService(settingsBuilder().put("cluster.routing.allocation.concurrent_recoveries",10).put(ClusterRebalanceAllocationDecider.CLUSTER_ROUTING_ALLOCATION_ALLOW_REBALANCE,"always").put("cluster.routing.allocation.cluster_concurrent_rebalance",-1).build(),deciders,makeShardsAllocators(),cis);
+  AllocationService strategy=new AllocationService(Settings.builder().put("cluster.routing.allocation.node_concurrent_recoveries",10).put(ClusterRebalanceAllocationDecider.CLUSTER_ROUTING_ALLOCATION_ALLOW_REBALANCE_SETTING.getKey(),"always").put("cluster.routing.allocation.cluster_concurrent_rebalance",-1).build(),deciders,NoopGatewayAllocator.INSTANCE,new BalancedShardsAllocator(Settings.EMPTY),cis);
   MetaData metaData=MetaData.builder().put(IndexMetaData.builder("test").settings(settings(Version.CURRENT)).numberOfShards(1).numberOfReplicas(1)).put(IndexMetaData.builder("test2").settings(settings(Version.CURRENT)).numberOfShards(1).numberOfReplicas(1)).build();
   RoutingTable routingTable=RoutingTable.builder().addAsNew(metaData.index("test")).addAsNew(metaData.index("test2")).build();
   ClusterState clusterState=ClusterState.builder(org.elasticsearch.cluster.ClusterName.DEFAULT).metaData(metaData).routingTable(routingTable).build();
@@ -39,18 +39,18 @@
   assertThat(clusterState.getRoutingNodes().shardsWithState(ShardRoutingState.STARTED).size(),equalTo(4));
   logger.info("--> adding node3");
   clusterState=ClusterState.builder(clusterState).nodes(DiscoveryNodes.builder(clusterState.nodes()).put(newNode("node3"))).build();
-  AllocationCommand relocate1=new MoveAllocationCommand(new ShardId("test",0),"node2","node3");
+  AllocationCommand relocate1=new MoveAllocationCommand("test",0,"node2","node3");
   AllocationCommands cmds=new AllocationCommands(relocate1);
   routingTable=strategy.reroute(clusterState,cmds).routingTable();
   clusterState=ClusterState.builder(clusterState).routingTable(routingTable).build();
   logShardStates(clusterState);
-  AllocationCommand relocate2=new MoveAllocationCommand(new ShardId("test2",0),"node2","node3");
+  AllocationCommand relocate2=new MoveAllocationCommand("test2",0,"node2","node3");
   cmds=new AllocationCommands(relocate2);
   try {
     strategy.reroute(clusterState,cmds).routingTable();
     fail("should not have been able to reroute the shard");
   }
  catch (  IllegalArgumentException e) {
-    assertThat("can't allocated because there isn't enough room: " + e.getMessage(),e.getMessage().contains("more than allowed [70.0%] used disk on node, free: [26.0%]"),equalTo(true));
+    assertThat("can't allocated because there isn't enough room: " + e.getMessage(),e.getMessage(),containsString("the node is above the low watermark and has more than allowed [70.0%] used disk, free: [26.0%]"));
   }
 }

@@ -1,18 +1,18 @@
 {
   createIndex("test");
   try {
-    client().admin().indices().prepareUpdateSettings("test").setSettings(Settings.settingsBuilder().put("index.refresh_interval",-1).put("index.cache.filter.type","none")).execute().actionGet();
+    client().admin().indices().prepareUpdateSettings("test").setSettings(Settings.builder().put("index.refresh_interval",-1).put("index.fielddata.cache","none")).execute().actionGet();
     fail();
   }
  catch (  IllegalArgumentException e) {
   }
   IndexMetaData indexMetaData=client().admin().cluster().prepareState().execute().actionGet().getState().metaData().index("test");
   assertThat(indexMetaData.getSettings().get("index.refresh_interval"),nullValue());
-  assertThat(indexMetaData.getSettings().get("index.cache.filter.type"),nullValue());
+  assertThat(indexMetaData.getSettings().get("index.fielddata.cache"),nullValue());
   GetSettingsResponse getSettingsResponse=client().admin().indices().prepareGetSettings("test").get();
   assertThat(getSettingsResponse.getSetting("test","index.refresh_interval"),nullValue());
-  assertThat(getSettingsResponse.getSetting("test","index.cache.filter.type"),nullValue());
-  client().admin().indices().prepareUpdateSettings("test").setSettings(Settings.settingsBuilder().put("index.refresh_interval",-1)).execute().actionGet();
+  assertThat(getSettingsResponse.getSetting("test","index.fielddata.cache"),nullValue());
+  client().admin().indices().prepareUpdateSettings("test").setSettings(Settings.builder().put("index.refresh_interval",-1)).execute().actionGet();
   indexMetaData=client().admin().cluster().prepareState().execute().actionGet().getState().metaData().index("test");
   assertThat(indexMetaData.getSettings().get("index.refresh_interval"),equalTo("-1"));
   getSettingsResponse=client().admin().indices().prepareGetSettings("test").get();
@@ -21,17 +21,18 @@
   assertThat(health.isTimedOut(),equalTo(false));
   client().admin().indices().prepareClose("test").execute().actionGet();
   try {
-    client().admin().indices().prepareUpdateSettings("test").setSettings(Settings.settingsBuilder().put(IndexMetaData.SETTING_NUMBER_OF_REPLICAS,1)).execute().actionGet();
+    client().admin().indices().prepareUpdateSettings("test").setSettings(Settings.builder().put(IndexMetaData.SETTING_NUMBER_OF_REPLICAS,1)).execute().actionGet();
     fail("can't change number of replicas on a closed index");
   }
  catch (  IllegalArgumentException ex) {
-    assertEquals(ex.getMessage(),"Can't update [index.number_of_replicas] on closed indices [[test]] - can leave index in an unopenable state");
+    assertTrue(ex.getMessage(),ex.getMessage().startsWith("Can't update [index.number_of_replicas] on closed indices [[test/"));
+    assertTrue(ex.getMessage(),ex.getMessage().endsWith("]] - can leave index in an unopenable state"));
   }
-  client().admin().indices().prepareUpdateSettings("test").setSettings(Settings.settingsBuilder().put("index.refresh_interval","1s").put("index.cache.filter.type","none")).execute().actionGet();
+  client().admin().indices().prepareUpdateSettings("test").setSettings(Settings.builder().put("index.refresh_interval","1s").put("index.fielddata.cache","none")).execute().actionGet();
   indexMetaData=client().admin().cluster().prepareState().execute().actionGet().getState().metaData().index("test");
   assertThat(indexMetaData.getSettings().get("index.refresh_interval"),equalTo("1s"));
-  assertThat(indexMetaData.getSettings().get("index.cache.filter.type"),equalTo("none"));
+  assertThat(indexMetaData.getSettings().get("index.fielddata.cache"),equalTo("none"));
   getSettingsResponse=client().admin().indices().prepareGetSettings("test").get();
   assertThat(getSettingsResponse.getSetting("test","index.refresh_interval"),equalTo("1s"));
-  assertThat(getSettingsResponse.getSetting("test","index.cache.filter.type"),equalTo("none"));
+  assertThat(getSettingsResponse.getSetting("test","index.fielddata.cache"),equalTo("none"));
 }

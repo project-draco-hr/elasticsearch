@@ -1,0 +1,24 @@
+{
+  IndexWriter writer=new IndexWriter(new RAMDirectory(),new IndexWriterConfig(Lucene.STANDARD_ANALYZER));
+  Document doc=new Document();
+  doc.add(new Field("field","aaa bbb ccc ddd",TextField.TYPE_NOT_STORED));
+  writer.addDocument(doc);
+  IndexReader reader=DirectoryReader.open(writer);
+  IndexSearcher searcher=new IndexSearcher(reader);
+  Query query=new MatchNoDocsQuery("field not found");
+  assertThat(searcher.count(query),equalTo(0));
+  BooleanQuery.Builder bq=new BooleanQuery.Builder();
+  bq.add(new BooleanClause(new TermQuery(new Term("field","aaa")),BooleanClause.Occur.SHOULD));
+  bq.add(new BooleanClause(new MatchNoDocsQuery("field not found"),BooleanClause.Occur.MUST));
+  query=bq.build();
+  assertThat(searcher.count(query),equalTo(0));
+  assertThat(query.toString(),equalTo("field:aaa +MatchNoDocsQuery[\"field not found\"]"));
+  bq=new BooleanQuery.Builder();
+  bq.add(new BooleanClause(new TermQuery(new Term("field","aaa")),BooleanClause.Occur.SHOULD));
+  bq.add(new BooleanClause(new MatchNoDocsQuery("field not found"),BooleanClause.Occur.SHOULD));
+  query=bq.build();
+  assertThat(query.toString(),equalTo("field:aaa MatchNoDocsQuery[\"field not found\"]"));
+  assertThat(searcher.count(query),equalTo(1));
+  Query rewrite=query.rewrite(reader);
+  assertThat(rewrite.toString(),equalTo("field:aaa MatchNoDocsQuery[\"field not found\"]"));
+}

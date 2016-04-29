@@ -1,5 +1,5 @@
 {
-  final ShardId shardId=new ShardId(new Index("index"),1);
+  final ShardId shardId=new ShardId("index","_na_",1);
   DirectoryService directoryService=new LuceneManagedDirectoryService(random());
   Store store=new Store(shardId,INDEX_SETTINGS,directoryService,new DummyShardLock(shardId));
   IndexWriterConfig indexWriterConfig=newIndexWriterConfig(random(),new MockAnalyzer(random())).setCodec(TestUtil.getDefaultCodec());
@@ -40,21 +40,6 @@
   writer.commit();
   writer.close();
   Store.MetadataSnapshot secondMeta=store.getMetadata();
-  Store.LegacyChecksums checksums=new Store.LegacyChecksums();
-  Map<String,StoreFileMetaData> legacyMeta=new HashMap<>();
-  for (  String file : store.directory().listAll()) {
-    if (file.equals("write.lock") || file.equals(IndexFileNames.OLD_SEGMENTS_GEN) || file.startsWith("extra")) {
-      continue;
-    }
-    BytesRef hash=new BytesRef();
-    if (file.startsWith("segments")) {
-      hash=Store.MetadataSnapshot.hashFile(store.directory(),file);
-    }
-    StoreFileMetaData storeFileMetaData=new StoreFileMetaData(file,store.directory().fileLength(file),file + "checksum",null,hash);
-    legacyMeta.put(file,storeFileMetaData);
-    checksums.add(storeFileMetaData);
-  }
-  checksums.write(store);
   if (randomBoolean()) {
     store.cleanupAndVerify("test",firstMeta);
     String[] strings=store.directory().listAll();
@@ -64,16 +49,12 @@
       if (file.startsWith("extra")) {
         continue;
       }
-      assertTrue(firstMeta.contains(file) || Store.isChecksum(file) || file.equals("write.lock"));
-      if (Store.isChecksum(file)) {
-        numChecksums++;
-      }
- else       if (secondMeta.contains(file) == false) {
+      assertTrue(firstMeta.contains(file) || file.equals("write.lock"));
+      if (secondMeta.contains(file) == false) {
         numNotFound++;
       }
     }
     assertTrue("at least one file must not be in here since we have two commits?",numNotFound > 0);
-    assertEquals("we wrote one checksum but it's gone now? - checksums are supposed to be kept",numChecksums,1);
   }
  else {
     store.cleanupAndVerify("test",secondMeta);
@@ -84,16 +65,12 @@
       if (file.startsWith("extra")) {
         continue;
       }
-      assertTrue(file,secondMeta.contains(file) || Store.isChecksum(file) || file.equals("write.lock"));
-      if (Store.isChecksum(file)) {
-        numChecksums++;
-      }
- else       if (firstMeta.contains(file) == false) {
+      assertTrue(file,secondMeta.contains(file) || file.equals("write.lock"));
+      if (firstMeta.contains(file) == false) {
         numNotFound++;
       }
     }
     assertTrue("at least one file must not be in here since we have two commits?",numNotFound > 0);
-    assertEquals("we wrote one checksum but it's gone now? - checksums are supposed to be kept",numChecksums,1);
   }
   deleteContent(store.directory());
   IOUtils.close(store);

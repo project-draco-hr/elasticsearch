@@ -6,14 +6,13 @@
     return;
   }
   ChannelBuffer buffer=(ChannelBuffer)m;
-  int size=buffer.getInt(buffer.readerIndex() - 4);
-  transportServiceAdapter.received(size + 6);
-  boolean hasMessageBytesToRead=(size - (NettyHeader.HEADER_SIZE - 6)) != 0;
-  int markedReaderIndex=buffer.readerIndex();
-  int expectedIndexReader=markedReaderIndex + size;
+  Marker marker=new Marker(buffer);
+  int size=marker.messageSizeWithRemainingHeaders();
+  transportServiceAdapter.received(marker.messageSizeWithAllHeaders());
+  boolean hasMessageBytesToRead=marker.messageSize() != 0;
   StreamInput streamIn=ChannelBufferStreamInputFactory.create(buffer,size);
   boolean success=false;
-  try {
+  try (ThreadContext.StoredContext tCtx=threadContext.stashContext()){
     long requestId=streamIn.readLong();
     byte status=streamIn.readByte();
     Version version=Version.fromId(streamIn.readInt());
@@ -34,19 +33,13 @@
       }
       streamIn=compressor.streamInput(streamIn);
     }
+    if (version.onOrAfter(Version.CURRENT.minimumCompatibilityVersion()) == false || version.major != Version.CURRENT.major) {
+      throw new IllegalStateException("Received message from unsupported version: [" + version + "] minimal compatible version is: ["+ Version.CURRENT.minimumCompatibilityVersion()+ "]");
+    }
     streamIn.setVersion(version);
     if (TransportStatus.isRequest(status)) {
-      String action=handleRequest(ctx.getChannel(),streamIn,requestId,version);
-      final int nextByte=streamIn.read();
-      if (nextByte != -1) {
-        throw new IllegalStateException("Message not fully read (request) for requestId [" + requestId + "], action ["+ action+ "], readerIndex ["+ buffer.readerIndex()+ "] vs expected ["+ expectedIndexReader+ "]; resetting");
-      }
-      if (buffer.readerIndex() < expectedIndexReader) {
-        throw new IllegalStateException("Message is fully read (request), yet there are " + (expectedIndexReader - buffer.readerIndex()) + " remaining bytes; resetting");
-      }
-      if (buffer.readerIndex() > expectedIndexReader) {
-        throw new IllegalStateException("Message read past expected size (request) for requestId [" + requestId + "], action ["+ action+ "], readerIndex ["+ buffer.readerIndex()+ "] vs expected ["+ expectedIndexReader+ "]; resetting");
-      }
+      threadContext.readHeaders(streamIn);
+      handleRequest(ctx.getChannel(),marker,streamIn,requestId,size,version);
     }
  else {
       TransportResponseHandler<?> handler=transportServiceAdapter.onResponseReceived(requestId);
@@ -57,18 +50,10 @@
  else {
           handleResponse(ctx.getChannel(),streamIn,handler);
         }
-        final int nextByte=streamIn.read();
-        if (nextByte != -1) {
-          throw new IllegalStateException("Message not fully read (response) for requestId [" + requestId + "], handler ["+ handler+ "], error ["+ TransportStatus.isError(status)+ "]; resetting");
-        }
-        if (buffer.readerIndex() < expectedIndexReader) {
-          throw new IllegalStateException("Message is fully read (response), yet there are " + (expectedIndexReader - buffer.readerIndex()) + " remaining bytes; resetting");
-        }
-        if (buffer.readerIndex() > expectedIndexReader) {
-          throw new IllegalStateException("Message read past expected size (response) for requestId [" + requestId + "], handler ["+ handler+ "], error ["+ TransportStatus.isError(status)+ "]; resetting");
-        }
+        marker.validateResponse(streamIn,requestId,handler,TransportStatus.isError(status));
       }
     }
+    success=true;
   }
   finally {
     try {
@@ -80,7 +65,7 @@
       }
     }
   finally {
-      buffer.readerIndex(expectedIndexReader);
+      buffer.readerIndex(marker.expectedReaderIndex());
     }
   }
 }

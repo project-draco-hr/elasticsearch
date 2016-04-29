@@ -1,0 +1,23 @@
+{
+  try (NodeEnvironment env=newNodeEnvironment()){
+    MetaStateService metaStateService=new MetaStateService(Settings.EMPTY,env);
+    DanglingIndicesState danglingState=new DanglingIndicesState(Settings.EMPTY,env,metaStateService,null);
+    MetaData metaData=MetaData.builder().build();
+    final String uuid="test1UUID";
+    final Settings.Builder settings=Settings.builder().put(indexSettings).put(IndexMetaData.SETTING_INDEX_UUID,uuid);
+    IndexMetaData dangledIndex=IndexMetaData.builder("test1").settings(settings).build();
+    metaStateService.writeIndex("test_write",dangledIndex);
+    for (    Path path : env.resolveIndexFolder(uuid)) {
+      if (Files.exists(path)) {
+        Files.move(path,path.resolveSibling("invalidUUID"),StandardCopyOption.ATOMIC_MOVE);
+      }
+    }
+    try {
+      danglingState.findNewDanglingIndices(metaData);
+      fail("no exception thrown for invalid folder name");
+    }
+ catch (    IllegalStateException e) {
+      assertThat(e.getMessage(),equalTo("[invalidUUID] invalid index folder name, rename to [test1UUID]"));
+    }
+  }
+ }

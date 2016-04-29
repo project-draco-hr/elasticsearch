@@ -1,31 +1,31 @@
 {
   final IndexService indexService=createIndex("test");
-  IndexFieldDataService shardPrivateService=indexService.fieldData();
-  final IndexFieldDataService ifdService=new IndexFieldDataService(indexService.getIndexSettings(),getInstanceFromNode(IndicesFieldDataCache.class),getInstanceFromNode(CircuitBreakerService.class),indexService.mapperService());
+  final IndicesService indicesService=getInstanceFromNode(IndicesService.class);
+  final IndexFieldDataService ifdService=new IndexFieldDataService(indexService.getIndexSettings(),indicesService.getIndicesFieldDataCache(),indicesService.getCircuitBreakerService(),indexService.mapperService());
   final BuilderContext ctx=new BuilderContext(indexService.getIndexSettings().getSettings(),new ContentPath(1));
-  final MappedFieldType mapper1=MapperBuilders.stringField("s").tokenized(false).docValues(true).fieldDataSettings(Settings.builder().put(FieldDataType.FORMAT_KEY,"paged_bytes").build()).build(ctx).fieldType();
+  final MappedFieldType mapper1=new TextFieldMapper.Builder("s").fielddata(true).build(ctx).fieldType();
   final IndexWriter writer=new IndexWriter(new RAMDirectory(),new IndexWriterConfig(new KeywordAnalyzer()));
   Document doc=new Document();
   doc.add(new StringField("s","thisisastring",Store.NO));
   writer.addDocument(doc);
-  DirectoryReader open=DirectoryReader.open(writer,true);
+  DirectoryReader open=DirectoryReader.open(writer);
   final boolean wrap=randomBoolean();
-  final IndexReader reader=wrap ? ElasticsearchDirectoryReader.wrap(open,new ShardId("test",1)) : open;
+  final IndexReader reader=wrap ? ElasticsearchDirectoryReader.wrap(open,new ShardId("test","_na_",1)) : open;
   final AtomicInteger onCacheCalled=new AtomicInteger();
   final AtomicInteger onRemovalCalled=new AtomicInteger();
   ifdService.setListener(new IndexFieldDataCache.Listener(){
-    @Override public void onCache(    ShardId shardId,    MappedFieldType.Names fieldNames,    FieldDataType fieldDataType,    Accountable ramUsage){
+    @Override public void onCache(    ShardId shardId,    String fieldName,    Accountable ramUsage){
       if (wrap) {
-        assertEquals(new ShardId("test",1),shardId);
+        assertEquals(new ShardId("test","_na_",1),shardId);
       }
  else {
         assertNull(shardId);
       }
       onCacheCalled.incrementAndGet();
     }
-    @Override public void onRemoval(    ShardId shardId,    MappedFieldType.Names fieldNames,    FieldDataType fieldDataType,    boolean wasEvicted,    long sizeInBytes){
+    @Override public void onRemoval(    ShardId shardId,    String fieldName,    boolean wasEvicted,    long sizeInBytes){
       if (wrap) {
-        assertEquals(new ShardId("test",1),shardId);
+        assertEquals(new ShardId("test","_na_",1),shardId);
       }
  else {
         assertNull(shardId);

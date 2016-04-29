@@ -4,6 +4,9 @@
   Map<String,Settings> similaritySettings=this.indexSettings.getSettings().getGroups(IndexModule.SIMILARITY_SETTINGS_PREFIX);
   for (  Map.Entry<String,Settings> entry : similaritySettings.entrySet()) {
     String name=entry.getKey();
+    if (BUILT_IN.containsKey(name) && indexSettings.getIndexVersionCreated().onOrAfter(Version.V_5_0_0_alpha1)) {
+      throw new IllegalArgumentException("Cannot redefine built-in Similarity [" + name + "]");
+    }
     Settings settings=entry.getValue();
     String typeName=settings.get("type");
     if (typeName == null) {
@@ -18,8 +21,13 @@
     }
     providers.put(name,factory.apply(name,settings));
   }
-  addSimilarities(similaritySettings,providers,DEFAULTS);
+  for (  Map.Entry<String,SimilarityProvider> entry : addSimilarities(similaritySettings,DEFAULTS).entrySet()) {
+    if (providers.containsKey(entry.getKey()) && indexSettings.getIndexVersionCreated().before(Version.V_5_0_0_alpha1)) {
+      continue;
+    }
+    providers.put(entry.getKey(),entry.getValue());
+  }
   this.similarities=providers;
-  defaultSimilarity=providers.get(SimilarityService.DEFAULT_SIMILARITY).get();
+  defaultSimilarity=(providers.get("default") != null) ? providers.get("default").get() : providers.get(SimilarityService.DEFAULT_SIMILARITY).get();
   baseSimilarity=(providers.get("base") != null) ? providers.get("base").get() : defaultSimilarity;
 }

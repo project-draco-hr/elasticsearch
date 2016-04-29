@@ -1,2 +1,25 @@
 {
+  try {
+    transport.stop();
+  }
+  finally {
+    for (    Map.Entry<Long,RequestHolder> entry : clientHandlers.entrySet()) {
+      final RequestHolder holderToNotify=clientHandlers.remove(entry.getKey());
+      if (holderToNotify != null) {
+        threadPool.generic().execute(new AbstractRunnable(){
+          @Override public void onRejection(          Throwable t){
+            logger.debug("failed to notify response handler on rejection, action: {}",t,holderToNotify.action());
+          }
+          @Override public void onFailure(          Throwable t){
+            logger.warn("failed to notify response handler on exception, action: {}",t,holderToNotify.action());
+          }
+          @Override public void doRun(){
+            TransportException ex=new TransportException("transport stopped, action: " + holderToNotify.action());
+            holderToNotify.handler().handleException(ex);
+          }
+        }
+);
+      }
+    }
+  }
 }

@@ -1,13 +1,17 @@
 {
   final ClusterName incomingClusterName=incomingState.getClusterName();
   if (!incomingClusterName.equals(this.clusterName)) {
-    logger.warn("received cluster state from [{}] which is also master but with a different cluster name [{}]",incomingState.nodes().masterNode(),incomingClusterName);
+    logger.warn("received cluster state from [{}] which is also master but with a different cluster name [{}]",incomingState.nodes().getMasterNode(),incomingClusterName);
     throw new IllegalStateException("received state from a node that is not part of the cluster");
   }
-  final DiscoveryNodes currentNodes=nodesProvider.nodes();
-  if (currentNodes.localNode().equals(incomingState.nodes().localNode()) == false) {
-    logger.warn("received a cluster state from [{}] and not part of the cluster, should not happen",incomingState.nodes().masterNode());
-    throw new IllegalStateException("received state from a node that is not part of the cluster");
+  final ClusterState clusterState=clusterStateSupplier.get();
+  if (clusterState.nodes().getLocalNode().equals(incomingState.nodes().getLocalNode()) == false) {
+    logger.warn("received a cluster state from [{}] and not part of the cluster, should not happen",incomingState.nodes().getMasterNode());
+    throw new IllegalStateException("received state with a local node that does not match the current local node");
   }
-  ZenDiscovery.validateStateIsFromCurrentMaster(logger,currentNodes,incomingState);
+  if (ZenDiscovery.shouldIgnoreOrRejectNewClusterState(logger,clusterState,incomingState)) {
+    String message=String.format(Locale.ROOT,"rejecting cluster state version [%d] uuid [%s] received from [%s]",incomingState.version(),incomingState.stateUUID(),incomingState.nodes().getMasterNodeId());
+    logger.warn(message);
+    throw new IllegalStateException(message);
+  }
 }

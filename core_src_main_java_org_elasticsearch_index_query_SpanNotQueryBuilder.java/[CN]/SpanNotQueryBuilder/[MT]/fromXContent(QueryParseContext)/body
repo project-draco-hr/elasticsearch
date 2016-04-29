@@ -1,0 +1,78 @@
+{
+  XContentParser parser=parseContext.parser();
+  float boost=AbstractQueryBuilder.DEFAULT_BOOST;
+  SpanQueryBuilder include=null;
+  SpanQueryBuilder exclude=null;
+  Integer dist=null;
+  Integer pre=null;
+  Integer post=null;
+  String queryName=null;
+  String currentFieldName=null;
+  XContentParser.Token token;
+  while ((token=parser.nextToken()) != XContentParser.Token.END_OBJECT) {
+    if (token == XContentParser.Token.FIELD_NAME) {
+      currentFieldName=parser.currentName();
+    }
+ else     if (token == XContentParser.Token.START_OBJECT) {
+      if (parseContext.getParseFieldMatcher().match(currentFieldName,INCLUDE_FIELD)) {
+        QueryBuilder query=parseContext.parseInnerQueryBuilder();
+        if (!(query instanceof SpanQueryBuilder)) {
+          throw new ParsingException(parser.getTokenLocation(),"spanNot [include] must be of type span query");
+        }
+        include=(SpanQueryBuilder)query;
+      }
+ else       if (parseContext.getParseFieldMatcher().match(currentFieldName,EXCLUDE_FIELD)) {
+        QueryBuilder query=parseContext.parseInnerQueryBuilder();
+        if (!(query instanceof SpanQueryBuilder)) {
+          throw new ParsingException(parser.getTokenLocation(),"spanNot [exclude] must be of type span query");
+        }
+        exclude=(SpanQueryBuilder)query;
+      }
+ else {
+        throw new ParsingException(parser.getTokenLocation(),"[span_not] query does not support [" + currentFieldName + "]");
+      }
+    }
+ else {
+      if (parseContext.getParseFieldMatcher().match(currentFieldName,DIST_FIELD)) {
+        dist=parser.intValue();
+      }
+ else       if (parseContext.getParseFieldMatcher().match(currentFieldName,PRE_FIELD)) {
+        pre=parser.intValue();
+      }
+ else       if (parseContext.getParseFieldMatcher().match(currentFieldName,POST_FIELD)) {
+        post=parser.intValue();
+      }
+ else       if (parseContext.getParseFieldMatcher().match(currentFieldName,AbstractQueryBuilder.BOOST_FIELD)) {
+        boost=parser.floatValue();
+      }
+ else       if (parseContext.getParseFieldMatcher().match(currentFieldName,AbstractQueryBuilder.NAME_FIELD)) {
+        queryName=parser.text();
+      }
+ else {
+        throw new ParsingException(parser.getTokenLocation(),"[span_not] query does not support [" + currentFieldName + "]");
+      }
+    }
+  }
+  if (include == null) {
+    throw new ParsingException(parser.getTokenLocation(),"spanNot must have [include] span query clause");
+  }
+  if (exclude == null) {
+    throw new ParsingException(parser.getTokenLocation(),"spanNot must have [exclude] span query clause");
+  }
+  if (dist != null && (pre != null || post != null)) {
+    throw new ParsingException(parser.getTokenLocation(),"spanNot can either use [dist] or [pre] & [post] (or none)");
+  }
+  SpanNotQueryBuilder spanNotQuery=new SpanNotQueryBuilder(include,exclude);
+  if (dist != null) {
+    spanNotQuery.dist(dist);
+  }
+  if (pre != null) {
+    spanNotQuery.pre(pre);
+  }
+  if (post != null) {
+    spanNotQuery.post(post);
+  }
+  spanNotQuery.boost(boost);
+  spanNotQuery.queryName(queryName);
+  return spanNotQuery;
+}

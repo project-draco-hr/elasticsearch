@@ -4,6 +4,7 @@
   String defaultType=request.param("type");
   String defaultRouting=request.param("routing");
   String fieldsParam=request.param("fields");
+  String defaultPipeline=request.param("pipeline");
   String[] defaultFields=fieldsParam != null ? Strings.commaDelimitedListToStringArray(fieldsParam) : null;
   String consistencyLevel=request.param("consistency");
   if (consistencyLevel != null) {
@@ -11,67 +12,19 @@
   }
   bulkRequest.timeout(request.paramAsTime("timeout",BulkShardRequest.DEFAULT_TIMEOUT));
   bulkRequest.refresh(request.paramAsBoolean("refresh",bulkRequest.refresh()));
-  bulkRequest.add(request.content(),defaultIndex,defaultType,defaultRouting,defaultFields,null,allowExplicitIndex);
+  bulkRequest.add(request.content(),defaultIndex,defaultType,defaultRouting,defaultFields,defaultPipeline,null,allowExplicitIndex);
   client.bulk(bulkRequest,new RestBuilderListener<BulkResponse>(channel){
     @Override public RestResponse buildResponse(    BulkResponse response,    XContentBuilder builder) throws Exception {
       builder.startObject();
       builder.field(Fields.TOOK,response.getTookInMillis());
+      if (response.getIngestTookInMillis() != BulkResponse.NO_INGEST_TOOK) {
+        builder.field(Fields.INGEST_TOOK,response.getIngestTookInMillis());
+      }
       builder.field(Fields.ERRORS,response.hasFailures());
       builder.startArray(Fields.ITEMS);
       for (      BulkItemResponse itemResponse : response) {
         builder.startObject();
-        builder.startObject(itemResponse.getOpType());
-        builder.field(Fields._INDEX,itemResponse.getIndex());
-        builder.field(Fields._TYPE,itemResponse.getType());
-        builder.field(Fields._ID,itemResponse.getId());
-        long version=itemResponse.getVersion();
-        if (version != -1) {
-          builder.field(Fields._VERSION,itemResponse.getVersion());
-        }
-        if (itemResponse.isFailed()) {
-          builder.field(Fields.STATUS,itemResponse.getFailure().getStatus().getStatus());
-          builder.startObject(Fields.ERROR);
-          ElasticsearchException.toXContent(builder,request,itemResponse.getFailure().getCause());
-          builder.endObject();
-        }
- else {
-          ActionWriteResponse.ShardInfo shardInfo=itemResponse.getResponse().getShardInfo();
-          shardInfo.toXContent(builder,request);
-          if (itemResponse.getResponse() instanceof DeleteResponse) {
-            DeleteResponse deleteResponse=itemResponse.getResponse();
-            if (deleteResponse.isFound()) {
-              builder.field(Fields.STATUS,shardInfo.status().getStatus());
-            }
- else {
-              builder.field(Fields.STATUS,RestStatus.NOT_FOUND.getStatus());
-            }
-            builder.field(Fields.FOUND,deleteResponse.isFound());
-          }
- else           if (itemResponse.getResponse() instanceof IndexResponse) {
-            IndexResponse indexResponse=itemResponse.getResponse();
-            if (indexResponse.isCreated()) {
-              builder.field(Fields.STATUS,RestStatus.CREATED.getStatus());
-            }
- else {
-              builder.field(Fields.STATUS,shardInfo.status().getStatus());
-            }
-          }
- else           if (itemResponse.getResponse() instanceof UpdateResponse) {
-            UpdateResponse updateResponse=itemResponse.getResponse();
-            if (updateResponse.isCreated()) {
-              builder.field(Fields.STATUS,RestStatus.CREATED.getStatus());
-            }
- else {
-              builder.field(Fields.STATUS,shardInfo.status().getStatus());
-            }
-            if (updateResponse.getGetResult() != null) {
-              builder.startObject(Fields.GET);
-              updateResponse.getGetResult().toXContentEmbedded(builder,request);
-              builder.endObject();
-            }
-          }
-        }
-        builder.endObject();
+        itemResponse.toXContent(builder,request);
         builder.endObject();
       }
       builder.endArray();

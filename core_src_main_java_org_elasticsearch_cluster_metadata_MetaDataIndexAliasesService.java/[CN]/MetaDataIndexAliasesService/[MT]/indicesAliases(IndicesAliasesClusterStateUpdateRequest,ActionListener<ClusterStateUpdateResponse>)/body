@@ -4,7 +4,7 @@
       return new ClusterStateUpdateResponse(acknowledged);
     }
     @Override public ClusterState execute(    final ClusterState currentState){
-      List<String> indicesToClose=new ArrayList<>();
+      List<Index> indicesToClose=new ArrayList<>();
       Map<String,IndexService> indices=new HashMap<>();
       try {
         for (        AliasAction aliasAction : request.actions()) {
@@ -30,12 +30,9 @@
                 if (indexService == null) {
                   try {
                     indexService=indicesService.createIndex(nodeServicesProvider,indexMetaData,Collections.emptyList());
-                    if (indexMetaData.getMappings().containsKey(MapperService.DEFAULT_MAPPING)) {
-                      indexService.mapperService().merge(MapperService.DEFAULT_MAPPING,indexMetaData.getMappings().get(MapperService.DEFAULT_MAPPING).source(),false,false);
-                    }
                     for (                    ObjectCursor<MappingMetaData> cursor : indexMetaData.getMappings().values()) {
                       MappingMetaData mappingMetaData=cursor.value;
-                      indexService.mapperService().merge(mappingMetaData.type(),mappingMetaData.source(),false,false);
+                      indexService.mapperService().merge(mappingMetaData.type(),mappingMetaData.source(),MapperService.MergeReason.MAPPING_RECOVERY,false);
                     }
                   }
  catch (                  Exception e) {
@@ -44,9 +41,9 @@
                   }
                   indicesToClose.add(indexMetaData.getIndex());
                 }
-                indices.put(indexMetaData.getIndex(),indexService);
+                indices.put(indexMetaData.getIndex().getName(),indexService);
               }
-              aliasValidator.validateAliasFilter(aliasAction.alias(),filter,indexService.getQueryShardContext());
+              aliasValidator.validateAliasFilter(aliasAction.alias(),filter,indexService.newQueryShardContext());
             }
             AliasMetaData newAliasMd=AliasMetaData.newAliasMetaDataBuilder(aliasAction.alias()).filter(filter).indexRouting(aliasAction.indexRouting()).searchRouting(aliasAction.searchRouting()).build();
             AliasMetaData aliasMd=indexMetaData.getAliases().get(aliasAction.alias());
@@ -73,7 +70,7 @@
         return currentState;
       }
   finally {
-        for (        String index : indicesToClose) {
+        for (        Index index : indicesToClose) {
           indicesService.removeIndex(index,"created for alias processing");
         }
       }

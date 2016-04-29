@@ -1,5 +1,5 @@
 {
-synchronized (dirtyLock(index.uid())) {
+  try (Releasable ignored=acquireLock(index.uid())){
     lastWriteNanos=index.startTime();
     final long currentVersion;
     final boolean deleted;
@@ -10,7 +10,7 @@ synchronized (dirtyLock(index.uid())) {
     }
  else {
       deleted=versionValue.delete();
-      if (engineConfig.isEnableGcDeletes() && versionValue.delete() && (engineConfig.getThreadPool().estimatedTimeInMillis() - versionValue.time()) > engineConfig.getGcDeletesInMillis()) {
+      if (engineConfig.isEnableGcDeletes() && versionValue.delete() && (engineConfig.getThreadPool().estimatedTimeInMillis() - versionValue.time()) > getGcDeletesInMillis()) {
         currentVersion=Versions.NOT_FOUND;
       }
  else {
@@ -18,44 +18,25 @@ synchronized (dirtyLock(index.uid())) {
       }
     }
     long expectedVersion=index.version();
-    if (index.versionType().isVersionConflictForWrites(currentVersion,expectedVersion,deleted)) {
-      if (index.origin() == Operation.Origin.RECOVERY) {
-        return false;
-      }
- else {
+    if (isVersionConflictForWrites(index,currentVersion,deleted,expectedVersion)) {
+      if (index.origin() != Operation.Origin.RECOVERY) {
         throw new VersionConflictEngineException(shardId,index.type(),index.id(),index.versionType().explainConflictForWrites(currentVersion,expectedVersion,deleted));
       }
+      return false;
     }
     long updatedVersion=index.versionType().updateVersion(currentVersion,expectedVersion);
     final boolean created;
     index.updateVersion(updatedVersion);
     if (currentVersion == Versions.NOT_FOUND) {
       created=true;
-      if (index.docs().size() > 1) {
-        indexWriter.addDocuments(index.docs());
-      }
- else {
-        indexWriter.addDocument(index.docs().get(0));
-      }
+      index(index,indexWriter);
     }
  else {
-      if (versionValue != null) {
-        created=versionValue.delete();
-      }
- else {
-        created=false;
-      }
-      if (index.docs().size() > 1) {
-        indexWriter.updateDocuments(index.uid(),index.docs());
-      }
- else {
-        indexWriter.updateDocument(index.uid(),index.docs().get(0));
-      }
+      created=update(index,versionValue,indexWriter);
     }
     Translog.Location translogLocation=translog.add(new Translog.Index(index));
     versionMap.putUnderLock(index.uid().bytes(),new VersionValue(updatedVersion,translogLocation));
     index.setTranslogLocation(translogLocation);
-    indexingService.postIndexUnderLock(index);
     return created;
   }
-}
+ }

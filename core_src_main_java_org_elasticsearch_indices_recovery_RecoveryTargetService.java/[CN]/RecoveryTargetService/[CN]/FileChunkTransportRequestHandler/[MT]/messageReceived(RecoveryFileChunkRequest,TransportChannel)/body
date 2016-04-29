@@ -1,0 +1,21 @@
+{
+  try (RecoveriesCollection.RecoveryRef recoveryRef=onGoingRecoveries.getRecoverySafe(request.recoveryId(),request.shardId())){
+    final RecoveryTarget status=recoveryRef.status();
+    final RecoveryState.Index indexState=status.state().getIndex();
+    if (request.sourceThrottleTimeInNanos() != RecoveryState.Index.UNKNOWN) {
+      indexState.addSourceThrottling(request.sourceThrottleTimeInNanos());
+    }
+    RateLimiter rateLimiter=recoverySettings.rateLimiter();
+    if (rateLimiter != null) {
+      long bytes=bytesSinceLastPause.addAndGet(request.content().length());
+      if (bytes > rateLimiter.getMinPauseCheckBytes()) {
+        bytesSinceLastPause.addAndGet(-bytes);
+        long throttleTimeInNanos=rateLimiter.pause(bytes);
+        indexState.addTargetThrottling(throttleTimeInNanos);
+        status.indexShard().recoveryStats().addThrottleTime(throttleTimeInNanos);
+      }
+    }
+    status.writeFileChunk(request.metadata(),request.position(),request.content(),request.lastChunk(),request.totalTranslogOps());
+  }
+   channel.sendResponse(TransportResponse.Empty.INSTANCE);
+}

@@ -2,8 +2,8 @@
   createIndex("test");
   ensureGreen();
   IndicesService indicesService=getInstanceFromNode(IndicesService.class);
-  DiscoveryNode localNode=new DiscoveryNode("foo",DummyTransportAddress.INSTANCE,Version.CURRENT);
-  IndexService test=indicesService.indexService("test");
+  DiscoveryNode localNode=new DiscoveryNode("foo",DummyTransportAddress.INSTANCE,emptyMap(),emptySet(),Version.CURRENT);
+  IndexService test=indicesService.indexService(resolveIndex("test"));
   final IndexShard shard=test.getShardOrNull(0);
   client().prepareIndex("test","test","0").setSource("{}").setRefresh(randomBoolean()).get();
   if (randomBoolean()) {
@@ -14,7 +14,7 @@
   Store store=shard.store();
   store.incRef();
   test.removeShard(0,"b/c simon says so");
-  Lucene.cleanLuceneIndex(store.directory());
+  cleanLuceneIndex(store.directory());
   store.decRef();
   ShardRoutingHelper.reinit(routing);
   IndexShard newShard=test.createShard(routing);
@@ -46,6 +46,9 @@
   newShard.updateRoutingEntry(routing,true);
   SearchResponse response=client().prepareSearch().get();
   assertHitCount(response,0);
-  client().prepareIndex("test","test","0").setSource("{}").setRefresh(true).get();
+  IndexRequest request=client().prepareIndex("test","test","0").setSource("{}").request();
+  request.process(null,false,"test");
+  TransportIndexAction.executeIndexRequestOnPrimary(request,newShard,null);
+  newShard.refresh("test");
   assertHitCount(client().prepareSearch().get(),1);
 }

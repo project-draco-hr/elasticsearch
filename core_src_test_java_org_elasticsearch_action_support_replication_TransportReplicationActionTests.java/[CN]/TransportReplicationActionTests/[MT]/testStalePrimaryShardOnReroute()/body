@@ -1,0 +1,40 @@
+{
+  final String index="test";
+  final ShardId shardId=new ShardId(index,"_na_",0);
+  setState(clusterService,stateWithActivePrimary(index,true,randomInt(3)));
+  logger.debug("--> using initial state:\n{}",clusterService.state().prettyPrint());
+  Request request=new Request(shardId);
+  boolean timeout=randomBoolean();
+  if (timeout) {
+    request.timeout("0s");
+  }
+ else {
+    request.timeout("1h");
+  }
+  PlainActionFuture<Response> listener=new PlainActionFuture<>();
+  ReplicationTask task=maybeTask();
+  TransportReplicationAction.ReroutePhase reroutePhase=action.new ReroutePhase(task,request,listener);
+  reroutePhase.run();
+  CapturingTransport.CapturedRequest[] capturedRequests=transport.getCapturedRequestsAndClear();
+  assertThat(capturedRequests,arrayWithSize(1));
+  assertThat(capturedRequests[0].action,equalTo("testAction[p]"));
+  assertPhase(task,"waiting_on_primary");
+  transport.handleRemoteError(capturedRequests[0].requestId,randomRetryPrimaryException(shardId));
+  if (timeout) {
+    assertThat(listener.isDone(),equalTo(false));
+    capturedRequests=transport.getCapturedRequestsAndClear();
+    assertThat(capturedRequests,arrayWithSize(1));
+    assertThat(capturedRequests[0].action,equalTo("testAction[p]"));
+    assertPhase(task,"waiting_on_primary");
+    transport.handleRemoteError(capturedRequests[0].requestId,randomRetryPrimaryException(shardId));
+    assertListenerThrows("must throw index not found exception",listener,ElasticsearchException.class);
+    assertPhase(task,"failed");
+  }
+ else {
+    assertThat(listener.isDone(),equalTo(false));
+    setState(clusterService,clusterService.state());
+    capturedRequests=transport.getCapturedRequestsAndClear();
+    assertThat(capturedRequests,arrayWithSize(1));
+    assertThat(capturedRequests[0].action,equalTo("testAction[p]"));
+  }
+}

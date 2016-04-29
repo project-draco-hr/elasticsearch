@@ -1,0 +1,61 @@
+{
+  final CorrelatingBackoffPolicy internalPolicy=new CorrelatingBackoffPolicy(backoffPolicy);
+  int numberOfAsyncOps=randomIntBetween(600,700);
+  final CountDownLatch latch=new CountDownLatch(numberOfAsyncOps);
+  final Set<Object> responses=Collections.newSetFromMap(new ConcurrentHashMap<>());
+  assertAcked(prepareCreate(INDEX_NAME));
+  ensureGreen();
+  BulkProcessor bulkProcessor=BulkProcessor.builder(client(),new BulkProcessor.Listener(){
+    @Override public void beforeBulk(    long executionId,    BulkRequest request){
+    }
+    @Override public void afterBulk(    long executionId,    BulkRequest request,    BulkResponse response){
+      internalPolicy.logResponse(response);
+      responses.add(response);
+      latch.countDown();
+    }
+    @Override public void afterBulk(    long executionId,    BulkRequest request,    Throwable failure){
+      responses.add(failure);
+      latch.countDown();
+    }
+  }
+).setBulkActions(1).setConcurrentRequests(randomIntBetween(0,100)).setBackoffPolicy(internalPolicy).build();
+  indexDocs(bulkProcessor,numberOfAsyncOps);
+  latch.await(10,TimeUnit.SECONDS);
+  bulkProcessor.close();
+  assertThat(responses.size(),equalTo(numberOfAsyncOps));
+  for (  Object response : responses) {
+    if (response instanceof BulkResponse) {
+      BulkResponse bulkResponse=(BulkResponse)response;
+      for (      BulkItemResponse bulkItemResponse : bulkResponse.getItems()) {
+        if (bulkItemResponse.isFailed()) {
+          BulkItemResponse.Failure failure=bulkItemResponse.getFailure();
+          Throwable rootCause=ExceptionsHelper.unwrapCause(failure.getCause());
+          if (rootCause instanceof EsRejectedExecutionException) {
+            if (rejectedExecutionExpected == false) {
+              Iterator<TimeValue> backoffState=internalPolicy.backoffStateFor(bulkResponse);
+              assertNotNull("backoffState is null (indicates a bulk request got rejected without retry)",backoffState);
+              if (backoffState.hasNext()) {
+                throw new AssertionError("Got rejected although backoff policy would allow more retries",rootCause);
+              }
+ else {
+                logger.debug("We maxed out the number of bulk retries and got rejected (this is ok).");
+              }
+            }
+          }
+ else {
+            throw new AssertionError("Unexpected failure",rootCause);
+          }
+        }
+      }
+    }
+ else {
+      Throwable t=(Throwable)response;
+      throw new AssertionError("Unexpected failure",t);
+    }
+  }
+  client().admin().indices().refresh(new RefreshRequest()).get();
+  Matcher<Long> searchResultCount;
+  searchResultCount=lessThanOrEqualTo((long)numberOfAsyncOps);
+  SearchResponse results=client().prepareSearch(INDEX_NAME).setTypes(TYPE_NAME).setQuery(QueryBuilders.matchAllQuery()).setSize(0).get();
+  assertThat(results.getHits().totalHits(),searchResultCount);
+}

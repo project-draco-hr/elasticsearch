@@ -1,33 +1,43 @@
 {
-  if (optimizeSingleShard) {
-    try {
-      ClusterState clusterState=clusterService.state();
-      String[] concreteIndices=indexNameExpressionResolver.concreteIndices(clusterState,searchRequest);
-      Map<String,Set<String>> routingMap=indexNameExpressionResolver.resolveSearchRouting(clusterState,searchRequest.routing(),searchRequest.indices());
-      int shardCount=clusterService.operationRouting().searchShardsCount(clusterState,concreteIndices,routingMap);
-      if (shardCount == 1) {
-        searchRequest.searchType(QUERY_AND_FETCH);
-      }
+  try {
+    ClusterState clusterState=clusterService.state();
+    String[] concreteIndices=indexNameExpressionResolver.concreteIndexNames(clusterState,searchRequest);
+    Map<String,Set<String>> routingMap=indexNameExpressionResolver.resolveSearchRouting(clusterState,searchRequest.routing(),searchRequest.indices());
+    int shardCount=clusterService.operationRouting().searchShardsCount(clusterState,concreteIndices,routingMap);
+    if (shardCount == 1) {
+      searchRequest.searchType(QUERY_AND_FETCH);
     }
- catch (    IndexNotFoundException|IndexClosedException e) {
-    }
-catch (    Exception e) {
-      logger.debug("failed to optimize search type, continue as normal",e);
-    }
+    if (searchRequest.isSuggestOnly()) {
+      searchRequest.requestCache(false);
+switch (searchRequest.searchType()) {
+case DFS_QUERY_AND_FETCH:
+case DFS_QUERY_THEN_FETCH:
+        searchRequest.searchType(QUERY_THEN_FETCH);
+      break;
   }
-  if (searchRequest.searchType() == DFS_QUERY_THEN_FETCH) {
-    dfsQueryThenFetchAction.execute(searchRequest,listener);
-  }
- else   if (searchRequest.searchType() == SearchType.QUERY_THEN_FETCH) {
-    queryThenFetchAction.execute(searchRequest,listener);
-  }
- else   if (searchRequest.searchType() == SearchType.DFS_QUERY_AND_FETCH) {
-    dfsQueryAndFetchAction.execute(searchRequest,listener);
-  }
- else   if (searchRequest.searchType() == SearchType.QUERY_AND_FETCH) {
-    queryAndFetchAction.execute(searchRequest,listener);
-  }
- else {
-    throw new IllegalStateException("Unknown search type: [" + searchRequest.searchType() + "]");
-  }
+}
+}
+ catch (IndexNotFoundException|IndexClosedException e) {
+}
+catch (Exception e) {
+logger.debug("failed to optimize search type, continue as normal",e);
+}
+AbstractSearchAsyncAction searchAsyncAction;
+switch (searchRequest.searchType()) {
+case DFS_QUERY_THEN_FETCH:
+searchAsyncAction=new SearchDfsQueryThenFetchAsyncAction(logger,searchTransportService,clusterService,indexNameExpressionResolver,searchPhaseController,threadPool,searchRequest,listener);
+break;
+case QUERY_THEN_FETCH:
+searchAsyncAction=new SearchQueryThenFetchAsyncAction(logger,searchTransportService,clusterService,indexNameExpressionResolver,searchPhaseController,threadPool,searchRequest,listener);
+break;
+case DFS_QUERY_AND_FETCH:
+searchAsyncAction=new SearchDfsQueryAndFetchAsyncAction(logger,searchTransportService,clusterService,indexNameExpressionResolver,searchPhaseController,threadPool,searchRequest,listener);
+break;
+case QUERY_AND_FETCH:
+searchAsyncAction=new SearchQueryAndFetchAsyncAction(logger,searchTransportService,clusterService,indexNameExpressionResolver,searchPhaseController,threadPool,searchRequest,listener);
+break;
+default :
+throw new IllegalStateException("Unknown search type: [" + searchRequest.searchType() + "]");
+}
+searchAsyncAction.start();
 }

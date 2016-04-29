@@ -1,0 +1,21 @@
+{
+  createIndex("test",Settings.EMPTY,"type","t","type=text");
+  ensureGreen("test");
+  client().prepareIndex("test","type","1").setSource("t","a").get();
+  client().prepareIndex("test","type","2").setSource("t","a a b").get();
+  client().prepareIndex("test","type","3").setSource("t","a a a b c").get();
+  client().prepareIndex("test","type","4").setSource("t","a b c d").get();
+  client().prepareIndex("test","type","5").setSource("t","a a b c d e").get();
+  client().admin().indices().prepareRefresh("test").get();
+  final Script script=new Script("_score + 1",ScriptService.ScriptType.INLINE,"painless",null);
+  final SearchResponse sr=client().prepareSearch("test").setQuery(QueryBuilders.functionScoreQuery(QueryBuilders.matchQuery("t","a"),ScoreFunctionBuilders.scriptFunction(script))).get();
+  final SearchHit[] hits=sr.getHits().getHits();
+  for (  final SearchHit hit : hits) {
+    assertTrue(hit.score() > 0.9999F && hit.score() < 2.0001F);
+  }
+  assertEquals("1",hits[0].getId());
+  assertEquals("3",hits[1].getId());
+  assertEquals("2",hits[2].getId());
+  assertEquals("5",hits[3].getId());
+  assertEquals("4",hits[4].getId());
+}

@@ -1,0 +1,20 @@
+{
+  ShardId shardId=request.shardId();
+  final IndexService indexService=indicesService.indexServiceSafe(shardId.getIndex());
+  final IndexShard indexShard=indexService.getShard(shardId.getId());
+  final IndexMetaData metaData=indexService.getIndexSettings().getIndexMetaData();
+  long[] preVersions=new long[request.items().length];
+  VersionType[] preVersionTypes=new VersionType[request.items().length];
+  Translog.Location location=null;
+  for (int requestIndex=0; requestIndex < request.items().length; requestIndex++) {
+    BulkItemRequest item=request.items()[requestIndex];
+    location=handleItem(metaData,request,indexShard,preVersions,preVersionTypes,location,requestIndex,item);
+  }
+  processAfterWrite(request.refresh(),indexShard,location);
+  BulkItemResponse[] responses=new BulkItemResponse[request.items().length];
+  BulkItemRequest[] items=request.items();
+  for (int i=0; i < items.length; i++) {
+    responses[i]=items[i].getPrimaryResponse();
+  }
+  return new Tuple<>(new BulkShardResponse(request.shardId(),responses),request);
+}

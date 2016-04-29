@@ -1,0 +1,75 @@
+{
+  setupTestNodes(Settings.EMPTY);
+  connectNodes(testNodes);
+  CountDownLatch checkLatch=new CountDownLatch(1);
+  CountDownLatch responseLatch=new CountDownLatch(1);
+  final AtomicReference<NodesResponse> responseReference=new AtomicReference<>();
+  Task mainTask=startBlockingTestNodesAction(checkLatch,new ActionListener<NodesResponse>(){
+    @Override public void onResponse(    NodesResponse listTasksResponse){
+      responseReference.set(listTasksResponse);
+      responseLatch.countDown();
+    }
+    @Override public void onFailure(    Throwable e){
+      logger.warn("Couldn't get list of tasks",e);
+      responseLatch.countDown();
+    }
+  }
+);
+  Map<Long,Task> localTasks=testNodes[0].transportService.getTaskManager().getTasks();
+  assertEquals(2,localTasks.size());
+  Task coordinatingTask=localTasks.get(Collections.min(localTasks.keySet()));
+  Task subTask=localTasks.get(Collections.max(localTasks.keySet()));
+  assertThat(subTask.getAction(),endsWith("[n]"));
+  assertThat(coordinatingTask.getAction(),not(endsWith("[n]")));
+  for (int i=1; i < testNodes.length; i++) {
+    Map<Long,Task> remoteTasks=testNodes[i].transportService.getTaskManager().getTasks();
+    assertEquals(1,remoteTasks.size());
+    Task remoteTask=remoteTasks.values().iterator().next();
+    assertThat(remoteTask.getAction(),endsWith("[n]"));
+  }
+  int testNodeNum=randomIntBetween(0,testNodes.length - 1);
+  TestNode testNode=testNodes[testNodeNum];
+  ListTasksRequest listTasksRequest=new ListTasksRequest();
+  listTasksRequest.setActions("testAction*");
+  logger.info("Listing currently running tasks using node [{}]",testNodeNum);
+  ListTasksResponse response=testNode.transportListTasksAction.execute(listTasksRequest).get();
+  logger.info("Checking currently running tasks");
+  assertEquals(testNodes.length,response.getPerNodeTasks().size());
+  assertEquals(2,response.getPerNodeTasks().get(testNodes[0].discoveryNode).size());
+  for (int i=1; i < testNodes.length; i++) {
+    assertEquals(1,response.getPerNodeTasks().get(testNodes[i].discoveryNode).size());
+  }
+  assertEquals(1,response.getTaskGroups().size());
+  assertEquals(testNodes.length,response.getTaskGroups().get(0).getChildTasks().size());
+  testNode=testNodes[randomIntBetween(0,testNodes.length - 1)];
+  listTasksRequest=new ListTasksRequest();
+  listTasksRequest.setActions("testAction[n]");
+  response=testNode.transportListTasksAction.execute(listTasksRequest).get();
+  assertEquals(testNodes.length,response.getPerNodeTasks().size());
+  for (  Map.Entry<DiscoveryNode,List<TaskInfo>> entry : response.getPerNodeTasks().entrySet()) {
+    assertEquals(1,entry.getValue().size());
+    assertNull(entry.getValue().get(0).getDescription());
+  }
+  assertEquals(testNodes.length,response.getTaskGroups().size());
+  for (  TaskGroup taskGroup : response.getTaskGroups()) {
+    assertEquals(0,taskGroup.getChildTasks().size());
+  }
+  listTasksRequest.setDetailed(true);
+  response=testNode.transportListTasksAction.execute(listTasksRequest).get();
+  assertEquals(testNodes.length,response.getPerNodeTasks().size());
+  for (  Map.Entry<DiscoveryNode,List<TaskInfo>> entry : response.getPerNodeTasks().entrySet()) {
+    assertEquals(1,entry.getValue().size());
+    assertEquals("CancellableNodeRequest[Test Request, true]",entry.getValue().get(0).getDescription());
+  }
+  listTasksRequest.setActions("testAction");
+  response=testNode.transportListTasksAction.execute(listTasksRequest).get();
+  assertEquals(1,response.getTasks().size());
+  assertEquals(mainTask.getId(),response.getTasks().get(0).getId());
+  checkLatch.countDown();
+  assertTrue(responseLatch.await(10,TimeUnit.SECONDS));
+  NodesResponse responses=responseReference.get();
+  assertEquals(0,responses.failureCount());
+  for (  TestNode node : testNodes) {
+    assertEquals(0,node.transportService.getTaskManager().getTasks().size());
+  }
+}

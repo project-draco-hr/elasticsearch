@@ -1,0 +1,37 @@
+{
+  Path indexDir=createTempDir();
+  Path dataDir=indexDir.resolve("data");
+  try (InputStream stream=Files.newInputStream(backwardsIndex)){
+    TestUtil.unzip(stream,indexDir);
+  }
+   assertTrue(Files.exists(dataDir));
+  final Path[] list;
+  try (DirectoryStream<Path> stream=Files.newDirectoryStream(dataDir)){
+    List<Path> dirs=new ArrayList<>();
+    for (    Path p : stream) {
+      if (!p.getFileName().toString().startsWith("extra")) {
+        dirs.add(p);
+      }
+    }
+    list=dirs.toArray(new Path[0]);
+  }
+   if (list.length != 1) {
+    StringBuilder builder=new StringBuilder("Backwards index must contain exactly one cluster\n");
+    for (    Path line : list) {
+      builder.append(line.toString()).append('\n');
+    }
+    throw new IllegalStateException(builder.toString());
+  }
+  Path src=list[0];
+  Path dest=dataDir.resolve(internalCluster().getClusterName());
+  assertTrue(Files.exists(src));
+  Files.move(src,dest);
+  assertFalse(Files.exists(src));
+  assertTrue(Files.exists(dest));
+  Settings.Builder builder=Settings.builder().put(settings).put(Environment.PATH_DATA_SETTING.getKey(),dataDir.toAbsolutePath());
+  Path configDir=indexDir.resolve("config");
+  if (Files.exists(configDir)) {
+    builder.put(Environment.PATH_CONF_SETTING.getKey(),configDir.toAbsolutePath());
+  }
+  return builder.build();
+}

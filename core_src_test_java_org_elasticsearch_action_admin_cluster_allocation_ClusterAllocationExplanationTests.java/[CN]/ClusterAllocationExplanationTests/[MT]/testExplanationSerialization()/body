@@ -1,0 +1,30 @@
+{
+  ShardId shard=new ShardId("test","uuid",0);
+  long remainingDelay=randomIntBetween(0,500);
+  Map<DiscoveryNode,NodeExplanation> nodeExplanations=new HashMap<>(1);
+  Float nodeWeight=randomFloat();
+  Set<String> activeAllocationIds=new HashSet<>();
+  activeAllocationIds.add("eggplant");
+  IndicesShardStoresResponse.StoreStatus storeStatus=new IndicesShardStoresResponse.StoreStatus(node,42,"eggplant",IndicesShardStoresResponse.StoreStatus.AllocationStatus.PRIMARY,null);
+  NodeExplanation ne=TransportClusterAllocationExplainAction.calculateNodeExplanation(primaryShard,indexMetaData,node,yesDecision,nodeWeight,storeStatus,"",activeAllocationIds);
+  nodeExplanations.put(ne.getNode(),ne);
+  ClusterAllocationExplanation cae=new ClusterAllocationExplanation(shard,true,"assignedNode",remainingDelay,null,nodeExplanations);
+  BytesStreamOutput out=new BytesStreamOutput();
+  cae.writeTo(out);
+  StreamInput in=StreamInput.wrap(out.bytes());
+  ClusterAllocationExplanation cae2=new ClusterAllocationExplanation(in);
+  assertEquals(shard,cae2.getShard());
+  assertTrue(cae2.isPrimary());
+  assertTrue(cae2.isAssigned());
+  assertEquals("assignedNode",cae2.getAssignedNodeId());
+  assertNull(cae2.getUnassignedInfo());
+  assertEquals(remainingDelay,cae2.getRemainingDelayMillis());
+  for (  Map.Entry<DiscoveryNode,NodeExplanation> entry : cae2.getNodeExplanations().entrySet()) {
+    DiscoveryNode node=entry.getKey();
+    NodeExplanation explanation=entry.getValue();
+    IndicesShardStoresResponse.StoreStatus status=explanation.getStoreStatus();
+    assertNotNull(explanation.getStoreStatus());
+    assertNotNull(explanation.getDecision());
+    assertEquals(nodeWeight,explanation.getWeight());
+  }
+}

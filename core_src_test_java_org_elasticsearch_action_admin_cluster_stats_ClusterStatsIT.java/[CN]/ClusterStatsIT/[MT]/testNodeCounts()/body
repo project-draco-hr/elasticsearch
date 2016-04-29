@@ -1,16 +1,34 @@
 {
+  int total=1;
+  Map<String,Integer> expectedCounts=new HashMap<>();
+  expectedCounts.put(DiscoveryNode.Role.DATA.getRoleName(),1);
+  expectedCounts.put(DiscoveryNode.Role.MASTER.getRoleName(),1);
+  expectedCounts.put(DiscoveryNode.Role.INGEST.getRoleName(),1);
+  expectedCounts.put(ClusterStatsNodes.Counts.COORDINATING_ONLY,0);
+  int numNodes=randomIntBetween(1,5);
   ClusterStatsResponse response=client().admin().cluster().prepareClusterStats().get();
-  assertCounts(response.getNodesStats().getCounts(),1,0,0,1,0);
-  internalCluster().startNode(Settings.builder().put("node.data",false));
-  waitForNodes(2);
-  response=client().admin().cluster().prepareClusterStats().get();
-  assertCounts(response.getNodesStats().getCounts(),2,1,0,1,0);
-  internalCluster().startNode(Settings.builder().put("node.master",false));
-  waitForNodes(3);
-  response=client().admin().cluster().prepareClusterStats().get();
-  assertCounts(response.getNodesStats().getCounts(),3,1,1,1,0);
-  internalCluster().startNode(Settings.builder().put("node.client",true));
-  waitForNodes(4);
-  response=client().admin().cluster().prepareClusterStats().get();
-  assertCounts(response.getNodesStats().getCounts(),4,1,1,1,1);
+  assertCounts(response.getNodesStats().getCounts(),total,expectedCounts);
+  for (int i=0; i < numNodes; i++) {
+    boolean isDataNode=randomBoolean();
+    boolean isMasterNode=randomBoolean();
+    boolean isIngestNode=randomBoolean();
+    Settings settings=Settings.builder().put(Node.NODE_DATA_SETTING.getKey(),isDataNode).put(Node.NODE_MASTER_SETTING.getKey(),isMasterNode).put(Node.NODE_INGEST_SETTING.getKey(),isIngestNode).build();
+    internalCluster().startNode(settings);
+    total++;
+    waitForNodes(total);
+    if (isDataNode) {
+      incrementCountForRole(DiscoveryNode.Role.DATA.getRoleName(),expectedCounts);
+    }
+    if (isMasterNode) {
+      incrementCountForRole(DiscoveryNode.Role.MASTER.getRoleName(),expectedCounts);
+    }
+    if (isIngestNode) {
+      incrementCountForRole(DiscoveryNode.Role.INGEST.getRoleName(),expectedCounts);
+    }
+    if (!isDataNode && !isMasterNode && !isIngestNode) {
+      incrementCountForRole(ClusterStatsNodes.Counts.COORDINATING_ONLY,expectedCounts);
+    }
+    response=client().admin().cluster().prepareClusterStats().get();
+    assertCounts(response.getNodesStats().getCounts(),total,expectedCounts);
+  }
 }

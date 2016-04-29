@@ -1,49 +1,142 @@
 {
-  StringFieldMapper.Builder builder=stringField(name);
-  parseTextField(builder,name,node,parserContext);
-  for (Iterator<Map.Entry<String,Object>> iterator=node.entrySet().iterator(); iterator.hasNext(); ) {
-    Map.Entry<String,Object> entry=iterator.next();
-    String propName=Strings.toUnderscoreCase(entry.getKey());
-    Object propNode=entry.getValue();
-    if (propName.equals("null_value")) {
-      if (propNode == null) {
-        throw new MapperParsingException("Property [null_value] cannot be null.");
+  if (parserContext.indexVersionCreated().onOrAfter(Version.V_5_0_0_alpha1)) {
+    final Object index=node.get("index");
+    final boolean keyword=index != null && "analyzed".equals(index) == false;
+    Set<String> autoUpgradeParameters=keyword ? SUPPORTED_PARAMETERS_FOR_AUTO_UPGRADE_TO_KEYWORD : SUPPORTED_PARAMETERS_FOR_AUTO_UPGRADE_TO_TEXT;
+    if (autoUpgradeParameters.containsAll(node.keySet())) {
+      deprecationLogger.deprecated("The [string] field is deprecated, please use [text] or [keyword] instead on [{}]",fieldName);
+{
+        node.put("index","no".equals(index) == false);
       }
-      builder.nullValue(propNode.toString());
-      iterator.remove();
+{
+        Object norms=node.remove("norms");
+        if (norms instanceof Map) {
+          norms=((Map<?,?>)norms).get("enabled");
+        }
+        if (norms != null) {
+          node.put("norms",TypeParsers.nodeBooleanValue("norms",norms,parserContext));
+        }
+        Object omitNorms=node.remove("omit_norms");
+        if (omitNorms != null) {
+          node.put("norms",TypeParsers.nodeBooleanValue("omit_norms",omitNorms,parserContext) == false);
+        }
+      }
+{
+        Object fielddataO=node.get("fielddata");
+        if (fielddataO instanceof Map) {
+          Map<?,?> fielddata=(Map<?,?>)fielddataO;
+          if (keyword == false) {
+            node.put("fielddata","disabled".equals(fielddata.get("format")) == false);
+            Map<?,?> fielddataFilter=(Map<?,?>)fielddata.get("filter");
+            if (fielddataFilter != null) {
+              Map<?,?> frequencyFilter=(Map<?,?>)fielddataFilter.get("frequency");
+              frequencyFilter.keySet().retainAll(Arrays.asList("min","max","min_segment_size"));
+              node.put("fielddata_frequency_filter",frequencyFilter);
+            }
+          }
+ else {
+            node.remove("fielddata");
+          }
+          final Object loading=fielddata.get("loading");
+          if (loading != null) {
+            node.put("eager_global_ordinals","eager_global_ordinals".equals(loading));
+          }
+        }
+      }
+      if (keyword) {
+        return new KeywordFieldMapper.TypeParser().parse(fieldName,node,parserContext);
+      }
+ else {
+        return new TextFieldMapper.TypeParser().parse(fieldName,node,parserContext);
+      }
     }
- else     if (propName.equals("search_quote_analyzer")) {
-      NamedAnalyzer analyzer=parserContext.analysisService().analyzer(propNode.toString());
-      if (analyzer == null) {
-        throw new MapperParsingException("Analyzer [" + propNode.toString() + "] not found for field ["+ name+ "]");
-      }
-      builder.searchQuotedAnalyzer(analyzer);
-      iterator.remove();
-    }
- else     if (propName.equals("position_increment_gap") || parserContext.indexVersionCreated().before(Version.V_2_0_0) && propName.equals("position_offset_gap")) {
-      int newPositionIncrementGap=XContentMapValues.nodeIntegerValue(propNode,-1);
-      if (newPositionIncrementGap < 0) {
-        throw new MapperParsingException("positions_increment_gap less than 0 aren't allowed.");
-      }
-      builder.positionIncrementGap(newPositionIncrementGap);
-      if (builder.fieldType().indexAnalyzer() == null) {
-        builder.fieldType().setIndexAnalyzer(parserContext.analysisService().defaultIndexAnalyzer());
-      }
-      if (builder.fieldType().searchAnalyzer() == null) {
-        builder.fieldType().setSearchAnalyzer(parserContext.analysisService().defaultSearchAnalyzer());
-      }
-      if (builder.fieldType().searchQuoteAnalyzer() == null) {
-        builder.fieldType().setSearchQuoteAnalyzer(parserContext.analysisService().defaultSearchQuoteAnalyzer());
-      }
-      iterator.remove();
-    }
- else     if (propName.equals("ignore_above")) {
-      builder.ignoreAbove(XContentMapValues.nodeIntegerValue(propNode,-1));
-      iterator.remove();
-    }
- else     if (parseMultiField(builder,name,parserContext,propName,propNode)) {
-      iterator.remove();
-    }
+    throw new IllegalArgumentException("The [string] type is removed in 5.0. You should now use either a [text] " + "or [keyword] field instead for field [" + fieldName + "]");
   }
-  return builder;
+  StringFieldMapper.Builder builder=new StringFieldMapper.Builder(fieldName);
+  final Object index=node.remove("index");
+  if (index != null) {
+    final String normalizedIndex=index.toString();
+switch (normalizedIndex) {
+case "analyzed":
+      builder.tokenized(true);
+    node.put("index",true);
+  break;
+case "not_analyzed":
+builder.tokenized(false);
+node.put("index",true);
+break;
+case "no":
+node.put("index",false);
+break;
+default :
+throw new IllegalArgumentException("Can't parse [index] value [" + index + "] for field ["+ fieldName+ "], expected [true], [false], [no], [not_analyzed] or [analyzed]");
+}
+}
+final Object fielddataObject=node.get("fielddata");
+if (fielddataObject instanceof Map) {
+Map<?,?> fielddata=(Map<?,?>)fielddataObject;
+final Object loading=fielddata.get("loading");
+if (loading != null) {
+node.put("eager_global_ordinals","eager_global_ordinals".equals(loading));
+}
+Map<?,?> fielddataFilter=(Map<?,?>)fielddata.get("filter");
+if (fielddataFilter != null) {
+Map<?,?> frequencyFilter=(Map<?,?>)fielddataFilter.get("frequency");
+frequencyFilter.keySet().retainAll(Arrays.asList("min","max","min_segment_size"));
+node.put("fielddata_frequency_filter",frequencyFilter);
+}
+node.put("fielddata","disabled".equals(fielddata.get("format")) == false);
+}
+parseTextField(builder,fieldName,node,parserContext);
+for (Iterator<Map.Entry<String,Object>> iterator=node.entrySet().iterator(); iterator.hasNext(); ) {
+Map.Entry<String,Object> entry=iterator.next();
+String propName=entry.getKey();
+Object propNode=entry.getValue();
+if (propName.equals("null_value")) {
+if (propNode == null) {
+throw new MapperParsingException("Property [null_value] cannot be null.");
+}
+builder.nullValue(propNode.toString());
+iterator.remove();
+}
+ else if (propName.equals("position_increment_gap")) {
+int newPositionIncrementGap=XContentMapValues.nodeIntegerValue(propNode,-1);
+if (newPositionIncrementGap < 0) {
+throw new MapperParsingException("positions_increment_gap less than 0 aren't allowed.");
+}
+builder.positionIncrementGap(newPositionIncrementGap);
+if (builder.fieldType().indexAnalyzer() == null) {
+builder.fieldType().setIndexAnalyzer(parserContext.analysisService().defaultIndexAnalyzer());
+}
+if (builder.fieldType().searchAnalyzer() == null) {
+builder.fieldType().setSearchAnalyzer(parserContext.analysisService().defaultSearchAnalyzer());
+}
+if (builder.fieldType().searchQuoteAnalyzer() == null) {
+builder.fieldType().setSearchQuoteAnalyzer(parserContext.analysisService().defaultSearchQuoteAnalyzer());
+}
+iterator.remove();
+}
+ else if (propName.equals("ignore_above")) {
+builder.ignoreAbove(XContentMapValues.nodeIntegerValue(propNode,-1));
+iterator.remove();
+}
+ else if (propName.equals("fielddata")) {
+builder.fielddata(XContentMapValues.nodeBooleanValue(propNode));
+iterator.remove();
+}
+ else if (propName.equals("eager_global_ordinals")) {
+builder.eagerGlobalOrdinals(XContentMapValues.nodeBooleanValue(propNode));
+iterator.remove();
+}
+ else if (propName.equals("fielddata_frequency_filter")) {
+Map<?,?> frequencyFilter=(Map<?,?>)propNode;
+double minFrequency=XContentMapValues.nodeDoubleValue(frequencyFilter.remove("min"),0);
+double maxFrequency=XContentMapValues.nodeDoubleValue(frequencyFilter.remove("max"),Integer.MAX_VALUE);
+int minSegmentSize=XContentMapValues.nodeIntegerValue(frequencyFilter.remove("min_segment_size"),0);
+builder.fielddataFrequencyFilter(minFrequency,maxFrequency,minSegmentSize);
+DocumentMapperParser.checkNoRemainingFields(propName,frequencyFilter,parserContext.indexVersionCreated());
+iterator.remove();
+}
+}
+return builder;
 }

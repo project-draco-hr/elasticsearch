@@ -1,0 +1,43 @@
+{
+  boolean bulkRequestSetupSuccessful=false;
+  boolean acquired=false;
+  try {
+    listener.beforeBulk(executionId,bulkRequest);
+    semaphore.acquire();
+    acquired=true;
+    Retry.on(EsRejectedExecutionException.class).policy(backoffPolicy).withAsyncBackoff(client,bulkRequest,new ActionListener<BulkResponse>(){
+      @Override public void onResponse(      BulkResponse response){
+        try {
+          listener.afterBulk(executionId,bulkRequest,response);
+        }
+  finally {
+          semaphore.release();
+        }
+      }
+      @Override public void onFailure(      Throwable e){
+        try {
+          listener.afterBulk(executionId,bulkRequest,e);
+        }
+  finally {
+          semaphore.release();
+        }
+      }
+    }
+);
+    bulkRequestSetupSuccessful=true;
+  }
+ catch (  InterruptedException e) {
+    Thread.currentThread().interrupt();
+    logger.info("Bulk request {} has been cancelled.",e,executionId);
+    listener.afterBulk(executionId,bulkRequest,e);
+  }
+catch (  Throwable t) {
+    logger.warn("Failed to execute bulk request {}.",t,executionId);
+    listener.afterBulk(executionId,bulkRequest,t);
+  }
+ finally {
+    if (!bulkRequestSetupSuccessful && acquired) {
+      semaphore.release();
+    }
+  }
+}

@@ -1,79 +1,21 @@
 {
-  boolean http10=nettyRequest.getProtocolVersion().equals(HttpVersion.HTTP_1_0);
-  boolean close=HttpHeaders.Values.CLOSE.equalsIgnoreCase(nettyRequest.headers().get(HttpHeaders.Names.CONNECTION)) || (http10 && !HttpHeaders.Values.KEEP_ALIVE.equalsIgnoreCase(nettyRequest.headers().get(HttpHeaders.Names.CONNECTION)));
-  HttpResponseStatus status=getStatus(response.status());
-  org.jboss.netty.handler.codec.http.HttpResponse resp;
-  if (http10) {
-    resp=new DefaultHttpResponse(HttpVersion.HTTP_1_0,status);
-    if (!close) {
-      resp.headers().add(HttpHeaders.Names.CONNECTION,"Keep-Alive");
-    }
-  }
- else {
-    resp=new DefaultHttpResponse(HttpVersion.HTTP_1_1,status);
-  }
-  if (RestUtils.isBrowser(nettyRequest.headers().get(USER_AGENT))) {
-    if (transport.settings().getAsBoolean(SETTING_CORS_ENABLED,false)) {
-      String originHeader=request.header(ORIGIN);
-      if (!Strings.isNullOrEmpty(originHeader)) {
-        if (corsPattern == null) {
-          String allowedOrigins=transport.settings().get(SETTING_CORS_ALLOW_ORIGIN,null);
-          if (!Strings.isNullOrEmpty(allowedOrigins)) {
-            resp.headers().add(ACCESS_CONTROL_ALLOW_ORIGIN,allowedOrigins);
-          }
-        }
- else {
-          resp.headers().add(ACCESS_CONTROL_ALLOW_ORIGIN,corsPattern.matcher(originHeader).matches() ? originHeader : "null");
-        }
-      }
-      if (nettyRequest.getMethod() == HttpMethod.OPTIONS) {
-        resp.headers().add(ACCESS_CONTROL_MAX_AGE,transport.settings().getAsInt(SETTING_CORS_MAX_AGE,1728000));
-        resp.headers().add(ACCESS_CONTROL_ALLOW_METHODS,transport.settings().get(SETTING_CORS_ALLOW_METHODS,"OPTIONS, HEAD, GET, POST, PUT, DELETE"));
-        resp.headers().add(ACCESS_CONTROL_ALLOW_HEADERS,transport.settings().get(SETTING_CORS_ALLOW_HEADERS,"X-Requested-With, Content-Type, Content-Length"));
-      }
-      if (transport.settings().getAsBoolean(SETTING_CORS_ALLOW_CREDENTIALS,false)) {
-        resp.headers().add(ACCESS_CONTROL_ALLOW_CREDENTIALS,"true");
-      }
-    }
-  }
+  HttpResponse resp=newResponse();
+  resp.setStatus(getStatus(response.status()));
+  CorsHandler.setCorsResponseHeaders(nettyRequest,resp,transport.getCorsConfig());
   String opaque=nettyRequest.headers().get("X-Opaque-Id");
   if (opaque != null) {
-    resp.headers().add("X-Opaque-Id",opaque);
+    setHeaderField(resp,"X-Opaque-Id",opaque);
   }
-  Map<String,List<String>> customHeaders=response.getHeaders();
-  if (customHeaders != null) {
-    for (    Map.Entry<String,List<String>> headerEntry : customHeaders.entrySet()) {
-      for (      String headerValue : headerEntry.getValue()) {
-        resp.headers().add(headerEntry.getKey(),headerValue);
-      }
-    }
-  }
+  addCustomHeaders(response,resp);
   BytesReference content=response.content();
   ChannelBuffer buffer;
   boolean addedReleaseListener=false;
   try {
     buffer=content.toChannelBuffer();
     resp.setContent(buffer);
-    if (!resp.headers().contains(HttpHeaders.Names.CONTENT_TYPE)) {
-      resp.headers().add(HttpHeaders.Names.CONTENT_TYPE,response.contentType());
-    }
-    if (!resp.headers().contains(HttpHeaders.Names.CONTENT_LENGTH)) {
-      resp.headers().add(HttpHeaders.Names.CONTENT_LENGTH,String.valueOf(buffer.readableBytes()));
-    }
-    if (transport.resetCookies) {
-      String cookieString=nettyRequest.headers().get(HttpHeaders.Names.COOKIE);
-      if (cookieString != null) {
-        CookieDecoder cookieDecoder=new CookieDecoder();
-        Set<Cookie> cookies=cookieDecoder.decode(cookieString);
-        if (!cookies.isEmpty()) {
-          CookieEncoder cookieEncoder=new CookieEncoder(true);
-          for (          Cookie cookie : cookies) {
-            cookieEncoder.addCookie(cookie);
-          }
-          resp.headers().add(HttpHeaders.Names.SET_COOKIE,cookieEncoder.encode());
-        }
-      }
-    }
+    setHeaderField(resp,HttpHeaders.Names.CONTENT_TYPE,response.contentType(),false);
+    setHeaderField(resp,HttpHeaders.Names.CONTENT_LENGTH,String.valueOf(buffer.readableBytes()),false);
+    addCookies(resp);
     ChannelFuture future;
     if (orderedUpstreamMessageEvent != null) {
       OrderedDownstreamChannelEvent downstreamChannelEvent=new OrderedDownstreamChannelEvent(orderedUpstreamMessageEvent,0,true,resp);
@@ -87,7 +29,7 @@
       future.addListener(new ReleaseChannelFutureListener((Releasable)content));
       addedReleaseListener=true;
     }
-    if (close) {
+    if (isCloseConnection()) {
       future.addListener(ChannelFutureListener.CLOSE);
     }
   }

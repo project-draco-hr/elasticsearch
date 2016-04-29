@@ -1,7 +1,11 @@
 {
-  final String[] termTypes={"string","long","integer","float","double"};
+  final String[] termTypes={"text","long","integer","float","double"};
   String termtype=termTypes[randomInt(termTypes.length - 1)];
-  assertAcked(prepareCreate(index).setSettings(SETTING_NUMBER_OF_SHARDS,1,SETTING_NUMBER_OF_REPLICAS,0).addMapping(type,"{\"properties\":{\"text\": {\"type\": \"" + termtype + "\"}}}"));
+  String termMappings="type=" + termtype;
+  if (termtype.equals("text")) {
+    termMappings+=",fielddata=true";
+  }
+  assertAcked(prepareCreate(index).setSettings(SETTING_NUMBER_OF_SHARDS,1,SETTING_NUMBER_OF_REPLICAS,0).addMapping(type,"text",termMappings));
   ensureYellow(index);
   List<IndexRequestBuilder> indexBuilders=new ArrayList<>();
   addTermsDocs("1",1,indexBuilders);
@@ -11,11 +15,11 @@
   addTermsDocs("5",3,indexBuilders);
   addTermsDocs("6",3,indexBuilders);
   indexRandom(true,false,indexBuilders);
-  SearchResponse response=client().prepareSearch(index).addAggregation(new TermsBuilder("myTerms").field("text").minDocCount(2).size(2).executionHint(randomExecutionHint()).order(Terms.Order.term(true))).execute().actionGet();
+  SearchResponse response=client().prepareSearch(index).addAggregation(terms("myTerms").field("text").minDocCount(2).size(2).executionHint(randomExecutionHint()).order(Terms.Order.term(true))).execute().actionGet();
   assertSearchResponse(response);
   Terms sigterms=response.getAggregations().get("myTerms");
   assertThat(sigterms.getBuckets().size(),equalTo(0));
-  response=client().prepareSearch(index).addAggregation(new TermsBuilder("myTerms").field("text").minDocCount(2).shardMinDocCount(2).size(2).executionHint(randomExecutionHint()).order(Terms.Order.term(true))).execute().actionGet();
+  response=client().prepareSearch(index).addAggregation(terms("myTerms").field("text").minDocCount(2).shardMinDocCount(2).size(2).executionHint(randomExecutionHint()).order(Terms.Order.term(true))).execute().actionGet();
   assertSearchResponse(response);
   sigterms=response.getAggregations().get("myTerms");
   assertThat(sigterms.getBuckets().size(),equalTo(2));

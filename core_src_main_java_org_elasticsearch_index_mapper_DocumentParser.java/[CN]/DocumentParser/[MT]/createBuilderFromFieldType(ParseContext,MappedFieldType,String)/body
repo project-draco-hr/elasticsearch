@@ -1,46 +1,48 @@
 {
   Mapper.Builder builder=null;
   if (fieldType instanceof StringFieldType) {
-    builder=context.root().findTemplateBuilder(context,currentFieldName,"string");
+    builder=context.root().findTemplateBuilder(context,currentFieldName,"string","string");
+  }
+ else   if (fieldType instanceof TextFieldType) {
+    builder=context.root().findTemplateBuilder(context,currentFieldName,"text","string");
     if (builder == null) {
-      builder=MapperBuilders.stringField(currentFieldName);
+      builder=new TextFieldMapper.Builder(currentFieldName).addMultiField(new KeywordFieldMapper.Builder("keyword").ignoreAbove(256));
     }
   }
- else   if (fieldType instanceof DateFieldType) {
-    builder=context.root().findTemplateBuilder(context,currentFieldName,"date");
-    if (builder == null) {
-      builder=MapperBuilders.dateField(currentFieldName);
-    }
+ else   if (fieldType instanceof KeywordFieldType) {
+    builder=context.root().findTemplateBuilder(context,currentFieldName,"keyword","string");
   }
- else   if (fieldType.numericType() != null) {
-switch (fieldType.numericType()) {
-case LONG:
-      builder=context.root().findTemplateBuilder(context,currentFieldName,"long");
-    if (builder == null) {
-      builder=MapperBuilders.longField(currentFieldName);
-    }
-  break;
-case DOUBLE:
+ else {
+switch (fieldType.typeName()) {
+case DateFieldMapper.CONTENT_TYPE:
+      builder=context.root().findTemplateBuilder(context,currentFieldName,"date");
+    break;
+case "long":
+  builder=context.root().findTemplateBuilder(context,currentFieldName,"long");
+break;
+case "double":
 builder=context.root().findTemplateBuilder(context,currentFieldName,"double");
-if (builder == null) {
-builder=MapperBuilders.doubleField(currentFieldName);
-}
 break;
-case INT:
+case "integer":
 builder=context.root().findTemplateBuilder(context,currentFieldName,"integer");
-if (builder == null) {
-builder=MapperBuilders.integerField(currentFieldName);
-}
 break;
-case FLOAT:
+case "float":
 builder=context.root().findTemplateBuilder(context,currentFieldName,"float");
-if (builder == null) {
-builder=MapperBuilders.floatField(currentFieldName);
-}
+break;
+case BooleanFieldMapper.CONTENT_TYPE:
+builder=context.root().findTemplateBuilder(context,currentFieldName,"boolean");
 break;
 default :
-throw new AssertionError("Unexpected numeric type " + fieldType.numericType());
+break;
 }
+}
+if (builder == null) {
+Mapper.TypeParser.ParserContext parserContext=context.docMapperParser().parserContext(currentFieldName);
+Mapper.TypeParser typeParser=parserContext.typeParser(fieldType.typeName());
+if (typeParser == null) {
+throw new MapperParsingException("Cannot generate dynamic mappings of type [" + fieldType.typeName() + "] for ["+ currentFieldName+ "]");
+}
+builder=typeParser.parse(currentFieldName,new HashMap<>(),parserContext);
 }
 return builder;
 }
