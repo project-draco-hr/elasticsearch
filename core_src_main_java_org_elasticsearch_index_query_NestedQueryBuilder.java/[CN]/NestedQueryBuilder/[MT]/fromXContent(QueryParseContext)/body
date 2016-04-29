@@ -1,39 +1,43 @@
 {
   XContentParser parser=parseContext.parser();
   float boost=AbstractQueryBuilder.DEFAULT_BOOST;
-  ScoreMode scoreMode=NestedQueryBuilder.DEFAULT_SCORE_MODE;
+  ScoreMode scoreMode=ScoreMode.Avg;
   String queryName=null;
-  QueryBuilder query=null;
+  QueryBuilder<?> query=null;
   String path=null;
   String currentFieldName=null;
   InnerHitBuilder innerHitBuilder=null;
+  boolean ignoreUnmapped=DEFAULT_IGNORE_UNMAPPED;
   XContentParser.Token token;
   while ((token=parser.nextToken()) != XContentParser.Token.END_OBJECT) {
     if (token == XContentParser.Token.FIELD_NAME) {
       currentFieldName=parser.currentName();
     }
  else     if (token == XContentParser.Token.START_OBJECT) {
-      if (parseContext.parseFieldMatcher().match(currentFieldName,QUERY_FIELD)) {
+      if (parseContext.getParseFieldMatcher().match(currentFieldName,QUERY_FIELD)) {
         query=parseContext.parseInnerQueryBuilder();
       }
- else       if (parseContext.parseFieldMatcher().match(currentFieldName,INNER_HITS_FIELD)) {
-        innerHitBuilder=InnerHitBuilder.fromXContent(parser,parseContext);
+ else       if (parseContext.getParseFieldMatcher().match(currentFieldName,INNER_HITS_FIELD)) {
+        innerHitBuilder=InnerHitBuilder.fromXContent(parseContext);
       }
  else {
         throw new ParsingException(parser.getTokenLocation(),"[nested] query does not support [" + currentFieldName + "]");
       }
     }
  else     if (token.isValue()) {
-      if (parseContext.parseFieldMatcher().match(currentFieldName,PATH_FIELD)) {
+      if (parseContext.getParseFieldMatcher().match(currentFieldName,PATH_FIELD)) {
         path=parser.text();
       }
- else       if (parseContext.parseFieldMatcher().match(currentFieldName,AbstractQueryBuilder.BOOST_FIELD)) {
+ else       if (parseContext.getParseFieldMatcher().match(currentFieldName,AbstractQueryBuilder.BOOST_FIELD)) {
         boost=parser.floatValue();
       }
- else       if (parseContext.parseFieldMatcher().match(currentFieldName,SCORE_MODE_FIELD)) {
+ else       if (parseContext.getParseFieldMatcher().match(currentFieldName,IGNORE_UNMAPPED_FIELD)) {
+        ignoreUnmapped=parser.booleanValue();
+      }
+ else       if (parseContext.getParseFieldMatcher().match(currentFieldName,SCORE_MODE_FIELD)) {
         scoreMode=HasChildQueryBuilder.parseScoreMode(parser.text());
       }
- else       if (parseContext.parseFieldMatcher().match(currentFieldName,AbstractQueryBuilder.NAME_FIELD)) {
+ else       if (parseContext.getParseFieldMatcher().match(currentFieldName,AbstractQueryBuilder.NAME_FIELD)) {
         queryName=parser.text();
       }
  else {
@@ -41,5 +45,9 @@
       }
     }
   }
-  return new NestedQueryBuilder(path,query,scoreMode,innerHitBuilder).queryName(queryName).boost(boost);
+  NestedQueryBuilder queryBuilder=new NestedQueryBuilder(path,query,scoreMode).ignoreUnmapped(ignoreUnmapped).queryName(queryName).boost(boost);
+  if (innerHitBuilder != null) {
+    queryBuilder.innerHit(innerHitBuilder);
+  }
+  return queryBuilder;
 }

@@ -8,16 +8,21 @@
   Request request=new Request(shardId).timeout("1ms");
   PlainActionFuture<Response> listener=new PlainActionFuture<>();
   ReplicationTask task=maybeTask();
-  AtomicBoolean movedToReplication=new AtomicBoolean();
-  TransportReplicationAction.PrimaryPhase primaryPhase=action.new PrimaryPhase(task,request,createTransportChannel(listener)){
-    @Override void finishAndMoveToReplication(    TransportReplicationAction.ReplicationPhase replicationPhase){
-      super.finishAndMoveToReplication(replicationPhase);
-      movedToReplication.set(true);
+  AtomicBoolean executed=new AtomicBoolean();
+  Action.PrimaryOperationTransportHandler primaryPhase=action.new PrimaryOperationTransportHandler(){
+    @Override protected ReplicationOperation createReplicatedOperation(    Request request,    ActionListener<Response> actionListener,    Action.PrimaryShardReference primaryShardReference,    boolean executeOnReplicas){
+      return new NoopReplicationOperation(request,actionListener){
+        public void execute() throws Exception {
+          assertPhase(task,"primary");
+          assertFalse(executed.getAndSet(true));
+          super.execute();
+        }
+      }
+;
     }
   }
 ;
-  primaryPhase.run();
-  assertThat("request was not processed on primary relocation target",request.processedOnPrimary.get(),equalTo(true));
-  assertThat(movedToReplication.get(),equalTo(true));
-  assertPhase(task,"replicating");
+  primaryPhase.messageReceived(request,createTransportChannel(listener),task);
+  assertThat(executed.get(),equalTo(true));
+  assertPhase(task,"finished");
 }

@@ -2,17 +2,19 @@
   String threadPoolName=randomThreadPool(ThreadPool.ThreadPoolType.SCALING);
   ThreadPool threadPool=null;
   try {
-    Settings nodeSettings=settingsBuilder().put("threadpool." + threadPoolName + ".size",10).put("node.name","testScalingExecutorType").build();
+    Settings nodeSettings=Settings.builder().put("threadpool." + threadPoolName + ".size",10).put("node.name","testScalingExecutorType").build();
     threadPool=new ThreadPool(nodeSettings);
     ClusterSettings clusterSettings=new ClusterSettings(nodeSettings,ClusterSettings.BUILT_IN_CLUSTER_SETTINGS);
     threadPool.setClusterSettings(clusterSettings);
-    assertThat(info(threadPool,threadPoolName).getMin(),equalTo(1));
+    final int expectedMinimum="generic".equals(threadPoolName) ? 4 : 1;
+    assertThat(info(threadPool,threadPoolName).getMin(),equalTo(expectedMinimum));
     assertThat(info(threadPool,threadPoolName).getMax(),equalTo(10));
-    assertThat(info(threadPool,threadPoolName).getKeepAlive().minutes(),equalTo(5L));
+    final long expectedKeepAlive="generic".equals(threadPoolName) ? 30 : 300;
+    assertThat(info(threadPool,threadPoolName).getKeepAlive().seconds(),equalTo(expectedKeepAlive));
     assertEquals(info(threadPool,threadPoolName).getThreadPoolType(),ThreadPool.ThreadPoolType.SCALING);
     assertThat(threadPool.executor(threadPoolName),instanceOf(EsThreadPoolExecutor.class));
     Executor oldExecutor=threadPool.executor(threadPoolName);
-    clusterSettings.applySettings(settingsBuilder().put("threadpool." + threadPoolName + ".keep_alive","10m").put("threadpool." + threadPoolName + ".min","2").put("threadpool." + threadPoolName + ".size","15").build());
+    clusterSettings.applySettings(Settings.builder().put("threadpool." + threadPoolName + ".keep_alive","10m").put("threadpool." + threadPoolName + ".min","2").put("threadpool." + threadPoolName + ".size","15").build());
     assertEquals(info(threadPool,threadPoolName).getThreadPoolType(),ThreadPool.ThreadPoolType.SCALING);
     assertThat(threadPool.executor(threadPoolName),instanceOf(EsThreadPoolExecutor.class));
     assertThat(((EsThreadPoolExecutor)threadPool.executor(threadPoolName)).getCorePoolSize(),equalTo(2));

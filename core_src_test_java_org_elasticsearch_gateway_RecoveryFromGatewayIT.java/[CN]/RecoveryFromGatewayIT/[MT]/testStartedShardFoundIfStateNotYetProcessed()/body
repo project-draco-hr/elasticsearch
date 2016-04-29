@@ -1,0 +1,42 @@
+{
+  final String nodeName=internalCluster().startNode();
+  assertAcked(prepareCreate("test").setSettings(SETTING_NUMBER_OF_SHARDS,1));
+  final Index index=resolveIndex("test");
+  final ShardId shardId=new ShardId(index,0);
+  index("test","type","1");
+  flush("test");
+  final boolean corrupt=randomBoolean();
+  internalCluster().fullRestart(new RestartCallback(){
+    @Override public Settings onNodeStopped(    String nodeName) throws Exception {
+      return Settings.builder().put(GatewayService.RECOVER_AFTER_NODES_SETTING.getKey(),2).build();
+    }
+  }
+);
+  if (corrupt) {
+    for (    Path path : internalCluster().getInstance(NodeEnvironment.class,nodeName).availableShardPaths(shardId)) {
+      final Path indexPath=path.resolve(ShardPath.INDEX_FOLDER_NAME);
+      if (Files.exists(indexPath)) {
+        try (DirectoryStream<Path> stream=Files.newDirectoryStream(indexPath)){
+          for (          Path item : stream) {
+            if (item.getFileName().toString().startsWith("segments_")) {
+              logger.debug("--> deleting [{}]",item);
+              Files.delete(item);
+            }
+          }
+        }
+       }
+    }
+  }
+  DiscoveryNode node=internalCluster().getInstance(ClusterService.class,nodeName).localNode();
+  TransportNodesListGatewayStartedShards.NodesGatewayStartedShards response;
+  response=internalCluster().getInstance(TransportNodesListGatewayStartedShards.class).execute(new TransportNodesListGatewayStartedShards.Request(shardId,new String[]{node.getId()})).get();
+  assertThat(response.getNodes(),arrayWithSize(1));
+  assertThat(response.getNodes()[0].allocationId(),notNullValue());
+  if (corrupt) {
+    assertThat(response.getNodes()[0].storeException(),notNullValue());
+  }
+ else {
+    assertThat(response.getNodes()[0].storeException(),nullValue());
+  }
+  internalCluster().startNode();
+}

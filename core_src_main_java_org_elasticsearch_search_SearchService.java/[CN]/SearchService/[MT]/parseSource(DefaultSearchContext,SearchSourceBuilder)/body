@@ -12,11 +12,24 @@
       context.queryBoost(indexBoost);
     }
   }
+  Map<String,InnerHitBuilder> innerHitBuilders=new HashMap<>();
   if (source.query() != null) {
+    InnerHitBuilder.extractInnerHits(source.query(),innerHitBuilders);
     context.parsedQuery(queryShardContext.toQuery(source.query()));
   }
   if (source.postFilter() != null) {
+    InnerHitBuilder.extractInnerHits(source.postFilter(),innerHitBuilders);
     context.parsedPostFilter(queryShardContext.toQuery(source.postFilter()));
+  }
+  if (innerHitBuilders.size() > 0) {
+    for (    Map.Entry<String,InnerHitBuilder> entry : innerHitBuilders.entrySet()) {
+      try {
+        entry.getValue().build(context,context.innerHits());
+      }
+ catch (      IOException e) {
+        throw new SearchContextException(context,"failed to build inner_hits",e);
+      }
+    }
   }
   if (source.sorts() != null) {
     try {
@@ -92,25 +105,9 @@
       throw new SearchContextException(context,"failed to create SearchContextHighlighter",e);
     }
   }
-  if (source.innerHits() != null) {
-    for (    Map.Entry<String,InnerHitBuilder> entry : source.innerHits().getInnerHitsBuilders().entrySet()) {
-      try {
-        queryShardContext.reset();
-        InnerHitBuilder innerHitBuilder=entry.getValue();
-        InnerHitsContext innerHitsContext=context.innerHits();
-        innerHitBuilder.buildTopLevel(context,queryShardContext,innerHitsContext);
-      }
- catch (      IOException e) {
-        throw new SearchContextException(context,"failed to create InnerHitsContext",e);
-      }
- finally {
-        queryShardContext.reset();
-      }
-    }
-  }
   if (source.scriptFields() != null) {
     for (    org.elasticsearch.search.builder.SearchSourceBuilder.ScriptField field : source.scriptFields()) {
-      SearchScript searchScript=context.scriptService().search(context.lookup(),field.script(),ScriptContext.Standard.SEARCH,Collections.emptyMap());
+      SearchScript searchScript=context.scriptService().search(context.lookup(),field.script(),ScriptContext.Standard.SEARCH,Collections.emptyMap(),context.getQueryShardContext().getClusterState());
       context.scriptFields().add(new ScriptField(field.fieldName(),searchScript,field.ignoreFailure()));
     }
   }
@@ -147,6 +144,11 @@
       }
       XContentLocation location=extParser != null ? extParser.getTokenLocation() : null;
       throw new SearchParseException(context,"failed to parse ext source [" + sSource + "]",location,e);
+    }
+ finally {
+      if (extParser != null) {
+        extParser.close();
+      }
     }
   }
   if (source.version() != null) {

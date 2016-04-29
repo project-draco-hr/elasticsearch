@@ -1,34 +1,35 @@
 {
-  DateFieldMapper.Builder builder=new DateFieldMapper.Builder(name);
-  parseNumberField(builder,name,node,parserContext);
-  boolean configuredFormat=false;
+  if (parserContext.indexVersionCreated().before(Version.V_5_0_0_alpha2)) {
+    return new LegacyDateFieldMapper.TypeParser().parse(name,node,parserContext);
+  }
+  Builder builder=new Builder(name);
+  TypeParsers.parseField(builder,name,node,parserContext);
   for (Iterator<Map.Entry<String,Object>> iterator=node.entrySet().iterator(); iterator.hasNext(); ) {
     Map.Entry<String,Object> entry=iterator.next();
-    String propName=Strings.toUnderscoreCase(entry.getKey());
+    String propName=entry.getKey();
     Object propNode=entry.getValue();
     if (propName.equals("null_value")) {
       if (propNode == null) {
         throw new MapperParsingException("Property [null_value] cannot be null.");
       }
-      builder.nullValue(propNode.toString());
+      builder.nullValue(InetAddresses.forString(propNode.toString()));
       iterator.remove();
     }
- else     if (propName.equals("format")) {
-      builder.dateTimeFormatter(parseDateTimeFormatter(propNode));
-      configuredFormat=true;
-      iterator.remove();
-    }
- else     if (propName.equals("numeric_resolution")) {
-      builder.timeUnit(TimeUnit.valueOf(propNode.toString().toUpperCase(Locale.ROOT)));
+ else     if (propName.equals("ignore_malformed")) {
+      builder.ignoreMalformed(TypeParsers.nodeBooleanValue("ignore_malformed",propNode,parserContext));
       iterator.remove();
     }
  else     if (propName.equals("locale")) {
       builder.locale(LocaleUtils.parse(propNode.toString()));
       iterator.remove();
     }
-  }
-  if (!configuredFormat) {
-    builder.dateTimeFormatter(Defaults.DATE_TIME_FORMATTER);
+ else     if (propName.equals("format")) {
+      builder.dateTimeFormatter(parseDateTimeFormatter(propNode));
+      iterator.remove();
+    }
+ else     if (TypeParsers.parseMultiField(builder,name,parserContext,propName,propNode)) {
+      iterator.remove();
+    }
   }
   return builder;
 }

@@ -1,26 +1,26 @@
 {
-  assertAcked(prepareCreate("test").addMapping("type1","field1","type=long,doc_values=true","field2","type=text"));
+  assertAcked(prepareCreate(INDEX_NAME).addMapping("type1","field1","type=long","field2","type=text").addMapping(TYPE_NAME,"query","type=percolator"));
   ensureGreen();
   XContentBuilder doc=XContentFactory.jsonBuilder().startObject().startObject("doc").field("field1",1).field("field2","value").endObject().endObject();
-  PercolateResponse response=client().preparePercolate().setSource(doc).setIndices("test").setDocumentType("type1").execute().actionGet();
+  PercolateResponse response=client().preparePercolate().setSource(doc).setIndices(INDEX_NAME).setDocumentType(TYPE_NAME).execute().actionGet();
   assertMatchCount(response,0L);
   assertThat(response.getMatches(),emptyArray());
-  client().prepareIndex("test",PercolatorFieldMapper.TYPE_NAME,"test1").setSource(XContentFactory.jsonBuilder().startObject().field("query",termQuery("field2","value")).endObject()).execute().actionGet();
+  client().prepareIndex(INDEX_NAME,TYPE_NAME,"test1").setSource(XContentFactory.jsonBuilder().startObject().field("query",termQuery("field2","value")).endObject()).execute().actionGet();
   refresh();
-  response=client().preparePercolate().setIndices("test").setDocumentType("type1").setSource(doc).execute().actionGet();
+  response=client().preparePercolate().setIndices(INDEX_NAME).setDocumentType(TYPE_NAME).setSource(doc).execute().actionGet();
   assertMatchCount(response,1L);
   assertThat(response.getMatches(),arrayWithSize(1));
-  assertThat(convertFromTextArray(response.getMatches(),"test"),arrayContaining("test1"));
-  client().prepareIndex("test",PercolatorFieldMapper.TYPE_NAME,"test2").setSource(XContentFactory.jsonBuilder().startObject().field("query",termQuery("field1",1)).endObject()).execute().actionGet();
+  assertThat(convertFromTextArray(response.getMatches(),INDEX_NAME),arrayContaining("test1"));
+  client().prepareIndex(INDEX_NAME,TYPE_NAME,"test2").setSource(XContentFactory.jsonBuilder().startObject().field("query",termQuery("field1",1)).endObject()).execute().actionGet();
   refresh();
-  response=client().preparePercolate().setIndices("test").setDocumentType("type1").setSource(doc).execute().actionGet();
+  response=client().preparePercolate().setIndices(INDEX_NAME).setDocumentType("type1").setSource(doc).execute().actionGet();
   assertMatchCount(response,2L);
   assertThat(response.getMatches(),arrayWithSize(2));
-  assertThat(convertFromTextArray(response.getMatches(),"test"),arrayContainingInAnyOrder("test1","test2"));
-  client().prepareDelete("test",PercolatorFieldMapper.TYPE_NAME,"test2").execute().actionGet();
+  assertThat(convertFromTextArray(response.getMatches(),INDEX_NAME),arrayContainingInAnyOrder("test1","test2"));
+  client().prepareDelete(INDEX_NAME,TYPE_NAME,"test2").execute().actionGet();
   refresh();
-  response=client().preparePercolate().setIndices("test").setDocumentType("type1").setSource(doc).execute().actionGet();
+  response=client().preparePercolate().setIndices(INDEX_NAME).setDocumentType("type1").setSource(doc).execute().actionGet();
   assertMatchCount(response,1L);
   assertThat(response.getMatches(),arrayWithSize(1));
-  assertThat(convertFromTextArray(response.getMatches(),"test"),arrayContaining("test1"));
+  assertThat(convertFromTextArray(response.getMatches(),INDEX_NAME),arrayContaining("test1"));
 }

@@ -1,6 +1,7 @@
 {
   int successfulShards=0;
   int failedShards=0;
+  Map<String,String> conflicts=new HashMap<>();
   Map<String,Map<String,FieldStats>> indicesMergedFieldStats=new HashMap<>();
   List<ShardOperationFailedException> shardFailures=new ArrayList<>();
   for (int i=0; i < shardsResponses.length(); i++) {
@@ -33,12 +34,25 @@
         FieldStats<?> existing=indexMergedFieldStats.get(entry.getKey());
         if (existing != null) {
           if (existing.getType() != entry.getValue().getType()) {
-            throw new IllegalStateException("trying to merge the field stats of field [" + entry.getKey() + "] from index ["+ shardResponse.getIndex()+ "] but the field type is incompatible, try to set the 'level' option to 'indices'");
+            if (conflicts.containsKey(entry.getKey()) == false) {
+              conflicts.put(entry.getKey(),"Field [" + entry.getKey() + "] of type ["+ FieldStats.typeName(entry.getValue().getType())+ "] conflicts with existing field of type ["+ FieldStats.typeName(existing.getType())+ "] in other index.");
+            }
           }
-          existing.append(entry.getValue());
+ else {
+            existing.accumulate(entry.getValue());
+          }
         }
  else {
           indexMergedFieldStats.put(entry.getKey(),entry.getValue());
+        }
+      }
+    }
+    for (    String conflictKey : conflicts.keySet()) {
+      Iterator<Map.Entry<String,Map<String,FieldStats>>> iterator=indicesMergedFieldStats.entrySet().iterator();
+      while (iterator.hasNext()) {
+        Map.Entry<String,Map<String,FieldStats>> entry=iterator.next();
+        if (entry.getValue().containsKey(conflictKey)) {
+          entry.getValue().remove(conflictKey);
         }
       }
     }
@@ -61,5 +75,5 @@
       }
     }
   }
-  return new FieldStatsResponse(shardsResponses.length(),successfulShards,failedShards,shardFailures,indicesMergedFieldStats);
+  return new FieldStatsResponse(shardsResponses.length(),successfulShards,failedShards,shardFailures,indicesMergedFieldStats,conflicts);
 }
