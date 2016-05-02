@@ -24,7 +24,7 @@
  else {
         String fieldname=null;
         String methodname=null;
-        String variablename=VALUE_VARIABLE;
+        String variablename="value";
         VariableContext[] parts=VariableContext.parse(variable);
         if (parts[0].text.equals("doc") == false) {
           throw new ScriptException("Unknown variable [" + parts[0].text + "] in expression");
@@ -54,15 +54,35 @@
           throw new ScriptException("Field [" + fieldname + "] used in expression does not exist in mappings");
         }
         IndexFieldData<?> fieldData=lookup.doc().fieldDataService().getForField(fieldType);
-        if (fieldData instanceof IndexNumericFieldData == false) {
-          throw new ScriptException("Field [" + fieldname + "] used in expression must be numeric");
+        final ValueSource valueSource;
+        if (fieldType instanceof BaseGeoPointFieldMapper.GeoPointFieldType) {
+          if (methodname == null) {
+            valueSource=GeoField.getVariable(fieldData,fieldname,variablename);
+          }
+ else {
+            valueSource=GeoField.getMethod(fieldData,fieldname,methodname);
+          }
         }
-        if (methodname == null) {
-          bindings.add(variable,getVariableValueSource(fieldType,fieldData,fieldname,variablename));
+ else         if (fieldType instanceof LegacyDateFieldMapper.DateFieldType || fieldType instanceof DateFieldMapper.DateFieldType) {
+          if (methodname == null) {
+            valueSource=DateField.getVariable(fieldData,fieldname,variablename);
+          }
+ else {
+            valueSource=DateField.getMethod(fieldData,fieldname,methodname);
+          }
+        }
+ else         if (fieldData instanceof IndexNumericFieldData) {
+          if (methodname == null) {
+            valueSource=NumericField.getVariable(fieldData,fieldname,variablename);
+          }
+ else {
+            valueSource=NumericField.getMethod(fieldData,fieldname,methodname);
+          }
         }
  else {
-          bindings.add(variable,getMethodValueSource(fieldType,fieldData,fieldname,methodname));
+          throw new ScriptException("Field [" + fieldname + "] used in expression must be numeric, date, or geopoint");
         }
+        bindings.add(variable,valueSource);
       }
     }
     final boolean needsScores=expr.getSortField(bindings,false).needsScores();
