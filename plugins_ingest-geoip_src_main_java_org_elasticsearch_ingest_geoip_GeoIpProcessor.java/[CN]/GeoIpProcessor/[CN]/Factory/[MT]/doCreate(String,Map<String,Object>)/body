@@ -3,24 +3,33 @@
   String targetField=readStringProperty(TYPE,processorTag,config,"target_field","geoip");
   String databaseFile=readStringProperty(TYPE,processorTag,config,"database_file","GeoLite2-City.mmdb");
   List<String> propertyNames=readOptionalList(TYPE,processorTag,config,"properties");
+  DatabaseReader databaseReader=databaseReaders.get(databaseFile);
+  if (databaseReader == null) {
+    throw newConfigurationException(TYPE,processorTag,"database_file","database file [" + databaseFile + "] doesn't exist");
+  }
+  String databaseType=databaseReader.getMetadata().getDatabaseType();
   final Set<Property> properties;
   if (propertyNames != null) {
     properties=EnumSet.noneOf(Property.class);
     for (    String fieldName : propertyNames) {
       try {
-        properties.add(Property.parse(fieldName));
+        properties.add(Property.parseProperty(databaseType,fieldName));
       }
- catch (      Exception e) {
-        throw newConfigurationException(TYPE,processorTag,"properties","illegal field option [" + fieldName + "]. valid values are ["+ Arrays.toString(Property.values())+ "]");
+ catch (      IllegalArgumentException e) {
+        throw newConfigurationException(TYPE,processorTag,"properties",e.getMessage());
       }
     }
   }
  else {
-    properties=DEFAULT_PROPERTIES;
-  }
-  DatabaseReader databaseReader=databaseReaders.get(databaseFile);
-  if (databaseReader == null) {
-    throw newConfigurationException(TYPE,processorTag,"database_file","database file [" + databaseFile + "] doesn't exist");
+    if (CITY_DB_TYPE.equals(databaseType)) {
+      properties=DEFAULT_CITY_PROPERTIES;
+    }
+ else     if (COUNTRY_DB_TYPE.equals(databaseType)) {
+      properties=DEFAULT_COUNTRY_PROPERTIES;
+    }
+ else {
+      throw newConfigurationException(TYPE,processorTag,"database_file","Unsupported database type [" + databaseType + "]");
+    }
   }
   return new GeoIpProcessor(processorTag,ipField,databaseReader,targetField,properties);
 }
