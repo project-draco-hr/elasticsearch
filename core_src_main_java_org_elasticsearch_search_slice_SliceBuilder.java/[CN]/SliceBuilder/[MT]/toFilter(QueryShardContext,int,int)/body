@@ -1,0 +1,43 @@
+{
+  final MappedFieldType type=context.fieldMapper(field);
+  if (type == null) {
+    throw new IllegalArgumentException("field " + field + " not found");
+  }
+  boolean useTermQuery=false;
+  if (UidFieldMapper.NAME.equals(field)) {
+    useTermQuery=true;
+  }
+ else   if (type.hasDocValues() == false) {
+    throw new IllegalArgumentException("cannot load numeric doc values on " + field);
+  }
+ else {
+    IndexFieldData ifm=context.getForField(type);
+    if (ifm instanceof IndexNumericFieldData == false) {
+      throw new IllegalArgumentException("cannot load numeric doc values on " + field);
+    }
+  }
+  if (numShards == 1) {
+    return useTermQuery ? new TermsSliceQuery(field,id,max) : new DocValuesSliceQuery(field,id,max);
+  }
+  if (max >= numShards) {
+    int targetShard=id % numShards;
+    if (targetShard != shardId) {
+      return new MatchNoDocsQuery("this shard is not part of the slice");
+    }
+    int numSlicesInShard=max / numShards;
+    int rest=max % numShards;
+    if (rest > targetShard) {
+      numSlicesInShard++;
+    }
+    if (numSlicesInShard == 1) {
+      return new MatchAllDocsQuery();
+    }
+    int shardSlice=id / numShards;
+    return useTermQuery ? new TermsSliceQuery(field,shardSlice,numSlicesInShard) : new DocValuesSliceQuery(field,shardSlice,numSlicesInShard);
+  }
+  int targetSlice=shardId % max;
+  if (id != targetSlice) {
+    return new MatchNoDocsQuery("this shard is not part of the slice");
+  }
+  return new MatchAllDocsQuery();
+}
