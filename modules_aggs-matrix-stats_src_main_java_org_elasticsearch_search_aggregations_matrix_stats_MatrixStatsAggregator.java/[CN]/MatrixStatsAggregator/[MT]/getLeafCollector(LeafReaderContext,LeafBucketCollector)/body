@@ -1,0 +1,50 @@
+{
+  if (valuesSources == null || valuesSources.isEmpty()) {
+    return LeafBucketCollector.NO_OP_COLLECTOR;
+  }
+  final BigArrays bigArrays=context.bigArrays();
+  final HashMap<String,SortedNumericDoubleValues> values=new HashMap<>(valuesSources.size());
+  for (  Map.Entry<String,ValuesSource.Numeric> valuesSource : valuesSources.entrySet()) {
+    values.put(valuesSource.getKey(),valuesSource.getValue().doubleValues(ctx));
+  }
+  return new LeafBucketCollectorBase(sub,values){
+    @Override public void collect(    int doc,    long bucket) throws IOException {
+      Map<String,Double> fields=getFields(doc);
+      if (fields != null) {
+        stats=bigArrays.grow(stats,bucket + 1);
+        RunningStats stat=stats.get(bucket);
+        if (stat == null) {
+          stat=new RunningStats(fields);
+        }
+ else {
+          stat.add(fields);
+        }
+        stats.set(bucket,stat);
+      }
+    }
+    /** 
+ * return a map of field names and data
+ */
+    private Map<String,Double> getFields(    int doc){
+      ArrayList<String> fieldNames=new ArrayList<>(values.keySet());
+      HashMap<String,Double> fields=new HashMap<>(fieldNames.size());
+      for (      String fieldName : fieldNames) {
+        final SortedNumericDoubleValues doubleValues=values.get(fieldName);
+        doubleValues.setDocument(doc);
+        final int valuesCount=doubleValues.count();
+        if (valuesCount <= 0) {
+          return null;
+        }
+        double fieldValue=0;
+        for (int i=0; i < valuesCount; ++i) {
+          if (Double.isNaN(doubleValues.valueAt(i)) == false) {
+            fieldValue+=doubleValues.valueAt(i);
+          }
+        }
+        fields.put(fieldName,fieldValue / valuesCount);
+      }
+      return fields;
+    }
+  }
+;
+}
