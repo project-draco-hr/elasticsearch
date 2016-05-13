@@ -1,0 +1,22 @@
+{
+  final int indices=randomIntBetween(2,5);
+  final int docs=randomIntBetween(2,10) * 2;
+  long[] candidates=new long[indices];
+  long deletions=0;
+  List<IndexRequestBuilder> builders=new ArrayList<>();
+  for (int i=0; i < indices; i++) {
+    candidates[i]=randomIntBetween(1,docs);
+    deletions=deletions + candidates[i];
+    for (int j=0; j < docs; j++) {
+      boolean candidate=(j < candidates[i]);
+      builders.add(client().prepareIndex("test-" + i,"doc",String.valueOf(j)).setSource("candidate",candidate));
+    }
+  }
+  indexRandom(true,true,true,builders);
+  assertThat(deleteByQuery().source("test-*").filter(termQuery("candidate",true)).refresh(true).get(),matcher().deleted(deletions));
+  for (int i=0; i < indices; i++) {
+    long remaining=docs - candidates[i];
+    assertHitCount(client().prepareSearch("test-" + i).setSize(0).get(),remaining);
+  }
+  assertHitCount(client().prepareSearch().setSize(0).get(),(indices * docs) - deletions);
+}
