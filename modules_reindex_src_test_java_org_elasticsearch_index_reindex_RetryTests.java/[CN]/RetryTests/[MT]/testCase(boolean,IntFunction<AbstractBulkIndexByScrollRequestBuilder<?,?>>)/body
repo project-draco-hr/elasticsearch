@@ -1,0 +1,29 @@
+{
+  List<ListenableActionFuture<BulkIndexByScrollResponse>> futures=new ArrayList<>(CONCURRENT);
+  for (int i=0; i < CONCURRENT; i++) {
+    AbstractBulkIndexByScrollRequestBuilder<?,?> request=requestBuilder.apply(i);
+    request.source().setSize(DOC_COUNT / randomIntBetween(2,10));
+    request.setRetryBackoffInitialTime(timeValueMillis(randomIntBetween(10,300)));
+    futures.add(request.execute());
+  }
+  List<BulkIndexByScrollResponse> responses=new ArrayList<>(CONCURRENT);
+  for (  ListenableActionFuture<BulkIndexByScrollResponse> future : futures) {
+    responses.add(future.get());
+  }
+  long bulkRetries=0;
+  long searchRetries=0;
+  BulkIndexByScrollResponseMatcher matcher=matcher();
+  if (expectCreated) {
+    matcher.created(DOC_COUNT);
+  }
+ else {
+    matcher.updated(DOC_COUNT);
+  }
+  for (  BulkIndexByScrollResponse response : responses) {
+    assertThat(response,matcher);
+    bulkRetries+=response.getBulkRetries();
+    searchRetries+=response.getSearchRetries();
+  }
+  assertThat(bulkRetries,greaterThan(0L));
+  assertThat(searchRetries,greaterThan(0L));
+}
