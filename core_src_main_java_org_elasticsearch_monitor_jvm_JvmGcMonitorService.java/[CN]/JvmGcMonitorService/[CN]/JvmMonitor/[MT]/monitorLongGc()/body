@@ -1,14 +1,16 @@
 {
   seq++;
+  final long currentTime=now();
   JvmStats currentJvmStats=jvmStats();
+  final long elapsed=TimeUnit.NANOSECONDS.toMillis(currentTime - lastTime);
   for (int i=0; i < currentJvmStats.getGc().getCollectors().length; i++) {
     GarbageCollector gc=currentJvmStats.getGc().getCollectors()[i];
-    GarbageCollector prevGc=lastJvmStats.gc.collectors[i];
-    long collections=gc.collectionCount - prevGc.collectionCount;
+    GarbageCollector prevGc=lastJvmStats.getGc().getCollectors()[i];
+    long collections=gc.getCollectionCount() - prevGc.getCollectionCount();
     if (collections == 0) {
       continue;
     }
-    long collectionTime=gc.collectionTime - prevGc.collectionTime;
+    long collectionTime=gc.getCollectionTime().millis() - prevGc.getCollectionTime().millis();
     if (collectionTime == 0) {
       continue;
     }
@@ -17,15 +19,20 @@
       gcThreshold=gcThresholds.get("default");
     }
     long avgCollectionTime=collectionTime / collections;
+    Threshold threshold=null;
     if (avgCollectionTime > gcThreshold.warnThreshold) {
-      logger.warn("[gc][{}][{}][{}] duration [{}], collections [{}]/[{}], total [{}]/[{}], memory [{}]->[{}]/[{}], all_pools {}",gc.getName(),seq,gc.getCollectionCount(),TimeValue.timeValueMillis(collectionTime),collections,TimeValue.timeValueMillis(currentJvmStats.getTimestamp() - lastJvmStats.getTimestamp()),TimeValue.timeValueMillis(collectionTime),gc.getCollectionTime(),lastJvmStats.getMem().getHeapUsed(),currentJvmStats.getMem().getHeapUsed(),JvmInfo.jvmInfo().getMem().getHeapMax(),buildPools(lastJvmStats,currentJvmStats));
+      threshold=Threshold.WARN;
     }
  else     if (avgCollectionTime > gcThreshold.infoThreshold) {
-      logger.info("[gc][{}][{}][{}] duration [{}], collections [{}]/[{}], total [{}]/[{}], memory [{}]->[{}]/[{}], all_pools {}",gc.getName(),seq,gc.getCollectionCount(),TimeValue.timeValueMillis(collectionTime),collections,TimeValue.timeValueMillis(currentJvmStats.getTimestamp() - lastJvmStats.getTimestamp()),TimeValue.timeValueMillis(collectionTime),gc.getCollectionTime(),lastJvmStats.getMem().getHeapUsed(),currentJvmStats.getMem().getHeapUsed(),JvmInfo.jvmInfo().getMem().getHeapMax(),buildPools(lastJvmStats,currentJvmStats));
+      threshold=Threshold.INFO;
     }
- else     if (avgCollectionTime > gcThreshold.debugThreshold && logger.isDebugEnabled()) {
-      logger.debug("[gc][{}][{}][{}] duration [{}], collections [{}]/[{}], total [{}]/[{}], memory [{}]->[{}]/[{}], all_pools {}",gc.getName(),seq,gc.getCollectionCount(),TimeValue.timeValueMillis(collectionTime),collections,TimeValue.timeValueMillis(currentJvmStats.getTimestamp() - lastJvmStats.getTimestamp()),TimeValue.timeValueMillis(collectionTime),gc.getCollectionTime(),lastJvmStats.getMem().getHeapUsed(),currentJvmStats.getMem().getHeapUsed(),JvmInfo.jvmInfo().getMem().getHeapMax(),buildPools(lastJvmStats,currentJvmStats));
+ else     if (avgCollectionTime > gcThreshold.debugThreshold) {
+      threshold=Threshold.DEBUG;
+    }
+    if (threshold != null) {
+      onSlowGc(threshold,seq,new SlowGcEvent(gc,collections,TimeValue.timeValueMillis(collectionTime),elapsed,lastJvmStats,currentJvmStats,JvmInfo.jvmInfo().getMem().getHeapMax()));
     }
   }
+  lastTime=currentTime;
   lastJvmStats=currentJvmStats;
 }
