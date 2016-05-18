@@ -1,0 +1,37 @@
+{
+  final int youngCollectionCount=randomIntBetween(1,16);
+  final int youngCollectionIncrement=randomIntBetween(1,16);
+  final int youngCollectionTime=randomIntBetween(1,1 << 10);
+  final int youngCollectionTimeIncrement=randomIntBetween(1,1 << 10);
+  final int oldCollectionCount=randomIntBetween(1,16);
+  final int oldCollectionIncrement=randomIntBetween(1,16);
+  final int oldCollectionTime=randomIntBetween(1,1 << 10);
+  final int oldCollectionTimeIncrement=randomIntBetween(1,1 << 10);
+  final JvmStats.GarbageCollector lastYoungCollector=collector("young",youngCollectionCount,youngCollectionTime);
+  final JvmStats.GarbageCollector lastOldCollector=collector("old",oldCollectionCount,oldCollectionTime);
+  final JvmStats lastjvmStats=jvmStats(lastYoungCollector,lastOldCollector);
+  final JvmStats.GarbageCollector currentYoungCollector=collector("young",youngCollectionCount + youngCollectionIncrement,youngCollectionTime + youngCollectionTimeIncrement);
+  final JvmStats.GarbageCollector currentOldCollector=collector("old",oldCollectionCount + oldCollectionIncrement,oldCollectionTime + oldCollectionTimeIncrement);
+  final JvmStats currentJvmStats=jvmStats(currentYoungCollector,currentOldCollector);
+  final long expectedElapsed=randomIntBetween(Math.max(youngCollectionTime + youngCollectionTimeIncrement,oldCollectionTime + oldCollectionTimeIncrement),Integer.MAX_VALUE);
+  final AtomicBoolean invoked=new AtomicBoolean();
+  final JvmGcMonitorService.JvmMonitor monitor=new JvmGcMonitorService.JvmMonitor(Collections.emptyMap(),IGNORE){
+    @Override void onMonitorFailure(    Throwable t){
+    }
+    @Override void onSlowGc(    Threshold threshold,    long seq,    SlowGcEvent slowGcEvent){
+    }
+    @Override void onGcOverhead(    Threshold threshold,    long total,    long elapsed,    long seq){
+    }
+    @Override void checkGcOverhead(    long current,    long elapsed,    long seq){
+      invoked.set(true);
+      assertThat(current,equalTo((long)(youngCollectionTimeIncrement + oldCollectionTimeIncrement)));
+      assertThat(elapsed,equalTo(expectedElapsed));
+    }
+    @Override JvmStats jvmStats(){
+      return lastjvmStats;
+    }
+  }
+;
+  monitor.monitorGcOverhead(currentJvmStats,expectedElapsed);
+  assertTrue(invoked.get());
+}
