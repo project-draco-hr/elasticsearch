@@ -1,0 +1,43 @@
+{
+  Map<String,String> params=new HashMap<>();
+  if (searchRequest.scroll() != null) {
+    params.put("scroll",searchRequest.scroll().keepAlive().toString());
+  }
+  params.put("size",Integer.toString(searchRequest.source().size()));
+  if (searchRequest.source().version() == null || searchRequest.source().version() == true) {
+    params.put("version",null);
+  }
+  if (searchRequest.source().sorts() != null) {
+    boolean useScan=false;
+    if (remoteVersion.before(Version.V_2_1_0)) {
+      for (      SortBuilder<?> sort : searchRequest.source().sorts()) {
+        if (sort instanceof FieldSortBuilder) {
+          FieldSortBuilder f=(FieldSortBuilder)sort;
+          if (f.getFieldName().equals(FieldSortBuilder.DOC_FIELD_NAME)) {
+            useScan=true;
+            break;
+          }
+        }
+      }
+    }
+    if (useScan) {
+      params.put("search_type","scan");
+    }
+ else {
+      StringBuilder sorts=new StringBuilder(sortToUri(searchRequest.source().sorts().get(0)));
+      for (int i=1; i < searchRequest.source().sorts().size(); i++) {
+        sorts.append(',').append(sortToUri(searchRequest.source().sorts().get(i)));
+      }
+      params.put("sorts",sorts.toString());
+    }
+  }
+  if (searchRequest.source().storedFields() != null && false == searchRequest.source().storedFields().isEmpty()) {
+    StringBuilder fields=new StringBuilder(searchRequest.source().storedFields().get(0));
+    for (int i=1; i < searchRequest.source().storedFields().size(); i++) {
+      fields.append(',').append(searchRequest.source().storedFields().get(i));
+    }
+    String storedFieldsParamName=remoteVersion.before(Version.V_5_0_0_alpha4) ? "fields" : "stored_fields";
+    params.put(storedFieldsParamName,fields.toString());
+  }
+  return params;
+}
