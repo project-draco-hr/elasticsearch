@@ -1,0 +1,43 @@
+{
+  SSLConnectionSocketFactory sslsf;
+  String keystorePath=settings.get(TRUSTSTORE_PATH);
+  if (keystorePath != null) {
+    final String keystorePass=settings.get(TRUSTSTORE_PASSWORD);
+    if (keystorePass == null) {
+      throw new IllegalStateException(TRUSTSTORE_PATH + " is provided but not " + TRUSTSTORE_PASSWORD);
+    }
+    Path path=PathUtils.get(keystorePath);
+    if (!Files.exists(path)) {
+      throw new IllegalStateException(TRUSTSTORE_PATH + " is set but points to a non-existing file");
+    }
+    try {
+      KeyStore keyStore=KeyStore.getInstance("jks");
+      try (InputStream is=Files.newInputStream(path)){
+        keyStore.load(is,keystorePass.toCharArray());
+      }
+       SSLContext sslcontext=SSLContexts.custom().loadTrustMaterial(keyStore,null).build();
+      sslsf=new SSLConnectionSocketFactory(sslcontext);
+    }
+ catch (    KeyStoreException|NoSuchAlgorithmException|KeyManagementException|CertificateException e) {
+      throw new RuntimeException(e);
+    }
+  }
+ else {
+    sslsf=SSLConnectionSocketFactory.getSocketFactory();
+  }
+  Registry<ConnectionSocketFactory> socketFactoryRegistry=RegistryBuilder.<ConnectionSocketFactory>create().register("http",PlainConnectionSocketFactory.getSocketFactory()).register("https",sslsf).build();
+  List<Header> headers=new ArrayList<>();
+  try (ThreadContext threadContext=new ThreadContext(settings)){
+    for (    Map.Entry<String,String> entry : threadContext.getHeaders().entrySet()) {
+      headers.add(new BasicHeader(entry.getKey(),entry.getValue()));
+    }
+  }
+   CloseableHttpClient httpClient=HttpClientBuilder.create().setDefaultHeaders(headers).setConnectionManager(new PoolingHttpClientConnectionManager(socketFactoryRegistry)).build();
+  String protocol=settings.get(PROTOCOL,"http");
+  HttpHost[] hosts=new HttpHost[urls.length];
+  for (int i=0; i < hosts.length; i++) {
+    URL url=urls[i];
+    hosts[i]=new HttpHost(url.getHost(),url.getPort(),protocol);
+  }
+  return RestClient.builder().setHttpClient(httpClient).setHosts(hosts).build();
+}
