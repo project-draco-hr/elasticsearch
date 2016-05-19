@@ -1,0 +1,21 @@
+{
+  assertAcked(prepareCreate("test").setSettings("number_of_shards",2));
+  ensureGreen("test");
+  final int docs=randomIntBetween(2,10);
+  logger.info("--> indexing [{}] documents with routing",docs);
+  List<IndexRequestBuilder> builders=new ArrayList<>();
+  for (int i=0; i < docs; i++) {
+    builders.add(client().prepareIndex("test","test",String.valueOf(i)).setRouting(String.valueOf(i)).setSource("field1",1));
+  }
+  indexRandom(true,true,true,builders);
+  logger.info("--> counting documents with no routing, should be equal to [{}]",docs);
+  assertHitCount(client().prepareSearch().setSize(0).get(),docs);
+  String routing=String.valueOf(randomIntBetween(2,docs));
+  logger.info("--> counting documents with routing [{}]",routing);
+  long expected=client().prepareSearch().setSize(0).setRouting(routing).get().getHits().totalHits();
+  logger.info("--> delete all documents with routing [{}] with a delete-by-query",routing);
+  DeleteByQueryRequestBuilder delete=deleteByQuery().source("test");
+  delete.source().setRouting(routing);
+  assertThat(delete.refresh(true).get(),matcher().deleted(expected));
+  assertHitCount(client().prepareSearch().setSize(0).get(),docs - expected);
+}

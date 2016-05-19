@@ -1,6 +1,16 @@
 {
   QueryShardContext queryShardContext=new QueryShardContext(this.queryShardContext);
-  QueryBuilder<?> queryBuilder=parseQueryBuilder(queryShardContext.parseContext(),context.parser());
+  DocumentMapper documentMapper=queryShardContext.getMapperService().documentMapper(context.sourceToParse().type());
+  for (  FieldMapper fieldMapper : documentMapper.mappers()) {
+    if (fieldMapper instanceof PercolatorFieldMapper) {
+      PercolatorFieldType fieldType=(PercolatorFieldType)fieldMapper.fieldType();
+      if (context.doc().getField(fieldType.getQueryBuilderFieldName()) != null) {
+        throw new IllegalArgumentException("a document can only contain one percolator query");
+      }
+    }
+  }
+  XContentParser parser=context.parser();
+  QueryBuilder queryBuilder=parseQueryBuilder(queryShardContext.newParseContext(parser),parser.getTokenLocation());
   queryBuilder=queryBuilder.rewrite(queryShardContext);
   try (XContentBuilder builder=XContentFactory.contentBuilder(PercolatorQueryCache.QUERY_BUILDER_CONTENT_TYPE)){
     queryBuilder.toXContent(builder,new MapParams(Collections.emptyMap()));

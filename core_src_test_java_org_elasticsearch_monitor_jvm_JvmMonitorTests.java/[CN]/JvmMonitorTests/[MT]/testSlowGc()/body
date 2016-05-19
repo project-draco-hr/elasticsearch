@@ -1,0 +1,87 @@
+{
+  final int initialYoungCollectionCount=randomIntBetween(1,4);
+  final int initialYoungCollectionTime=randomIntBetween(initialYoungCollectionCount * 100,initialYoungCollectionCount * 200);
+  final int initialOldCollectionCount=randomIntBetween(1,4);
+  final int initialOldCollectionTime=randomIntBetween(initialYoungCollectionCount * 1000,initialYoungCollectionCount * 2000);
+  final JvmStats.GarbageCollector initialYoungCollector=mock(JvmStats.GarbageCollector.class);
+  when(initialYoungCollector.getName()).thenReturn("young");
+  when(initialYoungCollector.getCollectionCount()).thenReturn((long)initialYoungCollectionCount);
+  when(initialYoungCollector.getCollectionTime()).thenReturn(TimeValue.timeValueMillis(initialYoungCollectionTime));
+  final JvmStats.GarbageCollector initialOldCollector=mock(JvmStats.GarbageCollector.class);
+  when(initialOldCollector.getName()).thenReturn("old");
+  when(initialOldCollector.getCollectionCount()).thenReturn((long)initialOldCollectionCount);
+  when(initialOldCollector.getCollectionTime()).thenReturn(TimeValue.timeValueMillis(initialOldCollectionTime));
+  JvmStats initialJvmStats=jvmStats(initialYoungCollector,initialOldCollector);
+  final Map<String,JvmGcMonitorService.GcThreshold> gcThresholds=new HashMap<>();
+  final int youngDebugThreshold=randomIntBetween(1,10) * 100;
+  gcThresholds.put("young",new JvmGcMonitorService.GcThreshold("young",youngDebugThreshold * 3,youngDebugThreshold * 2,youngDebugThreshold));
+  final boolean youngGcThreshold=randomBoolean();
+  final JvmGcMonitorService.JvmMonitor.Threshold youngThresholdLevel=randomFrom(JvmGcMonitorService.JvmMonitor.Threshold.values());
+  final int youngMultiplier=1 + youngThresholdLevel.ordinal();
+  final int youngCollections=randomIntBetween(1,4);
+  final JvmStats.GarbageCollector youngCollector;
+  youngCollector=mock(JvmStats.GarbageCollector.class);
+  when(youngCollector.getName()).thenReturn("young");
+  when(youngCollector.getCollectionCount()).thenReturn((long)(initialYoungCollectionCount + youngCollections));
+  final int youngIncrement;
+  if (youngGcThreshold) {
+    youngIncrement=youngCollections * youngMultiplier * youngDebugThreshold + youngCollections;
+  }
+ else {
+    youngIncrement=randomIntBetween(1,youngDebugThreshold);
+  }
+  when(youngCollector.getCollectionTime()).thenReturn(TimeValue.timeValueMillis(initialYoungCollectionTime + youngIncrement));
+  final int oldDebugThreshold=randomIntBetween(1,10) * 100;
+  gcThresholds.put("old",new JvmGcMonitorService.GcThreshold("old",oldDebugThreshold * 3,oldDebugThreshold * 2,oldDebugThreshold));
+  final boolean oldGcThreshold=randomBoolean();
+  final JvmGcMonitorService.JvmMonitor.Threshold oldThresholdLevel=randomFrom(JvmGcMonitorService.JvmMonitor.Threshold.values());
+  final int oldMultiplier=1 + oldThresholdLevel.ordinal();
+  final int oldCollections=randomIntBetween(1,4);
+  final JvmStats.GarbageCollector oldCollector=mock(JvmStats.GarbageCollector.class);
+  when(oldCollector.getName()).thenReturn("old");
+  when(oldCollector.getCollectionCount()).thenReturn((long)(initialOldCollectionCount + oldCollections));
+  final int oldIncrement;
+  if (oldGcThreshold) {
+    oldIncrement=oldCollections * oldMultiplier * oldDebugThreshold + oldCollections;
+  }
+ else {
+    oldIncrement=randomIntBetween(1,oldDebugThreshold);
+  }
+  when(oldCollector.getCollectionTime()).thenReturn(TimeValue.timeValueMillis(initialOldCollectionTime + oldIncrement));
+  final long start=randomIntBetween(1,1 << 30);
+  final long expectedElapsed=randomIntBetween(1,1000);
+  final AtomicLong now=new AtomicLong(start);
+  final AtomicReference<JvmStats> jvmStats=new AtomicReference<>();
+  jvmStats.set(initialJvmStats);
+  final AtomicInteger count=new AtomicInteger();
+  JvmGcMonitorService.JvmMonitor monitor=new JvmGcMonitorService.JvmMonitor(gcThresholds,IGNORE){
+    @Override void onMonitorFailure(    Throwable t){
+    }
+    @Override void onSlowGc(    final Threshold threshold,    final long seq,    final SlowGcEvent slowGcEvent){
+      count.incrementAndGet();
+      assertThat(seq,equalTo(1L));
+      assertThat(slowGcEvent.elapsed,equalTo(expectedElapsed));
+      assertThat(slowGcEvent.currentGc.getName(),anyOf(equalTo("young"),equalTo("old")));
+      if ("young".equals(slowGcEvent.currentGc.getName())) {
+        assertCollection(threshold,youngThresholdLevel,slowGcEvent,initialYoungCollectionCount,youngCollections,initialYoungCollectionTime,youngIncrement);
+      }
+ else       if ("old".equals(slowGcEvent.currentGc.getName())) {
+        assertCollection(threshold,oldThresholdLevel,slowGcEvent,initialOldCollectionCount,oldCollections,initialOldCollectionTime,oldIncrement);
+      }
+    }
+    @Override void onGcOverhead(    Threshold threshold,    long total,    long elapsed,    long seq){
+    }
+    @Override long now(){
+      return now.get();
+    }
+    @Override JvmStats jvmStats(){
+      return jvmStats.get();
+    }
+  }
+;
+  final JvmStats monitorJvmStats=jvmStats(youngCollector,oldCollector);
+  now.set(start + TimeUnit.NANOSECONDS.convert(expectedElapsed,TimeUnit.MILLISECONDS));
+  jvmStats.set(monitorJvmStats);
+  monitor.monitorGc();
+  assertThat(count.get(),equalTo((youngGcThreshold ? 1 : 0) + (oldGcThreshold ? 1 : 0)));
+}

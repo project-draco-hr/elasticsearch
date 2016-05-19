@@ -24,6 +24,7 @@
  else {
         String fieldname=null;
         String methodname=null;
+        String variablename="value";
         VariableContext[] parts=VariableContext.parse(variable);
         if (parts[0].text.equals("doc") == false) {
           throw new ScriptException("Unknown variable [" + parts[0].text + "] in expression");
@@ -38,8 +39,11 @@
           if (parts[2].type == VariableContext.Type.METHOD) {
             methodname=parts[2].text;
           }
- else           if (parts[2].type != VariableContext.Type.MEMBER || !"value".equals(parts[2].text)) {
-            throw new ScriptException("Only the member variable [value] or member methods may be accessed on a field when not accessing the field directly");
+ else           if (parts[2].type == VariableContext.Type.MEMBER) {
+            variablename=parts[2].text;
+          }
+ else {
+            throw new ScriptException("Only member variables or member methods may be accessed on a field when not accessing the field directly");
           }
         }
         if (parts.length > 3) {
@@ -50,15 +54,35 @@
           throw new ScriptException("Field [" + fieldname + "] used in expression does not exist in mappings");
         }
         IndexFieldData<?> fieldData=lookup.doc().fieldDataService().getForField(fieldType);
-        if (fieldData instanceof IndexNumericFieldData == false) {
-          throw new ScriptException("Field [" + fieldname + "] used in expression must be numeric");
+        final ValueSource valueSource;
+        if (fieldType instanceof BaseGeoPointFieldMapper.GeoPointFieldType) {
+          if (methodname == null) {
+            valueSource=GeoField.getVariable(fieldData,fieldname,variablename);
+          }
+ else {
+            valueSource=GeoField.getMethod(fieldData,fieldname,methodname);
+          }
         }
-        if (methodname == null) {
-          bindings.add(variable,new FieldDataValueSource(fieldData,MultiValueMode.MIN));
+ else         if (fieldType instanceof LegacyDateFieldMapper.DateFieldType || fieldType instanceof DateFieldMapper.DateFieldType) {
+          if (methodname == null) {
+            valueSource=DateField.getVariable(fieldData,fieldname,variablename);
+          }
+ else {
+            valueSource=DateField.getMethod(fieldData,fieldname,methodname);
+          }
+        }
+ else         if (fieldData instanceof IndexNumericFieldData) {
+          if (methodname == null) {
+            valueSource=NumericField.getVariable(fieldData,fieldname,variablename);
+          }
+ else {
+            valueSource=NumericField.getMethod(fieldData,fieldname,methodname);
+          }
         }
  else {
-          bindings.add(variable,getMethodValueSource(fieldType,fieldData,fieldname,methodname));
+          throw new ScriptException("Field [" + fieldname + "] used in expression must be numeric, date, or geopoint");
         }
+        bindings.add(variable,valueSource);
       }
     }
     final boolean needsScores=expr.getSortField(bindings,false).needsScores();
