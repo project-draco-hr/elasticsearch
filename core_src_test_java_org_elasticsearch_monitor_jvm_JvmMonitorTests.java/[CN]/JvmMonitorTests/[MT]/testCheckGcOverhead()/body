@@ -1,0 +1,48 @@
+{
+  final int debugThreshold=randomIntBetween(1,98);
+  final int infoThreshold=randomIntBetween(debugThreshold + 1,99);
+  final int warnThreshold=randomIntBetween(infoThreshold + 1,100);
+  final JvmGcMonitorService.GcOverheadThreshold gcOverheadThreshold=new JvmGcMonitorService.GcOverheadThreshold(warnThreshold,infoThreshold,debugThreshold);
+  final JvmGcMonitorService.JvmMonitor.Threshold expectedThreshold;
+  int fraction=0;
+  final long expectedCurrent;
+  final long expectedElapsed;
+  if (randomBoolean()) {
+    expectedThreshold=randomFrom(JvmGcMonitorService.JvmMonitor.Threshold.values());
+switch (expectedThreshold) {
+case WARN:
+      fraction=randomIntBetween(warnThreshold,100);
+    break;
+case INFO:
+  fraction=randomIntBetween(infoThreshold,warnThreshold - 1);
+break;
+case DEBUG:
+fraction=randomIntBetween(debugThreshold,infoThreshold - 1);
+break;
+}
+}
+ else {
+expectedThreshold=null;
+fraction=randomIntBetween(0,debugThreshold - 1);
+}
+expectedElapsed=100 * randomIntBetween(1,1000);
+expectedCurrent=fraction * expectedElapsed / 100;
+final AtomicBoolean invoked=new AtomicBoolean();
+final long expectedSeq=randomIntBetween(1,Integer.MAX_VALUE);
+final JvmGcMonitorService.JvmMonitor monitor=new JvmGcMonitorService.JvmMonitor(Collections.emptyMap(),gcOverheadThreshold){
+@Override void onMonitorFailure(final Throwable t){
+}
+@Override void onSlowGc(Threshold threshold,long seq,SlowGcEvent slowGcEvent){
+}
+@Override void onGcOverhead(final Threshold threshold,final long current,final long elapsed,final long seq){
+invoked.set(true);
+assertThat(threshold,equalTo(expectedThreshold));
+assertThat(current,equalTo(expectedCurrent));
+assertThat(elapsed,equalTo(expectedElapsed));
+assertThat(seq,equalTo(expectedSeq));
+}
+}
+;
+monitor.checkGcOverhead(expectedCurrent,expectedElapsed,expectedSeq);
+assertThat(invoked.get(),equalTo(expectedThreshold != null));
+}
