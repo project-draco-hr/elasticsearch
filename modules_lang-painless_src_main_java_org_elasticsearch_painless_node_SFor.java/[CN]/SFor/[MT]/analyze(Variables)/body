@@ -1,0 +1,63 @@
+{
+  variables.incrementScope();
+  boolean continuous=false;
+  if (initializer != null) {
+    if (initializer instanceof SDeclBlock) {
+      ((SDeclBlock)initializer).analyze(variables);
+    }
+ else     if (initializer instanceof AExpression) {
+      final AExpression initializer=(AExpression)this.initializer;
+      initializer.read=false;
+      initializer.analyze(variables);
+      if (!initializer.statement) {
+        throw new IllegalArgumentException(initializer.error("Not a statement."));
+      }
+    }
+ else {
+      throw new IllegalStateException(error("Illegal tree structure."));
+    }
+  }
+  if (condition != null) {
+    condition.expected=Definition.BOOLEAN_TYPE;
+    condition.analyze(variables);
+    condition=condition.cast(variables);
+    if (condition.constant != null) {
+      continuous=(boolean)condition.constant;
+      if (!continuous) {
+        throw new IllegalArgumentException(error("Extraneous for loop."));
+      }
+      if (block == null) {
+        throw new IllegalArgumentException(error("For loop has no escape."));
+      }
+    }
+  }
+ else {
+    continuous=true;
+  }
+  if (afterthought != null) {
+    afterthought.read=false;
+    afterthought.analyze(variables);
+    if (!afterthought.statement) {
+      throw new IllegalArgumentException(afterthought.error("Not a statement."));
+    }
+  }
+  int count=1;
+  if (block != null) {
+    block.beginLoop=true;
+    block.inLoop=true;
+    block.analyze(variables);
+    if (block.loopEscape && !block.anyContinue) {
+      throw new IllegalArgumentException(error("Extraneous for loop."));
+    }
+    if (continuous && !block.anyBreak) {
+      methodEscape=true;
+      allEscape=true;
+    }
+    block.statementCount=Math.max(count,block.statementCount);
+  }
+  statementCount=1;
+  if (maxLoopCounter > 0) {
+    loopCounterSlot=variables.getVariable(location,"#loop").slot;
+  }
+  variables.decrementScope();
+}
