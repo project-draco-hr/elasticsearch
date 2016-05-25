@@ -1,0 +1,18 @@
+{
+  QueryShardContext queryShardContext=new QueryShardContext(this.queryShardContext);
+  if (context.doc().getField(queryBuilderField.name()) != null) {
+    throw new IllegalArgumentException("a document can only contain one percolator query");
+  }
+  XContentParser parser=context.parser();
+  QueryBuilder queryBuilder=parseQueryBuilder(queryShardContext.newParseContext(parser),parser.getTokenLocation());
+  queryBuilder=queryBuilder.rewrite(queryShardContext);
+  try (XContentBuilder builder=XContentFactory.contentBuilder(QUERY_BUILDER_CONTENT_TYPE)){
+    queryBuilder.toXContent(builder,new MapParams(Collections.emptyMap()));
+    builder.flush();
+    byte[] queryBuilderAsBytes=builder.bytes().toBytes();
+    context.doc().add(new Field(queryBuilderField.name(),queryBuilderAsBytes,queryBuilderField.fieldType()));
+  }
+   Query query=toQuery(queryShardContext,mapUnmappedFieldAsString,queryBuilder);
+  ExtractQueryTermsService.extractQueryTerms(query,context.doc(),queryTermsField.name(),unknownQueryField.name(),queryTermsField.fieldType());
+  return null;
+}
