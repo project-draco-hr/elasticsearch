@@ -1,0 +1,29 @@
+{
+  MetaData metaData=MetaData.builder().put(IndexMetaData.builder("test").settings(settings(Version.CURRENT).put(UnassignedInfo.INDEX_DELAYED_NODE_LEFT_TIMEOUT_SETTING.getKey(),"0")).numberOfShards(1).numberOfReplicas(1)).build();
+  ClusterState clusterState=ClusterState.builder(ClusterName.DEFAULT).metaData(metaData).routingTable(RoutingTable.builder().addAsNew(metaData.index("test")).build()).build();
+  clusterState=ClusterState.builder(clusterState).nodes(DiscoveryNodes.builder().put(newNode("node1")).put(newNode("node2")).localNodeId("node1").masterNodeId("node1")).build();
+  clusterState=ClusterState.builder(clusterState).routingResult(allocationService.reroute(clusterState,"reroute")).build();
+  clusterState=ClusterState.builder(clusterState).routingResult(allocationService.applyStartedShards(clusterState,clusterState.getRoutingNodes().shardsWithState(INITIALIZING))).build();
+  clusterState=ClusterState.builder(clusterState).routingResult(allocationService.applyStartedShards(clusterState,clusterState.getRoutingNodes().shardsWithState(INITIALIZING))).build();
+  assertThat(clusterState.getRoutingNodes().unassigned().size() > 0,equalTo(false));
+  ClusterState prevState=clusterState;
+  DiscoveryNodes.Builder nodes=DiscoveryNodes.builder(clusterState.nodes()).remove("node2");
+  boolean nodeAvailableForAllocation=randomBoolean();
+  if (nodeAvailableForAllocation) {
+    nodes.put(newNode("node3"));
+  }
+  clusterState=ClusterState.builder(clusterState).nodes(nodes).build();
+  clusterState=ClusterState.builder(clusterState).routingResult(allocationService.reroute(clusterState,"reroute")).build();
+  ClusterState newState=clusterState;
+  List<ShardRouting> unassignedShards=newState.getRoutingTable().shardsWithState(ShardRoutingState.UNASSIGNED);
+  if (nodeAvailableForAllocation) {
+    assertThat(unassignedShards.size(),equalTo(0));
+  }
+ else {
+    assertThat(unassignedShards.size(),equalTo(1));
+    assertThat(unassignedShards.get(0).unassignedInfo().isDelayed(),equalTo(false));
+  }
+  delayedAllocationService.clusterChanged(new ClusterChangedEvent("test",newState,prevState));
+  verifyNoMoreInteractions(clusterService);
+  assertNull(delayedAllocationService.delayedRerouteTask.get());
+}

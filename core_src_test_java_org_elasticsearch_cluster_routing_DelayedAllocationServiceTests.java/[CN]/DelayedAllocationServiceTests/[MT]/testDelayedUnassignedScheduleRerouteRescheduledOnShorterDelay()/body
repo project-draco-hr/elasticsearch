@@ -1,0 +1,63 @@
+{
+  TimeValue delaySetting=timeValueSeconds(30);
+  TimeValue shorterDelaySetting=timeValueMillis(100);
+  MetaData metaData=MetaData.builder().put(IndexMetaData.builder("foo").settings(settings(Version.CURRENT).put(UnassignedInfo.INDEX_DELAYED_NODE_LEFT_TIMEOUT_SETTING.getKey(),delaySetting)).numberOfShards(1).numberOfReplicas(1)).put(IndexMetaData.builder("bar").settings(settings(Version.CURRENT).put(UnassignedInfo.INDEX_DELAYED_NODE_LEFT_TIMEOUT_SETTING.getKey(),shorterDelaySetting)).numberOfShards(1).numberOfReplicas(1)).build();
+  ClusterState clusterState=ClusterState.builder(ClusterName.DEFAULT).metaData(metaData).routingTable(RoutingTable.builder().addAsNew(metaData.index("foo")).addAsNew(metaData.index("bar")).build()).build();
+  clusterState=ClusterState.builder(clusterState).nodes(DiscoveryNodes.builder().put(newNode("node1")).put(newNode("node2")).put(newNode("node3")).put(newNode("node4")).localNodeId("node1").masterNodeId("node1")).build();
+  final long nodeLeftTimestampNanos=System.nanoTime();
+  allocationService.setNanoTimeOverride(nodeLeftTimestampNanos);
+  clusterState=ClusterState.builder(clusterState).routingResult(allocationService.reroute(clusterState,"reroute")).build();
+  clusterState=ClusterState.builder(clusterState).routingResult(allocationService.applyStartedShards(clusterState,clusterState.getRoutingNodes().shardsWithState(INITIALIZING))).build();
+  clusterState=ClusterState.builder(clusterState).routingResult(allocationService.applyStartedShards(clusterState,clusterState.getRoutingNodes().shardsWithState(INITIALIZING))).build();
+  assertFalse("no shards should be unassigned",clusterState.getRoutingNodes().unassigned().size() > 0);
+  String nodeIdOfFooReplica=null;
+  for (  ShardRouting shardRouting : clusterState.getRoutingNodes().routingTable().allShards("foo")) {
+    if (shardRouting.primary() == false) {
+      nodeIdOfFooReplica=shardRouting.currentNodeId();
+      break;
+    }
+  }
+  assertNotNull(nodeIdOfFooReplica);
+  clusterState=ClusterState.builder(clusterState).nodes(DiscoveryNodes.builder(clusterState.nodes()).remove(nodeIdOfFooReplica)).build();
+  clusterState=ClusterState.builder(clusterState).routingResult(allocationService.reroute(clusterState,"fake node left")).build();
+  ClusterState stateWithDelayedShard=clusterState;
+  assertEquals(1,UnassignedInfo.getNumberOfDelayedUnassigned(stateWithDelayedShard));
+  ShardRouting delayedShard=stateWithDelayedShard.getRoutingNodes().unassigned().iterator().next();
+  assertEquals(nodeLeftTimestampNanos,delayedShard.unassignedInfo().getUnassignedTimeInNanos());
+  assertNull(delayedAllocationService.delayedRerouteTask.get());
+  long delayUntilClusterChangeEvent=TimeValue.timeValueNanos(randomInt((int)shorterDelaySetting.nanos() - 1)).nanos();
+  long clusterChangeEventTimestampNanos=nodeLeftTimestampNanos + delayUntilClusterChangeEvent;
+  delayedAllocationService.setNanoTimeOverride(clusterChangeEventTimestampNanos);
+  delayedAllocationService.clusterChanged(new ClusterChangedEvent("fake node left",stateWithDelayedShard,clusterState));
+  DelayedAllocationService.DelayedRerouteTask delayedRerouteTask=delayedAllocationService.delayedRerouteTask.get();
+  assertNotNull(delayedRerouteTask);
+  assertFalse(delayedRerouteTask.cancelScheduling.get());
+  assertThat(delayedRerouteTask.baseTimestampNanos,equalTo(clusterChangeEventTimestampNanos));
+  assertThat(delayedRerouteTask.nextDelay.nanos(),equalTo(delaySetting.nanos() - (clusterChangeEventTimestampNanos - nodeLeftTimestampNanos)));
+  if (randomBoolean()) {
+    ClusterState stateWithShorterDelay=ClusterState.builder(stateWithDelayedShard).metaData(MetaData.builder(stateWithDelayedShard.metaData()).updateSettings(Settings.builder().put(UnassignedInfo.INDEX_DELAYED_NODE_LEFT_TIMEOUT_SETTING.getKey(),shorterDelaySetting).build(),"foo")).build();
+    delayedAllocationService.setNanoTimeOverride(clusterChangeEventTimestampNanos);
+    delayedAllocationService.clusterChanged(new ClusterChangedEvent("apply shorter delay",stateWithShorterDelay,stateWithDelayedShard));
+  }
+ else {
+    String nodeIdOfBarReplica=null;
+    for (    ShardRouting shardRouting : stateWithDelayedShard.getRoutingNodes().routingTable().allShards("bar")) {
+      if (shardRouting.primary() == false) {
+        nodeIdOfBarReplica=shardRouting.currentNodeId();
+        break;
+      }
+    }
+    assertNotNull(nodeIdOfBarReplica);
+    clusterState=ClusterState.builder(stateWithDelayedShard).nodes(DiscoveryNodes.builder(stateWithDelayedShard.nodes()).remove(nodeIdOfBarReplica)).build();
+    ClusterState stateWithShorterDelay=ClusterState.builder(clusterState).routingResult(allocationService.reroute(clusterState,"fake node left")).build();
+    delayedAllocationService.setNanoTimeOverride(clusterChangeEventTimestampNanos);
+    delayedAllocationService.clusterChanged(new ClusterChangedEvent("fake node left",stateWithShorterDelay,stateWithDelayedShard));
+  }
+  DelayedAllocationService.DelayedRerouteTask shorterDelayedRerouteTask=delayedAllocationService.delayedRerouteTask.get();
+  assertNotNull(shorterDelayedRerouteTask);
+  assertNotEquals(shorterDelayedRerouteTask,delayedRerouteTask);
+  assertTrue(delayedRerouteTask.cancelScheduling.get());
+  assertFalse(shorterDelayedRerouteTask.cancelScheduling.get());
+  assertThat(delayedRerouteTask.baseTimestampNanos,equalTo(clusterChangeEventTimestampNanos));
+  assertThat(shorterDelayedRerouteTask.nextDelay.nanos(),equalTo(shorterDelaySetting.nanos() - (clusterChangeEventTimestampNanos - nodeLeftTimestampNanos)));
+}
