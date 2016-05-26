@@ -1,0 +1,45 @@
+{
+  return new AtomicFieldData(){
+    @Override public void close(){
+    }
+    @Override public long ramBytesUsed(){
+      return 0;
+    }
+    @Override public ScriptDocValues<?> getScriptValues(){
+      throw new UnsupportedOperationException("Cannot run scripts on ip fields");
+    }
+    @Override public SortedBinaryDocValues getBytesValues(){
+      SortedNumericDocValues values;
+      try {
+        values=DocValues.getSortedNumeric(context.reader(),fieldName);
+      }
+ catch (      IOException e) {
+        throw new IllegalStateException("Cannot load doc values",e);
+      }
+      return new SortedBinaryDocValues(){
+        final ByteBuffer scratch=ByteBuffer.allocate(4);
+        @Override public BytesRef valueAt(        int index){
+          long ip=values.valueAt(index);
+          scratch.putInt(0,(int)ip);
+          InetAddress inet;
+          try {
+            inet=InetAddress.getByAddress(scratch.array());
+          }
+ catch (          UnknownHostException e) {
+            throw new IllegalStateException("Cannot happen",e);
+          }
+          byte[] encoded=InetAddressPoint.encode(inet);
+          return new BytesRef(encoded);
+        }
+        @Override public void setDocument(        int docId){
+          values.setDocument(docId);
+        }
+        @Override public int count(){
+          return values.count();
+        }
+      }
+;
+    }
+  }
+;
+}
