@@ -23,20 +23,14 @@
   Long oldTTL=fieldValue(doc,TTLFieldMapper.NAME);
   context.put(TTLFieldMapper.NAME,oldTTL);
   context.put(SourceFieldMapper.NAME,request.getSource());
-  context.put("op","update");
+  OpType oldOpType=OpType.INDEX;
+  context.put("op",oldOpType.toString());
   executable.setNextVar("ctx",context);
   executable.run();
   Map<String,Object> resultCtx=(Map<String,Object>)executable.unwrap(context);
   String newOp=(String)resultCtx.remove("op");
   if (newOp == null) {
-    throw new IllegalArgumentException("Script cleared op!");
-  }
-  if ("noop".equals(newOp)) {
-    task.countNoop();
-    return null;
-  }
-  if (false == "update".equals(newOp)) {
-    throw new IllegalArgumentException("Invalid op [" + newOp + ']');
+    throw new IllegalArgumentException("Script cleared operation type");
   }
   request.setSource((Map<String,Object>)resultCtx.remove(SourceFieldMapper.NAME));
   Object newValue=context.remove(IndexFieldMapper.NAME);
@@ -70,6 +64,10 @@
   newValue=context.remove(TTLFieldMapper.NAME);
   if (false == Objects.equals(oldTTL,newValue)) {
     scriptChangedTTL(request,newValue);
+  }
+  OpType newOpType=OpType.fromString(newOp);
+  if (newOpType != oldOpType) {
+    return scriptChangedOpType(request,oldOpType,newOpType);
   }
   if (false == context.isEmpty()) {
     throw new IllegalArgumentException("Invalid fields added to context [" + String.join(",",context.keySet()) + ']');
