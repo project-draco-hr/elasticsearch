@@ -1,0 +1,25 @@
+{
+  createIndex("test",client().admin().indices().prepareCreate("test").addMapping("type","field1","type=keyword","field2","type=keyword").addMapping("queries","query","type=percolator"));
+  client().prepareIndex("test","queries","1").setSource(jsonBuilder().startObject().field("query",matchAllQuery()).endObject()).get();
+  client().prepareIndex("test","queries","2").setSource(jsonBuilder().startObject().field("query",matchQuery("field1","value")).endObject()).get();
+  client().prepareIndex("test","queries","3").setSource(jsonBuilder().startObject().field("query",boolQuery().must(matchQuery("field1","value")).must(matchQuery("field2","value"))).endObject()).get();
+  client().prepareIndex("test","type","1").setSource("{}").get();
+  client().prepareIndex("test","type","2").setSource("field1","value").get();
+  client().prepareIndex("test","type","3").setSource("field1","value","field2","value").get();
+  client().admin().indices().prepareRefresh().get();
+  logger.info("percolating empty doc");
+  SearchResponse response=client().prepareSearch().setQuery(new PercolateQueryBuilder("query","type","test","type","1",null,null,null)).get();
+  assertHitCount(response,1);
+  assertThat(response.getHits().getAt(0).getId(),equalTo("1"));
+  logger.info("percolating doc with 1 field");
+  response=client().prepareSearch().setQuery(new PercolateQueryBuilder("query","type","test","type","2",null,null,null)).addSort("_uid",SortOrder.ASC).get();
+  assertHitCount(response,2);
+  assertThat(response.getHits().getAt(0).getId(),equalTo("1"));
+  assertThat(response.getHits().getAt(1).getId(),equalTo("2"));
+  logger.info("percolating doc with 2 fields");
+  response=client().prepareSearch().setQuery(new PercolateQueryBuilder("query","type","test","type","3",null,null,null)).addSort("_uid",SortOrder.ASC).get();
+  assertHitCount(response,3);
+  assertThat(response.getHits().getAt(0).getId(),equalTo("1"));
+  assertThat(response.getHits().getAt(1).getId(),equalTo("2"));
+  assertThat(response.getHits().getAt(2).getId(),equalTo("3"));
+}

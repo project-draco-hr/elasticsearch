@@ -1,0 +1,21 @@
+{
+  client().admin().indices().prepareCreate(INDEX_NAME).setSettings(Settings.builder().put("index.number_of_shards",2)).addMapping(TYPE_NAME,"query","type=percolator").addMapping("type","field1","type=string").execute().actionGet();
+  ensureGreen();
+  logger.info("--> register a queries");
+  for (int i=1; i <= 100; i++) {
+    client().prepareIndex(INDEX_NAME,TYPE_NAME,Integer.toString(i)).setSource(jsonBuilder().startObject().field("query",matchAllQuery()).endObject()).setRouting(Integer.toString(i % 2)).execute().actionGet();
+  }
+  refresh();
+  logger.info("--> Percolate doc with no routing");
+  PercolateResponse response=preparePercolate(client()).setIndices(INDEX_NAME).setDocumentType("type").setPercolateDoc(docBuilder().setDoc(jsonBuilder().startObject().startObject("doc").field("field1","value").endObject().endObject())).setSize(100).execute().actionGet();
+  assertMatchCount(response,100L);
+  assertThat(response.getMatches(),arrayWithSize(100));
+  logger.info("--> Percolate doc with routing=0");
+  response=preparePercolate(client()).setIndices(INDEX_NAME).setDocumentType("type").setPercolateDoc(docBuilder().setDoc(jsonBuilder().startObject().startObject("doc").field("field1","value").endObject().endObject())).setSize(100).setRouting("0").execute().actionGet();
+  assertMatchCount(response,50L);
+  assertThat(response.getMatches(),arrayWithSize(50));
+  logger.info("--> Percolate doc with routing=1");
+  response=preparePercolate(client()).setIndices(INDEX_NAME).setDocumentType("type").setPercolateDoc(docBuilder().setDoc(jsonBuilder().startObject().startObject("doc").field("field1","value").endObject().endObject())).setSize(100).setRouting("1").execute().actionGet();
+  assertMatchCount(response,50L);
+  assertThat(response.getMatches(),arrayWithSize(50));
+}
