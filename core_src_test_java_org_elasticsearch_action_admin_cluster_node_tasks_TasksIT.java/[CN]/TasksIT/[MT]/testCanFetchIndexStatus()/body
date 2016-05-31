@@ -22,11 +22,23 @@
   }
   ListenableActionFuture<?> indexFuture=client().prepareIndex("test","test").setSource("test","test").execute();
   taskRegistered.await(10,TimeUnit.SECONDS);
-  ListTasksResponse tasks=client().admin().cluster().prepareListTasks().setActions("indices:data/write/index*").setDetailed(true).get();
+  ListTasksResponse listResponse=client().admin().cluster().prepareListTasks().setActions("indices:data/write/index*").setDetailed(true).get();
+  assertThat(listResponse.getTasks(),not(empty()));
+  for (  TaskInfo task : listResponse.getTasks()) {
+    assertNotNull(task.getStatus());
+    GetTaskResponse getResponse=client().admin().cluster().prepareGetTask(task.getTaskId()).get();
+    assertFalse("task should still be running",getResponse.getTask().isCompleted());
+    TaskInfo fetchedWithGet=getResponse.getTask().getTask();
+    assertEquals(task.getId(),fetchedWithGet.getId());
+    assertEquals(task.getType(),fetchedWithGet.getType());
+    assertEquals(task.getAction(),fetchedWithGet.getAction());
+    assertEquals(task.getDescription(),fetchedWithGet.getDescription());
+    assertEquals(task.getStatus(),fetchedWithGet.getStatus());
+    assertEquals(task.getStartTime(),fetchedWithGet.getStartTime());
+    assertThat(fetchedWithGet.getRunningTimeNanos(),greaterThanOrEqualTo(task.getRunningTimeNanos()));
+    assertEquals(task.isCancellable(),fetchedWithGet.isCancellable());
+    assertEquals(task.getParentTaskId(),fetchedWithGet.getParentTaskId());
+  }
   taskFinishLock.unlock();
   indexFuture.get();
-  assertThat(tasks.getTasks(),not(emptyCollectionOf(TaskInfo.class)));
-  for (  TaskInfo task : tasks.getTasks()) {
-    assertNotNull(task.getStatus());
-  }
 }
