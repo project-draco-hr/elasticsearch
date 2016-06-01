@@ -1,0 +1,62 @@
+{
+  if (temporarilyMarked.contains(builder)) {
+    throw new IllegalArgumentException("Cyclical dependency found with pipeline aggregator [" + builder.getName() + "]");
+  }
+ else   if (unmarkedBuilders.contains(builder)) {
+    temporarilyMarked.add(builder);
+    String[] bucketsPaths=builder.getBucketsPaths();
+    for (    String bucketsPath : bucketsPaths) {
+      List<AggregationPath.PathElement> bucketsPathElements=AggregationPath.parse(bucketsPath).getPathElements();
+      String firstAggName=bucketsPathElements.get(0).name;
+      if (bucketsPath.equals("_count") || bucketsPath.equals("_key")) {
+        continue;
+      }
+ else       if (aggBuildersMap.containsKey(firstAggName)) {
+        AggregationBuilder aggBuilder=aggBuildersMap.get(firstAggName);
+        for (int i=1; i < bucketsPathElements.size(); i++) {
+          PathElement pathElement=bucketsPathElements.get(i);
+          String aggName=pathElement.name;
+          if ((i == bucketsPathElements.size() - 1) && (aggName.equalsIgnoreCase("_key") || aggName.equals("_count"))) {
+            break;
+          }
+ else {
+            AggregationBuilder[] subBuilders=aggBuilder.factoriesBuilder.getAggregatorFactories();
+            boolean foundSubBuilder=false;
+            for (            AggregationBuilder subBuilder : subBuilders) {
+              if (aggName.equals(subBuilder.name)) {
+                aggBuilder=subBuilder;
+                foundSubBuilder=true;
+                break;
+              }
+            }
+            if (!foundSubBuilder && (i == bucketsPathElements.size() - 1)) {
+              List<PipelineAggregationBuilder> subPipelineBuilders=aggBuilder.factoriesBuilder.pipelineAggregatorBuilders;
+              for (              PipelineAggregationBuilder subFactory : subPipelineBuilders) {
+                if (aggName.equals(subFactory.getName())) {
+                  foundSubBuilder=true;
+                  break;
+                }
+              }
+            }
+            if (!foundSubBuilder) {
+              throw new IllegalArgumentException("No aggregation [" + aggName + "] found for path ["+ bucketsPath+ "]");
+            }
+          }
+        }
+        continue;
+      }
+ else {
+        PipelineAggregationBuilder matchingBuilder=pipelineAggregatorBuildersMap.get(firstAggName);
+        if (matchingBuilder != null) {
+          resolvePipelineAggregatorOrder(aggBuildersMap,pipelineAggregatorBuildersMap,orderedPipelineAggregators,unmarkedBuilders,temporarilyMarked,matchingBuilder);
+        }
+ else {
+          throw new IllegalArgumentException("No aggregation found for path [" + bucketsPath + "]");
+        }
+      }
+    }
+    unmarkedBuilders.remove(builder);
+    temporarilyMarked.remove(builder);
+    orderedPipelineAggregators.add(builder);
+  }
+}
