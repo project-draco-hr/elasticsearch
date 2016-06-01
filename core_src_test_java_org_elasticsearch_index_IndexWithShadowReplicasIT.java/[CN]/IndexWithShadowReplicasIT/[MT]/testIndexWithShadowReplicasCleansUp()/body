@@ -1,28 +1,2 @@
 {
-  Path dataPath=createTempDir();
-  Settings nodeSettings=nodeSettings(dataPath);
-  final int nodeCount=randomIntBetween(2,5);
-  logger.info("--> starting {} nodes",nodeCount);
-  final List<String> nodes=internalCluster().startNodesAsync(nodeCount,nodeSettings).get();
-  final String IDX="test";
-  final Tuple<Integer,Integer> numPrimariesAndReplicas=randomPrimariesAndReplicas(nodeCount);
-  final int numPrimaries=numPrimariesAndReplicas.v1();
-  final int numReplicas=numPrimariesAndReplicas.v2();
-  logger.info("--> creating index {} with {} primary shards and {} replicas",IDX,numPrimaries,numReplicas);
-  Settings idxSettings=Settings.builder().put(IndexMetaData.SETTING_NUMBER_OF_SHARDS,numPrimaries).put(IndexMetaData.SETTING_NUMBER_OF_REPLICAS,numReplicas).put(IndexMetaData.SETTING_DATA_PATH,dataPath.toAbsolutePath().toString()).put(IndexMetaData.SETTING_SHADOW_REPLICAS,true).put(IndexMetaData.SETTING_SHARED_FILESYSTEM,true).build();
-  prepareCreate(IDX).setSettings(idxSettings).addMapping("doc","foo","type=text").get();
-  ensureGreen(IDX);
-  client().prepareIndex(IDX,"doc","1").setSource("foo","bar").get();
-  client().prepareIndex(IDX,"doc","2").setSource("foo","bar").get();
-  flushAndRefresh(IDX);
-  GetResponse gResp1=client().prepareGet(IDX,"doc","1").setFields("foo").get();
-  GetResponse gResp2=client().prepareGet(IDX,"doc","2").setFields("foo").get();
-  assertThat(gResp1.getField("foo").getValue().toString(),equalTo("bar"));
-  assertThat(gResp2.getField("foo").getValue().toString(),equalTo("bar"));
-  logger.info("--> performing query");
-  SearchResponse resp=client().prepareSearch(IDX).setQuery(matchAllQuery()).get();
-  assertHitCount(resp,2);
-  logger.info("--> deleting index " + IDX);
-  assertAcked(client().admin().indices().prepareDelete(IDX));
-  assertBusyPathHasBeenCleared(dataPath);
 }
