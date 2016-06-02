@@ -1,36 +1,47 @@
 {
   try {
+    final String repository=request.repository();
     List<SnapshotInfo> snapshotInfoBuilder=new ArrayList<>();
     if (isAllSnapshots(request.snapshots())) {
-      snapshotInfoBuilder.addAll(snapshotsService.snapshots(request.repository(),request.ignoreUnavailable()));
+      snapshotInfoBuilder.addAll(snapshotsService.currentSnapshots(repository));
+      snapshotInfoBuilder.addAll(snapshotsService.snapshots(repository,snapshotsService.snapshotIds(repository),request.ignoreUnavailable()));
     }
  else     if (isCurrentSnapshots(request.snapshots())) {
-      snapshotInfoBuilder.addAll(snapshotsService.currentSnapshots(request.repository()));
+      snapshotInfoBuilder.addAll(snapshotsService.currentSnapshots(repository));
     }
  else {
-      Set<String> snapshotsToGet=new LinkedHashSet<>();
-      List<SnapshotInfo> snapshots=null;
+      final Map<String,SnapshotId> allSnapshotIds=new HashMap<>();
+      for (      SnapshotInfo snapshotInfo : snapshotsService.currentSnapshots(repository)) {
+        SnapshotId snapshotId=snapshotInfo.snapshotId();
+        allSnapshotIds.put(snapshotId.getName(),snapshotId);
+      }
+      for (      SnapshotId snapshotId : snapshotsService.snapshotIds(repository)) {
+        allSnapshotIds.put(snapshotId.getName(),snapshotId);
+      }
+      final Set<SnapshotId> toResolve=new LinkedHashSet<>();
       for (      String snapshotOrPattern : request.snapshots()) {
         if (Regex.isSimpleMatchPattern(snapshotOrPattern) == false) {
-          snapshotsToGet.add(snapshotOrPattern);
+          if (allSnapshotIds.containsKey(snapshotOrPattern)) {
+            toResolve.add(allSnapshotIds.get(snapshotOrPattern));
+          }
+ else           if (request.ignoreUnavailable() == false) {
+            throw new SnapshotMissingException(repository,snapshotOrPattern);
+          }
         }
  else {
-          if (snapshots == null) {
-            snapshots=snapshotsService.snapshots(request.repository(),request.ignoreUnavailable());
-          }
-          for (          SnapshotInfo snapshot : snapshots) {
-            if (Regex.simpleMatch(snapshotOrPattern,snapshot.name())) {
-              snapshotsToGet.add(snapshot.name());
+          for (          Map.Entry<String,SnapshotId> entry : allSnapshotIds.entrySet()) {
+            if (Regex.simpleMatch(snapshotOrPattern,entry.getKey())) {
+              toResolve.add(entry.getValue());
             }
           }
         }
       }
-      for (      String snapshot : snapshotsToGet) {
-        SnapshotId snapshotId=new SnapshotId(request.repository(),snapshot);
-        snapshotInfoBuilder.add(snapshotsService.snapshot(snapshotId));
+      if (toResolve.isEmpty() && request.ignoreUnavailable() == false) {
+        throw new SnapshotMissingException(repository,request.snapshots()[0]);
       }
+      snapshotInfoBuilder.addAll(snapshotsService.snapshots(repository,new ArrayList<>(toResolve),request.ignoreUnavailable()));
     }
-    listener.onResponse(new GetSnapshotsResponse(Collections.unmodifiableList(snapshotInfoBuilder)));
+    listener.onResponse(new GetSnapshotsResponse(snapshotInfoBuilder));
   }
  catch (  Throwable t) {
     listener.onFailure(t);

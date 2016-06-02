@@ -1,7 +1,7 @@
 {
   boolean snapshotCreated=false;
   try {
-    Repository repository=repositoriesService.repository(snapshot.snapshotId().getRepository());
+    Repository repository=repositoriesService.repository(snapshot.snapshot().getRepository());
     MetaData metaData=clusterState.metaData();
     if (!snapshot.includeGlobalState()) {
       MetaData.Builder builder=MetaData.builder();
@@ -10,14 +10,14 @@
       }
       metaData=builder.build();
     }
-    repository.initializeSnapshot(snapshot.snapshotId(),snapshot.indices(),metaData);
+    repository.initializeSnapshot(snapshot.snapshot().getSnapshotId(),snapshot.indices(),metaData);
     snapshotCreated=true;
     if (snapshot.indices().isEmpty()) {
       userCreateSnapshotListener.onResponse();
       endSnapshot(snapshot);
       return;
     }
-    clusterService.submitStateUpdateTask("update_snapshot [" + snapshot.snapshotId().getSnapshot() + "]",new ClusterStateUpdateTask(){
+    clusterService.submitStateUpdateTask("update_snapshot [" + snapshot.snapshot() + "]",new ClusterStateUpdateTask(){
       boolean accepted=false;
       SnapshotsInProgress.Entry updatedSnapshot;
       String failure=null;
@@ -25,7 +25,7 @@
         SnapshotsInProgress snapshots=currentState.custom(SnapshotsInProgress.TYPE);
         List<SnapshotsInProgress.Entry> entries=new ArrayList<>();
         for (        SnapshotsInProgress.Entry entry : snapshots.entries()) {
-          if (entry.snapshotId().equals(snapshot.snapshotId())) {
+          if (entry.snapshot().equals(snapshot.snapshot())) {
             ImmutableOpenMap<ShardId,SnapshotsInProgress.ShardSnapshotStatus> shards=shards(currentState,entry.indices());
             if (!partial) {
               Tuple<Set<String>,Set<String>> indicesWithMissingShards=indicesWithMissingShards(shards,currentState.metaData());
@@ -63,8 +63,8 @@
         return ClusterState.builder(currentState).putCustom(SnapshotsInProgress.TYPE,new SnapshotsInProgress(Collections.unmodifiableList(entries))).build();
       }
       @Override public void onFailure(      String source,      Throwable t){
-        logger.warn("[{}] failed to create snapshot",t,snapshot.snapshotId());
-        removeSnapshotFromClusterState(snapshot.snapshotId(),null,t,new CleanupAfterErrorListener(snapshot,true,userCreateSnapshotListener,t));
+        logger.warn("[{}] failed to create snapshot",t,snapshot.snapshot().getSnapshotId());
+        removeSnapshotFromClusterState(snapshot.snapshot(),null,t,new CleanupAfterErrorListener(snapshot,true,userCreateSnapshotListener,t));
       }
       @Override public void clusterStateProcessed(      String source,      ClusterState oldState,      ClusterState newState){
         userCreateSnapshotListener.onResponse();
@@ -76,7 +76,7 @@
 );
   }
  catch (  Throwable t) {
-    logger.warn("failed to create snapshot [{}]",t,snapshot.snapshotId());
-    removeSnapshotFromClusterState(snapshot.snapshotId(),null,t,new CleanupAfterErrorListener(snapshot,snapshotCreated,userCreateSnapshotListener,t));
+    logger.warn("failed to create snapshot [{}]",t,snapshot.snapshot().getSnapshotId());
+    removeSnapshotFromClusterState(snapshot.snapshot(),null,t,new CleanupAfterErrorListener(snapshot,snapshotCreated,userCreateSnapshotListener,t));
   }
 }
