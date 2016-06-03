@@ -1,0 +1,27 @@
+{
+  final String indexName="test-idx1";
+  final String alias="test-alias";
+  final IndicesService indicesService=getIndicesService();
+  final ClusterService clusterService=getInstanceFromNode(ClusterService.class);
+  final IndexService test=createIndex(indexName);
+  AliasAction action=new AliasAction(AliasAction.Type.ADD,indexName,alias);
+  IndicesAliasesRequest request=new IndicesAliasesRequest().addAliasAction(action);
+  client().admin().indices().aliases(request).actionGet();
+  final ClusterState originalState=clusterService.state();
+  final LocalAllocateDangledIndices dangling=getInstanceFromNode(LocalAllocateDangledIndices.class);
+  final Settings idxSettings=Settings.builder().put(IndexMetaData.SETTING_VERSION_CREATED,Version.CURRENT).put(IndexMetaData.SETTING_INDEX_UUID,UUIDs.randomBase64UUID()).build();
+  final IndexMetaData indexMetaData=new IndexMetaData.Builder(alias).settings(idxSettings).numberOfShards(1).numberOfReplicas(0).build();
+  DanglingListener listener=new DanglingListener();
+  dangling.allocateDangled(Arrays.asList(indexMetaData),listener);
+  listener.latch.await();
+  assertThat(clusterService.state(),equalTo(originalState));
+  action=new AliasAction(AliasAction.Type.REMOVE,indexName,alias);
+  request=new IndicesAliasesRequest().addAliasAction(action);
+  client().admin().indices().aliases(request).actionGet();
+  listener=new DanglingListener();
+  dangling.allocateDangled(Arrays.asList(indexMetaData),listener);
+  listener.latch.await();
+  assertThat(clusterService.state(),not(originalState));
+  assertNotNull(clusterService.state().getMetaData().index(alias));
+  indicesService.deleteIndex(test.index(),"finished with test");
+}

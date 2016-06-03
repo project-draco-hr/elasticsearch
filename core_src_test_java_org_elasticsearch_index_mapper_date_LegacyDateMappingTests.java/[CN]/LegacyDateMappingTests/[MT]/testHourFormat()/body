@@ -1,0 +1,16 @@
+{
+  String mapping=XContentFactory.jsonBuilder().startObject().startObject("type").field("date_detection",false).startObject("properties").startObject("date_field").field("type","date").field("format","HH:mm:ss").endObject().endObject().endObject().endObject().string();
+  DocumentMapper defaultMapper=mapper("test","type",mapping);
+  ParsedDocument doc=defaultMapper.parse("test","type","1",XContentFactory.jsonBuilder().startObject().field("date_field","10:00:00").endObject().bytes());
+  assertThat(((LegacyLongFieldMapper.CustomLongNumericField)doc.rootDoc().getField("date_field")).numericAsString(),equalTo(Long.toString(new DateTime(TimeValue.timeValueHours(10).millis(),DateTimeZone.UTC).getMillis())));
+  LegacyNumericRangeQuery<Long> rangeQuery;
+  try {
+    SearchContext.setCurrent(new TestSearchContext(null));
+    rangeQuery=(LegacyNumericRangeQuery<Long>)defaultMapper.mappers().smartNameFieldMapper("date_field").fieldType().rangeQuery("10:00:00","11:00:00",true,true).rewrite(null);
+  }
+  finally {
+    SearchContext.removeCurrent();
+  }
+  assertThat(rangeQuery.getMax(),equalTo(new DateTime(TimeValue.timeValueHours(11).millis(),DateTimeZone.UTC).getMillis()));
+  assertThat(rangeQuery.getMin(),equalTo(new DateTime(TimeValue.timeValueHours(10).millis(),DateTimeZone.UTC).getMillis()));
+}

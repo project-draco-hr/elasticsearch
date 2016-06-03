@@ -1,6 +1,4 @@
 {
-  RoutingTableValidation validation=clusterState.routingTable().validate(clusterState.metaData());
-  validationFailures=validation.failures();
   numberOfNodes=clusterState.nodes().getSize();
   numberOfDataNodes=clusterState.nodes().getDataNodes().size();
   for (  String index : concreteIndices) {
@@ -12,27 +10,35 @@
     ClusterIndexHealth indexHealth=new ClusterIndexHealth(indexMetaData,indexRoutingTable);
     indices.put(indexHealth.getIndex(),indexHealth);
   }
-  status=ClusterHealthStatus.GREEN;
+  ClusterHealthStatus computeStatus=ClusterHealthStatus.GREEN;
+  int computeActivePrimaryShards=0;
+  int computeActiveShards=0;
+  int computeRelocatingShards=0;
+  int computeInitializingShards=0;
+  int computeUnassignedShards=0;
   for (  ClusterIndexHealth indexHealth : indices.values()) {
-    activePrimaryShards+=indexHealth.getActivePrimaryShards();
-    activeShards+=indexHealth.getActiveShards();
-    relocatingShards+=indexHealth.getRelocatingShards();
-    initializingShards+=indexHealth.getInitializingShards();
-    unassignedShards+=indexHealth.getUnassignedShards();
+    computeActivePrimaryShards+=indexHealth.getActivePrimaryShards();
+    computeActiveShards+=indexHealth.getActiveShards();
+    computeRelocatingShards+=indexHealth.getRelocatingShards();
+    computeInitializingShards+=indexHealth.getInitializingShards();
+    computeUnassignedShards+=indexHealth.getUnassignedShards();
     if (indexHealth.getStatus() == ClusterHealthStatus.RED) {
-      status=ClusterHealthStatus.RED;
+      computeStatus=ClusterHealthStatus.RED;
     }
- else     if (indexHealth.getStatus() == ClusterHealthStatus.YELLOW && status != ClusterHealthStatus.RED) {
-      status=ClusterHealthStatus.YELLOW;
+ else     if (indexHealth.getStatus() == ClusterHealthStatus.YELLOW && computeStatus != ClusterHealthStatus.RED) {
+      computeStatus=ClusterHealthStatus.YELLOW;
     }
   }
-  if (!validationFailures.isEmpty()) {
-    status=ClusterHealthStatus.RED;
+  if (clusterState.blocks().hasGlobalBlock(RestStatus.SERVICE_UNAVAILABLE)) {
+    computeStatus=ClusterHealthStatus.RED;
   }
- else   if (clusterState.blocks().hasGlobalBlock(RestStatus.SERVICE_UNAVAILABLE)) {
-    status=ClusterHealthStatus.RED;
-  }
-  if (status.equals(ClusterHealthStatus.GREEN)) {
+  this.status=computeStatus;
+  this.activePrimaryShards=computeActivePrimaryShards;
+  this.activeShards=computeActiveShards;
+  this.relocatingShards=computeRelocatingShards;
+  this.initializingShards=computeInitializingShards;
+  this.unassignedShards=computeUnassignedShards;
+  if (computeStatus.equals(ClusterHealthStatus.GREEN)) {
     this.activeShardsPercent=100;
   }
  else {

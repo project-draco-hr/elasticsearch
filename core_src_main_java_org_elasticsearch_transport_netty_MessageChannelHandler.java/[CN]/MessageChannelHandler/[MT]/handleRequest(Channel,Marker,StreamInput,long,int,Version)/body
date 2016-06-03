@@ -1,0 +1,42 @@
+{
+  buffer=new NamedWriteableAwareStreamInput(buffer,transport.namedWriteableRegistry);
+  final String action=buffer.readString();
+  transportServiceAdapter.onRequestReceived(requestId,action);
+  NettyTransportChannel transportChannel=null;
+  try {
+    final RequestHandlerRegistry reg=transportServiceAdapter.getRequestHandler(action);
+    if (reg == null) {
+      throw new ActionNotFoundTransportException(action);
+    }
+    if (reg.canTripCircuitBreaker()) {
+      transport.inFlightRequestsBreaker().addEstimateBytesAndMaybeBreak(messageLengthBytes,"<transport_request>");
+    }
+ else {
+      transport.inFlightRequestsBreaker().addWithoutBreaking(messageLengthBytes);
+    }
+    transportChannel=new NettyTransportChannel(transport,transportServiceAdapter,action,channel,requestId,version,profileName,messageLengthBytes);
+    final TransportRequest request=reg.newRequest();
+    request.remoteAddress(new InetSocketTransportAddress((InetSocketAddress)channel.getRemoteAddress()));
+    request.readFrom(buffer);
+    validateRequest(marker,buffer,requestId,action);
+    if (ThreadPool.Names.SAME.equals(reg.getExecutor())) {
+      reg.processMessageReceived(request,transportChannel);
+    }
+ else {
+      threadPool.executor(reg.getExecutor()).execute(new RequestHandler(reg,request,transportChannel));
+    }
+  }
+ catch (  Throwable e) {
+    if (transportChannel == null) {
+      transportChannel=new NettyTransportChannel(transport,transportServiceAdapter,action,channel,requestId,version,profileName,0);
+    }
+    try {
+      transportChannel.sendResponse(e);
+    }
+ catch (    IOException e1) {
+      logger.warn("Failed to send error message back to client for action [{}]",e,action);
+      logger.warn("Actual Exception",e1);
+    }
+  }
+  return action;
+}

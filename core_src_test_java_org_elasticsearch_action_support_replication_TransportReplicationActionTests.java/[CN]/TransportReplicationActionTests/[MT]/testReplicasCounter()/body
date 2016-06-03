@@ -1,2 +1,27 @@
 {
+  final ShardId shardId=new ShardId("test","_na_",0);
+  setState(clusterService,state(shardId.getIndexName(),true,ShardRoutingState.STARTED,ShardRoutingState.STARTED));
+  boolean throwException=randomBoolean();
+  final ReplicationTask task=maybeTask();
+  Action action=new Action(Settings.EMPTY,"testActionWithExceptions",transportService,clusterService,threadPool){
+    @Override protected void shardOperationOnReplica(    Request request){
+      assertIndexShardCounter(1);
+      assertPhase(task,"replica");
+      if (throwException) {
+        throw new ElasticsearchException("simulated");
+      }
+      super.shardOperationOnReplica(request);
+    }
+  }
+;
+  final Action.ReplicaOperationTransportHandler replicaOperationTransportHandler=action.new ReplicaOperationTransportHandler();
+  try {
+    replicaOperationTransportHandler.messageReceived(new Request().setShardId(shardId),createTransportChannel(new PlainActionFuture<>()),task);
+  }
+ catch (  ElasticsearchException e) {
+    assertThat(e.getMessage(),containsString("simulated"));
+    assertTrue(throwException);
+  }
+  assertPhase(task,"finished");
+  assertIndexShardCounter(0);
 }

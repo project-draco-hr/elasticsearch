@@ -1,12 +1,9 @@
 {
   validateType(source);
-  source.type(docMapper.type());
   final Mapping mapping=docMapper.mapping();
-  final ParseContext.InternalParseContext context=cache.get();
-  XContentParser parser=null;
-  try {
-    parser=parser(source);
-    context.reset(parser,new ParseContext.Document(),source);
+  final ParseContext.InternalParseContext context;
+  try (XContentParser parser=XContentHelper.createParser(source.source())){
+    context=new ParseContext.InternalParseContext(indexSettings.getSettings(),docMapperParser,docMapper,source,parser);
     validateStart(parser);
     internalParseDocument(mapping,context,parser);
     validateEnd(source,parser);
@@ -14,13 +11,11 @@
  catch (  Throwable t) {
     throw wrapInMapperParsingException(source,t);
   }
- finally {
-    if (internalParser(source,parser)) {
-      parser.close();
-    }
+  String remainingPath=context.path().pathAsText("");
+  if (remainingPath.isEmpty() == false) {
+    throw new IllegalStateException("found leftover path elements: " + remainingPath);
   }
   reverseOrder(context);
   ParsedDocument doc=parsedDocument(source,context,createDynamicUpdate(mapping,docMapper,context.getDynamicMappers()));
-  context.reset(null,null,null);
   return doc;
 }

@@ -1,0 +1,27 @@
+{
+  assertAcked(prepareCreate("test1").addMapping("test","value","type=long","value2","type=long"));
+  assertAcked(prepareCreate("test2").addMapping("test","value","type=text","value2","type=long"));
+  ensureGreen("test1","test2");
+  client().prepareIndex("test1","test").setSource("value",1L,"value2",1L).get();
+  client().prepareIndex("test1","test").setSource("value",2L).get();
+  client().prepareIndex("test2","test").setSource("value","a").get();
+  client().prepareIndex("test2","test").setSource("value","b").get();
+  refresh();
+  FieldStatsResponse response=client().prepareFieldStats().setFields("value","value2").get();
+  assertAllSuccessful(response);
+  assertThat(response.getIndicesMergedFieldStats().size(),equalTo(1));
+  assertThat(response.getIndicesMergedFieldStats().get("_all").size(),equalTo(1));
+  assertThat(response.getIndicesMergedFieldStats().get("_all").get("value2").getMinValue(),equalTo(1L));
+  assertThat(response.getIndicesMergedFieldStats().get("_all").get("value2").getMaxValue(),equalTo(1L));
+  assertThat(response.getConflicts().size(),equalTo(1));
+  assertThat(response.getConflicts().get("value"),equalTo("Field [value] of type [whole-number] conflicts with existing field of type [text] " + "in other index."));
+  response=client().prepareFieldStats().setFields("value","value2").setLevel("indices").get();
+  assertAllSuccessful(response);
+  assertThat(response.getIndicesMergedFieldStats().size(),equalTo(2));
+  assertThat(response.getIndicesMergedFieldStats().get("test1").get("value").getMinValue(),equalTo(1L));
+  assertThat(response.getIndicesMergedFieldStats().get("test1").get("value").getMaxValue(),equalTo(2L));
+  assertThat(response.getIndicesMergedFieldStats().get("test1").get("value2").getMinValue(),equalTo(1L));
+  assertThat(response.getIndicesMergedFieldStats().get("test1").get("value2").getMaxValue(),equalTo(1L));
+  assertThat(response.getIndicesMergedFieldStats().get("test2").get("value").getMinValue(),equalTo(new BytesRef("a")));
+  assertThat(response.getIndicesMergedFieldStats().get("test2").get("value").getMaxValue(),equalTo(new BytesRef("b")));
+}

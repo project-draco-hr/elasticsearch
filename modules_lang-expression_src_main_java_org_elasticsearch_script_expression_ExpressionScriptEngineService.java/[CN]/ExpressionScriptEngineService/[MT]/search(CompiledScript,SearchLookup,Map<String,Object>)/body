@@ -1,10 +1,10 @@
 {
-  try {
-    Expression expr=(Expression)compiledScript.compiled();
-    MapperService mapper=lookup.doc().mapperService();
-    SimpleBindings bindings=new SimpleBindings();
-    ReplaceableConstValueSource specialValue=null;
-    for (    String variable : expr.variables) {
+  Expression expr=(Expression)compiledScript.compiled();
+  MapperService mapper=lookup.doc().mapperService();
+  SimpleBindings bindings=new SimpleBindings();
+  ReplaceableConstValueSource specialValue=null;
+  for (  String variable : expr.variables) {
+    try {
       if (variable.equals("_score")) {
         bindings.add(new SortField("_score",SortField.Type.SCORE));
       }
@@ -18,18 +18,20 @@
           bindings.add(variable,new DoubleConstValueSource(((Number)value).doubleValue()));
         }
  else {
-          throw new ScriptException("Parameter [" + variable + "] must be a numeric type");
+          throw new ParseException("Parameter [" + variable + "] must be a numeric type",0);
         }
       }
  else {
         String fieldname=null;
         String methodname=null;
+        String variablename="value";
+        boolean dateAccessor=false;
         VariableContext[] parts=VariableContext.parse(variable);
         if (parts[0].text.equals("doc") == false) {
-          throw new ScriptException("Unknown variable [" + parts[0].text + "] in expression");
+          throw new ParseException("Unknown variable [" + parts[0].text + "]",0);
         }
         if (parts.length < 2 || parts[1].type != VariableContext.Type.STR_INDEX) {
-          throw new ScriptException("Variable 'doc' in expression must be used with a specific field like: doc['myfield']");
+          throw new ParseException("Variable 'doc' must be used with a specific field like: doc['myfield']",3);
         }
  else {
           fieldname=parts[1].text;
@@ -38,33 +40,78 @@
           if (parts[2].type == VariableContext.Type.METHOD) {
             methodname=parts[2].text;
           }
- else           if (parts[2].type != VariableContext.Type.MEMBER || !"value".equals(parts[2].text)) {
-            throw new ScriptException("Only the member variable [value] or member methods may be accessed on a field when not accessing the field directly");
+ else           if (parts[2].type == VariableContext.Type.MEMBER) {
+            variablename=parts[2].text;
+          }
+ else {
+            throw new IllegalArgumentException("Only member variables or member methods may be accessed on a field when not accessing the field directly");
           }
         }
         if (parts.length > 3) {
-          throw new ScriptException("Variable [" + variable + "] does not follow an allowed format of either doc['field'] or doc['field'].method()");
+          if (parts.length == 4 && ("date".equals(parts[2].text) || "getDate".equals(parts[2].text))) {
+            if (parts[3].type == VariableContext.Type.METHOD) {
+              methodname=parts[3].text;
+              dateAccessor=true;
+            }
+ else             if (parts[3].type == VariableContext.Type.MEMBER) {
+              variablename=parts[3].text;
+              dateAccessor=true;
+            }
+          }
+          if (!dateAccessor) {
+            throw new IllegalArgumentException("Variable [" + variable + "] does not follow an allowed format of either doc['field'] or doc['field'].method()");
+          }
         }
         MappedFieldType fieldType=mapper.fullName(fieldname);
         if (fieldType == null) {
-          throw new ScriptException("Field [" + fieldname + "] used in expression does not exist in mappings");
+          throw new ParseException("Field [" + fieldname + "] does not exist in mappings",5);
         }
-        if (fieldType.isNumeric() == false) {
-          throw new ScriptException("Field [" + fieldname + "] used in expression must be numeric");
+        IndexFieldData<?> fieldData=lookup.doc().fieldDataService().getForField(fieldType);
+        final ValueSource valueSource;
+        if (fieldType instanceof BaseGeoPointFieldMapper.GeoPointFieldType) {
+          if (methodname == null) {
+            valueSource=GeoField.getVariable(fieldData,fieldname,variablename);
+          }
+ else {
+            valueSource=GeoField.getMethod(fieldData,fieldname,methodname);
+          }
         }
-        IndexFieldData<?> fieldData=lookup.doc().fieldDataService().getForField((NumberFieldMapper.NumberFieldType)fieldType);
-        if (methodname == null) {
-          bindings.add(variable,new FieldDataValueSource(fieldData,MultiValueMode.MIN));
+ else         if (fieldType instanceof LegacyDateFieldMapper.DateFieldType || fieldType instanceof DateFieldMapper.DateFieldType) {
+          if (dateAccessor) {
+            if (methodname == null) {
+              valueSource=DateObject.getVariable(fieldData,fieldname,variablename);
+            }
+ else {
+              valueSource=DateObject.getMethod(fieldData,fieldname,methodname);
+            }
+          }
+ else {
+            if (methodname == null) {
+              valueSource=DateField.getVariable(fieldData,fieldname,variablename);
+            }
+ else {
+              valueSource=DateField.getMethod(fieldData,fieldname,methodname);
+            }
+          }
+        }
+ else         if (fieldData instanceof IndexNumericFieldData) {
+          if (methodname == null) {
+            valueSource=NumericField.getVariable(fieldData,fieldname,variablename);
+          }
+ else {
+            valueSource=NumericField.getMethod(fieldData,fieldname,methodname);
+          }
         }
  else {
-          bindings.add(variable,getMethodValueSource(fieldType,fieldData,fieldname,methodname));
+          throw new ParseException("Field [" + fieldname + "] must be numeric, date, or geopoint",5);
         }
+        bindings.add(variable,valueSource);
       }
     }
-    final boolean needsScores=expr.getSortField(bindings,false).needsScores();
-    return new ExpressionSearchScript(compiledScript,bindings,specialValue,needsScores);
+ catch (    Exception e) {
+      throw convertToScriptException("link error",expr.sourceText,variable,e);
+    }
   }
- catch (  Exception exception) {
-    throw new ScriptException("Error during search with " + compiledScript,exception);
-  }
+  final boolean needsScores=expr.getSortField(bindings,false).needsScores();
+  return new ExpressionSearchScript(compiledScript,bindings,specialValue,needsScores);
 }

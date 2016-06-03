@@ -1,0 +1,73 @@
+{
+  final long startTime=relativeTime();
+  final AtomicArray<BulkItemResponse> responses=new AtomicArray<>(bulkRequest.requests.size());
+  if (needToCheck()) {
+    final Map<String,Set<String>> indicesAndTypes=new HashMap<>();
+    for (    ActionRequest request : bulkRequest.requests) {
+      if (request instanceof DocumentRequest) {
+        DocumentRequest req=(DocumentRequest)request;
+        Set<String> types=indicesAndTypes.get(req.index());
+        if (types == null) {
+          indicesAndTypes.put(req.index(),types=new HashSet<>());
+        }
+        types.add(req.type());
+      }
+ else {
+        throw new ElasticsearchException("Parsed unknown request in bulk actions: " + request.getClass().getSimpleName());
+      }
+    }
+    final AtomicInteger counter=new AtomicInteger(indicesAndTypes.size());
+    ClusterState state=clusterService.state();
+    for (    Map.Entry<String,Set<String>> entry : indicesAndTypes.entrySet()) {
+      final String index=entry.getKey();
+      if (shouldAutoCreate(index,state)) {
+        CreateIndexRequest createIndexRequest=new CreateIndexRequest();
+        createIndexRequest.index(index);
+        for (        String type : entry.getValue()) {
+          createIndexRequest.mapping(type);
+        }
+        createIndexRequest.cause("auto(bulk api)");
+        createIndexRequest.masterNodeTimeout(bulkRequest.timeout());
+        createIndexAction.execute(createIndexRequest,new ActionListener<CreateIndexResponse>(){
+          @Override public void onResponse(          CreateIndexResponse result){
+            if (counter.decrementAndGet() == 0) {
+              try {
+                executeBulk(task,bulkRequest,startTime,listener,responses);
+              }
+ catch (              Throwable t) {
+                listener.onFailure(t);
+              }
+            }
+          }
+          @Override public void onFailure(          Throwable e){
+            if (!(ExceptionsHelper.unwrapCause(e) instanceof IndexAlreadyExistsException)) {
+              for (int i=0; i < bulkRequest.requests.size(); i++) {
+                ActionRequest request=bulkRequest.requests.get(i);
+                if (request != null && setResponseFailureIfIndexMatches(responses,i,request,index,e)) {
+                  bulkRequest.requests.set(i,null);
+                }
+              }
+            }
+            if (counter.decrementAndGet() == 0) {
+              try {
+                executeBulk(task,bulkRequest,startTime,listener,responses);
+              }
+ catch (              Throwable t) {
+                listener.onFailure(t);
+              }
+            }
+          }
+        }
+);
+      }
+ else {
+        if (counter.decrementAndGet() == 0) {
+          executeBulk(task,bulkRequest,startTime,listener,responses);
+        }
+      }
+    }
+  }
+ else {
+    executeBulk(task,bulkRequest,startTime,listener,responses);
+  }
+}

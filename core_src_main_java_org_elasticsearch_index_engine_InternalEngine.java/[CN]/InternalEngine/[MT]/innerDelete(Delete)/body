@@ -1,5 +1,5 @@
 {
-synchronized (dirtyLock(delete.uid())) {
+  try (Releasable ignored=acquireLock(delete.uid())){
     lastWriteNanos=delete.startTime();
     final long currentVersion;
     final boolean deleted;
@@ -20,7 +20,7 @@ synchronized (dirtyLock(delete.uid())) {
     long updatedVersion;
     long expectedVersion=delete.version();
     if (delete.versionType().isVersionConflictForWrites(currentVersion,expectedVersion,deleted)) {
-      if (delete.origin() == Operation.Origin.RECOVERY) {
+      if (delete.origin().isRecovery()) {
         return;
       }
  else {
@@ -40,8 +40,13 @@ synchronized (dirtyLock(delete.uid())) {
       found=true;
     }
     delete.updateVersion(updatedVersion,found);
-    Translog.Location translogLocation=translog.add(new Translog.Delete(delete));
-    versionMap.putUnderLock(delete.uid().bytes(),new DeleteVersionValue(updatedVersion,engineConfig.getThreadPool().estimatedTimeInMillis(),translogLocation));
-    delete.setTranslogLocation(translogLocation);
+    if (delete.origin() != Operation.Origin.LOCAL_TRANSLOG_RECOVERY) {
+      final Translog.Location translogLocation=translog.add(new Translog.Delete(delete));
+      delete.setTranslogLocation(translogLocation);
+      versionMap.putUnderLock(delete.uid().bytes(),new DeleteVersionValue(updatedVersion,engineConfig.getThreadPool().estimatedTimeInMillis(),delete.getTranslogLocation()));
+    }
+ else {
+      versionMap.putUnderLock(delete.uid().bytes(),new DeleteVersionValue(updatedVersion,engineConfig.getThreadPool().estimatedTimeInMillis(),null));
+    }
   }
-}
+ }

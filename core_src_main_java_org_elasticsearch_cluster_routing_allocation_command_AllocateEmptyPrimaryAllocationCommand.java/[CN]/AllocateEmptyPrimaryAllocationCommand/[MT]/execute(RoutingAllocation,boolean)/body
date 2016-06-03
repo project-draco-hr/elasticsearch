@@ -1,2 +1,33 @@
 {
+  final DiscoveryNode discoNode;
+  try {
+    discoNode=allocation.nodes().resolveNode(node);
+  }
+ catch (  IllegalArgumentException e) {
+    return explainOrThrowRejectedCommand(explain,allocation,e);
+  }
+  final RoutingNodes routingNodes=allocation.routingNodes();
+  RoutingNode routingNode=routingNodes.node(discoNode.getId());
+  if (routingNode == null) {
+    return explainOrThrowMissingRoutingNode(allocation,explain,discoNode);
+  }
+  final ShardRouting shardRouting;
+  try {
+    shardRouting=allocation.routingTable().shardRoutingTable(index,shardId).primaryShard();
+  }
+ catch (  IndexNotFoundException|ShardNotFoundException e) {
+    return explainOrThrowRejectedCommand(explain,allocation,e);
+  }
+  if (shardRouting.unassigned() == false) {
+    return explainOrThrowRejectedCommand(explain,allocation,"primary [" + index + "]["+ shardId+ "] is already assigned");
+  }
+  if (shardRouting.unassignedInfo().getReason() != UnassignedInfo.Reason.INDEX_CREATED && acceptDataLoss == false) {
+    return explainOrThrowRejectedCommand(explain,allocation,"allocating an empty primary for [" + index + "]["+ shardId+ "] can result in data loss. Please confirm by setting the accept_data_loss parameter to true");
+  }
+  UnassignedInfo unassignedInfoToUpdate=null;
+  if (shardRouting.unassignedInfo().getReason() != UnassignedInfo.Reason.INDEX_CREATED) {
+    unassignedInfoToUpdate=new UnassignedInfo(UnassignedInfo.Reason.INDEX_CREATED,"force empty allocation from previous reason " + shardRouting.unassignedInfo().getReason() + ", "+ shardRouting.unassignedInfo().getMessage(),shardRouting.unassignedInfo().getFailure(),0,System.nanoTime(),System.currentTimeMillis(),false);
+  }
+  initializeUnassignedShard(allocation,routingNodes,routingNode,shardRouting,unassignedInfoToUpdate);
+  return new RerouteExplanation(this,allocation.decision(Decision.YES,name() + " (allocation command)","ignore deciders"));
 }

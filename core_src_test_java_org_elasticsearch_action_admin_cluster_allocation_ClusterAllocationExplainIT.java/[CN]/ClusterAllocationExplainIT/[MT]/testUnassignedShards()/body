@@ -1,0 +1,63 @@
+{
+  logger.info("--> starting 3 nodes");
+  String noAttrNode=internalCluster().startNode();
+  String barAttrNode=internalCluster().startNode(Settings.builder().put("node.attr.bar","baz"));
+  String fooBarAttrNode=internalCluster().startNode(Settings.builder().put("node.attr.foo","bar").put("node.attr.bar","baz"));
+  logger.info("--> waiting for 3 nodes to be up");
+  client().admin().cluster().health(Requests.clusterHealthRequest().waitForNodes("3")).actionGet();
+  client().admin().indices().prepareCreate("anywhere").setSettings(Settings.builder().put("index.number_of_shards",5).put("index.number_of_replicas",1)).get();
+  client().admin().indices().prepareCreate("only-baz").setSettings(Settings.builder().put("index.routing.allocation.include.bar","baz").put("index.number_of_shards",5).put("index.number_of_replicas",1)).get();
+  client().admin().indices().prepareCreate("only-foo").setSettings(Settings.builder().put("index.routing.allocation.include.foo","bar").put("index.number_of_shards",1).put("index.number_of_replicas",1)).get();
+  ensureGreen("anywhere","only-baz");
+  ensureYellow("only-foo");
+  ClusterAllocationExplainResponse resp=client().admin().cluster().prepareAllocationExplain().setIndex("only-foo").setShard(0).setPrimary(false).get();
+  ClusterAllocationExplanation cae=resp.getExplanation();
+  assertThat(cae.getShard().getIndexName(),equalTo("only-foo"));
+  assertFalse(cae.isPrimary());
+  assertFalse(cae.isAssigned());
+  assertFalse(cae.isStillFetchingShardData());
+  assertThat(UnassignedInfo.Reason.INDEX_CREATED,equalTo(cae.getUnassignedInfo().getReason()));
+  assertThat("expecting no remaining delay: " + cae.getRemainingDelayMillis(),cae.getRemainingDelayMillis(),equalTo(0L));
+  Map<DiscoveryNode,NodeExplanation> explanations=cae.getNodeExplanations();
+  Float noAttrWeight=-1f;
+  Float barAttrWeight=-1f;
+  Float fooBarAttrWeight=-1f;
+  for (  Map.Entry<DiscoveryNode,NodeExplanation> entry : explanations.entrySet()) {
+    DiscoveryNode node=entry.getKey();
+    String nodeName=node.getName();
+    NodeExplanation explanation=entry.getValue();
+    ClusterAllocationExplanation.FinalDecision finalDecision=explanation.getFinalDecision();
+    String finalExplanation=explanation.getFinalExplanation();
+    ClusterAllocationExplanation.StoreCopy storeCopy=explanation.getStoreCopy();
+    Decision d=explanation.getDecision();
+    float weight=explanation.getWeight();
+    IndicesShardStoresResponse.StoreStatus storeStatus=explanation.getStoreStatus();
+    assertEquals(d.type(),Decision.Type.NO);
+    if (noAttrNode.equals(nodeName)) {
+      assertThat(d.toString(),containsString("node does not match index include filters [foo:\"bar\"]"));
+      noAttrWeight=weight;
+      assertNull(storeStatus);
+      assertEquals("the shard cannot be assigned because one or more allocation decider returns a 'NO' decision",explanation.getFinalExplanation());
+      assertEquals(ClusterAllocationExplanation.FinalDecision.NO,finalDecision);
+    }
+ else     if (barAttrNode.equals(nodeName)) {
+      assertThat(d.toString(),containsString("node does not match index include filters [foo:\"bar\"]"));
+      barAttrWeight=weight;
+      assertNull(storeStatus);
+      assertEquals("the shard cannot be assigned because one or more allocation decider returns a 'NO' decision",explanation.getFinalExplanation());
+      assertEquals(ClusterAllocationExplanation.FinalDecision.NO,finalDecision);
+    }
+ else     if (fooBarAttrNode.equals(nodeName)) {
+      assertThat(d.toString(),containsString("the shard cannot be allocated on the same node id"));
+      fooBarAttrWeight=weight;
+      assertEquals(storeStatus.getAllocationStatus(),IndicesShardStoresResponse.StoreStatus.AllocationStatus.PRIMARY);
+      assertEquals(ClusterAllocationExplanation.FinalDecision.NO,finalDecision);
+      assertEquals(ClusterAllocationExplanation.StoreCopy.AVAILABLE,storeCopy);
+      assertEquals("the shard cannot be assigned because one or more allocation decider returns a 'NO' decision",explanation.getFinalExplanation());
+    }
+ else {
+      fail("unexpected node with name: " + nodeName + ", I have: "+ noAttrNode+ ", "+ barAttrNode+ ", "+ fooBarAttrNode);
+    }
+  }
+  assertFalse(barAttrWeight == fooBarAttrWeight);
+}

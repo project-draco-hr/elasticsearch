@@ -2,31 +2,38 @@
   this.index=indexMetaData.getIndex().getName();
   this.numberOfShards=indexMetaData.getNumberOfShards();
   this.numberOfReplicas=indexMetaData.getNumberOfReplicas();
-  this.validationFailures=indexRoutingTable.validate(indexMetaData);
   for (  IndexShardRoutingTable shardRoutingTable : indexRoutingTable) {
     int shardId=shardRoutingTable.shardId().id();
     shards.put(shardId,new ClusterShardHealth(shardId,shardRoutingTable));
   }
-  status=ClusterHealthStatus.GREEN;
+  ClusterHealthStatus computeStatus=ClusterHealthStatus.GREEN;
+  int computeActivePrimaryShards=0;
+  int computeActiveShards=0;
+  int computeRelocatingShards=0;
+  int computeInitializingShards=0;
+  int computeUnassignedShards=0;
   for (  ClusterShardHealth shardHealth : shards.values()) {
     if (shardHealth.isPrimaryActive()) {
-      activePrimaryShards++;
+      computeActivePrimaryShards++;
     }
-    activeShards+=shardHealth.getActiveShards();
-    relocatingShards+=shardHealth.getRelocatingShards();
-    initializingShards+=shardHealth.getInitializingShards();
-    unassignedShards+=shardHealth.getUnassignedShards();
+    computeActiveShards+=shardHealth.getActiveShards();
+    computeRelocatingShards+=shardHealth.getRelocatingShards();
+    computeInitializingShards+=shardHealth.getInitializingShards();
+    computeUnassignedShards+=shardHealth.getUnassignedShards();
     if (shardHealth.getStatus() == ClusterHealthStatus.RED) {
-      status=ClusterHealthStatus.RED;
+      computeStatus=ClusterHealthStatus.RED;
     }
- else     if (shardHealth.getStatus() == ClusterHealthStatus.YELLOW && status != ClusterHealthStatus.RED) {
-      status=ClusterHealthStatus.YELLOW;
+ else     if (shardHealth.getStatus() == ClusterHealthStatus.YELLOW && computeStatus != ClusterHealthStatus.RED) {
+      computeStatus=ClusterHealthStatus.YELLOW;
     }
   }
-  if (!validationFailures.isEmpty()) {
-    status=ClusterHealthStatus.RED;
+  if (shards.isEmpty()) {
+    computeStatus=ClusterHealthStatus.RED;
   }
- else   if (shards.isEmpty()) {
-    status=ClusterHealthStatus.RED;
-  }
+  this.status=computeStatus;
+  this.activePrimaryShards=computeActivePrimaryShards;
+  this.activeShards=computeActiveShards;
+  this.relocatingShards=computeRelocatingShards;
+  this.initializingShards=computeInitializingShards;
+  this.unassignedShards=computeUnassignedShards;
 }

@@ -1,0 +1,15 @@
+{
+  assertAcked(prepareCreate("test").addAlias(new Alias("alias")));
+  final int docs=scaledRandomIntBetween(10,100);
+  List<IndexRequestBuilder> builders=new ArrayList<>();
+  for (int i=0; i < docs; i++) {
+    builders.add(client().prepareIndex("test","test",Integer.toString(i)).setRouting(randomAsciiOfLengthBetween(1,5)).setSource("foo","bar"));
+  }
+  indexRandom(true,true,true,builders);
+  int n=between(0,docs - 1);
+  assertHitCount(client().prepareSearch("test").setSize(0).setQuery(matchQuery("_id",Integer.toString(n))).get(),1);
+  assertHitCount(client().prepareSearch("test").setSize(0).setQuery(QueryBuilders.matchAllQuery()).get(),docs);
+  DeleteByQueryRequestBuilder delete=deleteByQuery().source("alias").filter(matchQuery("_id",Integer.toString(n)));
+  assertThat(delete.refresh(true).get(),matcher().deleted(1L));
+  assertHitCount(client().prepareSearch("test").setSize(0).setQuery(QueryBuilders.matchAllQuery()).get(),docs - 1);
+}

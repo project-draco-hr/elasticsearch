@@ -1,0 +1,17 @@
+{
+  Path dataPath=createTempDir();
+  Settings nodeSettings=nodeSettings(dataPath);
+  internalCluster().startNodesAsync(2,nodeSettings).get();
+  String IDX="test";
+  Settings idxSettings=Settings.builder().put(IndexMetaData.SETTING_NUMBER_OF_SHARDS,1).put(IndexMetaData.SETTING_NUMBER_OF_REPLICAS,2).put(IndexMetaData.SETTING_DATA_PATH,dataPath.toAbsolutePath().toString()).put(IndexMetaData.SETTING_SHADOW_REPLICAS,true).put(IndexMetaData.SETTING_SHARED_FILESYSTEM,true).build();
+  prepareCreate(IDX).setSettings(idxSettings).addMapping("doc","foo","type=text").get();
+  ensureYellow(IDX);
+  client().prepareIndex(IDX,"doc","1").setSource("foo","bar").get();
+  client().prepareIndex(IDX,"doc","2").setSource("foo","bar").get();
+  flushAndRefresh(IDX);
+  internalCluster().startNodesAsync(1).get();
+  ensureYellow(IDX);
+  final ClusterHealthResponse clusterHealth=client().admin().cluster().prepareHealth().setWaitForEvents(Priority.LANGUID).execute().actionGet();
+  assertThat(clusterHealth.getNumberOfNodes(),equalTo(3));
+  assertThat(clusterHealth.getStatus(),equalTo(ClusterHealthStatus.YELLOW));
+}

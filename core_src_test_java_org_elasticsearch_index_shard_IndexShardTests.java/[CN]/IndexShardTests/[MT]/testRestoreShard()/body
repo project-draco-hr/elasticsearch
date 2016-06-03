@@ -12,9 +12,9 @@
   assertSearchHits(client().prepareSearch("test_target").get(),"1");
   client().admin().indices().prepareFlush("test").get();
   final ShardRouting origRouting=test_target.getShardOrNull(0).routingEntry();
-  ShardRouting routing=new ShardRouting(origRouting);
-  ShardRoutingHelper.reinit(routing);
-  routing=ShardRoutingHelper.newWithRestoreSource(routing,new RestoreSource(new SnapshotId("foo","bar"),Version.CURRENT,"test"));
+  ShardRouting routing=ShardRoutingHelper.reinit(origRouting);
+  final Snapshot snapshot=new Snapshot("foo",new SnapshotId("bar",UUIDs.randomBase64UUID()));
+  routing=ShardRoutingHelper.newWithRestoreSource(routing,new RestoreSource(snapshot,Version.CURRENT,"test"));
   test_target.removeShard(0,"just do it man!");
   final IndexShard test_target_shard=test_target.createShard(routing);
   Store sourceStore=test_shard.store();
@@ -45,10 +45,8 @@
     @Override public void verify(    String verificationToken){
     }
   }
-,localNode));
-  routing=new ShardRouting(routing);
-  ShardRoutingHelper.moveToStarted(routing);
-  test_target_shard.updateRoutingEntry(routing,true);
+));
+  test_target_shard.updateRoutingEntry(routing.moveToStarted(),true);
   assertHitCount(client().prepareSearch("test_target").get(),1);
   assertSearchHits(client().prepareSearch("test_target").get(),"0");
 }
