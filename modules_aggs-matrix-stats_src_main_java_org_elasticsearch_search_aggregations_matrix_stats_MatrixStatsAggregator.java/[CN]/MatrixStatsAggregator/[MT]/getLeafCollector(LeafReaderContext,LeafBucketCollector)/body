@@ -1,0 +1,42 @@
+{
+  if (valuesSources == null) {
+    return LeafBucketCollector.NO_OP_COLLECTOR;
+  }
+  final BigArrays bigArrays=context.bigArrays();
+  final NumericDoubleValues[] values=new NumericDoubleValues[valuesSources.fieldNames().length];
+  for (int i=0; i < values.length; ++i) {
+    values[i]=valuesSources.getField(i,ctx);
+  }
+  return new LeafBucketCollectorBase(sub,values){
+    final String[] fieldNames=valuesSources.fieldNames();
+    final double[] fieldVals=new double[fieldNames.length];
+    @Override public void collect(    int doc,    long bucket) throws IOException {
+      if (includeDocument(doc) == true) {
+        stats=bigArrays.grow(stats,bucket + 1);
+        RunningStats stat=stats.get(bucket);
+        if (stat == null) {
+          stat=new RunningStats(fieldNames,fieldVals);
+          stats.set(bucket,stat);
+        }
+ else {
+          stat.add(fieldNames,fieldVals);
+        }
+      }
+    }
+    /** 
+ * return a map of field names and data
+ */
+    private boolean includeDocument(    int doc){
+      for (int i=0; i < fieldVals.length; ++i) {
+        final NumericDoubleValues doubleValues=values[i];
+        final double value=doubleValues.get(doc);
+        if (value == Double.NEGATIVE_INFINITY) {
+          return false;
+        }
+        fieldVals[i]=value;
+      }
+      return true;
+    }
+  }
+;
+}

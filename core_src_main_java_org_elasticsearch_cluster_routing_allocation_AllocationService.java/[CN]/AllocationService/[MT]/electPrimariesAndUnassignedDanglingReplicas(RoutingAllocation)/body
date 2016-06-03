@@ -4,27 +4,30 @@
   if (routingNodes.unassigned().getNumPrimaries() == 0) {
     return changed;
   }
-  for (  ShardRouting shardEntry : routingNodes.unassigned()) {
+  final RoutingNodes.UnassignedShards.UnassignedIterator unassignedIterator=routingNodes.unassigned().iterator();
+  while (unassignedIterator.hasNext()) {
+    ShardRouting shardEntry=unassignedIterator.next();
     if (shardEntry.primary()) {
       changed|=failReplicasForUnassignedPrimary(allocation,shardEntry);
-      ShardRouting candidate=allocation.routingNodes().activeReplica(shardEntry);
+      ShardRouting candidate=allocation.routingNodes().activeReplica(shardEntry.shardId());
       if (candidate != null) {
-        routingNodes.swapPrimaryFlag(shardEntry,candidate);
-        if (candidate.relocatingNodeId() != null) {
+        shardEntry=unassignedIterator.demotePrimaryToReplicaShard();
+        ShardRouting primarySwappedCandidate=routingNodes.promoteAssignedReplicaShardToPrimary(candidate);
+        if (primarySwappedCandidate.relocatingNodeId() != null) {
           changed=true;
-          RoutingNode node=routingNodes.node(candidate.relocatingNodeId());
+          RoutingNode node=routingNodes.node(primarySwappedCandidate.relocatingNodeId());
           if (node != null) {
             for (            ShardRouting shardRouting : node) {
-              if (shardRouting.shardId().equals(candidate.shardId()) && !shardRouting.primary()) {
-                routingNodes.swapPrimaryFlag(shardRouting);
+              if (shardRouting.shardId().equals(primarySwappedCandidate.shardId()) && !shardRouting.primary()) {
+                routingNodes.promoteAssignedReplicaShardToPrimary(shardRouting);
                 break;
               }
             }
           }
         }
-        IndexMetaData index=allocation.metaData().getIndexSafe(candidate.index());
+        IndexMetaData index=allocation.metaData().getIndexSafe(primarySwappedCandidate.index());
         if (IndexMetaData.isIndexUsingShadowReplicas(index.getSettings())) {
-          routingNodes.reinitShadowPrimary(candidate);
+          routingNodes.reinitShadowPrimary(primarySwappedCandidate);
           changed=true;
         }
       }

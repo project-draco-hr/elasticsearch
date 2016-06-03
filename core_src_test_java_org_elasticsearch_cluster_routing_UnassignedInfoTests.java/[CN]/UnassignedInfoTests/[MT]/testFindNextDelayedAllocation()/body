@@ -1,7 +1,5 @@
 {
   MockAllocationService allocation=createAllocationService(Settings.EMPTY,new DelayedShardsMockGatewayAllocator());
-  final long baseTime=System.nanoTime();
-  allocation.setNanoTimeOverride(baseTime);
   final TimeValue delayTest1=TimeValue.timeValueMillis(randomIntBetween(1,200));
   final TimeValue delayTest2=TimeValue.timeValueMillis(randomIntBetween(1,200));
   final long expectMinDelaySettingsNanos=Math.min(delayTest1.nanos(),delayTest2.nanos());
@@ -13,15 +11,14 @@
   clusterState=ClusterState.builder(clusterState).routingResult(allocation.applyStartedShards(clusterState,clusterState.getRoutingNodes().shardsWithState(INITIALIZING))).build();
   clusterState=ClusterState.builder(clusterState).routingResult(allocation.applyStartedShards(clusterState,clusterState.getRoutingNodes().shardsWithState(INITIALIZING))).build();
   assertThat(clusterState.getRoutingNodes().unassigned().size() > 0,equalTo(false));
+  final long baseTime=System.nanoTime();
+  allocation.setNanoTimeOverride(baseTime);
   clusterState=ClusterState.builder(clusterState).nodes(DiscoveryNodes.builder(clusterState.nodes()).remove("node2")).build();
   clusterState=ClusterState.builder(clusterState).routingResult(allocation.reroute(clusterState,"reroute")).build();
-  final long delta=randomBoolean() ? 0 : randomInt((int)expectMinDelaySettingsNanos);
+  final long delta=randomBoolean() ? 0 : randomInt((int)expectMinDelaySettingsNanos - 1);
   if (delta > 0) {
     allocation.setNanoTimeOverride(baseTime + delta);
     clusterState=ClusterState.builder(clusterState).routingResult(allocation.reroute(clusterState,"time moved")).build();
   }
-  long minDelaySetting=UnassignedInfo.findSmallestDelayedAllocationSettingNanos(Settings.EMPTY,clusterState);
-  assertThat(minDelaySetting,equalTo(expectMinDelaySettingsNanos));
-  long nextDelay=UnassignedInfo.findNextDelayedAllocationIn(clusterState);
-  assertThat(nextDelay,equalTo(expectMinDelaySettingsNanos - delta));
+  assertThat(UnassignedInfo.findNextDelayedAllocation(baseTime + delta,clusterState),equalTo(expectMinDelaySettingsNanos - delta));
 }

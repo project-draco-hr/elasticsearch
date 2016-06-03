@@ -1,0 +1,34 @@
+{
+  final int docs=randomIntBetween(1,32);
+  Engine initialEngine=null;
+  try {
+    initialEngine=engine;
+    for (int i=0; i < docs; i++) {
+      final String id=Integer.toString(i);
+      final ParsedDocument doc=testParsedDocument(id,id,"test",null,-1,-1,testDocumentWithTextField(),new BytesArray("{}".getBytes(Charset.defaultCharset())),null);
+      initialEngine.index(new Engine.Index(newUid(id),doc));
+    }
+  }
+  finally {
+    IOUtils.close(initialEngine);
+  }
+  Engine recoveringEngine=null;
+  try {
+    final AtomicBoolean flushed=new AtomicBoolean();
+    recoveringEngine=new InternalEngine(copy(engine.config(),EngineConfig.OpenMode.OPEN_INDEX_AND_TRANSLOG)){
+      @Override public CommitId flush(      boolean force,      boolean waitIfOngoing) throws EngineException {
+        assertThat(getTranslog().totalOperations(),equalTo(docs));
+        final CommitId commitId=super.flush(force,waitIfOngoing);
+        flushed.set(true);
+        return commitId;
+      }
+    }
+;
+    assertThat(recoveringEngine.getTranslog().totalOperations(),equalTo(docs));
+    recoveringEngine.recoverFromTranslog();
+    assertTrue(flushed.get());
+  }
+  finally {
+    IOUtils.close(recoveringEngine);
+  }
+}
