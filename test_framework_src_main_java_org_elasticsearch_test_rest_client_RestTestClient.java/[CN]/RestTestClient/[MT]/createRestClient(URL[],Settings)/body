@@ -26,18 +26,21 @@
     sslsf=SSLConnectionSocketFactory.getSocketFactory();
   }
   Registry<ConnectionSocketFactory> socketFactoryRegistry=RegistryBuilder.<ConnectionSocketFactory>create().register("http",PlainConnectionSocketFactory.getSocketFactory()).register("https",sslsf).build();
-  List<Header> headers=new ArrayList<>();
-  try (ThreadContext threadContext=new ThreadContext(settings)){
-    for (    Map.Entry<String,String> entry : threadContext.getHeaders().entrySet()) {
-      headers.add(new BasicHeader(entry.getKey(),entry.getValue()));
-    }
-  }
-   CloseableHttpClient httpClient=HttpClientBuilder.create().setDefaultHeaders(headers).setConnectionManager(new PoolingHttpClientConnectionManager(socketFactoryRegistry)).build();
+  CloseableHttpClient httpClient=RestClient.Builder.createDefaultHttpClient(socketFactoryRegistry);
   String protocol=settings.get(PROTOCOL,"http");
   HttpHost[] hosts=new HttpHost[urls.length];
   for (int i=0; i < hosts.length; i++) {
     URL url=urls[i];
     hosts[i]=new HttpHost(url.getHost(),url.getPort(),protocol);
   }
-  return RestClient.builder().setHttpClient(httpClient).setHosts(hosts).build();
+  RestClient.Builder builder=RestClient.builder().setHttpClient(httpClient).setHosts(hosts);
+  try (ThreadContext threadContext=new ThreadContext(settings)){
+    Header[] defaultHeaders=new Header[threadContext.getHeaders().size()];
+    int i=0;
+    for (    Map.Entry<String,String> entry : threadContext.getHeaders().entrySet()) {
+      defaultHeaders[i++]=new BasicHeader(entry.getKey(),entry.getValue());
+    }
+    builder.setDefaultHeaders(defaultHeaders);
+  }
+   return builder.build();
 }
