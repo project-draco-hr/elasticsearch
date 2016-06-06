@@ -4,15 +4,13 @@
   final AliasOrIndex aliasOrIndex=metaData.getAliasAndIndexLookup().get(rolloverRequest.getSourceAlias());
   final IndexMetaData indexMetaData=aliasOrIndex.getIndices().get(0);
   final String sourceIndexName=indexMetaData.getIndex().getName();
-  client.admin().indices().prepareStats(sourceIndexName).clear().setDocs(true).setStore(true).execute(new ActionListener<IndicesStatsResponse>(){
+  client.admin().indices().prepareStats(sourceIndexName).clear().setDocs(true).execute(new ActionListener<IndicesStatsResponse>(){
     @Override public void onResponse(    IndicesStatsResponse indicesStatsResponse){
       final IndexMetaData sourceIndex=metaData.index(sourceIndexName);
       DocsStats docsStats=indicesStatsResponse.getTotal().getDocs();
       long docCount=docsStats == null ? 0 : docsStats.getCount();
-      StoreStats storeStats=indicesStatsResponse.getTotal().getStore();
-      long sizeInBytes=storeStats == null ? 0 : storeStats.getSizeInBytes();
-      long creationDate=sourceIndex.getCreationDate();
-      if (satisfiesConditions(rolloverRequest.getConditions(),docCount,sizeInBytes,creationDate)) {
+      long indexAge=System.currentTimeMillis() - sourceIndex.getCreationDate();
+      if (satisfiesConditions(rolloverRequest.getConditions(),docCount,indexAge)) {
         final String rolloverIndexName=generateRolloverIndexName(sourceIndexName);
         boolean createRolloverIndex=metaData.index(rolloverIndexName) == null;
         if (createRolloverIndex) {
