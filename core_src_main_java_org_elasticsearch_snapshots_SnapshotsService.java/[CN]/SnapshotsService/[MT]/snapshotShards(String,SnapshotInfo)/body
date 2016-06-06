@@ -1,0 +1,27 @@
+{
+  Map<ShardId,IndexShardSnapshotStatus> shardStatus=new HashMap<>();
+  Repository repository=repositoriesService.repository(repositoryName);
+  IndexShardRepository indexShardRepository=repositoriesService.indexShardRepository(repositoryName);
+  MetaData metaData=repository.readSnapshotMetaData(snapshotInfo,snapshotInfo.indices());
+  for (  String index : snapshotInfo.indices()) {
+    IndexMetaData indexMetaData=metaData.indices().get(index);
+    if (indexMetaData != null) {
+      int numberOfShards=indexMetaData.getNumberOfShards();
+      for (int i=0; i < numberOfShards; i++) {
+        ShardId shardId=new ShardId(indexMetaData.getIndex(),i);
+        SnapshotShardFailure shardFailure=findShardFailure(snapshotInfo.shardFailures(),shardId);
+        if (shardFailure != null) {
+          IndexShardSnapshotStatus shardSnapshotStatus=new IndexShardSnapshotStatus();
+          shardSnapshotStatus.updateStage(IndexShardSnapshotStatus.Stage.FAILURE);
+          shardSnapshotStatus.failure(shardFailure.reason());
+          shardStatus.put(shardId,shardSnapshotStatus);
+        }
+ else {
+          IndexShardSnapshotStatus shardSnapshotStatus=indexShardRepository.snapshotStatus(snapshotInfo.snapshotId(),snapshotInfo.version(),shardId);
+          shardStatus.put(shardId,shardSnapshotStatus);
+        }
+      }
+    }
+  }
+  return unmodifiableMap(shardStatus);
+}
