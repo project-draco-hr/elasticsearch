@@ -1,0 +1,49 @@
+{
+  boolean isCtorReference="new".equals(call);
+  java.lang.reflect.Method method=getFunctionalMethod(type,call,expected);
+  invokedName=method.getName();
+  invokedType=Type.getMethodType(Type.getType(expected));
+  interfaceType=Type.getMethodType(Type.getMethodDescriptor(method));
+  Definition.Struct struct=Definition.getType(type).struct;
+  final Definition.Method impl;
+  if (isCtorReference) {
+    impl=struct.constructors.get(new Definition.MethodKey("<init>",method.getParameterCount()));
+  }
+ else {
+    Definition.Method staticImpl=struct.staticMethods.get(new Definition.MethodKey(call,method.getParameterCount()));
+    if (staticImpl == null) {
+      impl=struct.methods.get(new Definition.MethodKey(call,method.getParameterCount() - 1));
+    }
+ else {
+      impl=staticImpl;
+    }
+  }
+  if (impl == null) {
+    throw new IllegalArgumentException("Unknown reference [" + type + "::"+ call+ "] matching "+ "["+ expected+ "]");
+  }
+  final int tag;
+  if (isCtorReference) {
+    tag=Opcodes.H_NEWINVOKESPECIAL;
+  }
+ else   if (Modifier.isStatic(impl.modifiers)) {
+    tag=Opcodes.H_INVOKESTATIC;
+  }
+ else {
+    tag=Opcodes.H_INVOKEVIRTUAL;
+  }
+  implMethod=new Handle(tag,struct.type.getInternalName(),impl.name,impl.method.getDescriptor());
+  implMethodHandle=impl.handle;
+  if (isCtorReference) {
+    samMethodType=Type.getMethodType(interfaceType.getReturnType(),impl.method.getArgumentTypes());
+  }
+ else   if (Modifier.isStatic(impl.modifiers)) {
+    samMethodType=Type.getMethodType(impl.method.getReturnType(),impl.method.getArgumentTypes());
+  }
+ else {
+    Type[] argTypes=impl.method.getArgumentTypes();
+    Type[] params=new Type[argTypes.length + 1];
+    System.arraycopy(argTypes,0,params,1,argTypes.length);
+    params[0]=struct.type;
+    samMethodType=Type.getMethodType(impl.method.getReturnType(),params);
+  }
+}
