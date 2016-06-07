@@ -1,0 +1,48 @@
+{
+  boolean isCtorReference="new".equals(call);
+  Method method=expected.struct.getFunctionalMethod();
+  if (method == null) {
+    throw new IllegalArgumentException("Cannot convert function reference [" + type + "::"+ call+ "] "+ "to ["+ expected.name+ "], not a functional interface");
+  }
+  invokedName=method.name;
+  invokedType=MethodType.methodType(expected.clazz);
+  interfaceMethodType=method.handle.type().dropParameterTypes(0,1);
+  Definition.Struct struct=Definition.getType(type).struct;
+  final Definition.Method impl;
+  if (isCtorReference) {
+    impl=struct.constructors.get(new Definition.MethodKey("<init>",method.arguments.size()));
+  }
+ else {
+    Definition.Method staticImpl=struct.staticMethods.get(new Definition.MethodKey(call,method.arguments.size()));
+    if (staticImpl == null) {
+      impl=struct.methods.get(new Definition.MethodKey(call,method.arguments.size() - 1));
+    }
+ else {
+      impl=staticImpl;
+    }
+  }
+  if (impl == null) {
+    throw new IllegalArgumentException("Unknown reference [" + type + "::"+ call+ "] matching "+ "["+ expected+ "]");
+  }
+  final int tag;
+  if (isCtorReference) {
+    tag=Opcodes.H_NEWINVOKESPECIAL;
+  }
+ else   if (Modifier.isStatic(impl.modifiers)) {
+    tag=Opcodes.H_INVOKESTATIC;
+  }
+ else {
+    tag=Opcodes.H_INVOKEVIRTUAL;
+  }
+  implMethodASM=new Handle(tag,struct.type.getInternalName(),impl.name,impl.method.getDescriptor());
+  implMethod=impl.handle;
+  if (isCtorReference) {
+    samMethodType=MethodType.methodType(interfaceMethodType.returnType(),impl.handle.type().parameterArray());
+  }
+ else   if (Modifier.isStatic(impl.modifiers)) {
+    samMethodType=impl.handle.type();
+  }
+ else {
+    samMethodType=impl.handle.type().changeParameterType(0,struct.clazz);
+  }
+}
