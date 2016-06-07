@@ -1,10 +1,9 @@
 {
   ThreadPool threadPool=null;
   try {
-    Settings nodeSettings=Settings.builder().put("threadpool.my_pool1.type","scaling").put("threadpool.my_pool1.min",1).put("threadpool.my_pool1.size",EsExecutors.boundedNumberOfProcessors(Settings.EMPTY)).put("threadpool.my_pool1.keep_alive","1m").put("threadpool.my_pool2.type","fixed").put("threadpool.my_pool2.size","1").put("threadpool.my_pool2.queue_size","1").put("node.name","testCustomThreadPool").build();
-    threadPool=new ThreadPool(nodeSettings);
-    ClusterSettings clusterSettings=new ClusterSettings(nodeSettings,ClusterSettings.BUILT_IN_CLUSTER_SETTINGS);
-    threadPool.setClusterSettings(clusterSettings);
+    final ScalingExecutorBuilder scaling=new ScalingExecutorBuilder("my_pool1",1,EsExecutors.boundedNumberOfProcessors(Settings.EMPTY),TimeValue.timeValueMinutes(1));
+    final FixedExecutorBuilder fixed=new FixedExecutorBuilder(Settings.EMPTY,"my_pool2",1,1);
+    threadPool=new ThreadPool(Settings.builder().put("node.name","testCustomThreadPool").build(),scaling,fixed);
     ThreadPoolInfo groups=threadPool.info();
     boolean foundPool1=false;
     boolean foundPool2=false;
@@ -19,34 +18,6 @@
         assertThat(info.getMin(),equalTo(1));
         assertThat(info.getMax(),equalTo(1));
         assertThat(info.getQueueSize().singles(),equalTo(1L));
-      }
- else {
-        for (        Field field : Names.class.getFields()) {
-          if (info.getName().equalsIgnoreCase(field.getName())) {
-            continue outer;
-          }
-        }
-        fail("Unexpected pool name: " + info.getName());
-      }
-    }
-    assertThat(foundPool1,is(true));
-    assertThat(foundPool2,is(true));
-    Settings settings=Settings.builder().put("threadpool.my_pool2.size","10").build();
-    clusterSettings.applySettings(settings);
-    groups=threadPool.info();
-    foundPool1=false;
-    foundPool2=false;
-    outer:     for (    ThreadPool.Info info : groups) {
-      if ("my_pool1".equals(info.getName())) {
-        foundPool1=true;
-        assertEquals(info.getThreadPoolType(),ThreadPool.ThreadPoolType.SCALING);
-      }
- else       if ("my_pool2".equals(info.getName())) {
-        foundPool2=true;
-        assertThat(info.getMax(),equalTo(10));
-        assertThat(info.getMin(),equalTo(10));
-        assertThat(info.getQueueSize().singles(),equalTo(1L));
-        assertEquals(info.getThreadPoolType(),ThreadPool.ThreadPoolType.FIXED);
       }
  else {
         for (        Field field : Names.class.getFields()) {
