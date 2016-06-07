@@ -1,0 +1,53 @@
+{
+  final int numDocs=randomIntBetween(100,200);
+  final Directory dir=newDirectory();
+  final RandomIndexWriter w=new RandomIndexWriter(random(),dir);
+  int max=randomIntBetween(2,10);
+  int[] sliceCounters1=new int[max];
+  int[] sliceCounters2=new int[max];
+  Set<String> keys=new HashSet<>();
+  for (int i=0; i < numDocs; ++i) {
+    Document doc=new Document();
+    String uuid=UUIDs.base64UUID();
+    int intValue=randomInt();
+    long doubleValue=NumericUtils.doubleToSortableLong(randomDouble());
+    doc.add(new StringField("uuid",uuid,Field.Store.YES));
+    doc.add(new SortedNumericDocValuesField("intField",intValue));
+    doc.add(new SortedNumericDocValuesField("doubleField",doubleValue));
+    w.addDocument(doc);
+    sliceCounters1[Math.floorMod(Long.hashCode(intValue),max)]++;
+    sliceCounters2[Math.floorMod(Long.hashCode(doubleValue),max)]++;
+    keys.add(uuid);
+  }
+  final IndexReader reader=w.getReader();
+  final IndexSearcher searcher=newSearcher(reader);
+  for (int id=0; id < max; id++) {
+    DocValuesSliceQuery query1=new DocValuesSliceQuery("intField",id,max);
+    assertThat(searcher.count(query1),equalTo(sliceCounters1[id]));
+    DocValuesSliceQuery query2=new DocValuesSliceQuery("doubleField",id,max);
+    assertThat(searcher.count(query2),equalTo(sliceCounters2[id]));
+    searcher.search(query1,new Collector(){
+      @Override public LeafCollector getLeafCollector(      LeafReaderContext context) throws IOException {
+        return new LeafCollector(){
+          @Override public void setScorer(          Scorer scorer) throws IOException {
+          }
+          @Override public void collect(          int doc) throws IOException {
+            Document d=context.reader().document(doc,Collections.singleton("uuid"));
+            String uuid=d.get("uuid");
+            assertThat(keys.contains(uuid),equalTo(true));
+            keys.remove(uuid);
+          }
+        }
+;
+      }
+      @Override public boolean needsScores(){
+        return false;
+      }
+    }
+);
+  }
+  assertThat(keys.size(),equalTo(0));
+  w.close();
+  reader.close();
+  dir.close();
+}

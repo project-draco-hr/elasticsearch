@@ -1,0 +1,29 @@
+{
+  int totalResults=0;
+  List<String> keys=new ArrayList<>();
+  for (int id=0; id < numSlice; id++) {
+    SliceBuilder sliceBuilder=new SliceBuilder(field,id,numSlice);
+    SearchResponse searchResponse=request.slice(sliceBuilder).get();
+    totalResults+=searchResponse.getHits().getHits().length;
+    int expectedSliceResults=(int)searchResponse.getHits().getTotalHits();
+    int numSliceResults=searchResponse.getHits().getHits().length;
+    String scrollId=searchResponse.getScrollId();
+    for (    SearchHit hit : searchResponse.getHits().getHits()) {
+      keys.add(hit.getId());
+    }
+    while (searchResponse.getHits().getHits().length > 0) {
+      searchResponse=client().prepareSearchScroll("test").setScrollId(scrollId).setScroll(new Scroll(TimeValue.timeValueSeconds(10))).get();
+      scrollId=searchResponse.getScrollId();
+      totalResults+=searchResponse.getHits().getHits().length;
+      numSliceResults+=searchResponse.getHits().getHits().length;
+      for (      SearchHit hit : searchResponse.getHits().getHits()) {
+        keys.add(hit.getId());
+      }
+    }
+    assertThat(numSliceResults,equalTo(expectedSliceResults));
+    clearScroll(scrollId);
+  }
+  assertThat(totalResults,equalTo(NUM_DOCS));
+  assertThat(keys.size(),equalTo(NUM_DOCS));
+  assertThat(new HashSet(keys).size(),equalTo(NUM_DOCS));
+}
