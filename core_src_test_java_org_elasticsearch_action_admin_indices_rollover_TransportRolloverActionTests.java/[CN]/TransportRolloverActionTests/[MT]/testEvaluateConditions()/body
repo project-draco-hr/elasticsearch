@@ -1,0 +1,40 @@
+{
+  MaxDocsCondition maxDocsCondition=new MaxDocsCondition(100L);
+  MaxAgeCondition maxAgeCondition=new MaxAgeCondition(TimeValue.timeValueHours(2));
+  long matchMaxDocs=randomIntBetween(100,1000);
+  long notMatchMaxDocs=randomIntBetween(0,99);
+  final Settings settings=Settings.builder().put(IndexMetaData.SETTING_VERSION_CREATED,Version.CURRENT).put(IndexMetaData.SETTING_INDEX_UUID,UUIDs.randomBase64UUID()).put(IndexMetaData.SETTING_NUMBER_OF_SHARDS,1).put(IndexMetaData.SETTING_NUMBER_OF_REPLICAS,0).build();
+  final IndexMetaData metaData=IndexMetaData.builder(randomAsciiOfLength(10)).creationDate(System.currentTimeMillis() - TimeValue.timeValueHours(3).getMillis()).settings(settings).build();
+  final HashSet<Condition> conditions=Sets.newHashSet(maxDocsCondition,maxAgeCondition);
+  Set<Condition.Result> results=evaluateConditions(conditions,new DocsStats(matchMaxDocs,0L),metaData);
+  assertThat(results.size(),equalTo(2));
+  for (  Condition.Result result : results) {
+    assertThat(result.matched,equalTo(true));
+  }
+  results=evaluateConditions(conditions,new DocsStats(notMatchMaxDocs,0),metaData);
+  assertThat(results.size(),equalTo(2));
+  for (  Condition.Result result : results) {
+    if (result.condition instanceof MaxAgeCondition) {
+      assertThat(result.matched,equalTo(true));
+    }
+ else     if (result.condition instanceof MaxDocsCondition) {
+      assertThat(result.matched,equalTo(false));
+    }
+ else {
+      fail("unknown condition result found " + result.condition);
+    }
+  }
+  results=evaluateConditions(conditions,null,metaData);
+  assertThat(results.size(),equalTo(2));
+  for (  Condition.Result result : results) {
+    if (result.condition instanceof MaxAgeCondition) {
+      assertThat(result.matched,equalTo(true));
+    }
+ else     if (result.condition instanceof MaxDocsCondition) {
+      assertThat(result.matched,equalTo(false));
+    }
+ else {
+      fail("unknown condition result found " + result.condition);
+    }
+  }
+}
