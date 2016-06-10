@@ -1,0 +1,48 @@
+{
+  if (recipe == 0) {
+    return lookupMethodInternal(receiverClass,name,args.length - 1).handle;
+  }
+  int arity=args.length - 1;
+  for (int i=0; i < args.length; i++) {
+    if ((recipe & (1L << (i - 1))) != 0) {
+      String signature=(String)args[i];
+      int numCaptures=Integer.parseInt(signature.substring(signature.indexOf(',') + 1));
+      arity-=numCaptures;
+    }
+  }
+  Method method=lookupMethodInternal(receiverClass,name,arity);
+  MethodHandle handle=method.handle;
+  int replaced=0;
+  for (int i=1; i < args.length; i++) {
+    if ((recipe & (1L << (i - 1))) != 0) {
+      String signature=(String)args[i];
+      int separator=signature.indexOf('.');
+      int separator2=signature.indexOf(',');
+      String type=signature.substring(1,separator);
+      String call=signature.substring(separator + 1,separator2);
+      int numCaptures=Integer.parseInt(signature.substring(separator2 + 1));
+      Class<?> captures[]=new Class<?>[numCaptures];
+      for (int capture=0; capture < captures.length; capture++) {
+        captures[capture]=callSiteType.parameterType(i + 1 + capture);
+      }
+      MethodHandle filter;
+      Definition.Type interfaceType=method.arguments.get(i - 1 - replaced);
+      if (signature.charAt(0) == 'S') {
+        filter=lookupReferenceInternal(lookup,interfaceType,type,call,captures);
+      }
+ else       if (signature.charAt(0) == 'D') {
+        MethodType nestedType=MethodType.methodType(interfaceType.clazz,captures);
+        CallSite nested=DefBootstrap.bootstrap(lookup,call,nestedType,DefBootstrap.REFERENCE,interfaceType.name);
+        filter=nested.dynamicInvoker();
+      }
+ else {
+        throw new AssertionError();
+      }
+      filter=MethodHandles.dropArguments(filter,0,String.class);
+      handle=MethodHandles.collectArguments(handle,i,filter);
+      i+=numCaptures;
+      replaced+=numCaptures;
+    }
+  }
+  return handle;
+}
