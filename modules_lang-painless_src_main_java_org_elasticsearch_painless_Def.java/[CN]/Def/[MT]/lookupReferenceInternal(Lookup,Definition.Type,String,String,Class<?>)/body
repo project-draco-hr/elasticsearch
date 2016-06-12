@@ -1,5 +1,24 @@
 {
-  FunctionRef ref=new FunctionRef(clazz,type,call,captures);
+  final FunctionRef ref;
+  if ("this".equals(type)) {
+    Method interfaceMethod=clazz.struct.getFunctionalMethod();
+    if (interfaceMethod == null) {
+      throw new IllegalArgumentException("Cannot convert function reference [" + type + "::"+ call+ "] "+ "to ["+ clazz.name+ "], not a functional interface");
+    }
+    int arity=interfaceMethod.arguments.size() + captures.length;
+    final MethodHandle handle;
+    try {
+      MethodHandle accessor=lookup.findStaticGetter(lookup.lookupClass(),getUserFunctionHandleFieldName(call,arity),MethodHandle.class);
+      handle=(MethodHandle)accessor.invokeExact();
+    }
+ catch (    NoSuchFieldException|IllegalAccessException e) {
+      throw new IllegalArgumentException("Unknown call [" + call + "] with ["+ arity+ "] arguments.");
+    }
+    ref=new FunctionRef(clazz,interfaceMethod,handle,captures);
+  }
+ else {
+    ref=new FunctionRef(clazz,type,call,captures);
+  }
   final CallSite callSite;
   if (ref.needsBridges()) {
     callSite=LambdaMetafactory.altMetafactory(lookup,ref.invokedName,ref.invokedType,ref.samMethodType,ref.implMethod,ref.samMethodType,LambdaMetafactory.FLAG_BRIDGES,1,ref.interfaceMethodType);
