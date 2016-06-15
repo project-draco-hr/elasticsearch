@@ -1,49 +1,18 @@
 {
-  final int numNodes=randomIntBetween(2,5);
-  logger.info("--> starting {} nodes",numNodes);
-  final Settings nodeSettings=Settings.builder().put(ThrottlingAllocationDecider.CLUSTER_ROUTING_ALLOCATION_NODE_INITIAL_PRIMARIES_RECOVERIES_SETTING.getKey(),numNodes).build();
-  internalCluster().ensureAtLeastNumDataNodes(numNodes,nodeSettings);
-  ClusterHealthResponse healthResponse=client().admin().cluster().prepareHealth().setWaitForGreenStatus().setTimeout("10s").execute().actionGet();
-  assertThat(healthResponse.isTimedOut(),equalTo(false));
-  assertThat(healthResponse.getStatus(),equalTo(ClusterHealthStatus.GREEN));
-  final String masterNode=internalCluster().getMasterName();
-  final String indexName="test-idx";
-  final ClusterService clusterService=internalCluster().clusterService(masterNode);
-  final ClusterStateObserver observer=new ClusterStateObserver(clusterService,logger,threadPool.getThreadContext());
-  final ClusterStateObserver.ChangePredicate validationPredicate=new ClusterStateObserver.ValidationPredicate(){
-    @Override protected boolean validate(    ClusterState newState){
-      return newState.status() == ClusterState.ClusterStateStatus.APPLIED && newState.metaData().hasIndex(indexName);
-    }
-  }
-;
-  final ClusterStateObserver.Listener stateListener=new ClusterStateObserver.Listener(){
-    @Override public void onNewClusterState(    ClusterState clusterState){
-      final ClusterStateResponse csResponse=client().admin().cluster().prepareState().execute().actionGet();
-      boolean inactivePrimaries=false;
-      for (      ShardRouting shardRouting : csResponse.getState().routingTable().allShards(indexName)) {
-        if (shardRouting.primary() == false) {
-          continue;
-        }
-        if (shardRouting.active() == false) {
-          inactivePrimaries=true;
-          break;
-        }
+  final AtomicBoolean finished=new AtomicBoolean(false);
+  Thread clusterHealthThread=new Thread(){
+    @Override public void run(){
+      while (finished.get() == false) {
+        ClusterHealthResponse health=client().admin().cluster().prepareHealth().get();
+        assertThat(health.getStatus(),not(equalTo(ClusterHealthStatus.RED)));
       }
-      assertTrue(inactivePrimaries);
-      final ClusterHealthResponse response=client().admin().cluster().prepareHealth(indexName).get();
-      assertThat(response.getStatus(),equalTo(ClusterHealthStatus.YELLOW));
-    }
-    @Override public void onClusterServiceClose(){
-      fail("cluster service should not have closed");
-    }
-    @Override public void onTimeout(    TimeValue timeout){
-      fail("timeout on cluster state observer");
     }
   }
 ;
-  observer.waitForNextChange(stateListener,validationPredicate,TimeValue.timeValueSeconds(30L));
-  final Settings settings=Settings.builder().put(IndexMetaData.SETTING_NUMBER_OF_SHARDS,numNodes).put(IndexMetaData.SETTING_NUMBER_OF_REPLICAS,numNodes - 1).build();
-  CreateIndexResponse response=client().admin().indices().prepareCreate(indexName).setSettings(settings).execute().actionGet();
-  assertTrue(response.isAcknowledged());
-  ensureGreen(indexName);
+  clusterHealthThread.start();
+  for (int i=0; i < 10; i++) {
+    createIndex("test" + i);
+  }
+  finished.set(true);
+  clusterHealthThread.join();
 }
