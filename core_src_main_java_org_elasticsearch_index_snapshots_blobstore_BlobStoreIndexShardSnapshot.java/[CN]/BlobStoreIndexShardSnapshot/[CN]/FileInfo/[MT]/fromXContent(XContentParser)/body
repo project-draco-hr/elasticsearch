@@ -6,6 +6,7 @@
   String checksum=null;
   ByteSizeValue partSize=null;
   Version writtenBy=null;
+  String writtenByStr=null;
   BytesRef metaHash=new BytesRef();
   if (token == XContentParser.Token.START_OBJECT) {
     while ((token=parser.nextToken()) != XContentParser.Token.END_OBJECT) {
@@ -13,25 +14,26 @@
         String currentFieldName=parser.currentName();
         token=parser.nextToken();
         if (token.isValue()) {
-          if ("name".equals(currentFieldName)) {
+          if (NAME.equals(currentFieldName)) {
             name=parser.text();
           }
- else           if ("physical_name".equals(currentFieldName)) {
+ else           if (PHYSICAL_NAME.equals(currentFieldName)) {
             physicalName=parser.text();
           }
- else           if ("length".equals(currentFieldName)) {
+ else           if (LENGTH.equals(currentFieldName)) {
             length=parser.longValue();
           }
- else           if ("checksum".equals(currentFieldName)) {
+ else           if (CHECKSUM.equals(currentFieldName)) {
             checksum=parser.text();
           }
- else           if ("part_size".equals(currentFieldName)) {
+ else           if (PART_SIZE.equals(currentFieldName)) {
             partSize=new ByteSizeValue(parser.longValue());
           }
- else           if ("written_by".equals(currentFieldName)) {
-            writtenBy=Lucene.parseVersionLenient(parser.text(),null);
+ else           if (WRITTEN_BY.equals(currentFieldName)) {
+            writtenByStr=parser.text();
+            writtenBy=Lucene.parseVersionLenient(writtenByStr,null);
           }
- else           if ("meta_hash".equals(currentFieldName)) {
+ else           if (META_HASH.equals(currentFieldName)) {
             metaHash.bytes=parser.binaryValue();
             metaHash.offset=0;
             metaHash.length=metaHash.bytes.length;
@@ -57,6 +59,17 @@
   }
  else   if (length < 0) {
     throw new ElasticsearchParseException("missing or invalid file length");
+  }
+ else   if (writtenBy == null) {
+    throw new ElasticsearchParseException("missing or invalid written_by [" + writtenByStr + "]");
+  }
+ else   if (checksum == null) {
+    if (physicalName.startsWith("segments_") && writtenBy.onOrAfter(StoreFileMetaData.FIRST_LUCENE_CHECKSUM_VERSION) == false) {
+      checksum=UNKNOWN_CHECKSUM;
+    }
+ else {
+      throw new ElasticsearchParseException("missing checksum for name [" + name + "]");
+    }
   }
   return new FileInfo(name,new StoreFileMetaData(physicalName,length,checksum,writtenBy,metaHash),partSize);
 }

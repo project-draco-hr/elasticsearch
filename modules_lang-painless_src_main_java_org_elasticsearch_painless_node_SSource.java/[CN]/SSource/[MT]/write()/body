@@ -1,0 +1,38 @@
+{
+  int classFrames=ClassWriter.COMPUTE_FRAMES | ClassWriter.COMPUTE_MAXS;
+  int classVersion=Opcodes.V1_8;
+  int classAccess=Opcodes.ACC_PUBLIC | Opcodes.ACC_SUPER | Opcodes.ACC_FINAL;
+  String classBase=BASE_CLASS_TYPE.getInternalName();
+  String className=CLASS_TYPE.getInternalName();
+  String classInterfaces[]=reserved.usesScore() ? new String[]{WriterConstants.NEEDS_SCORE_TYPE.getInternalName()} : null;
+  ClassWriter writer=new ClassWriter(classFrames);
+  writer.visit(classVersion,classAccess,className,null,classBase,classInterfaces);
+  writer.visitSource(Location.computeSourceName(name,source),null);
+  expressions=new BitSet(source.length());
+  MethodWriter constructor=new MethodWriter(Opcodes.ACC_PUBLIC,CONSTRUCTOR,writer,expressions);
+  constructor.loadThis();
+  constructor.loadArgs();
+  constructor.invokeConstructor(org.objectweb.asm.Type.getType(Executable.class),CONSTRUCTOR);
+  constructor.returnValue();
+  constructor.endMethod();
+  MethodWriter execute=new MethodWriter(Opcodes.ACC_PUBLIC,EXECUTE,writer,expressions);
+  write(execute);
+  execute.endMethod();
+  for (  SFunction function : functions) {
+    function.write(writer,expressions);
+  }
+  if (false == locals.getConstants().isEmpty()) {
+    for (    Constant constant : locals.getConstants()) {
+      writer.visitField(Opcodes.ACC_FINAL | Opcodes.ACC_PRIVATE | Opcodes.ACC_STATIC,constant.name,constant.type.getDescriptor(),null,null).visitEnd();
+    }
+    final MethodWriter clinit=new MethodWriter(Opcodes.ACC_STATIC,WriterConstants.CLINIT,writer,expressions);
+    for (    Constant constant : locals.getConstants()) {
+      constant.initializer.accept(clinit);
+      clinit.putStatic(CLASS_TYPE,constant.name,constant.type);
+    }
+    clinit.returnValue();
+    clinit.endMethod();
+  }
+  writer.visitEnd();
+  bytes=writer.toByteArray();
+}
