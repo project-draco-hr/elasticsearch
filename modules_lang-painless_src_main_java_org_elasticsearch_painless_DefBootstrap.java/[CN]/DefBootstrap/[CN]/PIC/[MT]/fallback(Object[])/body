@@ -1,13 +1,30 @@
 {
-  if (depth >= MAX_DEPTH) {
-    return lookup(flavor,name,args).invokeWithArguments(args);
-  }
+  final Class<?> receiver=callArgs[0].getClass();
   final MethodType type=type();
-  final MethodHandle target=lookup(flavor,name,args).asType(type);
-  MethodHandle test=CHECK_CLASS.bindTo(args[0].getClass());
+  if (depth >= MAX_DEPTH) {
+    final ClassValue<MethodHandle> megamorphicCache=new ClassValue<MethodHandle>(){
+      @Override protected MethodHandle computeValue(      Class<?> receiverType){
+        try {
+          return lookup(flavor,name,receiverType,callArgs).asType(type);
+        }
+ catch (        Throwable e) {
+          throw new RuntimeException(e);
+        }
+      }
+    }
+;
+    MethodHandle cacheLookup=MEGAMORPHIC_LOOKUP.bindTo(megamorphicCache);
+    cacheLookup=MethodHandles.dropArguments(cacheLookup,0,type.parameterList().subList(1,type.parameterCount()));
+    cacheLookup=cacheLookup.asType(type.changeReturnType(MethodHandle.class));
+    MethodHandle target=MethodHandles.foldArguments(MethodHandles.exactInvoker(type),cacheLookup);
+    setTarget(target);
+    return target.invokeWithArguments(callArgs);
+  }
+  final MethodHandle target=lookup(flavor,name,receiver,callArgs).asType(type);
+  MethodHandle test=CHECK_CLASS.bindTo(receiver);
   test=test.asType(test.type().changeParameterType(0,type.parameterType(0)));
   MethodHandle guard=MethodHandles.guardWithTest(test,target,getTarget());
   depth++;
   setTarget(guard);
-  return target.invokeWithArguments(args);
+  return target.invokeWithArguments(callArgs);
 }
