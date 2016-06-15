@@ -29,8 +29,7 @@
         }
  else {
           logger.trace("cleaning existing shard, shouldn't exists");
-          IndexWriter writer=new IndexWriter(store.directory(),new IndexWriterConfig(Lucene.STANDARD_ANALYZER).setOpenMode(IndexWriterConfig.OpenMode.CREATE));
-          writer.close();
+          Lucene.cleanLuceneIndex(store.directory());
         }
       }
     }
@@ -40,18 +39,20 @@
     recoveryState.getIndex().updateVersion(version);
     try {
       final RecoveryState.Index index=recoveryState.getIndex();
-      if (si != null) {
-        final Directory directory=store.directory();
-        for (        String name : Lucene.files(si)) {
-          long length=directory.fileLength(name);
-          index.addFileDetail(name,length,true);
-        }
+      if (si != null && recoveryState.getType() == RecoveryState.Type.STORE) {
+        addRecoveredFileDetails(si,store,index);
       }
     }
  catch (    IOException e) {
       logger.debug("failed to list file details",e);
     }
-    indexShard.performTranslogRecovery(indexShouldExists);
+    if (recoveryState.getType() == RecoveryState.Type.LOCAL_SHARDS) {
+      assert indexShouldExists;
+      indexShard.skipTranslogRecovery();
+    }
+ else {
+      indexShard.performTranslogRecovery(indexShouldExists);
+    }
     indexShard.finalizeRecovery();
     indexShard.postRecovery("post recovery from shard_store");
   }

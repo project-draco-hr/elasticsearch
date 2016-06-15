@@ -5,7 +5,16 @@
   shardSizes.put("[test][2][r]",1000L);
   shardSizes.put("[other][0][p]",10000L);
   ClusterInfo info=new DevNullClusterInfo(ImmutableOpenMap.of(),ImmutableOpenMap.of(),shardSizes.build());
-  final Index index=new Index("test","_na_");
+  MetaData.Builder metaBuilder=MetaData.builder();
+  metaBuilder.put(IndexMetaData.builder("test").settings(settings(Version.CURRENT).put("index.uuid","1234")).numberOfShards(3).numberOfReplicas(1));
+  metaBuilder.put(IndexMetaData.builder("other").settings(settings(Version.CURRENT).put("index.uuid","5678")).numberOfShards(1).numberOfReplicas(1));
+  MetaData metaData=metaBuilder.build();
+  RoutingTable.Builder routingTableBuilder=RoutingTable.builder();
+  routingTableBuilder.addAsNew(metaData.index("test"));
+  routingTableBuilder.addAsNew(metaData.index("other"));
+  ClusterState clusterState=ClusterState.builder(org.elasticsearch.cluster.ClusterName.DEFAULT).metaData(metaData).routingTable(routingTableBuilder.build()).build();
+  RoutingAllocation allocation=new RoutingAllocation(null,null,clusterState,info,0,false);
+  final Index index=new Index("test","1234");
   ShardRouting test_0=ShardRouting.newUnassigned(new ShardId(index,0),null,false,new UnassignedInfo(UnassignedInfo.Reason.INDEX_CREATED,"foo"));
   test_0=ShardRoutingHelper.initialize(test_0,"node1");
   test_0=ShardRoutingHelper.moveToStarted(test_0);
@@ -17,29 +26,29 @@
   ShardRouting test_2=ShardRouting.newUnassigned(new ShardId(index,2),null,false,new UnassignedInfo(UnassignedInfo.Reason.INDEX_CREATED,"foo"));
   test_2=ShardRoutingHelper.initialize(test_2,"node1");
   test_2=ShardRoutingHelper.moveToStarted(test_2);
-  assertEquals(1000L,DiskThresholdDecider.getShardSize(test_2,info));
-  assertEquals(100L,DiskThresholdDecider.getShardSize(test_1,info));
-  assertEquals(10L,DiskThresholdDecider.getShardSize(test_0,info));
+  assertEquals(1000L,DiskThresholdDecider.getExpectedShardSize(test_2,allocation,0));
+  assertEquals(100L,DiskThresholdDecider.getExpectedShardSize(test_1,allocation,0));
+  assertEquals(10L,DiskThresholdDecider.getExpectedShardSize(test_0,allocation,0));
   RoutingNode node=new RoutingNode("node1",new DiscoveryNode("node1",new LocalTransportAddress("test"),emptyMap(),emptySet(),Version.CURRENT),test_0,test_1.buildTargetRelocatingShard(),test_2);
-  assertEquals(100L,DiskThresholdDecider.sizeOfRelocatingShards(node,info,false,"/dev/null"));
-  assertEquals(90L,DiskThresholdDecider.sizeOfRelocatingShards(node,info,true,"/dev/null"));
-  assertEquals(0L,DiskThresholdDecider.sizeOfRelocatingShards(node,info,true,"/dev/some/other/dev"));
-  assertEquals(0L,DiskThresholdDecider.sizeOfRelocatingShards(node,info,true,"/dev/some/other/dev"));
+  assertEquals(100L,DiskThresholdDecider.sizeOfRelocatingShards(node,allocation,false,"/dev/null"));
+  assertEquals(90L,DiskThresholdDecider.sizeOfRelocatingShards(node,allocation,true,"/dev/null"));
+  assertEquals(0L,DiskThresholdDecider.sizeOfRelocatingShards(node,allocation,true,"/dev/some/other/dev"));
+  assertEquals(0L,DiskThresholdDecider.sizeOfRelocatingShards(node,allocation,true,"/dev/some/other/dev"));
   ShardRouting test_3=ShardRouting.newUnassigned(new ShardId(index,3),null,false,new UnassignedInfo(UnassignedInfo.Reason.INDEX_CREATED,"foo"));
   test_3=ShardRoutingHelper.initialize(test_3,"node1");
   test_3=ShardRoutingHelper.moveToStarted(test_3);
-  assertEquals(0L,DiskThresholdDecider.getShardSize(test_3,info));
-  ShardRouting other_0=ShardRouting.newUnassigned(new ShardId("other","_NA_",0),null,randomBoolean(),new UnassignedInfo(UnassignedInfo.Reason.INDEX_CREATED,"foo"));
+  assertEquals(0L,DiskThresholdDecider.getExpectedShardSize(test_3,allocation,0));
+  ShardRouting other_0=ShardRouting.newUnassigned(new ShardId("other","5678",0),null,randomBoolean(),new UnassignedInfo(UnassignedInfo.Reason.INDEX_CREATED,"foo"));
   other_0=ShardRoutingHelper.initialize(other_0,"node2");
   other_0=ShardRoutingHelper.moveToStarted(other_0);
   other_0=ShardRoutingHelper.relocate(other_0,"node1");
   node=new RoutingNode("node1",new DiscoveryNode("node1",new LocalTransportAddress("test"),emptyMap(),emptySet(),Version.CURRENT),test_0,test_1.buildTargetRelocatingShard(),test_2,other_0.buildTargetRelocatingShard());
   if (other_0.primary()) {
-    assertEquals(10100L,DiskThresholdDecider.sizeOfRelocatingShards(node,info,false,"/dev/null"));
-    assertEquals(10090L,DiskThresholdDecider.sizeOfRelocatingShards(node,info,true,"/dev/null"));
+    assertEquals(10100L,DiskThresholdDecider.sizeOfRelocatingShards(node,allocation,false,"/dev/null"));
+    assertEquals(10090L,DiskThresholdDecider.sizeOfRelocatingShards(node,allocation,true,"/dev/null"));
   }
  else {
-    assertEquals(100L,DiskThresholdDecider.sizeOfRelocatingShards(node,info,false,"/dev/null"));
-    assertEquals(90L,DiskThresholdDecider.sizeOfRelocatingShards(node,info,true,"/dev/null"));
+    assertEquals(100L,DiskThresholdDecider.sizeOfRelocatingShards(node,allocation,false,"/dev/null"));
+    assertEquals(90L,DiskThresholdDecider.sizeOfRelocatingShards(node,allocation,true,"/dev/null"));
   }
 }

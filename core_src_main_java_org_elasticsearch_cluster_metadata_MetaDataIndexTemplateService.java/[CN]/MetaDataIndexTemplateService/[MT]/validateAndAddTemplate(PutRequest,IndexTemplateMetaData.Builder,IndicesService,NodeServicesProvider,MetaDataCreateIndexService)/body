@@ -1,0 +1,29 @@
+{
+  Index createdIndex=null;
+  final String temporaryIndexName=UUIDs.randomBase64UUID();
+  try {
+    Settings dummySettings=Settings.builder().put(IndexMetaData.SETTING_VERSION_CREATED,Version.CURRENT).put(request.settings).put(IndexMetaData.SETTING_NUMBER_OF_SHARDS,1).put(IndexMetaData.SETTING_NUMBER_OF_REPLICAS,0).put(IndexMetaData.SETTING_INDEX_UUID,UUIDs.randomBase64UUID()).build();
+    final IndexMetaData tmpIndexMetadata=IndexMetaData.builder(temporaryIndexName).settings(dummySettings).build();
+    IndexService dummyIndexService=indicesService.createIndex(nodeServicesProvider,tmpIndexMetadata,Collections.emptyList());
+    createdIndex=dummyIndexService.index();
+    templateBuilder.order(request.order);
+    templateBuilder.template(request.template);
+    templateBuilder.settings(request.settings);
+    Map<String,Map<String,Object>> mappingsForValidation=new HashMap<>();
+    for (    Map.Entry<String,String> entry : request.mappings.entrySet()) {
+      try {
+        templateBuilder.putMapping(entry.getKey(),entry.getValue());
+      }
+ catch (      Exception e) {
+        throw new MapperParsingException("Failed to parse mapping [{}]: {}",e,entry.getKey(),e.getMessage());
+      }
+      mappingsForValidation.put(entry.getKey(),MapperService.parseMapping(entry.getValue()));
+    }
+    dummyIndexService.mapperService().merge(mappingsForValidation,false);
+  }
+  finally {
+    if (createdIndex != null) {
+      indicesService.removeIndex(createdIndex," created for parsing template mapping");
+    }
+  }
+}

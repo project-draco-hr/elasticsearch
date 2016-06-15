@@ -1,15 +1,42 @@
 {
-  final MethodType type=type();
-  final Object receiver=args[0];
-  final Class<?> receiverClass=receiver.getClass();
-  final MethodHandle target=lookup(flavor,receiverClass,name,type).asType(type);
   if (depth >= MAX_DEPTH) {
-    setTarget(target);
-    return target.invokeWithArguments(args);
+    MethodHandle generic=getGeneric(flavor,name);
+    if (generic != null) {
+      setTarget(generic.asType(type()));
+      return generic.invokeWithArguments(args);
+    }
+ else {
+      return lookup(flavor,name,args).invokeWithArguments(args);
+    }
   }
-  MethodHandle test=CHECK_CLASS.bindTo(receiverClass);
-  test=test.asType(test.type().changeParameterType(0,type.parameterType(0)));
-  final MethodHandle guard=MethodHandles.guardWithTest(test,target,getTarget());
+  final MethodType type=type();
+  final MethodHandle target=lookup(flavor,name,args).asType(type);
+  final MethodHandle test;
+  if (flavor == BINARY_OPERATOR || flavor == SHIFT_OPERATOR) {
+    Class<?> clazz0=args[0] == null ? null : args[0].getClass();
+    Class<?> clazz1=args[1] == null ? null : args[1].getClass();
+    if (type.parameterType(1) != Object.class) {
+      MethodHandle unaryTest=CHECK_CLASS.bindTo(clazz0);
+      test=unaryTest.asType(unaryTest.type().changeParameterType(0,type.parameterType(0)));
+    }
+ else     if (type.parameterType(0) != Object.class) {
+      MethodHandle unaryTest=CHECK_BINARY_ARG.bindTo(clazz0).bindTo(clazz1);
+      test=unaryTest.asType(unaryTest.type().changeParameterType(0,type.parameterType(0)).changeParameterType(1,type.parameterType(1)));
+    }
+ else {
+      MethodHandle binaryTest=CHECK_BINARY.bindTo(clazz0).bindTo(clazz1);
+      test=binaryTest.asType(binaryTest.type().changeParameterType(0,type.parameterType(0)).changeParameterType(1,type.parameterType(1)));
+    }
+  }
+ else {
+    MethodHandle receiverTest=CHECK_CLASS.bindTo(args[0].getClass());
+    test=receiverTest.asType(receiverTest.type().changeParameterType(0,type.parameterType(0)));
+  }
+  MethodHandle guard=MethodHandles.guardWithTest(test,target,getTarget());
+  if (flavor == BINARY_OPERATOR && "add".equals(name) || "eq".equals(name)) {
+    MethodHandle handler=MethodHandles.dropArguments(getGeneric(flavor,name).asType(type()),0,NullPointerException.class);
+    guard=MethodHandles.catchException(guard,NullPointerException.class,handler);
+  }
   depth++;
   setTarget(guard);
   return target.invokeWithArguments(args);
