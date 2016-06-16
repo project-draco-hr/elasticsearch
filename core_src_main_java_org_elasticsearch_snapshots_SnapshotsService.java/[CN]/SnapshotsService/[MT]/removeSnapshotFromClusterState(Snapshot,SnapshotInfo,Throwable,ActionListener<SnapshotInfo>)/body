@@ -1,0 +1,49 @@
+{
+  clusterService.submitStateUpdateTask("remove snapshot metadata",new ClusterStateUpdateTask(){
+    @Override public ClusterState execute(    ClusterState currentState){
+      SnapshotsInProgress snapshots=currentState.custom(SnapshotsInProgress.TYPE);
+      if (snapshots != null) {
+        boolean changed=false;
+        ArrayList<SnapshotsInProgress.Entry> entries=new ArrayList<>();
+        for (        SnapshotsInProgress.Entry entry : snapshots.entries()) {
+          if (entry.snapshot().equals(snapshot)) {
+            changed=true;
+          }
+ else {
+            entries.add(entry);
+          }
+        }
+        if (changed) {
+          snapshots=new SnapshotsInProgress(entries.toArray(new SnapshotsInProgress.Entry[entries.size()]));
+          return ClusterState.builder(currentState).putCustom(SnapshotsInProgress.TYPE,snapshots).build();
+        }
+      }
+      return currentState;
+    }
+    @Override public void onFailure(    String source,    Throwable t){
+      logger.warn("[{}] failed to remove snapshot metadata",t,snapshot);
+      if (listener != null) {
+        listener.onFailure(t);
+      }
+    }
+    @Override public void clusterStateProcessed(    String source,    ClusterState oldState,    ClusterState newState){
+      for (      SnapshotCompletionListener listener : snapshotCompletionListeners) {
+        try {
+          if (snapshotInfo != null) {
+            listener.onSnapshotCompletion(snapshot,snapshotInfo);
+          }
+ else {
+            listener.onSnapshotFailure(snapshot,t);
+          }
+        }
+ catch (        Throwable t) {
+          logger.warn("failed to notify listener [{}]",t,listener);
+        }
+      }
+      if (listener != null) {
+        listener.onResponse(snapshotInfo);
+      }
+    }
+  }
+);
+}
