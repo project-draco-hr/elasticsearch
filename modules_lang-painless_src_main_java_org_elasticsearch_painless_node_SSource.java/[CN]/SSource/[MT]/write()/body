@@ -6,26 +6,32 @@
   String className=CLASS_TYPE.getInternalName();
   String classInterfaces[]=reserved.usesScore() ? new String[]{WriterConstants.NEEDS_SCORE_TYPE.getInternalName()} : null;
   ClassWriter writer=new ClassWriter(classFrames);
-  writer.visit(classVersion,classAccess,className,null,classBase,classInterfaces);
-  writer.visitSource(Location.computeSourceName(name,source),null);
+  ClassVisitor visitor=writer;
+  if (debugStream != null) {
+    visitor=new TraceClassVisitor(visitor,debugStream,null);
+  }
+  visitor.visit(classVersion,classAccess,className,null,classBase,classInterfaces);
+  visitor.visitSource(Location.computeSourceName(name,source),null);
   expressions=new BitSet(source.length());
-  MethodWriter constructor=new MethodWriter(Opcodes.ACC_PUBLIC,CONSTRUCTOR,writer,expressions);
+  MethodWriter constructor=new MethodWriter(Opcodes.ACC_PUBLIC,CONSTRUCTOR,visitor,expressions);
+  constructor.visitCode();
   constructor.loadThis();
   constructor.loadArgs();
   constructor.invokeConstructor(org.objectweb.asm.Type.getType(Executable.class),CONSTRUCTOR);
   constructor.returnValue();
   constructor.endMethod();
-  MethodWriter execute=new MethodWriter(Opcodes.ACC_PUBLIC,EXECUTE,writer,expressions);
+  MethodWriter execute=new MethodWriter(Opcodes.ACC_PUBLIC,EXECUTE,visitor,expressions);
+  execute.visitCode();
   write(execute);
   execute.endMethod();
   for (  SFunction function : functions) {
-    function.write(writer,expressions);
+    function.write(visitor,expressions);
   }
   if (false == locals.getConstants().isEmpty()) {
     for (    Constant constant : locals.getConstants()) {
-      writer.visitField(Opcodes.ACC_FINAL | Opcodes.ACC_PRIVATE | Opcodes.ACC_STATIC,constant.name,constant.type.getDescriptor(),null,null).visitEnd();
+      visitor.visitField(Opcodes.ACC_FINAL | Opcodes.ACC_PRIVATE | Opcodes.ACC_STATIC,constant.name,constant.type.getDescriptor(),null,null).visitEnd();
     }
-    final MethodWriter clinit=new MethodWriter(Opcodes.ACC_STATIC,WriterConstants.CLINIT,writer,expressions);
+    final MethodWriter clinit=new MethodWriter(Opcodes.ACC_STATIC,WriterConstants.CLINIT,visitor,expressions);
     for (    Constant constant : locals.getConstants()) {
       constant.initializer.accept(clinit);
       clinit.putStatic(CLASS_TYPE,constant.name,constant.type);
@@ -33,6 +39,6 @@
     clinit.returnValue();
     clinit.endMethod();
   }
-  writer.visitEnd();
+  visitor.visitEnd();
   bytes=writer.toByteArray();
 }
