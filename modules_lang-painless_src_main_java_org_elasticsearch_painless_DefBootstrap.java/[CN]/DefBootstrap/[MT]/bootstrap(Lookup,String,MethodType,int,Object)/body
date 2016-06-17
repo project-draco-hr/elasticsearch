@@ -1,17 +1,30 @@
 {
 switch (flavor) {
 case METHOD_CALL:
-    if (args.length != 1) {
+    if (args.length == 0) {
       throw new BootstrapMethodError("Invalid number of parameters for method call");
     }
   if (args[0] instanceof Long == false) {
     throw new BootstrapMethodError("Illegal parameter for method call: " + args[0]);
   }
 long recipe=(Long)args[0];
-if (Long.bitCount(recipe) > type.parameterCount()) {
+int numLambdas=Long.bitCount(recipe);
+if (numLambdas > type.parameterCount()) {
 throw new BootstrapMethodError("Illegal recipe for method call: too many bits");
 }
-break;
+if (args.length != numLambdas + 1) {
+throw new BootstrapMethodError("Illegal number of parameters: expected " + numLambdas + " references");
+}
+return new PIC(lookup,name,type,flavor,args);
+case LOAD:
+case STORE:
+case ARRAY_LOAD:
+case ARRAY_STORE:
+case ITERATOR:
+if (args.length > 0) {
+throw new BootstrapMethodError("Illegal static bootstrap parameters for flavor: " + flavor);
+}
+return new PIC(lookup,name,type,flavor,args);
 case REFERENCE:
 if (args.length != 1) {
 throw new BootstrapMethodError("Invalid number of parameters for reference call");
@@ -19,12 +32,25 @@ throw new BootstrapMethodError("Invalid number of parameters for reference call"
 if (args[0] instanceof String == false) {
 throw new BootstrapMethodError("Illegal parameter for reference call: " + args[0]);
 }
-break;
-default :
-if (args.length > 0) {
-throw new BootstrapMethodError("Illegal static bootstrap parameters for flavor: " + flavor);
-}
-break;
-}
 return new PIC(lookup,name,type,flavor,args);
+case UNARY_OPERATOR:
+case SHIFT_OPERATOR:
+case BINARY_OPERATOR:
+if (args.length != 1) {
+throw new BootstrapMethodError("Invalid number of parameters for operator call");
+}
+if (args[0] instanceof Integer == false) {
+throw new BootstrapMethodError("Illegal parameter for reference call: " + args[0]);
+}
+int flags=(int)args[0];
+if ((flags & OPERATOR_ALLOWS_NULL) != 0 && flavor != BINARY_OPERATOR) {
+throw new BootstrapMethodError("This parameter is only supported for BINARY_OPERATORs");
+}
+if ((flags & OPERATOR_COMPOUND_ASSIGNMENT) != 0 && flavor != BINARY_OPERATOR) {
+throw new BootstrapMethodError("This parameter is only supported for BINARY_OPERATORs");
+}
+return new MIC(name,type,flavor,flags);
+default :
+throw new BootstrapMethodError("Illegal static bootstrap parameter for flavor: " + flavor);
+}
 }
