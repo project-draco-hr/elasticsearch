@@ -1,10 +1,10 @@
 {
-  String type=false || randomBoolean() ? "text" : "long";
+  String type=randomBoolean() ? "text" : "long";
   String settings="{\"index.number_of_shards\": 1, \"index.number_of_replicas\": 0}";
   SharedSignificantTermsTestMethods.index01Docs(type,settings,this);
   SearchResponse response=client().prepareSearch(INDEX_NAME).setTypes(DOC_TYPE).addAggregation(terms("class").field(CLASS_FIELD).subAggregation(significantTerms("sig_terms").field(TEXT_FIELD))).execute().actionGet();
   assertSearchResponse(response);
-  StringTerms classes=(StringTerms)response.getAggregations().get("class");
+  StringTerms classes=response.getAggregations().get("class");
   assertThat(classes.getBuckets().size(),equalTo(2));
   for (  Terms.Bucket classBucket : classes.getBuckets()) {
     Map<String,Aggregation> aggs=classBucket.getAggregations().asMap();
@@ -16,13 +16,9 @@
     assertTrue(term.equals(classTerm));
   }
   XContentBuilder responseBuilder=XContentFactory.jsonBuilder();
+  responseBuilder.startObject();
   classes.toXContent(responseBuilder,null);
-  String result=null;
-  if (type.equals("long")) {
-    result="\"class\"{\"doc_count_error_upper_bound\":0,\"sum_other_doc_count\":0,\"buckets\":[{\"key\":\"0\",\"doc_count\":4,\"sig_terms\":{\"doc_count\":4,\"buckets\":[{\"key\":0,\"doc_count\":4,\"score\":0.39999999999999997,\"bg_count\":5}]}},{\"key\":\"1\",\"doc_count\":3,\"sig_terms\":{\"doc_count\":3,\"buckets\":[{\"key\":1,\"doc_count\":3,\"score\":0.75,\"bg_count\":4}]}}]}";
-  }
- else {
-    result="\"class\"{\"doc_count_error_upper_bound\":0,\"sum_other_doc_count\":0,\"buckets\":[{\"key\":\"0\",\"doc_count\":4,\"sig_terms\":{\"doc_count\":4,\"buckets\":[{\"key\":\"0\",\"doc_count\":4,\"score\":0.39999999999999997,\"bg_count\":5}]}},{\"key\":\"1\",\"doc_count\":3,\"sig_terms\":{\"doc_count\":3,\"buckets\":[{\"key\":\"1\",\"doc_count\":3,\"score\":0.75,\"bg_count\":4}]}}]}";
-  }
+  responseBuilder.endObject();
+  String result="{\"class\":{\"doc_count_error_upper_bound\":0,\"sum_other_doc_count\":0," + "\"buckets\":[" + "{"+ "\"key\":\"0\","+ "\"doc_count\":4,"+ "\"sig_terms\":{"+ "\"doc_count\":4,"+ "\"buckets\":["+ "{"+ "\"key\":" + (type.equals("long") ? "0," : "\"0\",") + "\"doc_count\":4,"+ "\"score\":0.39999999999999997,"+ "\"bg_count\":5"+ "}"+ "]"+ "}"+ "},"+ "{"+ "\"key\":\"1\","+ "\"doc_count\":3,"+ "\"sig_terms\":{"+ "\"doc_count\":3,"+ "\"buckets\":["+ "{"+ "\"key\":"+ (type.equals("long") ? "1," : "\"1\",")+ "\"doc_count\":3,"+ "\"score\":0.75,"+ "\"bg_count\":4"+ "}]}}]}}";
   assertThat(responseBuilder.string(),equalTo(result));
 }
