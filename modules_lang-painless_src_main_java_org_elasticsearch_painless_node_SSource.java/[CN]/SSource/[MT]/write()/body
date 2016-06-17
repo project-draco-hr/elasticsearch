@@ -12,27 +12,34 @@
   }
   visitor.visit(classVersion,classAccess,className,null,classBase,classInterfaces);
   visitor.visitSource(Location.computeSourceName(name,source),null);
-  expressions=new BitSet(source.length());
-  MethodWriter constructor=new MethodWriter(Opcodes.ACC_PUBLIC,CONSTRUCTOR,visitor,expressions);
+  MethodWriter constructor=new MethodWriter(Opcodes.ACC_PUBLIC,CONSTRUCTOR,visitor,globals.getStatements());
   constructor.visitCode();
   constructor.loadThis();
   constructor.loadArgs();
   constructor.invokeConstructor(org.objectweb.asm.Type.getType(Executable.class),CONSTRUCTOR);
   constructor.returnValue();
   constructor.endMethod();
-  MethodWriter execute=new MethodWriter(Opcodes.ACC_PUBLIC,EXECUTE,visitor,expressions);
+  MethodWriter execute=new MethodWriter(Opcodes.ACC_PUBLIC,EXECUTE,visitor,globals.getStatements());
   execute.visitCode();
-  write(execute);
+  write(execute,globals);
   execute.endMethod();
   for (  SFunction function : functions) {
-    function.write(visitor,expressions);
+    function.write(visitor,globals);
   }
-  if (false == locals.getConstants().isEmpty()) {
-    for (    Constant constant : locals.getConstants()) {
+  while (!globals.getSyntheticMethods().isEmpty()) {
+    List<SFunction> current=new ArrayList<>(globals.getSyntheticMethods().values());
+    globals.getSyntheticMethods().clear();
+    for (    SFunction function : current) {
+      function.write(visitor,globals);
+    }
+  }
+  if (false == globals.getConstantInitializers().isEmpty()) {
+    Collection<Constant> inits=globals.getConstantInitializers().values();
+    for (    Constant constant : inits) {
       visitor.visitField(Opcodes.ACC_FINAL | Opcodes.ACC_PRIVATE | Opcodes.ACC_STATIC,constant.name,constant.type.getDescriptor(),null,null).visitEnd();
     }
-    final MethodWriter clinit=new MethodWriter(Opcodes.ACC_STATIC,WriterConstants.CLINIT,visitor,expressions);
-    for (    Constant constant : locals.getConstants()) {
+    final MethodWriter clinit=new MethodWriter(Opcodes.ACC_STATIC,WriterConstants.CLINIT,visitor,globals.getStatements());
+    for (    Constant constant : inits) {
       constant.initializer.accept(clinit);
       clinit.putStatic(CLASS_TYPE,constant.name,constant.type);
     }
