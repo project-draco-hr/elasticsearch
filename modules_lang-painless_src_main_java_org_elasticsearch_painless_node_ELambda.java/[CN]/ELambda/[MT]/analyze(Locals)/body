@@ -1,4 +1,35 @@
 {
+  final Definition.Type returnType;
+  final List<String> actualParamTypeStrs;
+  Method interfaceMethod;
+  if (expected == null) {
+    interfaceMethod=null;
+    returnType=Definition.DEF_TYPE;
+    actualParamTypeStrs=paramTypeStrs;
+  }
+ else {
+    interfaceMethod=expected.struct.getFunctionalMethod();
+    if (interfaceMethod == null) {
+      throw createError(new IllegalArgumentException("Cannot pass lambda to [" + expected.name + "], not a functional interface"));
+    }
+    if (interfaceMethod.arguments.size() != paramTypeStrs.size())     throw new IllegalArgumentException("Incorrect number of parameters for [" + interfaceMethod.name + "] in ["+ expected.clazz+ "]");
+    if (interfaceMethod.rtn == Definition.VOID_TYPE) {
+      returnType=Definition.DEF_TYPE;
+    }
+ else {
+      returnType=interfaceMethod.rtn;
+    }
+    actualParamTypeStrs=new ArrayList<String>();
+    for (int i=0; i < paramTypeStrs.size(); i++) {
+      String paramType=paramTypeStrs.get(i);
+      if (paramType.equals(Definition.DEF_TYPE.name)) {
+        actualParamTypeStrs.add(interfaceMethod.arguments.get(i).name);
+      }
+ else {
+        actualParamTypeStrs.add(paramType);
+      }
+    }
+  }
   Set<String> variables=new HashSet<>();
   for (  AStatement statement : statements) {
     statement.extractVariables(variables);
@@ -15,11 +46,11 @@
     paramTypes.add(var.type.name);
     paramNames.add(var.name);
   }
-  paramTypes.addAll(paramTypeStrs);
+  paramTypes.addAll(actualParamTypeStrs);
   paramNames.addAll(paramNameStrs);
-  desugared=new SFunction(reserved,location,"def",name,paramTypes,paramNames,statements,true);
+  desugared=new SFunction(reserved,location,returnType.name,name,paramTypes,paramNames,statements,true);
   desugared.generate();
-  desugared.analyze(Locals.newLambdaScope(locals.getProgramScope(),desugared.parameters,captures.size(),reserved.getMaxLoopCounter()));
+  desugared.analyze(Locals.newLambdaScope(locals.getProgramScope(),returnType,desugared.parameters,captures.size(),reserved.getMaxLoopCounter()));
   if (expected == null) {
     ref=null;
     actual=Definition.getType("String");
@@ -28,10 +59,6 @@
  else {
     defPointer=null;
     try {
-      Method interfaceMethod=expected.struct.getFunctionalMethod();
-      if (interfaceMethod == null) {
-        throw new IllegalArgumentException("Cannot pass lambda to [" + expected.name + "], not a functional interface");
-      }
       Class<?> captureClasses[]=new Class<?>[captures.size()];
       for (int i=0; i < captures.size(); i++) {
         captureClasses[i]=captures.get(i).type.clazz;
