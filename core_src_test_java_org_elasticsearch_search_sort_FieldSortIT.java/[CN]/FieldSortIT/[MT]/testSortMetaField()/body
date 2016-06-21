@@ -1,10 +1,11 @@
 {
-  createIndex("test");
+  XContentBuilder mapping=XContentFactory.jsonBuilder().startObject().startObject("type").startObject("_timestamp").field("enabled",true).endObject().endObject().endObject();
+  assertAcked(prepareCreate("test").addMapping("type",mapping));
   ensureGreen();
   final int numDocs=randomIntBetween(10,20);
   IndexRequestBuilder[] indexReqs=new IndexRequestBuilder[numDocs];
   for (int i=0; i < numDocs; ++i) {
-    indexReqs[i]=client().prepareIndex("test","type",Integer.toString(i)).setSource();
+    indexReqs[i]=client().prepareIndex("test","type",Integer.toString(i)).setTimestamp(Integer.toString(randomInt(1000))).setSource();
   }
   indexRandom(true,indexReqs);
   SortOrder order=randomFrom(SortOrder.values());
@@ -16,5 +17,15 @@
     final BytesRef uid=new BytesRef(Uid.createUid(hits[i].type(),hits[i].id()));
     assertThat(previous,order == SortOrder.ASC ? lessThan(uid) : greaterThan(uid));
     previous=uid;
+  }
+  searchResponse=client().prepareSearch().setQuery(matchAllQuery()).setSize(randomIntBetween(1,numDocs + 5)).addSort("_timestamp",order).addField("_timestamp").execute().actionGet();
+  assertNoFailures(searchResponse);
+  hits=searchResponse.getHits().hits();
+  Long previousTs=order == SortOrder.ASC ? 0 : Long.MAX_VALUE;
+  for (int i=0; i < hits.length; ++i) {
+    SearchHitField timestampField=hits[i].getFields().get("_timestamp");
+    Long timestamp=timestampField.<Long>getValue();
+    assertThat(previousTs,order == SortOrder.ASC ? lessThanOrEqualTo(timestamp) : greaterThanOrEqualTo(timestamp));
+    previousTs=timestamp;
   }
 }
