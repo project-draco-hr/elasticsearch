@@ -6,33 +6,46 @@
   String className=CLASS_TYPE.getInternalName();
   String classInterfaces[]=reserved.usesScore() ? new String[]{WriterConstants.NEEDS_SCORE_TYPE.getInternalName()} : null;
   ClassWriter writer=new ClassWriter(classFrames);
-  writer.visit(classVersion,classAccess,className,null,classBase,classInterfaces);
-  writer.visitSource(Location.computeSourceName(name,source),null);
-  expressions=new BitSet(source.length());
-  MethodWriter constructor=new MethodWriter(Opcodes.ACC_PUBLIC,CONSTRUCTOR,writer,expressions);
+  ClassVisitor visitor=writer;
+  if (debugStream != null) {
+    visitor=new TraceClassVisitor(visitor,debugStream,null);
+  }
+  visitor.visit(classVersion,classAccess,className,null,classBase,classInterfaces);
+  visitor.visitSource(Location.computeSourceName(name,source),null);
+  MethodWriter constructor=new MethodWriter(Opcodes.ACC_PUBLIC,CONSTRUCTOR,visitor,globals.getStatements(),settings);
+  constructor.visitCode();
   constructor.loadThis();
   constructor.loadArgs();
   constructor.invokeConstructor(org.objectweb.asm.Type.getType(Executable.class),CONSTRUCTOR);
   constructor.returnValue();
   constructor.endMethod();
-  MethodWriter execute=new MethodWriter(Opcodes.ACC_PUBLIC,EXECUTE,writer,expressions);
-  write(execute);
+  MethodWriter execute=new MethodWriter(Opcodes.ACC_PUBLIC,EXECUTE,visitor,globals.getStatements(),settings);
+  execute.visitCode();
+  write(execute,globals);
   execute.endMethod();
   for (  SFunction function : functions) {
-    function.write(writer,expressions);
+    function.write(visitor,settings,globals);
   }
-  if (false == locals.getConstants().isEmpty()) {
-    for (    Constant constant : locals.getConstants()) {
-      writer.visitField(Opcodes.ACC_FINAL | Opcodes.ACC_PRIVATE | Opcodes.ACC_STATIC,constant.name,constant.type.getDescriptor(),null,null).visitEnd();
+  while (!globals.getSyntheticMethods().isEmpty()) {
+    List<SFunction> current=new ArrayList<>(globals.getSyntheticMethods().values());
+    globals.getSyntheticMethods().clear();
+    for (    SFunction function : current) {
+      function.write(visitor,settings,globals);
     }
-    final MethodWriter clinit=new MethodWriter(Opcodes.ACC_STATIC,WriterConstants.CLINIT,writer,expressions);
-    for (    Constant constant : locals.getConstants()) {
+  }
+  if (false == globals.getConstantInitializers().isEmpty()) {
+    Collection<Constant> inits=globals.getConstantInitializers().values();
+    for (    Constant constant : inits) {
+      visitor.visitField(Opcodes.ACC_FINAL | Opcodes.ACC_PRIVATE | Opcodes.ACC_STATIC,constant.name,constant.type.getDescriptor(),null,null).visitEnd();
+    }
+    final MethodWriter clinit=new MethodWriter(Opcodes.ACC_STATIC,WriterConstants.CLINIT,visitor,globals.getStatements(),settings);
+    for (    Constant constant : inits) {
       constant.initializer.accept(clinit);
       clinit.putStatic(CLASS_TYPE,constant.name,constant.type);
     }
     clinit.returnValue();
     clinit.endMethod();
   }
-  writer.visitEnd();
+  visitor.visitEnd();
   bytes=writer.toByteArray();
 }
