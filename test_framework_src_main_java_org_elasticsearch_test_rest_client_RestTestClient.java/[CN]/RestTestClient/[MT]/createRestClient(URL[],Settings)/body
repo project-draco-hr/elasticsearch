@@ -26,14 +26,18 @@
     sslsf=SSLConnectionSocketFactory.getSocketFactory();
   }
   Registry<ConnectionSocketFactory> socketFactoryRegistry=RegistryBuilder.<ConnectionSocketFactory>create().register("http",PlainConnectionSocketFactory.getSocketFactory()).register("https",sslsf).build();
-  CloseableHttpClient httpClient=RestClient.Builder.createDefaultHttpClient(socketFactoryRegistry);
+  PoolingHttpClientConnectionManager connectionManager=new PoolingHttpClientConnectionManager(socketFactoryRegistry);
+  connectionManager.setDefaultMaxPerRoute(10);
+  connectionManager.setMaxTotal(30);
+  RequestConfig requestConfig=RequestConfig.custom().setConnectTimeout(CONNECT_TIMEOUT_MILLIS).setSocketTimeout(SOCKET_TIMEOUT_MILLIS).setConnectionRequestTimeout(CONNECTION_REQUEST_TIMEOUT_MILLIS).build();
+  CloseableHttpClient httpClient=HttpClientBuilder.create().setConnectionManager(connectionManager).setDefaultRequestConfig(requestConfig).build();
   String protocol=settings.get(PROTOCOL,"http");
   HttpHost[] hosts=new HttpHost[urls.length];
   for (int i=0; i < hosts.length; i++) {
     URL url=urls[i];
     hosts[i]=new HttpHost(url.getHost(),url.getPort(),protocol);
   }
-  RestClient.Builder builder=RestClient.builder(hosts).setHttpClient(httpClient);
+  RestClient.Builder builder=RestClient.builder(hosts).setHttpClient(httpClient).setMaxRetryTimeoutMillis(MAX_RETRY_TIMEOUT_MILLIS);
   try (ThreadContext threadContext=new ThreadContext(settings)){
     Header[] defaultHeaders=new Header[threadContext.getHeaders().size()];
     int i=0;
