@@ -1,0 +1,54 @@
+{
+  long clusterSeed=randomLong();
+  boolean masterNodes=randomBoolean();
+  int minNumDataNodes=2;
+  int maxNumDataNodes=2;
+  final String clusterName1="shared1";
+  NodeConfigurationSource nodeConfigurationSource=NodeConfigurationSource.EMPTY;
+  int numClientNodes=0;
+  boolean enableHttpPipelining=randomBoolean();
+  String nodePrefix="test";
+  Path baseDir=createTempDir();
+  InternalTestCluster cluster=new InternalTestCluster("local",clusterSeed,baseDir,masterNodes,minNumDataNodes,maxNumDataNodes,clusterName1,nodeConfigurationSource,numClientNodes,enableHttpPipelining,nodePrefix,Collections.emptyList(),Function.identity());
+  try {
+    cluster.beforeTest(random(),0.0);
+    final Map<String,Path[]> shardNodePaths=new HashMap<>();
+    for (    String name : cluster.getNodeNames()) {
+      shardNodePaths.put(name,getNodePaths(cluster,name));
+    }
+    String poorNode=randomFrom(cluster.getNodeNames());
+    Path dataPath=getNodePaths(cluster,poorNode)[0];
+    final Path testMarker=dataPath.resolve("testMarker");
+    Files.createDirectories(testMarker);
+    cluster.stopRandomNode(InternalTestCluster.nameFilter(poorNode));
+    assertFileExists(testMarker);
+    final String stableNode=randomFrom(cluster.getNodeNames());
+    final Path stableDataPath=getNodePaths(cluster,stableNode)[0];
+    final Path stableTestMarker=stableDataPath.resolve("stableTestMarker");
+    assertThat(stableDataPath,not(dataPath));
+    Files.createDirectories(stableTestMarker);
+    final String newNode1=cluster.startNode();
+    assertThat(getNodePaths(cluster,newNode1)[0],equalTo(dataPath));
+    assertFileExists(testMarker);
+    final String newNode2=cluster.startNode();
+    final Path newDataPath=getNodePaths(cluster,newNode2)[0];
+    final Path newTestMarker=newDataPath.resolve("newTestMarker");
+    assertThat(newDataPath,not(dataPath));
+    Files.createDirectories(newTestMarker);
+    cluster.beforeTest(random(),0.0);
+    assertFileNotExists(newTestMarker);
+    assertFileNotExists(testMarker);
+    assertFileExists(stableTestMarker);
+    for (    String name : cluster.getNodeNames()) {
+      assertThat("data paths for " + name + " changed",getNodePaths(cluster,name),equalTo(shardNodePaths.get(name)));
+    }
+    cluster.beforeTest(random(),0.0);
+    assertFileExists(stableTestMarker);
+    for (    String name : cluster.getNodeNames()) {
+      assertThat("data paths for " + name + " changed",getNodePaths(cluster,name),equalTo(shardNodePaths.get(name)));
+    }
+  }
+  finally {
+    cluster.close();
+  }
+}
