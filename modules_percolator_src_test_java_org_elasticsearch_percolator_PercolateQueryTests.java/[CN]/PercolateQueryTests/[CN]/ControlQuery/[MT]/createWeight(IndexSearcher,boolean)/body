@@ -1,0 +1,50 @@
+{
+  return new ConstantScoreWeight(this){
+    float _score;
+    @Override public Explanation explain(    LeafReaderContext context,    int doc) throws IOException {
+      Scorer scorer=scorer(context);
+      if (scorer != null) {
+        int result=scorer.iterator().advance(doc);
+        if (result == doc) {
+          return Explanation.match(scorer.score(),"ControlQuery");
+        }
+      }
+      return Explanation.noMatch("ControlQuery");
+    }
+    @Override public String toString(){
+      return "weight(" + ControlQuery.this + ")";
+    }
+    @Override public Scorer scorer(    LeafReaderContext context) throws IOException {
+      DocIdSetIterator allDocs=DocIdSetIterator.all(context.reader().maxDoc());
+      PercolateQuery.QueryStore.Leaf leaf=queryStore.getQueries(context);
+      FilteredDocIdSetIterator memoryIndexIterator=new FilteredDocIdSetIterator(allDocs){
+        @Override protected boolean match(        int doc){
+          try {
+            Query query=leaf.getQuery(doc);
+            float score=memoryIndex.search(query);
+            if (score != 0f) {
+              if (needsScores) {
+                _score=score;
+              }
+              return true;
+            }
+ else {
+              return false;
+            }
+          }
+ catch (          IOException e) {
+            throw new RuntimeException(e);
+          }
+        }
+      }
+;
+      return new FilterScorer(new ConstantScoreScorer(this,score(),memoryIndexIterator)){
+        @Override public float score() throws IOException {
+          return _score;
+        }
+      }
+;
+    }
+  }
+;
+}

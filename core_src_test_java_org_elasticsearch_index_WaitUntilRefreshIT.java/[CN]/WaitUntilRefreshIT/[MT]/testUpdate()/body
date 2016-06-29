@@ -1,0 +1,16 @@
+{
+  indexRandom(true,client().prepareIndex("test","test","1").setSource("foo","bar"));
+  assertSearchHits(client().prepareSearch("test").setQuery(matchQuery("foo","bar")).get(),"1");
+  UpdateResponse update=client().prepareUpdate("test","test","1").setDoc("foo","baz").setRefreshPolicy(RefreshPolicy.WAIT_UNTIL).get();
+  assertEquals(2,update.getVersion());
+  assertFalse("request shouldn't have forced a refresh",update.forcedRefresh());
+  assertSearchHits(client().prepareSearch("test").setQuery(matchQuery("foo","baz")).get(),"1");
+  update=client().prepareUpdate("test","test","2").setDocAsUpsert(true).setDoc("foo","cat").setRefreshPolicy(RefreshPolicy.WAIT_UNTIL).get();
+  assertEquals(1,update.getVersion());
+  assertFalse("request shouldn't have forced a refresh",update.forcedRefresh());
+  assertSearchHits(client().prepareSearch("test").setQuery(matchQuery("foo","cat")).get(),"2");
+  update=client().prepareUpdate("test","test","2").setScript(new Script("delete_plz",ScriptType.INLINE,"native",emptyMap())).setRefreshPolicy(RefreshPolicy.WAIT_UNTIL).get();
+  assertEquals(2,update.getVersion());
+  assertFalse("request shouldn't have forced a refresh",update.forcedRefresh());
+  assertNoSearchHits(client().prepareSearch("test").setQuery(matchQuery("foo","cat")).get());
+}

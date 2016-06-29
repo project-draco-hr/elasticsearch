@@ -1,0 +1,80 @@
+{
+  XContentParser parser=context.parser();
+  List<String> fields=null;
+  ValueType valueType=null;
+  String format=null;
+  Map<String,Object> missingMap=null;
+  Map<ParseField,Object> otherOptions=new HashMap<>();
+  final ParseFieldMatcher parseFieldMatcher=context.getParseFieldMatcher();
+  XContentParser.Token token;
+  String currentFieldName=null;
+  while ((token=parser.nextToken()) != XContentParser.Token.END_OBJECT) {
+    if (token == XContentParser.Token.FIELD_NAME) {
+      currentFieldName=parser.currentName();
+    }
+ else     if (token == XContentParser.Token.VALUE_STRING) {
+      if (parseFieldMatcher.match(currentFieldName,CommonFields.FIELDS)) {
+        fields=Collections.singletonList(parser.text());
+      }
+ else       if (formattable && parseFieldMatcher.match(currentFieldName,CommonFields.FORMAT)) {
+        format=parser.text();
+      }
+ else       if (parseFieldMatcher.match(currentFieldName,CommonFields.VALUE_TYPE)) {
+        throw new ParsingException(parser.getTokenLocation(),"Unexpected token " + token + " ["+ currentFieldName+ "] in ["+ aggregationName+ "]. "+ "Multi-field aggregations do not support scripts.");
+      }
+ else       if (!token(aggregationName,currentFieldName,token,parser,context.getParseFieldMatcher(),otherOptions)) {
+        throw new ParsingException(parser.getTokenLocation(),"Unexpected token " + token + " ["+ currentFieldName+ "] in ["+ aggregationName+ "].");
+      }
+    }
+ else     if (token == XContentParser.Token.START_OBJECT) {
+      if (parseFieldMatcher.match(currentFieldName,CommonFields.MISSING)) {
+        missingMap=new HashMap<>();
+        while (parser.nextToken() != XContentParser.Token.END_OBJECT) {
+          parseMissingAndAdd(aggregationName,currentFieldName,parser,missingMap);
+        }
+      }
+ else       if (context.getParseFieldMatcher().match(currentFieldName,ScriptField.SCRIPT)) {
+        throw new ParsingException(parser.getTokenLocation(),"Unexpected token " + token + " ["+ currentFieldName+ "] in ["+ aggregationName+ "]. "+ "Multi-field aggregations do not support scripts.");
+      }
+ else       if (!token(aggregationName,currentFieldName,token,parser,context.getParseFieldMatcher(),otherOptions)) {
+        throw new ParsingException(parser.getTokenLocation(),"Unexpected token " + token + " ["+ currentFieldName+ "] in ["+ aggregationName+ "].");
+      }
+    }
+ else     if (token == XContentParser.Token.START_ARRAY) {
+      if (context.getParseFieldMatcher().match(currentFieldName,ScriptField.SCRIPT)) {
+        throw new ParsingException(parser.getTokenLocation(),"Unexpected token " + token + " ["+ currentFieldName+ "] in ["+ aggregationName+ "]. "+ "Multi-field aggregations do not support scripts.");
+      }
+ else       if (parseFieldMatcher.match(currentFieldName,CommonFields.FIELDS)) {
+        fields=new ArrayList<>();
+        while ((token=parser.nextToken()) != XContentParser.Token.END_ARRAY) {
+          if (token == XContentParser.Token.VALUE_STRING) {
+            fields.add(parser.text());
+          }
+ else {
+            throw new ParsingException(parser.getTokenLocation(),"Unexpected token " + token + " ["+ currentFieldName+ "] in ["+ aggregationName+ "].");
+          }
+        }
+      }
+ else       if (!token(aggregationName,currentFieldName,token,parser,context.getParseFieldMatcher(),otherOptions)) {
+        throw new ParsingException(parser.getTokenLocation(),"Unexpected token " + token + " ["+ currentFieldName+ "] in ["+ aggregationName+ "].");
+      }
+    }
+ else     if (!token(aggregationName,currentFieldName,token,parser,context.getParseFieldMatcher(),otherOptions)) {
+      throw new ParsingException(parser.getTokenLocation(),"Unexpected token " + token + " ["+ currentFieldName+ "] in ["+ aggregationName+ "].");
+    }
+  }
+  MultiValuesSourceAggregationBuilder<VS,?> factory=createFactory(aggregationName,this.valuesSourceType,this.targetValueType,otherOptions);
+  if (fields != null) {
+    factory.fields(fields);
+  }
+  if (valueType != null) {
+    factory.valueType(valueType);
+  }
+  if (format != null) {
+    factory.format(format);
+  }
+  if (missingMap != null) {
+    factory.missingMap(missingMap);
+  }
+  return factory;
+}

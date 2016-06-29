@@ -1,0 +1,29 @@
+{
+  final String sourceIndex=indexNameExpressionResolver.resolveDateMathExpression(shrinkReqeust.getSourceIndex());
+  final CreateIndexRequest targetIndex=shrinkReqeust.getShrinkIndexRequest();
+  final String targetIndexName=indexNameExpressionResolver.resolveDateMathExpression(targetIndex.index());
+  final IndexMetaData metaData=state.metaData().index(sourceIndex);
+  final Settings targetIndexSettings=Settings.builder().put(targetIndex.settings()).normalizePrefix(IndexMetaData.INDEX_SETTING_PREFIX).build();
+  int numShards=1;
+  if (IndexMetaData.INDEX_NUMBER_OF_SHARDS_SETTING.exists(targetIndexSettings)) {
+    numShards=IndexMetaData.INDEX_NUMBER_OF_SHARDS_SETTING.get(targetIndexSettings);
+  }
+  for (int i=0; i < numShards; i++) {
+    Set<ShardId> shardIds=IndexMetaData.selectShrinkShards(i,metaData,numShards);
+    long count=0;
+    for (    ShardId id : shardIds) {
+      DocsStats docsStats=perShardDocStats.apply(id.id());
+      if (docsStats != null) {
+        count+=docsStats.getCount();
+      }
+      if (count > IndexWriter.MAX_DOCS) {
+        throw new IllegalStateException("Can't merge index with more than [" + IndexWriter.MAX_DOCS + "] docs - too many documents in shards "+ shardIds);
+      }
+    }
+  }
+  targetIndex.cause("shrink_index");
+  Settings.Builder settingsBuilder=Settings.builder().put(targetIndexSettings);
+  settingsBuilder.put("index.number_of_shards",numShards);
+  targetIndex.settings(settingsBuilder);
+  return new CreateIndexClusterStateUpdateRequest(targetIndex,"shrink_index",targetIndexName,true).ackTimeout(targetIndex.timeout()).masterNodeTimeout(targetIndex.masterNodeTimeout()).settings(targetIndex.settings()).aliases(targetIndex.aliases()).customs(targetIndex.customs()).shrinkFrom(metaData.getIndex());
+}

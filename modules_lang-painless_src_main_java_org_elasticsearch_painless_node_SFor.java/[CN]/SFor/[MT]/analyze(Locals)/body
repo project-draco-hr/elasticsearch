@@ -1,0 +1,61 @@
+{
+  locals=Locals.newLocalScope(locals);
+  boolean continuous=false;
+  if (initializer != null) {
+    if (initializer instanceof AStatement) {
+      ((AStatement)initializer).analyze(locals);
+    }
+ else     if (initializer instanceof AExpression) {
+      AExpression initializer=(AExpression)this.initializer;
+      initializer.read=false;
+      initializer.analyze(locals);
+      if (!initializer.statement) {
+        throw createError(new IllegalArgumentException("Not a statement."));
+      }
+    }
+ else {
+      throw createError(new IllegalStateException("Illegal tree structure."));
+    }
+  }
+  if (condition != null) {
+    condition.expected=Definition.BOOLEAN_TYPE;
+    condition.analyze(locals);
+    condition=condition.cast(locals);
+    if (condition.constant != null) {
+      continuous=(boolean)condition.constant;
+      if (!continuous) {
+        throw createError(new IllegalArgumentException("Extraneous for loop."));
+      }
+      if (block == null) {
+        throw createError(new IllegalArgumentException("For loop has no escape."));
+      }
+    }
+  }
+ else {
+    continuous=true;
+  }
+  if (afterthought != null) {
+    afterthought.read=false;
+    afterthought.analyze(locals);
+    if (!afterthought.statement) {
+      throw createError(new IllegalArgumentException("Not a statement."));
+    }
+  }
+  if (block != null) {
+    block.beginLoop=true;
+    block.inLoop=true;
+    block.analyze(locals);
+    if (block.loopEscape && !block.anyContinue) {
+      throw createError(new IllegalArgumentException("Extraneous for loop."));
+    }
+    if (continuous && !block.anyBreak) {
+      methodEscape=true;
+      allEscape=true;
+    }
+    block.statementCount=Math.max(1,block.statementCount);
+  }
+  statementCount=1;
+  if (locals.hasVariable(Locals.LOOP)) {
+    loopCounter=locals.getVariable(location,Locals.LOOP);
+  }
+}

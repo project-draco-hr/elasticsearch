@@ -1,0 +1,27 @@
+{
+  if (task.isCancelled()) {
+    finishHim(null);
+    return;
+  }
+  setScroll(searchResponse.getScrollId());
+  if ((searchResponse.getShardFailures() != null && searchResponse.getShardFailures().length > 0) || searchResponse.isTimedOut()) {
+    startNormalTermination(emptyList(),unmodifiableList(Arrays.asList(searchResponse.getShardFailures())),searchResponse.isTimedOut());
+    return;
+  }
+  long total=searchResponse.getHits().totalHits();
+  if (mainRequest.getSize() > 0) {
+    total=min(total,mainRequest.getSize());
+  }
+  task.setTotal(total);
+  AbstractRunnable prepareBulkRequestRunnable=new AbstractRunnable(){
+    @Override protected void doRun() throws Exception {
+      prepareBulkRequest(timeValueNanos(System.nanoTime()),searchResponse);
+    }
+    @Override public void onFailure(    Throwable t){
+      finishHim(t);
+    }
+  }
+;
+  prepareBulkRequestRunnable=(AbstractRunnable)threadPool.getThreadContext().preserveContext(prepareBulkRequestRunnable);
+  task.delayPrepareBulkRequest(threadPool,lastBatchStartTime,lastBatchSize,prepareBulkRequestRunnable);
+}

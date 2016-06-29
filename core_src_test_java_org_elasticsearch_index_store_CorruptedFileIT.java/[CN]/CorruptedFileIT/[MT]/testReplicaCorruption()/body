@@ -12,21 +12,24 @@
   assertAllSuccessful(client().admin().indices().prepareFlush().setForce(true).setWaitIfOngoing(true).execute().actionGet());
   SearchResponse countResponse=client().prepareSearch().setSize(0).get();
   assertHitCount(countResponse,numDocs);
-  final Map<String,List<Path>> filesToCorrupt=findFilesToCorruptForReplica();
-  internalCluster().fullRestart(new InternalTestCluster.RestartCallback(){
-    @Override public Settings onNodeStopped(    String nodeName) throws Exception {
-      List<Path> paths=filesToCorrupt.get(nodeName);
-      if (paths != null) {
-        for (        Path path : paths) {
+  assertAcked(client().admin().cluster().prepareUpdateSettings().setPersistentSettings(Settings.builder().put(EnableAllocationDecider.CLUSTER_ROUTING_ALLOCATION_ENABLE_SETTING.getKey(),"primaries")));
+  internalCluster().fullRestart();
+  ensureYellow();
+  final Index index=resolveIndex("test");
+  final IndicesShardStoresResponse stores=client().admin().indices().prepareShardStores(index.getName()).get();
+  for (  IntObjectCursor<List<IndicesShardStoresResponse.StoreStatus>> shards : stores.getStoreStatuses().get(index.getName())) {
+    for (    IndicesShardStoresResponse.StoreStatus store : shards.value) {
+      final ShardId shardId=new ShardId(index,shards.key);
+      if (store.getAllocationStatus().equals(IndicesShardStoresResponse.StoreStatus.AllocationStatus.UNUSED)) {
+        for (        Path path : findFilesToCorruptOnNode(store.getNode().getName(),shardId)) {
           try (OutputStream os=Files.newOutputStream(path)){
             os.write(0);
           }
-           logger.info("corrupting file {} on node {}",path,nodeName);
+           logger.info("corrupting file {} on node {}",path,store.getNode().getName());
         }
       }
-      return null;
     }
   }
-);
+  assertAcked(client().admin().cluster().prepareUpdateSettings().setPersistentSettings(Settings.builder().putNull(EnableAllocationDecider.CLUSTER_ROUTING_ALLOCATION_ENABLE_SETTING.getKey())));
   ensureGreen();
 }

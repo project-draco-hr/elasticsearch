@@ -1,0 +1,67 @@
+{
+  final Struct owner=structsMap.get(struct);
+  if (owner == null) {
+    throw new IllegalArgumentException("Owner struct [" + struct + "] not defined for copy.");
+  }
+  for (int count=0; count < children.size(); ++count) {
+    final Struct child=structsMap.get(children.get(count));
+    if (child == null) {
+      throw new IllegalArgumentException("Child struct [" + children.get(count) + "]"+ " not defined for copy to owner struct ["+ owner.name+ "].");
+    }
+    if (!child.clazz.isAssignableFrom(owner.clazz)) {
+      throw new ClassCastException("Child struct [" + child.name + "]"+ " is not a super type of owner struct ["+ owner.name+ "] in copy.");
+    }
+    for (    Map.Entry<MethodKey,Method> kvPair : child.methods.entrySet()) {
+      MethodKey methodKey=kvPair.getKey();
+      Method method=kvPair.getValue();
+      if (owner.methods.get(methodKey) == null) {
+        if (owner.clazz.isInterface() && child.clazz == Object.class) {
+        }
+ else         if (child.clazz == Spliterator.OfPrimitive.class || child.clazz == PrimitiveIterator.class) {
+        }
+ else         if (Constants.JRE_IS_MINIMUM_JAVA9 && owner.clazz == LocalDate.class) {
+        }
+ else {
+          try {
+            final Class<?> impl;
+            final Class<?> arguments[];
+            if (method.augmentation) {
+              impl=Augmentation.class;
+              arguments=new Class<?>[method.arguments.size() + 1];
+              arguments[0]=method.owner.clazz;
+              for (int i=0; i < method.arguments.size(); i++) {
+                arguments[i + 1]=method.arguments.get(i).clazz;
+              }
+            }
+ else {
+              impl=owner.clazz;
+              arguments=new Class<?>[method.arguments.size()];
+              for (int i=0; i < method.arguments.size(); i++) {
+                arguments[i]=method.arguments.get(i).clazz;
+              }
+            }
+            java.lang.reflect.Method m=impl.getMethod(method.method.getName(),arguments);
+            if (m.getReturnType() != method.rtn.clazz) {
+              throw new IllegalStateException("missing covariant override for: " + m + " in "+ owner.name);
+            }
+            if (m.isBridge() && !Modifier.isVolatile(method.modifiers)) {
+              java.lang.reflect.Method source=child.clazz.getMethod(method.method.getName(),arguments);
+              if (!Arrays.equals(source.getGenericParameterTypes(),source.getParameterTypes())) {
+                throw new IllegalStateException("missing generic override for: " + m + " in "+ owner.name);
+              }
+            }
+          }
+ catch (          ReflectiveOperationException e) {
+            throw new AssertionError(e);
+          }
+        }
+        owner.methods.put(methodKey,method);
+      }
+    }
+    for (    Field field : child.members.values()) {
+      if (owner.members.get(field.name) == null) {
+        owner.members.put(field.name,new Field(field.name,field.javaName,owner,field.type,field.modifiers,field.getter,field.setter));
+      }
+    }
+  }
+}

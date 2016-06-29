@@ -1,0 +1,23 @@
+{
+  boolean requireScore=randomBoolean();
+  IndexSearcher percolateSearcher=memoryIndex.createSearcher();
+  PercolateQuery.Builder builder=new PercolateQuery.Builder("docType",queryStore,new BytesArray("{}"),percolateSearcher);
+  builder.extractQueryTermsQuery(EXTRACTED_TERMS_FIELD_NAME,UNKNOWN_QUERY_FIELD_NAME);
+  Query query=requireScore ? builder.build() : new ConstantScoreQuery(builder.build());
+  TopDocs topDocs=shardSearcher.search(query,10);
+  Query controlQuery=new ControlQuery(memoryIndex,queryStore);
+  controlQuery=requireScore ? controlQuery : new ConstantScoreQuery(controlQuery);
+  TopDocs controlTopDocs=shardSearcher.search(controlQuery,10);
+  assertThat(topDocs.totalHits,equalTo(controlTopDocs.totalHits));
+  assertThat(topDocs.scoreDocs.length,equalTo(controlTopDocs.scoreDocs.length));
+  for (int j=0; j < topDocs.scoreDocs.length; j++) {
+    assertThat(topDocs.scoreDocs[j].doc,equalTo(controlTopDocs.scoreDocs[j].doc));
+    assertThat(topDocs.scoreDocs[j].score,equalTo(controlTopDocs.scoreDocs[j].score));
+    if (requireScore) {
+      Explanation explain1=shardSearcher.explain(query,topDocs.scoreDocs[j].doc);
+      Explanation explain2=shardSearcher.explain(controlQuery,controlTopDocs.scoreDocs[j].doc);
+      assertThat(explain1.isMatch(),equalTo(explain2.isMatch()));
+      assertThat(explain1.getValue(),equalTo(explain2.getValue()));
+    }
+  }
+}

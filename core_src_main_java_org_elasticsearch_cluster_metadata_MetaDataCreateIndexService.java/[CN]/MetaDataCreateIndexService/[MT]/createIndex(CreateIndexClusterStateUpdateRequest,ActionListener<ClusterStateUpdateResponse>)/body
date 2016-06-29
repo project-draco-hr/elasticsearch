@@ -21,7 +21,7 @@
         Map<String,AliasMetaData> templatesAliases=new HashMap<>();
         List<String> templateNames=new ArrayList<>();
         for (        Map.Entry<String,String> entry : request.mappings().entrySet()) {
-          mappings.put(entry.getKey(),parseMapping(entry.getValue()));
+          mappings.put(entry.getKey(),MapperService.parseMapping(entry.getValue()));
         }
         for (        Map.Entry<String,Custom> entry : request.customs().entrySet()) {
           customs.put(entry.getKey(),entry.getValue());
@@ -30,10 +30,10 @@
           templateNames.add(template.getName());
           for (          ObjectObjectCursor<String,CompressedXContent> cursor : template.mappings()) {
             if (mappings.containsKey(cursor.key)) {
-              XContentHelper.mergeDefaults(mappings.get(cursor.key),parseMapping(cursor.value.string()));
+              XContentHelper.mergeDefaults(mappings.get(cursor.key),MapperService.parseMapping(cursor.value.string()));
             }
  else {
-              mappings.put(cursor.key,parseMapping(cursor.value.string()));
+              mappings.put(cursor.key,MapperService.parseMapping(cursor.value.string()));
             }
           }
           for (          ObjectObjectCursor<String,Custom> cursor : template.customs()) {
@@ -80,38 +80,33 @@
         }
         if (indexSettingsBuilder.get(SETTING_VERSION_CREATED) == null) {
           DiscoveryNodes nodes=currentState.nodes();
-          final Version createdVersion=Version.smallest(version,nodes.getSmallestNonClientNodeVersion());
+          final Version createdVersion=Version.smallest(Version.CURRENT,nodes.getSmallestNonClientNodeVersion());
           indexSettingsBuilder.put(SETTING_VERSION_CREATED,createdVersion);
         }
         if (indexSettingsBuilder.get(SETTING_CREATION_DATE) == null) {
           indexSettingsBuilder.put(SETTING_CREATION_DATE,new DateTime(DateTimeZone.UTC).getMillis());
         }
         indexSettingsBuilder.put(SETTING_INDEX_UUID,UUIDs.randomBase64UUID());
+        final Index shrinkFromIndex=request.shrinkFrom();
+        int routingNumShards=IndexMetaData.INDEX_NUMBER_OF_SHARDS_SETTING.get(indexSettingsBuilder.build());
+        ;
+        if (shrinkFromIndex != null) {
+          prepareShrinkIndexSettings(currentState,mappings.keySet(),indexSettingsBuilder,shrinkFromIndex,request.index());
+          IndexMetaData sourceMetaData=currentState.metaData().getIndexSafe(shrinkFromIndex);
+          routingNumShards=sourceMetaData.getRoutingNumShards();
+        }
         Settings actualIndexSettings=indexSettingsBuilder.build();
-        final IndexMetaData tmpImd=IndexMetaData.builder(request.index()).settings(actualIndexSettings).build();
+        IndexMetaData.Builder tmpImdBuilder=IndexMetaData.builder(request.index()).setRoutingNumShards(routingNumShards);
+        final IndexMetaData tmpImd=tmpImdBuilder.settings(actualIndexSettings).build();
         final IndexService indexService=indicesService.createIndex(nodeServicesProvider,tmpImd,Collections.emptyList());
         createdIndex=indexService.index();
         MapperService mapperService=indexService.mapperService();
-        if (mappings.containsKey(MapperService.DEFAULT_MAPPING)) {
-          try {
-            mapperService.merge(MapperService.DEFAULT_MAPPING,new CompressedXContent(XContentFactory.jsonBuilder().map(mappings.get(MapperService.DEFAULT_MAPPING)).string()),MapperService.MergeReason.MAPPING_UPDATE,request.updateAllTypes());
-          }
- catch (          Exception e) {
-            removalReason="failed on parsing default mapping on index creation";
-            throw new MapperParsingException("Failed to parse mapping [{}]: {}",e,MapperService.DEFAULT_MAPPING,e.getMessage());
-          }
+        try {
+          mapperService.merge(mappings,request.updateAllTypes());
         }
-        for (        Map.Entry<String,Map<String,Object>> entry : mappings.entrySet()) {
-          if (entry.getKey().equals(MapperService.DEFAULT_MAPPING)) {
-            continue;
-          }
-          try {
-            mapperService.merge(entry.getKey(),new CompressedXContent(XContentFactory.jsonBuilder().map(entry.getValue()).string()),MapperService.MergeReason.MAPPING_UPDATE,request.updateAllTypes());
-          }
- catch (          Exception e) {
-            removalReason="failed on parsing mappings on index creation";
-            throw new MapperParsingException("Failed to parse mapping [{}]: {}",e,entry.getKey(),e.getMessage());
-          }
+ catch (        MapperParsingException mpe) {
+          removalReason="failed on parsing default mapping/mappings on index creation";
+          throw mpe;
         }
         final QueryShardContext queryShardContext=indexService.newQueryShardContext();
         for (        Alias alias : request.aliases()) {
@@ -129,7 +124,7 @@
           MappingMetaData mappingMd=new MappingMetaData(mapper);
           mappingsMetaData.put(mapper.type(),mappingMd);
         }
-        final IndexMetaData.Builder indexMetaDataBuilder=IndexMetaData.builder(request.index()).settings(actualIndexSettings);
+        final IndexMetaData.Builder indexMetaDataBuilder=IndexMetaData.builder(request.index()).settings(actualIndexSettings).setRoutingNumShards(routingNumShards);
         for (        MappingMetaData mappingMd : mappingsMetaData.values()) {
           indexMetaDataBuilder.putMapping(mappingMd);
         }

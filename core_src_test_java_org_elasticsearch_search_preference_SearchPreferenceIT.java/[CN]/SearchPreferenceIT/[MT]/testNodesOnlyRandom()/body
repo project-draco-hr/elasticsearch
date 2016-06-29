@@ -1,0 +1,35 @@
+{
+  assertAcked(prepareCreate("test").setSettings(Settings.builder().put(indexSettings()).put(SETTING_NUMBER_OF_REPLICAS,between(1,maximumNumberOfReplicas()))));
+  ensureGreen();
+  client().prepareIndex("test","type1").setSource("field1","value1").execute().actionGet();
+  refresh();
+  final Client client=internalCluster().smartClient();
+  SearchRequestBuilder request=client.prepareSearch("test").setQuery(matchAllQuery()).setPreference("_only_nodes:*,nodes*");
+  assertSearchOnRandomNodes(request);
+  request=client.prepareSearch("test").setQuery(matchAllQuery()).setPreference("_only_nodes:*");
+  assertSearchOnRandomNodes(request);
+  ArrayList<String> allNodeIds=new ArrayList<>();
+  ArrayList<String> allNodeNames=new ArrayList<>();
+  ArrayList<String> allNodeHosts=new ArrayList<>();
+  NodesStatsResponse nodeStats=client().admin().cluster().prepareNodesStats().execute().actionGet();
+  for (  NodeStats node : nodeStats.getNodes()) {
+    allNodeIds.add(node.getNode().getId());
+    allNodeNames.add(node.getNode().getName());
+    allNodeHosts.add(node.getHostname());
+  }
+  String node_expr="_only_nodes:" + Strings.arrayToCommaDelimitedString(allNodeIds.toArray());
+  request=client.prepareSearch("test").setQuery(matchAllQuery()).setPreference(node_expr);
+  assertSearchOnRandomNodes(request);
+  node_expr="_only_nodes:" + Strings.arrayToCommaDelimitedString(allNodeNames.toArray());
+  request=client.prepareSearch("test").setQuery(matchAllQuery()).setPreference(node_expr);
+  assertSearchOnRandomNodes(request);
+  node_expr="_only_nodes:" + Strings.arrayToCommaDelimitedString(allNodeHosts.toArray());
+  request=client.prepareSearch("test").setQuery(matchAllQuery()).setPreference(node_expr);
+  assertSearchOnRandomNodes(request);
+  node_expr="_only_nodes:" + Strings.arrayToCommaDelimitedString(allNodeHosts.toArray());
+  request=client.prepareSearch("test").setQuery(matchAllQuery()).setPreference(node_expr);
+  assertSearchOnRandomNodes(request);
+  node_expr="_only_nodes:*,invalidnode";
+  request=client.prepareSearch("test").setQuery(matchAllQuery()).setPreference(node_expr);
+  assertSearchOnRandomNodes(request);
+}

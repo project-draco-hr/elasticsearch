@@ -1,0 +1,47 @@
+{
+  final DiscoveryNodes currentNodes=currentState.nodes();
+  final BatchResult.Builder<DiscoveryNode> results=BatchResult.builder();
+  boolean nodesChanged=false;
+  ClusterState.Builder newState=ClusterState.builder(currentState);
+  DiscoveryNodes.Builder nodesBuilder=DiscoveryNodes.builder(currentNodes);
+  if (currentNodes.getMasterNode() == null && joiningNodes.contains(BECOME_MASTER_TASK)) {
+    nodesBuilder.masterNodeId(currentNodes.getLocalNodeId());
+    ClusterBlocks clusterBlocks=ClusterBlocks.builder().blocks(currentState.blocks()).removeGlobalBlock(discoverySettings.getNoMasterBlock()).build();
+    newState.blocks(clusterBlocks);
+    newState.nodes(nodesBuilder);
+    nodesChanged=true;
+    final ClusterState tmpState=newState.build();
+    RoutingAllocation.Result result=routingService.getAllocationService().reroute(tmpState,"nodes joined");
+    newState=ClusterState.builder(tmpState);
+    if (result.changed()) {
+      newState.routingResult(result);
+    }
+    nodesBuilder=DiscoveryNodes.builder(tmpState.nodes());
+  }
+  if (nodesBuilder.isLocalNodeElectedMaster() == false) {
+    logger.trace("processing node joins, but we are not the master. current master: {}",currentNodes.getMasterNode());
+    throw new NotMasterException("Node [" + currentNodes.getLocalNode() + "] not master for join request");
+  }
+  for (  final DiscoveryNode node : joiningNodes) {
+    if (node.equals(BECOME_MASTER_TASK) || node.equals(FINISH_ELECTION_NOT_MASTER_TASK)) {
+    }
+ else     if (currentNodes.nodeExists(node.getId())) {
+      logger.debug("received a join request for an existing node [{}]",node);
+    }
+ else {
+      nodesChanged=true;
+      nodesBuilder.put(node);
+      for (      DiscoveryNode existingNode : currentNodes) {
+        if (node.getAddress().equals(existingNode.getAddress())) {
+          nodesBuilder.remove(existingNode.getId());
+          logger.warn("received join request from node [{}], but found existing node {} with same address, removing existing node",node,existingNode);
+        }
+      }
+    }
+    results.success(node);
+  }
+  if (nodesChanged) {
+    newState.nodes(nodesBuilder);
+  }
+  return results.build(newState.build());
+}
