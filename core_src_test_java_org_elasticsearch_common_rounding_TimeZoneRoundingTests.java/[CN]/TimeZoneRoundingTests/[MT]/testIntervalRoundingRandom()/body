@@ -4,22 +4,30 @@
     long interval=unit.toMillis(randomIntBetween(1,365));
     DateTimeZone tz=randomDateTimeZone();
     TimeZoneRounding rounding=new TimeZoneRounding.TimeIntervalRounding(interval,tz);
-    long date=Math.abs(randomLong() % (2 * (long)10e11));
-    try {
-      final long roundedDate=rounding.round(date);
-      final long nextRoundingValue=rounding.nextRoundingValue(roundedDate);
-      assertThat("Rounding should be idempotent",roundedDate,equalTo(rounding.round(roundedDate)));
-      assertThat("Rounded value smaller or equal than unrounded",roundedDate,lessThanOrEqualTo(date));
-      assertThat("Values smaller than rounded value should round further down",rounding.round(roundedDate - 1),lessThan(roundedDate));
-      if (tz.isFixed()) {
-        assertThat("NextRounding value should be greater than date",nextRoundingValue,greaterThan(roundedDate));
-        assertThat("NextRounding value should be interval from rounded value",nextRoundingValue - roundedDate,equalTo(interval));
-        assertThat("NextRounding value should be a rounded date",nextRoundingValue,equalTo(rounding.round(nextRoundingValue)));
-      }
+    long mainDate=Math.abs(randomLong() % (2 * (long)10e11));
+    if (randomBoolean()) {
+      mainDate=nastyDate(mainDate,tz,interval);
     }
- catch (    AssertionError e) {
-      logger.error("Rounding error at {}, timezone {}, interval: {},",new DateTime(date,tz),tz,interval);
-      throw e;
+    long previousRoundedValue=Long.MIN_VALUE;
+    for (long date=mainDate - 2 * interval; date < mainDate + 2 * interval; date+=interval / 2) {
+      try {
+        final long roundedDate=rounding.round(date);
+        final long nextRoundingValue=rounding.nextRoundingValue(roundedDate);
+        assertThat("Rounding should be idempotent",roundedDate,equalTo(rounding.round(roundedDate)));
+        assertThat("Rounded value smaller or equal than unrounded",roundedDate,lessThanOrEqualTo(date));
+        assertThat("Values smaller than rounded value should round further down",rounding.round(roundedDate - 1),lessThan(roundedDate));
+        assertThat("Rounding should be >= previous rounding value",roundedDate,greaterThanOrEqualTo(previousRoundedValue));
+        if (tz.isFixed()) {
+          assertThat("NextRounding value should be greater than date",nextRoundingValue,greaterThan(roundedDate));
+          assertThat("NextRounding value should be interval from rounded value",nextRoundingValue - roundedDate,equalTo(interval));
+          assertThat("NextRounding value should be a rounded date",nextRoundingValue,equalTo(rounding.round(nextRoundingValue)));
+        }
+        previousRoundedValue=roundedDate;
+      }
+ catch (      AssertionError e) {
+        logger.error("Rounding error at {}, timezone {}, interval: {},",new DateTime(date,tz),tz,interval);
+        throw e;
+      }
     }
   }
 }
