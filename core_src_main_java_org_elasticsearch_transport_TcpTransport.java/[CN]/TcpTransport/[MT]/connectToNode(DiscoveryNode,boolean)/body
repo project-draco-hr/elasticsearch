@@ -1,0 +1,49 @@
+{
+  if (!lifecycle.started()) {
+    throw new IllegalStateException("can't add nodes to a stopped transport");
+  }
+  if (node == null) {
+    throw new ConnectTransportException(null,"can't connect to a null node");
+  }
+  globalLock.readLock().lock();
+  try {
+    try (Releasable ignored=connectionLock.acquire(node.getId())){
+      if (!lifecycle.started()) {
+        throw new IllegalStateException("can't add nodes to a stopped transport");
+      }
+      NodeChannels nodeChannels=connectedNodes.get(node);
+      if (nodeChannels != null) {
+        return;
+      }
+      try {
+        if (light) {
+          nodeChannels=connectToChannelsLight(node);
+        }
+ else {
+          try {
+            nodeChannels=connectToChannels(node);
+          }
+ catch (          Throwable e) {
+            logger.trace("failed to connect to [{}], cleaning dangling connections",e,node);
+            throw e;
+          }
+        }
+        nodeChannels.start();
+        connectedNodes.put(node,nodeChannels);
+        if (logger.isDebugEnabled()) {
+          logger.debug("connected to node [{}]",node);
+        }
+        transportServiceAdapter.raiseNodeConnected(node);
+      }
+ catch (      ConnectTransportException e) {
+        throw e;
+      }
+catch (      Exception e) {
+        throw new ConnectTransportException(node,"general node connection failure",e);
+      }
+    }
+   }
+  finally {
+    globalLock.readLock().unlock();
+  }
+}
