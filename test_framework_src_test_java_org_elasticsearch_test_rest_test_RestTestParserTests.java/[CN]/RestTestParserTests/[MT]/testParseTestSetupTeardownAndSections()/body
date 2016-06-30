@@ -1,15 +1,42 @@
 {
-  parser=YamlXContent.yamlXContent.createParser("setup:\n" + "  - do:\n" + "        indices.create:\n"+ "          index: test_index\n"+ "\n"+ "---\n"+ "\"Get index mapping\":\n"+ "  - do:\n"+ "      indices.get_mapping:\n"+ "        index: test_index\n"+ "\n"+ "  - match: {test_index.test_type.properties.text.type:     string}\n"+ "  - match: {test_index.test_type.properties.text.analyzer: whitespace}\n"+ "\n"+ "---\n"+ "\"Get type mapping - pre 1.0\":\n"+ "\n"+ "  - skip:\n"+ "      version:     \"2.0.0 - \"\n"+ "      reason:      \"for newer versions the index name is always returned\"\n"+ "\n"+ "  - do:\n"+ "      indices.get_mapping:\n"+ "        index: test_index\n"+ "        type: test_type\n"+ "\n"+ "  - match: {test_type.properties.text.type:     string}\n"+ "  - match: {test_type.properties.text.analyzer: whitespace}\n");
+  final boolean includeSetup=randomBoolean();
+  final boolean includeTeardown=randomBoolean();
+  StringBuilder testSpecBuilder=new StringBuilder();
+  if (includeSetup) {
+    testSpecBuilder.append("---\n" + "setup:\n" + "  - do:\n"+ "        indices.create:\n"+ "          index: test_index\n"+ "\n");
+  }
+  if (includeTeardown) {
+    testSpecBuilder.append("---\n" + "teardown:\n" + "  - do:\n"+ "      indices.delete:\n"+ "        index: test_index\n"+ "\n");
+  }
+  parser=YamlXContent.yamlXContent.createParser(testSpecBuilder.toString() + "---\n" + "\"Get index mapping\":\n"+ "  - do:\n"+ "      indices.get_mapping:\n"+ "        index: test_index\n"+ "\n"+ "  - match: {test_index.test_type.properties.text.type:     string}\n"+ "  - match: {test_index.test_type.properties.text.analyzer: whitespace}\n"+ "\n"+ "---\n"+ "\"Get type mapping - pre 1.0\":\n"+ "\n"+ "  - skip:\n"+ "      version:     \"2.0.0 - \"\n"+ "      reason:      \"for newer versions the index name is always returned\"\n"+ "\n"+ "  - do:\n"+ "      indices.get_mapping:\n"+ "        index: test_index\n"+ "        type: test_type\n"+ "\n"+ "  - match: {test_type.properties.text.type:     string}\n"+ "  - match: {test_type.properties.text.analyzer: whitespace}\n");
   RestTestSuiteParser testParser=new RestTestSuiteParser();
   RestTestSuite restTestSuite=testParser.parse(new RestTestSuiteParseContext("api","suite",parser));
   assertThat(restTestSuite,notNullValue());
   assertThat(restTestSuite.getName(),equalTo("suite"));
   assertThat(restTestSuite.getSetupSection(),notNullValue());
-  assertThat(restTestSuite.getSetupSection().getSkipSection().isEmpty(),equalTo(true));
-  assertThat(restTestSuite.getSetupSection().getDoSections().size(),equalTo(1));
-  assertThat(restTestSuite.getSetupSection().getDoSections().get(0).getApiCallSection().getApi(),equalTo("indices.create"));
-  assertThat(restTestSuite.getSetupSection().getDoSections().get(0).getApiCallSection().getParams().size(),equalTo(1));
-  assertThat(restTestSuite.getSetupSection().getDoSections().get(0).getApiCallSection().getParams().get("index"),equalTo("test_index"));
+  if (includeSetup) {
+    assertThat(restTestSuite.getSetupSection().isEmpty(),equalTo(false));
+    assertThat(restTestSuite.getSetupSection().getSkipSection().isEmpty(),equalTo(true));
+    assertThat(restTestSuite.getSetupSection().getDoSections().size(),equalTo(1));
+    assertThat(restTestSuite.getSetupSection().getDoSections().get(0).getApiCallSection().getApi(),equalTo("indices.create"));
+    assertThat(restTestSuite.getSetupSection().getDoSections().get(0).getApiCallSection().getParams().size(),equalTo(1));
+    assertThat(restTestSuite.getSetupSection().getDoSections().get(0).getApiCallSection().getParams().get("index"),equalTo("test_index"));
+  }
+ else {
+    assertThat(restTestSuite.getSetupSection().isEmpty(),equalTo(true));
+  }
+  assertThat(restTestSuite.getTeardownSection(),notNullValue());
+  if (includeTeardown) {
+    assertThat(restTestSuite.getTeardownSection().isEmpty(),equalTo(false));
+    assertThat(restTestSuite.getTeardownSection().getSkipSection().isEmpty(),equalTo(true));
+    assertThat(restTestSuite.getTeardownSection().getDoSections().size(),equalTo(1));
+    assertThat(restTestSuite.getTeardownSection().getDoSections().get(0).getApiCallSection().getApi(),equalTo("indices.delete"));
+    assertThat(restTestSuite.getTeardownSection().getDoSections().get(0).getApiCallSection().getParams().size(),equalTo(1));
+    assertThat(restTestSuite.getTeardownSection().getDoSections().get(0).getApiCallSection().getParams().get("index"),equalTo("test_index"));
+  }
+ else {
+    assertThat(restTestSuite.getTeardownSection().isEmpty(),equalTo(true));
+  }
   assertThat(restTestSuite.getTestSections().size(),equalTo(2));
   assertThat(restTestSuite.getTestSections().get(0).getName(),equalTo("Get index mapping"));
   assertThat(restTestSuite.getTestSections().get(0).getSkipSection().isEmpty(),equalTo(true));
