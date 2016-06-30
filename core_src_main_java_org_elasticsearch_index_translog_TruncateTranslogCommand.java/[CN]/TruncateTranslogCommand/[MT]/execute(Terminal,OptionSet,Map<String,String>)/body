@@ -1,0 +1,57 @@
+{
+  boolean batch=options.has(batchMode);
+  Path translogPath=getTranslogPath(options);
+  Path idxLocation=translogPath.getParent().resolve("index");
+  if (Files.exists(translogPath) == false || Files.isDirectory(translogPath) == false) {
+    throw new ElasticsearchException("translog directory [" + translogPath + "], must exist and be a directory");
+  }
+  if (Files.exists(idxLocation) == false || Files.isDirectory(idxLocation) == false) {
+    throw new ElasticsearchException("unable to find a shard at [" + idxLocation + "], which must exist and be a directory");
+  }
+  try (Directory dir=FSDirectory.open(idxLocation,NativeFSLockFactory.INSTANCE);Lock writeLock=dir.obtainLock(IndexWriter.WRITE_LOCK_NAME)){
+    Set<Path> translogFiles;
+    try {
+      terminal.println("Checking existing translog files");
+      translogFiles=filesInDirectory(translogPath);
+    }
+ catch (    IOException e) {
+      terminal.println("encountered IOException while listing directory, aborting...");
+      throw new ElasticsearchException("failed to find existing translog files",e);
+    }
+    warnAboutDeletingFiles(terminal,translogFiles,batch);
+    List<IndexCommit> commits;
+    try {
+      terminal.println("Reading translog UUID information from Lucene commit from shard at [" + idxLocation + "]");
+      commits=DirectoryReader.listCommits(dir);
+    }
+ catch (    IndexNotFoundException infe) {
+      throw new ElasticsearchException("unable to find a valid shard at [" + idxLocation + "]",infe);
+    }
+    Map<String,String> commitData=commits.get(commits.size() - 1).getUserData();
+    String translogGeneration=commitData.get(Translog.TRANSLOG_GENERATION_KEY);
+    String translogUUID=commitData.get(Translog.TRANSLOG_UUID_KEY);
+    if (translogGeneration == null || translogUUID == null) {
+      throw new ElasticsearchException("shard must have a valid translog generation and UUID but got: [{}] and: [{}]",translogGeneration,translogUUID);
+    }
+    terminal.println("Translog Generation: " + translogGeneration);
+    terminal.println("Translog UUID      : " + translogUUID);
+    Path tempEmptyCheckpoint=translogPath.resolve("temp-" + Translog.CHECKPOINT_FILE_NAME);
+    Path realEmptyCheckpoint=translogPath.resolve(Translog.CHECKPOINT_FILE_NAME);
+    Path tempEmptyTranslog=translogPath.resolve("temp-" + Translog.TRANSLOG_FILE_PREFIX + translogGeneration+ Translog.TRANSLOG_FILE_SUFFIX);
+    Path realEmptyTranslog=translogPath.resolve(Translog.TRANSLOG_FILE_PREFIX + translogGeneration + Translog.TRANSLOG_FILE_SUFFIX);
+    long gen=Long.parseLong(translogGeneration);
+    int translogLen=writeEmptyTranslog(tempEmptyTranslog,translogUUID);
+    writeEmptyCheckpoint(tempEmptyCheckpoint,translogLen,gen);
+    terminal.println("Removing existing translog files");
+    IOUtils.rm(translogFiles.toArray(new Path[]{}));
+    terminal.println("Creating new empty checkpoint at [" + realEmptyCheckpoint + "]");
+    Files.move(tempEmptyCheckpoint,realEmptyCheckpoint,StandardCopyOption.ATOMIC_MOVE);
+    terminal.println("Creating new empty translog at [" + realEmptyTranslog + "]");
+    Files.move(tempEmptyTranslog,realEmptyTranslog,StandardCopyOption.ATOMIC_MOVE);
+    IOUtils.fsync(translogPath,true);
+  }
+ catch (  LockObtainFailedException lofe) {
+    throw new ElasticsearchException("Failed to lock shard's directory at [" + idxLocation + "], is Elasticsearch still running?");
+  }
+  terminal.println("Done.");
+}
