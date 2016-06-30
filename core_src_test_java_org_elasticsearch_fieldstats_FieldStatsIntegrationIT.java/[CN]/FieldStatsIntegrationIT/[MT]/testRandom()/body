@@ -1,9 +1,9 @@
 {
-  assertAcked(prepareCreate("test").addMapping("test","string","type=text","date","type=date","double","type=double","float","type=float","long","type=long","integer","type=integer","short","type=short","byte","type=byte"));
+  assertAcked(prepareCreate("test").addMapping("test","string","type=text","date","type=date","double","type=double","half_float","type=half_float","float","type=float","long","type=long","integer","type=integer","short","type=short","byte","type=byte"));
   ensureGreen("test");
-  assertAcked(prepareCreate("test1").addMapping("test","string","type=text,index=false","date","type=date,index=false","double","type=double,index=false","float","type=float,index=false","long","type=long,index=false","integer","type=integer,index=false","short","type=short,index=false","byte","type=byte,index=false"));
+  assertAcked(prepareCreate("test1").addMapping("test","string","type=text,index=false","date","type=date,index=false","double","type=double,index=false","half_float","type=half_float","float","type=float,index=false","long","type=long,index=false","integer","type=integer,index=false","short","type=short,index=false","byte","type=byte,index=false"));
   ensureGreen("test1");
-  assertAcked(prepareCreate("test3").addMapping("test","string","type=text,index=false","date","type=date,index=false","double","type=double,index=false","float","type=float,index=false","long","type=long,index=false","integer","type=integer,index=false","short","type=short,index=false","byte","type=byte,index=false"));
+  assertAcked(prepareCreate("test3").addMapping("test","string","type=text,index=false","date","type=date,index=false","double","type=double,index=false","half_float","type=half_float","float","type=float,index=false","long","type=long,index=false","integer","type=integer,index=false","short","type=short,index=false","byte","type=byte,index=false"));
   ensureGreen("test3");
   long minByte=Byte.MAX_VALUE;
   long maxByte=Byte.MIN_VALUE;
@@ -13,10 +13,12 @@
   long maxInt=Integer.MIN_VALUE;
   long minLong=Long.MAX_VALUE;
   long maxLong=Long.MIN_VALUE;
-  double minFloat=Float.MAX_VALUE;
-  double maxFloat=Float.MIN_VALUE;
-  double minDouble=Double.MAX_VALUE;
-  double maxDouble=Double.MIN_VALUE;
+  double minHalfFloat=Double.POSITIVE_INFINITY;
+  double maxHalfFloat=Double.NEGATIVE_INFINITY;
+  double minFloat=Double.POSITIVE_INFINITY;
+  double maxFloat=Double.NEGATIVE_INFINITY;
+  double minDouble=Double.POSITIVE_INFINITY;
+  double maxDouble=Double.NEGATIVE_INFINITY;
   String minString=new String(Character.toChars(1114111));
   String maxString="0";
   int numDocs=scaledRandomIntBetween(128,1024);
@@ -34,6 +36,10 @@
     long l=randomLong();
     minLong=Math.min(minLong,l);
     maxLong=Math.max(maxLong,l);
+    float hf=randomFloat();
+    hf=HalfFloatPoint.sortableShortToHalfFloat(HalfFloatPoint.halfFloatToSortableShort(hf));
+    minHalfFloat=Math.min(minHalfFloat,hf);
+    maxHalfFloat=Math.max(maxHalfFloat,hf);
     float f=randomFloat();
     minFloat=Math.min(minFloat,f);
     maxFloat=Math.max(maxFloat,f);
@@ -47,12 +53,12 @@
     if (str.compareTo(maxString) > 0) {
       maxString=str;
     }
-    request.add(client().prepareIndex("test","test",Integer.toString(doc)).setSource("byte",b,"short",s,"integer",i,"long",l,"float",f,"double",d,"string",str));
+    request.add(client().prepareIndex("test","test",Integer.toString(doc)).setSource("byte",b,"short",s,"integer",i,"long",l,"half_float",hf,"float",f,"double",d,"string",str));
   }
   indexRandom(true,false,request);
-  FieldStatsResponse response=client().prepareFieldStats().setFields("byte","short","integer","long","float","double","string").get();
+  FieldStatsResponse response=client().prepareFieldStats().setFields("byte","short","integer","long","half_float","float","double","string").get();
   assertAllSuccessful(response);
-  for (  FieldStats stats : response.getAllFieldStats().values()) {
+  for (  FieldStats<?> stats : response.getAllFieldStats().values()) {
     assertThat(stats.getMaxDoc(),equalTo((long)numDocs));
     assertThat(stats.getDocCount(),equalTo((long)numDocs));
     assertThat(stats.getDensity(),equalTo(100));
@@ -65,6 +71,8 @@
   assertThat(response.getAllFieldStats().get("integer").getMaxValue(),equalTo(maxInt));
   assertThat(response.getAllFieldStats().get("long").getMinValue(),equalTo(minLong));
   assertThat(response.getAllFieldStats().get("long").getMaxValue(),equalTo(maxLong));
+  assertThat(response.getAllFieldStats().get("half_float").getMinValue(),equalTo(minHalfFloat));
+  assertThat(response.getAllFieldStats().get("half_float").getMaxValue(),equalTo(maxHalfFloat));
   assertThat(response.getAllFieldStats().get("float").getMinValue(),equalTo(minFloat));
   assertThat(response.getAllFieldStats().get("float").getMaxValue(),equalTo(maxFloat));
   assertThat(response.getAllFieldStats().get("double").getMinValue(),equalTo(minDouble));

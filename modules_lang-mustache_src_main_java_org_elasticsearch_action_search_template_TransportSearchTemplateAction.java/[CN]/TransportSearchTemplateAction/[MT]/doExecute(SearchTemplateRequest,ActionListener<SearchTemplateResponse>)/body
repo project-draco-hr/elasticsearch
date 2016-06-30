@@ -1,0 +1,37 @@
+{
+  final SearchTemplateResponse response=new SearchTemplateResponse();
+  try {
+    Script script=new Script(request.getScript(),request.getScriptType(),TEMPLATE_LANG,request.getScriptParams());
+    ExecutableScript executable=scriptService.executable(script,SEARCH,emptyMap());
+    BytesReference source=(BytesReference)executable.run();
+    response.setSource(source);
+    if (request.isSimulate()) {
+      listener.onResponse(response);
+      return;
+    }
+    SearchRequest searchRequest=request.getRequest();
+    try (XContentParser parser=XContentFactory.xContent(source).createParser(source)){
+      SearchSourceBuilder builder=SearchSourceBuilder.searchSource();
+      builder.parseXContent(new QueryParseContext(queryRegistry,parser,parseFieldMatcher),aggsParsers,suggesters);
+      searchRequest.source(builder);
+      searchAction.execute(searchRequest,new ActionListener<SearchResponse>(){
+        @Override public void onResponse(        SearchResponse searchResponse){
+          try {
+            response.setResponse(searchResponse);
+            listener.onResponse(response);
+          }
+ catch (          Throwable t) {
+            listener.onFailure(t);
+          }
+        }
+        @Override public void onFailure(        Throwable t){
+          listener.onFailure(t);
+        }
+      }
+);
+    }
+   }
+ catch (  Throwable t) {
+    listener.onFailure(t);
+  }
+}

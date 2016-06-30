@@ -1,18 +1,19 @@
 {
   SnapshotsInProgress snapshotsInProgress=event.state().custom(SnapshotsInProgress.TYPE);
-  Map<SnapshotId,SnapshotShards> survivors=new HashMap<>();
-  for (  Map.Entry<SnapshotId,SnapshotShards> entry : shardSnapshots.entrySet()) {
-    if (snapshotsInProgress != null && snapshotsInProgress.snapshot(entry.getKey()) != null) {
+  Map<Snapshot,SnapshotShards> survivors=new HashMap<>();
+  for (  Map.Entry<Snapshot,SnapshotShards> entry : shardSnapshots.entrySet()) {
+    final Snapshot snapshot=entry.getKey();
+    if (snapshotsInProgress != null && snapshotsInProgress.snapshot(snapshot) != null) {
       survivors.put(entry.getKey(),entry.getValue());
     }
   }
-  Map<SnapshotId,Map<ShardId,IndexShardSnapshotStatus>> newSnapshots=new HashMap<>();
+  Map<Snapshot,Map<ShardId,IndexShardSnapshotStatus>> newSnapshots=new HashMap<>();
   final String localNodeId=clusterService.localNode().getId();
   if (snapshotsInProgress != null) {
     for (    SnapshotsInProgress.Entry entry : snapshotsInProgress.entries()) {
       if (entry.state() == SnapshotsInProgress.State.STARTED) {
         Map<ShardId,IndexShardSnapshotStatus> startedShards=new HashMap<>();
-        SnapshotShards snapshotShards=shardSnapshots.get(entry.snapshotId());
+        SnapshotShards snapshotShards=shardSnapshots.get(entry.snapshot());
         for (        ObjectObjectCursor<ShardId,SnapshotsInProgress.ShardSnapshotStatus> shard : entry.shards()) {
           if (localNodeId.equals(shard.value.nodeId())) {
             if (shard.value.state() == SnapshotsInProgress.State.INIT && (snapshotShards == null || !snapshotShards.shards.containsKey(shard.key))) {
@@ -22,20 +23,20 @@
           }
         }
         if (!startedShards.isEmpty()) {
-          newSnapshots.put(entry.snapshotId(),startedShards);
+          newSnapshots.put(entry.snapshot(),startedShards);
           if (snapshotShards != null) {
             Map<ShardId,IndexShardSnapshotStatus> shards=new HashMap<>();
             shards.putAll(snapshotShards.shards);
             shards.putAll(startedShards);
-            survivors.put(entry.snapshotId(),new SnapshotShards(unmodifiableMap(shards)));
+            survivors.put(entry.snapshot(),new SnapshotShards(unmodifiableMap(shards)));
           }
  else {
-            survivors.put(entry.snapshotId(),new SnapshotShards(unmodifiableMap(startedShards)));
+            survivors.put(entry.snapshot(),new SnapshotShards(unmodifiableMap(startedShards)));
           }
         }
       }
  else       if (entry.state() == SnapshotsInProgress.State.ABORTED) {
-        SnapshotShards snapshotShards=shardSnapshots.get(entry.snapshotId());
+        SnapshotShards snapshotShards=shardSnapshots.get(entry.snapshot());
         if (snapshotShards != null) {
           for (          ObjectObjectCursor<ShardId,SnapshotsInProgress.ShardSnapshotStatus> shard : entry.shards()) {
             IndexShardSnapshotStatus snapshotStatus=snapshotShards.shards.get(shard.key);
@@ -46,15 +47,15 @@ case STARTED:
                 snapshotStatus.abort();
               break;
 case FINALIZE:
-            logger.debug("[{}] trying to cancel snapshot on shard [{}] that is finalizing, letting it finish",entry.snapshotId(),shard.key);
+            logger.debug("[{}] trying to cancel snapshot on shard [{}] that is finalizing, letting it finish",entry.snapshot(),shard.key);
           break;
 case DONE:
-        logger.debug("[{}] trying to cancel snapshot on the shard [{}] that is already done, updating status on the master",entry.snapshotId(),shard.key);
-      updateIndexShardSnapshotStatus(entry.snapshotId(),shard.key,new SnapshotsInProgress.ShardSnapshotStatus(event.state().nodes().getLocalNodeId(),SnapshotsInProgress.State.SUCCESS));
+        logger.debug("[{}] trying to cancel snapshot on the shard [{}] that is already done, updating status on the master",entry.snapshot(),shard.key);
+      updateIndexShardSnapshotStatus(entry.snapshot(),shard.key,new SnapshotsInProgress.ShardSnapshotStatus(event.state().nodes().getLocalNodeId(),SnapshotsInProgress.State.SUCCESS));
     break;
 case FAILURE:
-  logger.debug("[{}] trying to cancel snapshot on the shard [{}] that has already failed, updating status on the master",entry.snapshotId(),shard.key);
-updateIndexShardSnapshotStatus(entry.snapshotId(),shard.key,new SnapshotsInProgress.ShardSnapshotStatus(event.state().nodes().getLocalNodeId(),SnapshotsInProgress.State.FAILED,snapshotStatus.failure()));
+  logger.debug("[{}] trying to cancel snapshot on the shard [{}] that has already failed, updating status on the master",entry.snapshot(),shard.key);
+updateIndexShardSnapshotStatus(entry.snapshot(),shard.key,new SnapshotsInProgress.ShardSnapshotStatus(event.state().nodes().getLocalNodeId(),SnapshotsInProgress.State.FAILED,snapshotStatus.failure()));
 break;
 default :
 throw new IllegalStateException("Unknown snapshot shard stage " + snapshotStatus.stage());
@@ -77,7 +78,7 @@ shutdownLock.unlock();
 }
 if (newSnapshots.isEmpty() == false) {
 Executor executor=threadPool.executor(ThreadPool.Names.SNAPSHOT);
-for (final Map.Entry<SnapshotId,Map<ShardId,IndexShardSnapshotStatus>> entry : newSnapshots.entrySet()) {
+for (final Map.Entry<Snapshot,Map<ShardId,IndexShardSnapshotStatus>> entry : newSnapshots.entrySet()) {
 for (final Map.Entry<ShardId,IndexShardSnapshotStatus> shardEntry : entry.getValue().entrySet()) {
 final ShardId shardId=shardEntry.getKey();
 try {
