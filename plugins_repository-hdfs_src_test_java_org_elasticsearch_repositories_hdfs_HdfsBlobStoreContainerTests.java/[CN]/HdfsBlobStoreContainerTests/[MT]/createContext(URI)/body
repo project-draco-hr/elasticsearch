@@ -1,0 +1,36 @@
+{
+  Configuration cfg=new Configuration(true);
+  cfg.setClassLoader(HdfsRepository.class.getClassLoader());
+  cfg.reloadConfiguration();
+  Constructor<?> ctor;
+  Subject subject;
+  try {
+    Class<?> clazz=Class.forName("org.apache.hadoop.security.User");
+    ctor=clazz.getConstructor(String.class);
+    ctor.setAccessible(true);
+  }
+ catch (  ClassNotFoundException|NoSuchMethodException e) {
+    throw new RuntimeException(e);
+  }
+  try {
+    Principal principal=(Principal)ctor.newInstance(System.getProperty("user.name"));
+    subject=new Subject(false,Collections.singleton(principal),Collections.emptySet(),Collections.emptySet());
+  }
+ catch (  InstantiationException|IllegalAccessException|InvocationTargetException e) {
+    throw new RuntimeException(e);
+  }
+  cfg.setBoolean("fs.hdfs.impl.disable.cache",true);
+  cfg.set(String.format("fs.AbstractFileSystem.%s.impl",uri.getScheme()),TestingFs.class.getName());
+  return Subject.doAs(subject,new PrivilegedAction<FileContext>(){
+    @Override public FileContext run(){
+      try {
+        TestingFs fs=(TestingFs)AbstractFileSystem.get(uri,cfg);
+        return FileContext.getFileContext(fs,cfg);
+      }
+ catch (      UnsupportedFileSystemException e) {
+        throw new RuntimeException(e);
+      }
+    }
+  }
+);
+}
