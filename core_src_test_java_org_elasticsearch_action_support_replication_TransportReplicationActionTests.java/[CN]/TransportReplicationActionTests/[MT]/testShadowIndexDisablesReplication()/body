@@ -8,12 +8,14 @@
   metaData.put(IndexMetaData.builder(metaData.get(index)).settings(settings));
   state=ClusterState.builder(state).metaData(metaData).build();
   setState(clusterService,state);
-  Action.PrimaryOperationTransportHandler primaryPhase=action.new PrimaryOperationTransportHandler(){
+  AtomicBoolean executed=new AtomicBoolean();
+  action.new AsyncPrimaryAction(new Request(shardId),createTransportChannel(new PlainActionFuture<>()),null){
     @Override protected ReplicationOperation<Request,Request,Action.PrimaryResult> createReplicatedOperation(    Request request,    ActionListener<Action.PrimaryResult> actionListener,    Action.PrimaryShardReference primaryShardReference,    boolean executeOnReplicas){
       assertFalse(executeOnReplicas);
+      assertFalse(executed.getAndSet(true));
       return new NoopReplicationOperation(request,actionListener);
     }
   }
-;
-  primaryPhase.messageReceived(new Request(shardId),createTransportChannel(new PlainActionFuture<>()),null);
+.run();
+  assertThat(executed.get(),equalTo(true));
 }
