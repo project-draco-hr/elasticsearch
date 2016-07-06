@@ -1,0 +1,36 @@
+{
+  Exception cause=new Exception();
+  RestStatus status=randomFrom(RestStatus.values());
+  ElasticsearchStatusException wrapped=RemoteScrollableHitSource.wrapExceptionToPreserveStatus(status.getStatus(),null,cause);
+  assertEquals(status,wrapped.status());
+  assertEquals(cause,wrapped.getCause());
+  assertEquals("No error body.",wrapped.getMessage());
+  HttpEntity okEntity=new StringEntity("test body",StandardCharsets.UTF_8);
+  wrapped=RemoteScrollableHitSource.wrapExceptionToPreserveStatus(status.getStatus(),okEntity,cause);
+  assertEquals(status,wrapped.status());
+  assertEquals(cause,wrapped.getCause());
+  assertEquals("body=test body",wrapped.getMessage());
+  IOException badEntityException=new IOException();
+  HttpEntity badEntity=mock(HttpEntity.class);
+  when(badEntity.getContent()).thenThrow(badEntityException);
+  wrapped=RemoteScrollableHitSource.wrapExceptionToPreserveStatus(status.getStatus(),badEntity,cause);
+  assertEquals(status,wrapped.status());
+  assertEquals(cause,wrapped.getCause());
+  assertEquals("Failed to extract body.",wrapped.getMessage());
+  assertEquals(badEntityException,wrapped.getSuppressed()[0]);
+  int notAnHttpStatus=-1;
+  assertNull(RestStatus.fromCode(notAnHttpStatus));
+  wrapped=RemoteScrollableHitSource.wrapExceptionToPreserveStatus(notAnHttpStatus,null,cause);
+  assertEquals(RestStatus.INTERNAL_SERVER_ERROR,wrapped.status());
+  assertEquals(cause,wrapped.getCause());
+  assertEquals("Couldn't extract status [" + notAnHttpStatus + "]. No error body.",wrapped.getMessage());
+  wrapped=RemoteScrollableHitSource.wrapExceptionToPreserveStatus(notAnHttpStatus,okEntity,cause);
+  assertEquals(RestStatus.INTERNAL_SERVER_ERROR,wrapped.status());
+  assertEquals(cause,wrapped.getCause());
+  assertEquals("Couldn't extract status [" + notAnHttpStatus + "]. body=test body",wrapped.getMessage());
+  wrapped=RemoteScrollableHitSource.wrapExceptionToPreserveStatus(notAnHttpStatus,badEntity,cause);
+  assertEquals(RestStatus.INTERNAL_SERVER_ERROR,wrapped.status());
+  assertEquals(cause,wrapped.getCause());
+  assertEquals("Couldn't extract status [" + notAnHttpStatus + "]. Failed to extract body.",wrapped.getMessage());
+  assertEquals(badEntityException,wrapped.getSuppressed()[0]);
+}
