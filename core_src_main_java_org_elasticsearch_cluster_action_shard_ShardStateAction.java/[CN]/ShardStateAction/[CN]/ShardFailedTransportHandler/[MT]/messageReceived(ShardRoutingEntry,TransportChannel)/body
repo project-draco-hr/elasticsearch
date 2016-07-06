@@ -1,13 +1,14 @@
 {
   logger.warn("{} received shard failed for {}",request.failure,request.shardRouting.shardId(),request);
-  clusterService.submitStateUpdateTask("shard-failed (" + request.shardRouting + "), message ["+ request.message+ "]",request,ClusterStateTaskConfig.build(Priority.HIGH),shardFailedClusterStateTaskExecutor,new ClusterStateTaskListener(){
-    @Override public void onFailure(    String source,    Throwable t){
-      logger.error("{} unexpected failure while failing shard [{}]",t,request.shardRouting.shardId(),request.shardRouting);
+  clusterService.submitStateUpdateTask("shard-failed",request,ClusterStateTaskConfig.build(Priority.HIGH),shardFailedClusterStateTaskExecutor,new ClusterStateTaskListener(){
+    @Override public void onFailure(    String source,    Exception e){
+      logger.error("{} unexpected failure while failing shard [{}]",e,request.shardRouting.shardId(),request.shardRouting);
       try {
-        channel.sendResponse(t);
+        channel.sendResponse(e);
       }
- catch (      Throwable channelThrowable) {
-        logger.warn("{} failed to send failure [{}] while failing shard [{}]",channelThrowable,request.shardRouting.shardId(),t,request.shardRouting);
+ catch (      Exception channelException) {
+        channelException.addSuppressed(e);
+        logger.warn("{} failed to send failure [{}] while failing shard [{}]",channelException,request.shardRouting.shardId(),e,request.shardRouting);
       }
     }
     @Override public void onNoLongerMaster(    String source){
@@ -15,16 +16,16 @@
       try {
         channel.sendResponse(new NotMasterException(source));
       }
- catch (      Throwable channelThrowable) {
-        logger.warn("{} failed to send no longer master while failing shard [{}]",channelThrowable,request.shardRouting.shardId(),request.shardRouting);
+ catch (      Exception channelException) {
+        logger.warn("{} failed to send no longer master while failing shard [{}]",channelException,request.shardRouting.shardId(),request.shardRouting);
       }
     }
     @Override public void clusterStateProcessed(    String source,    ClusterState oldState,    ClusterState newState){
       try {
         channel.sendResponse(TransportResponse.Empty.INSTANCE);
       }
- catch (      Throwable channelThrowable) {
-        logger.warn("{} failed to send response while failing shard [{}]",channelThrowable,request.shardRouting.shardId(),request.shardRouting);
+ catch (      Exception channelException) {
+        logger.warn("{} failed to send response while failing shard [{}]",channelException,request.shardRouting.shardId(),request.shardRouting);
       }
     }
   }
