@@ -1,0 +1,31 @@
+{
+  SearchResponse response=client().prepareSearch("idx").addAggregation(histogram("histo").field(SINGLE_VALUED_FIELD_NAME).interval(interval).subAggregation(sum("sum").field(SINGLE_VALUED_FIELD_NAME))).execute().actionGet();
+  assertSearchResponse(response);
+  Histogram histo=response.getAggregations().get("histo");
+  assertThat(histo,notNullValue());
+  assertThat(histo.getName(),equalTo("histo"));
+  assertThat(histo.getBuckets().size(),equalTo(numValueBuckets));
+  Object[] propertiesKeys=(Object[])histo.getProperty("_key");
+  Object[] propertiesDocCounts=(Object[])histo.getProperty("_count");
+  Object[] propertiesCounts=(Object[])histo.getProperty("sum.value");
+  List<Histogram.Bucket> buckets=new ArrayList<Histogram.Bucket>(histo.getBuckets());
+  for (int i=0; i < numValueBuckets; ++i) {
+    Histogram.Bucket bucket=buckets.get(i);
+    assertThat(bucket,notNullValue());
+    assertThat(((Number)bucket.getKey()).longValue(),equalTo((long)i * interval));
+    assertThat(bucket.getDocCount(),equalTo(valueCounts[i]));
+    assertThat(bucket.getAggregations().asList().isEmpty(),is(false));
+    Sum sum=bucket.getAggregations().get("sum");
+    assertThat(sum,notNullValue());
+    long s=0;
+    for (int j=0; j < numDocs; ++j) {
+      if ((j + 1) / interval == i) {
+        s+=j + 1;
+      }
+    }
+    assertThat(sum.getValue(),equalTo((double)s));
+    assertEquals(propertiesKeys[i],(long)i * interval);
+    assertThat(propertiesDocCounts[i],equalTo(valueCounts[i]));
+    assertThat(propertiesCounts[i],equalTo((double)s));
+  }
+}
