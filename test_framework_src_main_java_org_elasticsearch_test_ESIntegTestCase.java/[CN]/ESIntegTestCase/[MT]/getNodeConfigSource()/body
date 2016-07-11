@@ -1,0 +1,43 @@
+{
+  SuppressLocalMode noLocal=getAnnotation(this.getClass(),SuppressLocalMode.class);
+  SuppressNetworkMode noNetwork=getAnnotation(this.getClass(),SuppressNetworkMode.class);
+  String nodeMode=InternalTestCluster.configuredNodeMode();
+  Settings.Builder networkSettings=Settings.builder();
+  if (noLocal != null && noNetwork != null) {
+    throw new IllegalStateException("Can't suppress both network and local mode");
+  }
+ else   if (noLocal != null) {
+    nodeMode="network";
+    if (addMockTransportService()) {
+      networkSettings.put(NetworkModule.TRANSPORT_TYPE_KEY,MockTcpTransportPlugin.MOCK_TCP_TRANSPORT_NAME);
+    }
+  }
+ else   if (noNetwork != null) {
+    nodeMode="local";
+    if (addMockTransportService()) {
+      networkSettings.put(NetworkModule.TRANSPORT_TYPE_KEY,AssertingLocalTransport.ASSERTING_TRANSPORT_NAME);
+    }
+  }
+  final boolean isNetwork="network".equals(nodeMode);
+  NodeConfigurationSource nodeConfigurationSource=new NodeConfigurationSource(){
+    @Override public Settings nodeSettings(    int nodeOrdinal){
+      return Settings.builder().put(NetworkModule.HTTP_ENABLED.getKey(),false).put(networkSettings.build()).put(ESIntegTestCase.this.nodeSettings(nodeOrdinal)).build();
+    }
+    @Override public Collection<Class<? extends Plugin>> nodePlugins(){
+      return ESIntegTestCase.this.nodePlugins();
+    }
+    @Override public Settings transportClientSettings(){
+      return Settings.builder().put(networkSettings.build()).put(ESIntegTestCase.this.transportClientSettings()).build();
+    }
+    @Override public Collection<Class<? extends Plugin>> transportClientPlugins(){
+      Collection<Class<? extends Plugin>> plugins=ESIntegTestCase.this.transportClientPlugins();
+      if (isNetwork) {
+        plugins=new ArrayList<>(plugins);
+        plugins.add(MockTcpTransportPlugin.class);
+      }
+      return Collections.unmodifiableCollection(plugins);
+    }
+  }
+;
+  return new Tuple<>(nodeMode,nodeConfigurationSource);
+}
