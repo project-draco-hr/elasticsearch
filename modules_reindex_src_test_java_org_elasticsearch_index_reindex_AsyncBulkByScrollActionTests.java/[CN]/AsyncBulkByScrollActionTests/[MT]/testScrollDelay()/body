@@ -2,7 +2,7 @@
   AtomicReference<TimeValue> capturedDelay=new AtomicReference<>();
   AtomicReference<Runnable> capturedCommand=new AtomicReference<>();
   threadPool.shutdown();
-  threadPool=new ThreadPool(getTestName()){
+  threadPool=new TestThreadPool(getTestName()){
     @Override public ScheduledFuture<?> schedule(    TimeValue delay,    String name,    Runnable command){
       capturedDelay.set(delay);
       capturedCommand.set(command);
@@ -12,15 +12,23 @@
 ;
   DummyAbstractAsyncBulkByScrollAction action=new DummyAbstractAsyncBulkByScrollAction();
   action.setScroll(scrollId());
+  firstSearchRequest.scroll(timeValueSeconds(10));
   testTask.rethrottle(1f);
-  action.setLastBatchStartTime(System.nanoTime());
-  action.startNextScroll(100);
+  action.startNextScroll(timeValueNanos(System.nanoTime()),100);
   assertThat(client.lastScroll.get().request.scroll().keepAlive().seconds(),either(equalTo(110L)).or(equalTo(109L)));
   InternalSearchHit hit=new InternalSearchHit(0,"id",new Text("type"),emptyMap());
   InternalSearchHits hits=new InternalSearchHits(new InternalSearchHit[]{hit},0,0);
-  InternalSearchResponse searchResponse=new InternalSearchResponse(hits,null,null,null,false,false);
-  client.lastScroll.get().listener.onResponse(new SearchResponse(searchResponse,scrollId(),5,4,randomLong(),null));
-  assertThat(capturedDelay.get().seconds(),either(equalTo(100L)).or(equalTo(99L)));
+  InternalSearchResponse internalResponse=new InternalSearchResponse(hits,null,null,null,false,false);
+  SearchResponse searchResponse=new SearchResponse(internalResponse,scrollId(),5,4,randomLong(),null);
+  if (randomBoolean()) {
+    client.lastScroll.get().listener.onResponse(searchResponse);
+    assertThat(capturedDelay.get().seconds(),either(equalTo(100L)).or(equalTo(99L)));
+  }
+ else {
+    testTask.rethrottle(10f);
+    client.lastScroll.get().listener.onResponse(searchResponse);
+    assertThat(capturedDelay.get().seconds(),either(equalTo(10L)).or(equalTo(9L)));
+  }
   capturedCommand.get().run();
   assertEquals(capturedDelay.get(),testTask.getStatus().getThrottled());
 }

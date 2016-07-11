@@ -1,0 +1,57 @@
+{
+  final ExplainRequest explainRequest=new ExplainRequest(request.param("index"),request.param("type"),request.param("id"));
+  explainRequest.parent(request.param("parent"));
+  explainRequest.routing(request.param("routing"));
+  explainRequest.preference(request.param("preference"));
+  String queryString=request.param("q");
+  if (RestActions.hasBodyContent(request)) {
+    BytesReference restContent=RestActions.getRestContent(request);
+    explainRequest.query(RestActions.getQueryContent(restContent,indicesQueriesRegistry,parseFieldMatcher));
+  }
+ else   if (queryString != null) {
+    QueryBuilder query=RestActions.urlParamsToQueryBuilder(request);
+    explainRequest.query(query);
+  }
+  String sField=request.param("fields");
+  if (sField != null) {
+    String[] sFields=Strings.splitStringByCommaToArray(sField);
+    if (sFields != null) {
+      explainRequest.fields(sFields);
+    }
+  }
+  explainRequest.fetchSourceContext(FetchSourceContext.parseFromRestRequest(request));
+  client.explain(explainRequest,new RestBuilderListener<ExplainResponse>(channel){
+    @Override public RestResponse buildResponse(    ExplainResponse response,    XContentBuilder builder) throws Exception {
+      builder.startObject();
+      builder.field(Fields._INDEX,response.getIndex()).field(Fields._TYPE,response.getType()).field(Fields._ID,response.getId()).field(Fields.MATCHED,response.isMatch());
+      if (response.hasExplanation()) {
+        builder.startObject(Fields.EXPLANATION);
+        buildExplanation(builder,response.getExplanation());
+        builder.endObject();
+      }
+      GetResult getResult=response.getGetResult();
+      if (getResult != null) {
+        builder.startObject(Fields.GET);
+        response.getGetResult().toXContentEmbedded(builder,request);
+        builder.endObject();
+      }
+      builder.endObject();
+      return new BytesRestResponse(response.isExists() ? OK : NOT_FOUND,builder);
+    }
+    private void buildExplanation(    XContentBuilder builder,    Explanation explanation) throws IOException {
+      builder.field(Fields.VALUE,explanation.getValue());
+      builder.field(Fields.DESCRIPTION,explanation.getDescription());
+      Explanation[] innerExps=explanation.getDetails();
+      if (innerExps != null) {
+        builder.startArray(Fields.DETAILS);
+        for (        Explanation exp : innerExps) {
+          builder.startObject();
+          buildExplanation(builder,exp);
+          builder.endObject();
+        }
+        builder.endArray();
+      }
+    }
+  }
+);
+}

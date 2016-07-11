@@ -1,0 +1,46 @@
+{
+  List<Tuple<Integer,GetRequest>> getRequests=new ArrayList<>();
+  for (int i=0; i < request.requests().size(); i++) {
+    GetRequest getRequest=request.requests().get(i).getRequest();
+    if (getRequest != null) {
+      getRequests.add(new Tuple<>(i,getRequest));
+    }
+  }
+  if (getRequests.isEmpty()) {
+    innerDoExecute(request,listener,Collections.emptyMap(),new HashMap<>());
+  }
+ else {
+    MultiGetRequest multiGetRequest=new MultiGetRequest();
+    for (    Tuple<Integer,GetRequest> tuple : getRequests) {
+      GetRequest getRequest=tuple.v2();
+      multiGetRequest.add(new MultiGetRequest.Item(getRequest.index(),getRequest.type(),getRequest.id()));
+    }
+    client.multiGet(multiGetRequest,new ActionListener<MultiGetResponse>(){
+      @Override public void onResponse(      MultiGetResponse response){
+        Map<Integer,BytesReference> getResponseSources=new HashMap<>(response.getResponses().length);
+        Map<Integer,MultiPercolateResponse.Item> preFailures=new HashMap<>();
+        for (int i=0; i < response.getResponses().length; i++) {
+          MultiGetItemResponse itemResponse=response.getResponses()[i];
+          int originalSlot=getRequests.get(i).v1();
+          if (itemResponse.isFailed()) {
+            preFailures.put(originalSlot,new MultiPercolateResponse.Item(itemResponse.getFailure().getFailure()));
+          }
+ else {
+            if (itemResponse.getResponse().isExists()) {
+              getResponseSources.put(originalSlot,itemResponse.getResponse().getSourceAsBytesRef());
+            }
+ else {
+              GetRequest getRequest=getRequests.get(i).v2();
+              preFailures.put(originalSlot,new MultiPercolateResponse.Item(new ResourceNotFoundException("percolate document [{}/{}/{}] doesn't exist",getRequest.index(),getRequest.type(),getRequest.id())));
+            }
+          }
+        }
+        innerDoExecute(request,listener,getResponseSources,preFailures);
+      }
+      @Override public void onFailure(      Exception e){
+        listener.onFailure(e);
+      }
+    }
+);
+  }
+}

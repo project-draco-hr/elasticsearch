@@ -1,23 +1,23 @@
 {
-  Map<Object,List<InternalTerms.Bucket>> buckets=new HashMap<>();
+  Map<Object,List<B>> buckets=new HashMap<>();
   long sumDocCountError=0;
   long otherDocCount=0;
   InternalTerms<A,B> referenceTerms=null;
   for (  InternalAggregation aggregation : aggregations) {
-    InternalTerms<A,B> terms=(InternalTerms<A,B>)aggregation;
-    if (referenceTerms == null && !terms.getClass().equals(UnmappedTerms.class)) {
-      referenceTerms=(InternalTerms<A,B>)aggregation;
+    @SuppressWarnings("unchecked") InternalTerms<A,B> terms=(InternalTerms<A,B>)aggregation;
+    if (referenceTerms == null && !aggregation.getClass().equals(UnmappedTerms.class)) {
+      referenceTerms=terms;
     }
     if (referenceTerms != null && !referenceTerms.getClass().equals(terms.getClass()) && !terms.getClass().equals(UnmappedTerms.class)) {
       throw new AggregationExecutionException("Merging/Reducing the aggregations failed " + "when computing the aggregation [ Name: " + referenceTerms.getName() + ", Type: "+ referenceTerms.type()+ " ]"+ " because: "+ "the field you gave in the aggregation query "+ "existed as two different types "+ "in two different indices");
     }
     otherDocCount+=terms.getSumOfOtherDocCounts();
     final long thisAggDocCountError;
-    if (terms.buckets.size() < this.shardSize || InternalOrder.isTermOrder(order)) {
+    if (terms.getBucketsInternal().size() < getShardSize() || InternalOrder.isTermOrder(order)) {
       thisAggDocCountError=0;
     }
  else     if (InternalOrder.isCountDesc(this.order)) {
-      thisAggDocCountError=terms.buckets.get(terms.buckets.size() - 1).docCount;
+      thisAggDocCountError=terms.getBucketsInternal().get(terms.getBucketsInternal().size() - 1).docCount;
     }
  else {
       thisAggDocCountError=-1;
@@ -30,10 +30,10 @@
         sumDocCountError+=thisAggDocCountError;
       }
     }
-    terms.docCountError=thisAggDocCountError;
-    for (    Bucket bucket : terms.buckets) {
+    setDocCountError(thisAggDocCountError);
+    for (    B bucket : terms.getBucketsInternal()) {
       bucket.docCountError=thisAggDocCountError;
-      List<Bucket> bucketList=buckets.get(bucket.getKey());
+      List<B> bucketList=buckets.get(bucket.getKey());
       if (bucketList == null) {
         bucketList=new ArrayList<>();
         buckets.put(bucket.getKey(),bucketList);
@@ -42,9 +42,9 @@
     }
   }
   final int size=Math.min(requiredSize,buckets.size());
-  BucketPriorityQueue ordered=new BucketPriorityQueue(size,order.comparator(null));
-  for (  List<Bucket> sameTermBuckets : buckets.values()) {
-    final Bucket b=sameTermBuckets.get(0).reduce(sameTermBuckets,reduceContext);
+  BucketPriorityQueue<B> ordered=new BucketPriorityQueue<>(size,order.comparator(null));
+  for (  List<B> sameTermBuckets : buckets.values()) {
+    final B b=sameTermBuckets.get(0).reduce(sameTermBuckets,reduceContext);
     if (b.docCountError != -1) {
       if (sumDocCountError == -1) {
         b.docCountError=-1;
@@ -54,15 +54,15 @@
       }
     }
     if (b.docCount >= minDocCount) {
-      Terms.Bucket removed=ordered.insertWithOverflow(b);
+      B removed=ordered.insertWithOverflow(b);
       if (removed != null) {
         otherDocCount+=removed.getDocCount();
       }
     }
   }
-  Bucket[] list=new Bucket[ordered.size()];
+  B[] list=createBucketsArray(ordered.size());
   for (int i=ordered.size() - 1; i >= 0; i--) {
-    list[i]=(Bucket)ordered.pop();
+    list[i]=ordered.pop();
   }
   long docCountError;
   if (sumDocCountError == -1) {
@@ -71,5 +71,5 @@
  else {
     docCountError=aggregations.size() == 1 ? 0 : sumDocCountError;
   }
-  return create(name,Arrays.asList(list),docCountError,otherDocCount,this);
+  return create(name,Arrays.asList(list),docCountError,otherDocCount);
 }

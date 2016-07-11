@@ -1,0 +1,36 @@
+{
+  final String action=stream.readString();
+  transportServiceAdapter.onRequestReceived(requestId,action);
+  TransportChannel transportChannel=null;
+  try {
+    final RequestHandlerRegistry reg=transportServiceAdapter.getRequestHandler(action);
+    if (reg == null) {
+      throw new ActionNotFoundTransportException(action);
+    }
+    if (reg.canTripCircuitBreaker()) {
+      getInFlightRequestBreaker().addEstimateBytesAndMaybeBreak(messageLengthBytes,"<transport_request>");
+    }
+ else {
+      getInFlightRequestBreaker().addWithoutBreaking(messageLengthBytes);
+    }
+    transportChannel=new TcpTransportChannel<>(this,channel,transportName,action,requestId,version,profileName,messageLengthBytes);
+    final TransportRequest request=reg.newRequest();
+    request.remoteAddress(new InetSocketTransportAddress(remoteAddress));
+    request.readFrom(stream);
+    validateRequest(stream,requestId,action);
+    threadPool.executor(reg.getExecutor()).execute(new RequestHandler(reg,request,transportChannel));
+  }
+ catch (  Exception e) {
+    if (transportChannel == null) {
+      transportChannel=new TcpTransportChannel<>(this,channel,transportName,action,requestId,version,profileName,0);
+    }
+    try {
+      transportChannel.sendResponse(e);
+    }
+ catch (    IOException inner) {
+      inner.addSuppressed(e);
+      logger.warn("Failed to send error message back to client for action [{}]",inner,action);
+    }
+  }
+  return action;
+}

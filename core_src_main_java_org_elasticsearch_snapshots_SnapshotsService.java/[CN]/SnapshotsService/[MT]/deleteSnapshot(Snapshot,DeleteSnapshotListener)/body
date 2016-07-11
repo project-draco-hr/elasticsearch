@@ -1,0 +1,90 @@
+{
+  clusterService.submitStateUpdateTask("delete snapshot",new ClusterStateUpdateTask(){
+    boolean waitForSnapshot=false;
+    @Override public ClusterState execute(    ClusterState currentState) throws Exception {
+      SnapshotsInProgress snapshots=currentState.custom(SnapshotsInProgress.TYPE);
+      if (snapshots == null) {
+        return currentState;
+      }
+      SnapshotsInProgress.Entry snapshotEntry=snapshots.snapshot(snapshot);
+      if (snapshotEntry == null) {
+        if (!snapshots.entries().isEmpty()) {
+          throw new ConcurrentSnapshotExecutionException(snapshot,"another snapshot is currently running cannot delete");
+        }
+        return currentState;
+      }
+ else {
+        waitForSnapshot=true;
+        ImmutableOpenMap<ShardId,ShardSnapshotStatus> shards;
+        if (snapshotEntry.state() == State.STARTED && snapshotEntry.shards() != null) {
+          ImmutableOpenMap.Builder<ShardId,ShardSnapshotStatus> shardsBuilder=ImmutableOpenMap.builder();
+          for (          ObjectObjectCursor<ShardId,ShardSnapshotStatus> shardEntry : snapshotEntry.shards()) {
+            ShardSnapshotStatus status=shardEntry.value;
+            if (!status.state().completed()) {
+              shardsBuilder.put(shardEntry.key,new ShardSnapshotStatus(status.nodeId(),State.ABORTED));
+            }
+ else {
+              shardsBuilder.put(shardEntry.key,status);
+            }
+          }
+          shards=shardsBuilder.build();
+        }
+ else         if (snapshotEntry.state() == State.INIT) {
+          shards=snapshotEntry.shards();
+          endSnapshot(snapshotEntry);
+        }
+ else {
+          boolean hasUncompletedShards=false;
+          for (          ObjectCursor<ShardSnapshotStatus> shardStatus : snapshotEntry.shards().values()) {
+            if (shardStatus.value.state().completed() == false && shardStatus.value.nodeId() != null && currentState.nodes().get(shardStatus.value.nodeId()) != null) {
+              hasUncompletedShards=true;
+              break;
+            }
+          }
+          if (hasUncompletedShards) {
+            logger.debug("trying to delete completed snapshot - should wait for shards to finalize on all nodes");
+            return currentState;
+          }
+ else {
+            logger.debug("trying to delete completed snapshot with no finalizing shards - can delete immediately");
+            shards=snapshotEntry.shards();
+            endSnapshot(snapshotEntry);
+          }
+        }
+        SnapshotsInProgress.Entry newSnapshot=new SnapshotsInProgress.Entry(snapshotEntry,State.ABORTED,shards);
+        snapshots=new SnapshotsInProgress(newSnapshot);
+        return ClusterState.builder(currentState).putCustom(SnapshotsInProgress.TYPE,snapshots).build();
+      }
+    }
+    @Override public void onFailure(    String source,    Exception e){
+      listener.onFailure(e);
+    }
+    @Override public void clusterStateProcessed(    String source,    ClusterState oldState,    ClusterState newState){
+      if (waitForSnapshot) {
+        logger.trace("adding snapshot completion listener to wait for deleted snapshot to finish");
+        addListener(new SnapshotCompletionListener(){
+          @Override public void onSnapshotCompletion(          Snapshot completedSnapshot,          SnapshotInfo snapshotInfo){
+            if (completedSnapshot.equals(snapshot)) {
+              logger.trace("deleted snapshot completed - deleting files");
+              removeListener(this);
+              deleteSnapshotFromRepository(snapshot,listener);
+            }
+          }
+          @Override public void onSnapshotFailure(          Snapshot failedSnapshot,          Exception e){
+            if (failedSnapshot.equals(snapshot)) {
+              logger.trace("deleted snapshot failed - deleting files",e);
+              removeListener(this);
+              deleteSnapshotFromRepository(snapshot,listener);
+            }
+          }
+        }
+);
+      }
+ else {
+        logger.trace("deleted snapshot is not running - deleting files");
+        deleteSnapshotFromRepository(snapshot,listener);
+      }
+    }
+  }
+);
+}

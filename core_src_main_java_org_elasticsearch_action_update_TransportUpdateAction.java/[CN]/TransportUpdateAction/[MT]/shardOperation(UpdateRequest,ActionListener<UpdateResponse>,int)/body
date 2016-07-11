@@ -17,11 +17,12 @@ indexAction.execute(upsertRequest,new ActionListener<IndexResponse>(){
  else {
       update.setGetResult(null);
     }
+    update.setForcedRefresh(response.forcedRefresh());
     listener.onResponse(update);
   }
-  @Override public void onFailure(  Throwable e){
-    e=ExceptionsHelper.unwrapCause(e);
-    if (e instanceof VersionConflictEngineException) {
+  @Override public void onFailure(  Exception e){
+    final Throwable cause=ExceptionsHelper.unwrapCause(e);
+    if (cause instanceof VersionConflictEngineException) {
       if (retryCount < request.retryOnConflict()) {
         logger.trace("Retry attempt [{}] of [{}] on version conflict on [{}][{}][{}]",retryCount + 1,request.retryOnConflict(),request.index(),request.getShardId(),request.id());
         threadPool.executor(executor()).execute(new ActionRunnable<UpdateResponse>(listener){
@@ -33,7 +34,7 @@ indexAction.execute(upsertRequest,new ActionListener<IndexResponse>(){
         return;
       }
     }
-    listener.onFailure(e);
+    listener.onFailure(cause instanceof Exception ? (Exception)cause : new NotSerializableExceptionWrapper(cause));
   }
 }
 );
@@ -45,11 +46,12 @@ indexAction.execute(indexRequest,new ActionListener<IndexResponse>(){
 @Override public void onResponse(IndexResponse response){
 UpdateResponse update=new UpdateResponse(response.getShardInfo(),response.getShardId(),response.getType(),response.getId(),response.getVersion(),response.isCreated());
 update.setGetResult(updateHelper.extractGetResult(request,request.concreteIndex(),response.getVersion(),result.updatedSourceAsMap(),result.updateSourceContentType(),indexSourceBytes));
+update.setForcedRefresh(response.forcedRefresh());
 listener.onResponse(update);
 }
-@Override public void onFailure(Throwable e){
-e=ExceptionsHelper.unwrapCause(e);
-if (e instanceof VersionConflictEngineException) {
+@Override public void onFailure(Exception e){
+final Throwable cause=unwrapCause(e);
+if (cause instanceof VersionConflictEngineException) {
 if (retryCount < request.retryOnConflict()) {
 threadPool.executor(executor()).execute(new ActionRunnable<UpdateResponse>(listener){
   @Override protected void doRun(){
@@ -60,21 +62,23 @@ threadPool.executor(executor()).execute(new ActionRunnable<UpdateResponse>(liste
 return;
 }
 }
-listener.onFailure(e);
+listener.onFailure(cause instanceof Exception ? (Exception)cause : new NotSerializableExceptionWrapper(cause));
 }
 }
 );
 break;
 case DELETE:
-deleteAction.execute(result.action(),new ActionListener<DeleteResponse>(){
+DeleteRequest deleteRequest=result.action();
+deleteAction.execute(deleteRequest,new ActionListener<DeleteResponse>(){
 @Override public void onResponse(DeleteResponse response){
 UpdateResponse update=new UpdateResponse(response.getShardInfo(),response.getShardId(),response.getType(),response.getId(),response.getVersion(),false);
 update.setGetResult(updateHelper.extractGetResult(request,request.concreteIndex(),response.getVersion(),result.updatedSourceAsMap(),result.updateSourceContentType(),null));
+update.setForcedRefresh(response.forcedRefresh());
 listener.onResponse(update);
 }
-@Override public void onFailure(Throwable e){
-e=ExceptionsHelper.unwrapCause(e);
-if (e instanceof VersionConflictEngineException) {
+@Override public void onFailure(Exception e){
+final Throwable cause=unwrapCause(e);
+if (cause instanceof VersionConflictEngineException) {
 if (retryCount < request.retryOnConflict()) {
 threadPool.executor(executor()).execute(new ActionRunnable<UpdateResponse>(listener){
 @Override protected void doRun(){
@@ -85,7 +89,7 @@ shardOperation(request,listener,retryCount + 1);
 return;
 }
 }
-listener.onFailure(e);
+listener.onFailure(cause instanceof Exception ? (Exception)cause : new NotSerializableExceptionWrapper(cause));
 }
 }
 );

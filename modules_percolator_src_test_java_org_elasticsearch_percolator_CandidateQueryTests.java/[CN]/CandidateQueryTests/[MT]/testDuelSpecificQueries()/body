@@ -1,0 +1,31 @@
+{
+  List<ParseContext.Document> documents=new ArrayList<>();
+  CommonTermsQuery commonTermsQuery=new CommonTermsQuery(BooleanClause.Occur.SHOULD,BooleanClause.Occur.SHOULD,128);
+  commonTermsQuery.add(new Term("field","quick"));
+  commonTermsQuery.add(new Term("field","brown"));
+  commonTermsQuery.add(new Term("field","fox"));
+  addQuery(commonTermsQuery,documents);
+  BlendedTermQuery blendedTermQuery=BlendedTermQuery.booleanBlendedQuery(new Term[]{new Term("field","quick"),new Term("field","brown"),new Term("field","fox")},false);
+  addQuery(blendedTermQuery,documents);
+  SpanNearQuery spanNearQuery=new SpanNearQuery.Builder("field",true).addClause(new SpanTermQuery(new Term("field","quick"))).addClause(new SpanTermQuery(new Term("field","brown"))).addClause(new SpanTermQuery(new Term("field","fox"))).build();
+  addQuery(spanNearQuery,documents);
+  SpanNearQuery spanNearQuery2=new SpanNearQuery.Builder("field",true).addClause(new SpanTermQuery(new Term("field","the"))).addClause(new SpanTermQuery(new Term("field","lazy"))).addClause(new SpanTermQuery(new Term("field","doc"))).build();
+  SpanOrQuery spanOrQuery=new SpanOrQuery(spanNearQuery,spanNearQuery2);
+  addQuery(spanOrQuery,documents);
+  SpanNotQuery spanNotQuery=new SpanNotQuery(spanNearQuery,spanNearQuery);
+  addQuery(spanNotQuery,documents);
+  long lowerLong=randomIntBetween(0,256);
+  long upperLong=lowerLong + randomIntBetween(0,32);
+  addQuery(LongPoint.newRangeQuery("long_field",lowerLong,upperLong),documents);
+  indexWriter.addDocuments(documents);
+  indexWriter.close();
+  directoryReader=DirectoryReader.open(directory);
+  IndexSearcher shardSearcher=newSearcher(directoryReader);
+  shardSearcher.setQueryCache(null);
+  Document document=new Document();
+  document.add(new TextField("field","the quick brown fox jumps over the lazy dog",Field.Store.NO));
+  long randomLong=randomIntBetween((int)lowerLong,(int)upperLong);
+  document.add(new LongPoint("long_field",randomLong));
+  MemoryIndex memoryIndex=MemoryIndex.fromDocument(document,new WhitespaceAnalyzer());
+  duelRun(queryStore,memoryIndex,shardSearcher);
+}

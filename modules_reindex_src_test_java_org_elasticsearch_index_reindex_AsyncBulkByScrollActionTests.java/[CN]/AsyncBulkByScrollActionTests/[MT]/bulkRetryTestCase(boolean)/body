@@ -1,0 +1,28 @@
+{
+  int totalFailures=randomIntBetween(1,testRequest.getMaxRetries());
+  int size=randomIntBetween(1,100);
+  testRequest.setMaxRetries(totalFailures - (failWithRejection ? 1 : 0));
+  client.bulksToReject=client.bulksAttempts.get() + totalFailures;
+  CountDownLatch successLatch=new CountDownLatch(1);
+  DummyAbstractAsyncBulkByScrollAction action=new DummyActionWithoutBackoff(){
+    @Override void startNextScroll(    TimeValue lastBatchStartTime,    int lastBatchSize){
+      successLatch.countDown();
+    }
+  }
+;
+  BulkRequest request=new BulkRequest();
+  for (int i=0; i < size + 1; i++) {
+    request.add(new IndexRequest("index","type","id" + i));
+  }
+  action.sendBulkRequest(timeValueNanos(System.nanoTime()),request);
+  if (failWithRejection) {
+    BulkIndexByScrollResponse response=listener.get();
+    assertThat(response.getBulkFailures(),hasSize(1));
+    assertEquals(response.getBulkFailures().get(0).getStatus(),RestStatus.TOO_MANY_REQUESTS);
+    assertThat(response.getSearchFailures(),empty());
+    assertNull(response.getReasonCancelled());
+  }
+ else {
+    successLatch.await(10,TimeUnit.SECONDS);
+  }
+}

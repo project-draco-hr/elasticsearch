@@ -3,6 +3,7 @@
   logger.info("--> start two nodes");
   internalCluster().startNodesAsync(2,nodeSettings).get();
   client().admin().cluster().preparePutRepository("test-repo").setType("mock").setSettings(Settings.builder().put("location",randomRepoPath()).put(MockRepository.Plugin.USERNAME_SETTING.getKey(),"notsecretusername").put(MockRepository.Plugin.PASSWORD_SETTING.getKey(),"verysecretpassword")).get();
+  NodeClient nodeClient=internalCluster().getInstance(NodeClient.class);
   RestGetRepositoriesAction getRepoAction=internalCluster().getInstance(RestGetRepositoriesAction.class);
   RestRequest getRepoRequest=new FakeRestRequest();
   getRepoRequest.params().put("repository","test-repo");
@@ -11,8 +12,8 @@
   getRepoAction.handleRequest(getRepoRequest,new AbstractRestChannel(getRepoRequest,true){
     @Override public void sendResponse(    RestResponse response){
       try {
-        assertThat(response.content().toUtf8(),containsString("notsecretusername"));
-        assertThat(response.content().toUtf8(),not(containsString("verysecretpassword")));
+        assertThat(response.content().utf8ToString(),containsString("notsecretusername"));
+        assertThat(response.content().utf8ToString(),not(containsString("verysecretpassword")));
       }
  catch (      AssertionError ex) {
         getRepoError.set(ex);
@@ -20,7 +21,7 @@
       getRepoLatch.countDown();
     }
   }
-);
+,nodeClient);
   assertTrue(getRepoLatch.await(1,TimeUnit.SECONDS));
   if (getRepoError.get() != null) {
     throw getRepoError.get();
@@ -32,8 +33,8 @@
   clusterStateAction.handleRequest(clusterStateRequest,new AbstractRestChannel(clusterStateRequest,true){
     @Override public void sendResponse(    RestResponse response){
       try {
-        assertThat(response.content().toUtf8(),containsString("notsecretusername"));
-        assertThat(response.content().toUtf8(),not(containsString("verysecretpassword")));
+        assertThat(response.content().utf8ToString(),containsString("notsecretusername"));
+        assertThat(response.content().utf8ToString(),not(containsString("verysecretpassword")));
       }
  catch (      AssertionError ex) {
         clusterStateError.set(ex);
@@ -41,7 +42,7 @@
       clusterStateLatch.countDown();
     }
   }
-);
+,nodeClient);
   assertTrue(clusterStateLatch.await(1,TimeUnit.SECONDS));
   if (clusterStateError.get() != null) {
     throw clusterStateError.get();

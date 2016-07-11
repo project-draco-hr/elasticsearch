@@ -1,0 +1,26 @@
+{
+  final String[] indices=new String[randomIntBetween(2,5)];
+  for (int i=0; i < indices.length; ++i) {
+    indices[i]="test" + i;
+    assertTrue(prepareCreate(indices[i]).setSettings(Settings.builder().put("number_of_shards",1)).get().isAcknowledged());
+    int randomDocCount=randomIntBetween(1,2);
+    for (int j=0; j < randomDocCount; ++j) {
+      index(indices[i],"type",Integer.toString(j),"{\"field\":" + j + "}");
+    }
+  }
+  refresh(indices);
+  final String commaSeparatedIndices=Stream.of(indices).collect(Collectors.joining(","));
+  final String body="{\"query\":{\"bool\":{\"filter\":[{\"" + TestDeprecatedQueryBuilder.NAME + "\":{}}]}}}";
+  try (Response response=getRestClient().performRequest("GET","/" + commaSeparatedIndices + "/_search",Collections.emptyMap(),new StringEntity(body,RestClient.JSON_CONTENT_TYPE))){
+    assertThat(response.getStatusLine().getStatusCode(),equalTo(OK.getStatus()));
+    final List<String> deprecatedWarnings=getWarningHeaders(response.getHeaders());
+    final List<Matcher<String>> headerMatchers=new ArrayList<>(indices.length);
+    for (    String index : indices) {
+      headerMatchers.add(containsString(LoggerMessageFormat.format("[{}] index",(Object)index)));
+    }
+    assertThat(deprecatedWarnings,hasSize(headerMatchers.size()));
+    for (    Matcher<String> headerMatcher : headerMatchers) {
+      assertThat(deprecatedWarnings,hasItem(headerMatcher));
+    }
+  }
+ }

@@ -11,13 +11,14 @@
       try {
         si=store.readLastCommittedSegmentsInfo();
       }
- catch (      Throwable e) {
+ catch (      Exception e) {
         String files="_unknown_";
         try {
           files=Arrays.toString(store.directory().listAll());
         }
- catch (        Throwable e1) {
-          files+=" (failure=" + ExceptionsHelper.detailedMessage(e1) + ")";
+ catch (        Exception inner) {
+          inner.addSuppressed(e);
+          files+=" (failure=" + ExceptionsHelper.detailedMessage(inner) + ")";
         }
         if (indexShouldExists) {
           throw new IndexShardRecoveryException(shardId,"shard allocated for local recovery (post api), should exist, but doesn't, current files: " + files,e);
@@ -29,29 +30,30 @@
         }
  else {
           logger.trace("cleaning existing shard, shouldn't exists");
-          IndexWriter writer=new IndexWriter(store.directory(),new IndexWriterConfig(Lucene.STANDARD_ANALYZER).setOpenMode(IndexWriterConfig.OpenMode.CREATE));
-          writer.close();
+          Lucene.cleanLuceneIndex(store.directory());
         }
       }
     }
- catch (    Throwable e) {
+ catch (    Exception e) {
       throw new IndexShardRecoveryException(shardId,"failed to fetch index version after copying it over",e);
     }
     recoveryState.getIndex().updateVersion(version);
     try {
       final RecoveryState.Index index=recoveryState.getIndex();
-      if (si != null) {
-        final Directory directory=store.directory();
-        for (        String name : Lucene.files(si)) {
-          long length=directory.fileLength(name);
-          index.addFileDetail(name,length,true);
-        }
+      if (si != null && recoveryState.getType() == RecoveryState.Type.STORE) {
+        addRecoveredFileDetails(si,store,index);
       }
     }
  catch (    IOException e) {
       logger.debug("failed to list file details",e);
     }
-    indexShard.performTranslogRecovery(indexShouldExists);
+    if (recoveryState.getType() == RecoveryState.Type.LOCAL_SHARDS) {
+      assert indexShouldExists;
+      indexShard.skipTranslogRecovery();
+    }
+ else {
+      indexShard.performTranslogRecovery(indexShouldExists);
+    }
     indexShard.finalizeRecovery();
     indexShard.postRecovery("post recovery from shard_store");
   }

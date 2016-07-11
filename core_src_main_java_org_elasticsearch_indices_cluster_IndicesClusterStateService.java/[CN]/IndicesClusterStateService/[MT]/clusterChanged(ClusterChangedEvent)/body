@@ -1,34 +1,20 @@
 {
-  if (!indicesService.changesAllowed()) {
-    return;
-  }
   if (!lifecycle.started()) {
     return;
   }
-synchronized (mutex) {
-    if (event.state().blocks().disableStatePersistence()) {
-      for (      IndexService indexService : indicesService) {
-        Index index=indexService.index();
-        for (        Integer shardId : indexService.shardIds()) {
-          logger.debug("{}[{}] removing shard (disabled block persistence)",index,shardId);
-          try {
-            indexService.removeShard(shardId,"removing shard (disabled block persistence)");
-          }
- catch (          Throwable e) {
-            logger.warn("{} failed to remove shard (disabled block persistence)",e,index);
-          }
-        }
-        removeIndex(index,"cleaning index (disabled block persistence)");
-      }
-      return;
+  final ClusterState state=event.state();
+  if (state.blocks().disableStatePersistence()) {
+    for (    AllocatedIndex<? extends Shard> indexService : indicesService) {
+      indicesService.removeIndex(indexService.index(),"cleaning index (disabled block persistence)");
     }
-    cleanFailedShards(event);
-    applyDeletedIndices(event);
-    applyDeletedShards(event);
-    applyCleanedIndices(event);
-    applyIndexMetaData(event);
-    applyNewIndices(event);
-    applyMappings(event);
-    applyNewOrUpdatedShards(event);
+    return;
   }
+  updateFailedShardsCache(state);
+  deleteIndices(event);
+  removeUnallocatedIndices(state);
+  failMissingShards(state);
+  removeShards(state);
+  updateIndices(event);
+  createIndices(state);
+  createOrUpdateShards(state);
 }

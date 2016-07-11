@@ -8,31 +8,31 @@
   ShardRouting temp=indexShard.routingEntry();
   final ShardRouting newPrimaryShardRouting;
   if (randomBoolean()) {
-    newPrimaryShardRouting=TestShardRouting.newShardRouting(temp.index(),temp.id(),temp.currentNodeId(),"other node",true,ShardRoutingState.INITIALIZING,AllocationId.newRelocation(temp.allocationId()));
+    newPrimaryShardRouting=TestShardRouting.newShardRouting(temp.shardId(),temp.currentNodeId(),"other node",true,ShardRoutingState.INITIALIZING,AllocationId.newRelocation(temp.allocationId()));
   }
  else   if (randomBoolean()) {
-    ShardRouting newReplicaShardRouting=TestShardRouting.newShardRouting(temp.index(),temp.id(),temp.currentNodeId(),null,false,ShardRoutingState.STARTED,temp.allocationId());
-    indexShard.updateRoutingEntry(newReplicaShardRouting,false);
+    ShardRouting newReplicaShardRouting=TestShardRouting.newShardRouting(temp.shardId(),temp.currentNodeId(),null,false,ShardRoutingState.STARTED,temp.allocationId());
+    indexShard.updateRoutingEntry(newReplicaShardRouting);
     primaryTerm=primaryTerm + 1;
     indexShard.updatePrimaryTerm(primaryTerm);
-    newPrimaryShardRouting=TestShardRouting.newShardRouting(temp.index(),temp.id(),temp.currentNodeId(),null,true,ShardRoutingState.STARTED,temp.allocationId());
+    newPrimaryShardRouting=TestShardRouting.newShardRouting(temp.shardId(),temp.currentNodeId(),null,true,ShardRoutingState.STARTED,temp.allocationId());
   }
  else {
     newPrimaryShardRouting=temp;
   }
-  indexShard.updateRoutingEntry(newPrimaryShardRouting,false);
+  indexShard.updateRoutingEntry(newPrimaryShardRouting);
   assertEquals(0,indexShard.getActiveOperationsCount());
   if (newPrimaryShardRouting.isRelocationTarget() == false) {
     try {
-      indexShard.acquireReplicaOperationLock(primaryTerm);
+      indexShard.acquireReplicaOperationLock(primaryTerm,null,ThreadPool.Names.INDEX);
       fail("shard shouldn't accept operations as replica");
     }
  catch (    IllegalStateException ignored) {
     }
   }
-  Releasable operation1=indexShard.acquirePrimaryOperationLock();
+  Releasable operation1=acquirePrimaryOperationLockBlockingly(indexShard);
   assertEquals(1,indexShard.getActiveOperationsCount());
-  Releasable operation2=indexShard.acquirePrimaryOperationLock();
+  Releasable operation2=acquirePrimaryOperationLockBlockingly(indexShard);
   assertEquals(2,indexShard.getActiveOperationsCount());
   Releasables.close(operation1,operation2);
   assertEquals(0,indexShard.getActiveOperationsCount());

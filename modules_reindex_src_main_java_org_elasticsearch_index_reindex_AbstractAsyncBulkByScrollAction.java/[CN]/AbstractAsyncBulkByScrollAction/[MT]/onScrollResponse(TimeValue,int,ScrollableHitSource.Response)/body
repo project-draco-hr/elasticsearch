@@ -1,0 +1,26 @@
+{
+  if (task.isCancelled()) {
+    finishHim(null);
+    return;
+  }
+  if ((response.getFailures().size() > 0) || response.isTimedOut()) {
+    refreshAndFinish(emptyList(),response.getFailures(),response.isTimedOut());
+    return;
+  }
+  long total=response.getTotalHits();
+  if (mainRequest.getSize() > 0) {
+    total=min(total,mainRequest.getSize());
+  }
+  task.setTotal(total);
+  AbstractRunnable prepareBulkRequestRunnable=new AbstractRunnable(){
+    @Override protected void doRun() throws Exception {
+      prepareBulkRequest(timeValueNanos(System.nanoTime()),response);
+    }
+    @Override public void onFailure(    Exception e){
+      finishHim(e);
+    }
+  }
+;
+  prepareBulkRequestRunnable=(AbstractRunnable)threadPool.getThreadContext().preserveContext(prepareBulkRequestRunnable);
+  task.delayPrepareBulkRequest(threadPool,lastBatchStartTime,lastBatchSize,prepareBulkRequestRunnable);
+}

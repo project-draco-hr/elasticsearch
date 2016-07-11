@@ -1,0 +1,45 @@
+{
+  final DiscoveryNodes currentNodes=currentState.nodes();
+  final BatchResult.Builder<DiscoveryNode> results=BatchResult.builder();
+  boolean nodesChanged=false;
+  ClusterState.Builder newState=ClusterState.builder(currentState);
+  DiscoveryNodes.Builder nodesBuilder=DiscoveryNodes.builder(currentNodes);
+  if (currentNodes.getMasterNode() == null && joiningNodes.contains(BECOME_MASTER_TASK)) {
+    nodesBuilder.masterNodeId(currentNodes.getLocalNodeId());
+    ClusterBlocks clusterBlocks=ClusterBlocks.builder().blocks(currentState.blocks()).removeGlobalBlock(discoverySettings.getNoMasterBlock()).build();
+    newState.blocks(clusterBlocks);
+    nodesChanged=true;
+  }
+  if (nodesBuilder.isLocalNodeElectedMaster() == false) {
+    logger.trace("processing node joins, but we are not the master. current master: {}",currentNodes.getMasterNode());
+    throw new NotMasterException("Node [" + currentNodes.getLocalNode() + "] not master for join request");
+  }
+  for (  final DiscoveryNode node : joiningNodes) {
+    if (node.equals(BECOME_MASTER_TASK) || node.equals(FINISH_ELECTION_NOT_MASTER_TASK)) {
+    }
+ else     if (currentNodes.nodeExists(node)) {
+      logger.debug("received a join request for an existing node [{}]",node);
+    }
+ else {
+      try {
+        nodesBuilder.put(node);
+        nodesChanged=true;
+      }
+ catch (      IllegalArgumentException e) {
+        results.failure(node,e);
+        continue;
+      }
+    }
+    results.success(node);
+  }
+  if (nodesChanged) {
+    newState.nodes(nodesBuilder);
+    final ClusterState tmpState=newState.build();
+    RoutingAllocation.Result result=allocationService.reroute(tmpState,"node_join");
+    newState=ClusterState.builder(tmpState);
+    if (result.changed()) {
+      newState.routingResult(result);
+    }
+  }
+  return results.build(newState.build());
+}

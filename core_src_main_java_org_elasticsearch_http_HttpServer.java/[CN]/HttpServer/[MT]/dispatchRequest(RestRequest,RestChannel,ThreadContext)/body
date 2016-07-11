@@ -5,11 +5,17 @@
   }
   RestChannel responseChannel=channel;
   try {
-    inFlightRequestsBreaker(circuitBreakerService).addEstimateBytesAndMaybeBreak(request.content().length(),"<http_request>");
-    responseChannel=new ResourceHandlingHttpChannel(channel,circuitBreakerService);
-    restController.dispatchRequest(request,responseChannel,threadContext);
+    int contentLength=request.content().length();
+    if (restController.canTripCircuitBreaker(request)) {
+      inFlightRequestsBreaker(circuitBreakerService).addEstimateBytesAndMaybeBreak(contentLength,"<http_request>");
+    }
+ else {
+      inFlightRequestsBreaker(circuitBreakerService).addWithoutBreaking(contentLength);
+    }
+    responseChannel=new ResourceHandlingHttpChannel(channel,circuitBreakerService,contentLength);
+    restController.dispatchRequest(request,responseChannel,client,threadContext);
   }
- catch (  Throwable t) {
-    restController.sendErrorResponse(request,responseChannel,t);
+ catch (  Exception e) {
+    restController.sendErrorResponse(request,responseChannel,e);
   }
 }

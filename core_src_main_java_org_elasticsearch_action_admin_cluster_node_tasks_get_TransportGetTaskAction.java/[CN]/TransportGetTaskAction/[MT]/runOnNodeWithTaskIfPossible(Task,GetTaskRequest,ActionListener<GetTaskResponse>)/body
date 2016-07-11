@@ -1,0 +1,29 @@
+{
+  TransportRequestOptions.Builder builder=TransportRequestOptions.builder();
+  if (request.getTimeout() != null) {
+    builder.withTimeout(request.getTimeout());
+  }
+  builder.withCompress(false);
+  DiscoveryNode node=clusterService.state().nodes().get(request.getTaskId().getNodeId());
+  if (node == null) {
+    getFinishedTaskFromIndex(thisTask,request,listener);
+    return;
+  }
+  GetTaskRequest nodeRequest=request.nodeRequest(clusterService.localNode().getId(),thisTask.getId());
+  taskManager.registerChildTask(thisTask,node.getId());
+  transportService.sendRequest(node,GetTaskAction.NAME,nodeRequest,builder.build(),new TransportResponseHandler<GetTaskResponse>(){
+    @Override public GetTaskResponse newInstance(){
+      return new GetTaskResponse();
+    }
+    @Override public void handleResponse(    GetTaskResponse response){
+      listener.onResponse(response);
+    }
+    @Override public void handleException(    TransportException exp){
+      listener.onFailure(exp);
+    }
+    @Override public String executor(){
+      return ThreadPool.Names.SAME;
+    }
+  }
+);
+}

@@ -1,18 +1,18 @@
 {
   final DiscoveryNodes nodes=clusterService.state().nodes();
-  if (!request.masterNodeId.equals(nodes.getLocalNodeId())) {
+  if (!request.masterNode.equals(nodes.getLocalNode())) {
     throw new ThisIsNotTheMasterYouAreLookingForException();
   }
   if (request.clusterName != null && !request.clusterName.equals(clusterName)) {
     logger.trace("master fault detection ping request is targeted for a different [{}] cluster then us [{}]",request.clusterName,clusterName);
     throw new ThisIsNotTheMasterYouAreLookingForException("master fault detection ping request is targeted for a different [" + request.clusterName + "] cluster then us ["+ clusterName+ "]");
   }
-  if (!nodes.isLocalNodeElectedMaster() || !nodes.nodeExists(request.nodeId)) {
-    logger.trace("checking ping from [{}] under a cluster state thread",request.nodeId);
-    clusterService.submitStateUpdateTask("master ping (from: [" + request.nodeId + "])",new ClusterStateUpdateTask(){
+  if (!nodes.isLocalNodeElectedMaster() || !nodes.nodeExists(request.sourceNode)) {
+    logger.trace("checking ping from {} under a cluster state thread",request.sourceNode);
+    clusterService.submitStateUpdateTask("master ping (from: " + request.sourceNode + ")",new ClusterStateUpdateTask(){
       @Override public ClusterState execute(      ClusterState currentState) throws Exception {
         DiscoveryNodes nodes=currentState.nodes();
-        if (!nodes.nodeExists(request.nodeId)) {
+        if (!nodes.nodeExists(request.sourceNode)) {
           throw new NodeDoesNotExistOnMasterException();
         }
         return currentState;
@@ -20,15 +20,16 @@
       @Override public void onNoLongerMaster(      String source){
         onFailure(source,new NotMasterException("local node is not master"));
       }
-      @Override public void onFailure(      String source,      @Nullable Throwable t){
-        if (t == null) {
-          t=new ElasticsearchException("unknown error while processing ping");
+      @Override public void onFailure(      String source,      @Nullable Exception e){
+        if (e == null) {
+          e=new ElasticsearchException("unknown error while processing ping");
         }
         try {
-          channel.sendResponse(t);
+          channel.sendResponse(e);
         }
- catch (        IOException e) {
-          logger.warn("error while sending ping response",e);
+ catch (        IOException inner) {
+          inner.addSuppressed(e);
+          logger.warn("error while sending ping response",inner);
         }
       }
       @Override public void clusterStateProcessed(      String source,      ClusterState oldState,      ClusterState newState){

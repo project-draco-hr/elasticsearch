@@ -2,33 +2,33 @@
   createIndex("test");
   ensureGreen();
   IndicesService indicesService=getInstanceFromNode(IndicesService.class);
-  DiscoveryNode localNode=new DiscoveryNode("foo",DummyTransportAddress.INSTANCE,emptyMap(),emptySet(),Version.CURRENT);
+  DiscoveryNode localNode=new DiscoveryNode("foo",LocalTransportAddress.buildUnique(),emptyMap(),emptySet(),Version.CURRENT);
   IndexService test=indicesService.indexService(resolveIndex("test"));
   final IndexShard shard=test.getShardOrNull(0);
-  client().prepareIndex("test","test","0").setSource("{}").setRefresh(randomBoolean()).get();
+  client().prepareIndex("test","test","0").setSource("{}").setRefreshPolicy(randomBoolean() ? IMMEDIATE : NONE).get();
   if (randomBoolean()) {
     client().admin().indices().prepareFlush().get();
   }
   final ShardRouting origRouting=shard.routingEntry();
-  ShardRouting routing=new ShardRouting(origRouting);
+  ShardRouting routing=origRouting;
   Store store=shard.store();
   store.incRef();
   test.removeShard(0,"b/c simon says so");
   cleanLuceneIndex(store.directory());
   store.decRef();
-  ShardRoutingHelper.reinit(routing);
+  routing=ShardRoutingHelper.reinit(routing);
   IndexShard newShard=test.createShard(routing);
-  newShard.updateRoutingEntry(routing,false);
+  newShard.updateRoutingEntry(routing);
   newShard.markAsRecovering("store",new RecoveryState(newShard.shardId(),routing.primary(),RecoveryState.Type.STORE,localNode,localNode));
   try {
-    newShard.recoverFromStore(localNode);
+    newShard.recoverFromStore();
     fail("index not there!");
   }
  catch (  IndexShardRecoveryException ex) {
     assertTrue(ex.getMessage().contains("failed to fetch index version after copying it over"));
   }
-  ShardRoutingHelper.moveToUnassigned(routing,new UnassignedInfo(UnassignedInfo.Reason.INDEX_CREATED,"because I say so"));
-  ShardRoutingHelper.initialize(routing,origRouting.currentNodeId());
+  routing=ShardRoutingHelper.moveToUnassigned(routing,new UnassignedInfo(UnassignedInfo.Reason.INDEX_CREATED,"because I say so"));
+  routing=ShardRoutingHelper.initialize(routing,origRouting.currentNodeId());
   assertTrue("it's already recovering, we should ignore new ones",newShard.ignoreRecoveryAttempt());
   try {
     newShard.markAsRecovering("store",new RecoveryState(newShard.shardId(),routing.primary(),RecoveryState.Type.STORE,localNode,localNode));
@@ -38,12 +38,10 @@
   }
   test.removeShard(0,"I broken it");
   newShard=test.createShard(routing);
-  newShard.updateRoutingEntry(routing,false);
+  newShard.updateRoutingEntry(routing);
   newShard.markAsRecovering("store",new RecoveryState(newShard.shardId(),routing.primary(),RecoveryState.Type.STORE,localNode,localNode));
-  assertTrue("recover even if there is nothing to recover",newShard.recoverFromStore(localNode));
-  routing=new ShardRouting(routing);
-  ShardRoutingHelper.moveToStarted(routing);
-  newShard.updateRoutingEntry(routing,true);
+  assertTrue("recover even if there is nothing to recover",newShard.recoverFromStore());
+  newShard.updateRoutingEntry(getInitializingShardRouting(routing).moveToStarted());
   SearchResponse response=client().prepareSearch().get();
   assertHitCount(response,0);
   IndexRequest request=client().prepareIndex("test","test","0").setSource("{}").request();

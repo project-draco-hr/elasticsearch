@@ -1,0 +1,38 @@
+{
+  final Settings settings=Settings.EMPTY;
+  final RestController restController=new RestController(settings);
+  final RestIndicesAction action=new RestIndicesAction(settings,restController,new IndexNameExpressionResolver(settings));
+  final int numIndices=randomIntBetween(0,5);
+  Index[] indices=new Index[numIndices];
+  for (int i=0; i < numIndices; i++) {
+    indices[i]=new Index(randomAsciiOfLength(5),UUIDs.randomBase64UUID());
+  }
+  final MetaData.Builder metaDataBuilder=MetaData.builder();
+  for (  final Index index : indices) {
+    metaDataBuilder.put(IndexMetaData.builder(index.getName()).settings(Settings.builder().put(IndexMetaData.SETTING_VERSION_CREATED,Version.CURRENT).put(IndexMetaData.SETTING_INDEX_UUID,index.getUUID())).creationDate(System.currentTimeMillis()).numberOfShards(1).numberOfReplicas(1).state(IndexMetaData.State.OPEN));
+  }
+  final MetaData metaData=metaDataBuilder.build();
+  final ClusterState clusterState=ClusterState.builder(ClusterName.CLUSTER_NAME_SETTING.getDefault(Settings.EMPTY)).metaData(metaData).build();
+  final String[] indicesStr=new String[indices.length];
+  for (int i=0; i < indices.length; i++) {
+    indicesStr[i]=indices[i].getName();
+  }
+  final ClusterHealthResponse clusterHealth=new ClusterHealthResponse(clusterState.getClusterName().value(),indicesStr,clusterState,0,0,0,TimeValue.timeValueMillis(1000L));
+  final Table table=action.buildTable(null,indices,clusterHealth,randomIndicesStatsResponse(indices),metaData);
+  int count=0;
+  List<Table.Cell> headers=table.getHeaders();
+  assertThat(headers.get(count++).value,equalTo("health"));
+  assertThat(headers.get(count++).value,equalTo("status"));
+  assertThat(headers.get(count++).value,equalTo("index"));
+  assertThat(headers.get(count++).value,equalTo("uuid"));
+  List<List<Table.Cell>> rows=table.getRows();
+  assertThat(rows.size(),equalTo(indices.length));
+  for (int i=0; i < rows.size(); i++) {
+    count=0;
+    final List<Table.Cell> row=rows.get(i);
+    assertThat(row.get(count++).value,equalTo("red*"));
+    assertThat(row.get(count++).value,equalTo("open"));
+    assertThat(row.get(count++).value,equalTo(indices[i].getName()));
+    assertThat(row.get(count++).value,equalTo(indices[i].getUUID()));
+  }
+}

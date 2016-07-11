@@ -1,29 +1,13 @@
 {
-  final int sizeHeaderLength=NettyHeader.MARKER_BYTES_SIZE + NettyHeader.MESSAGE_LENGTH_SIZE;
-  if (buffer.readableBytes() < sizeHeaderLength) {
+  try {
+    boolean continueProcessing=TcpTransport.validateMessageHeader(NettyUtils.toBytesReference(buffer));
+    buffer.skipBytes(TcpHeader.MARKER_BYTES_SIZE + TcpHeader.MESSAGE_LENGTH_SIZE);
+    return continueProcessing ? buffer : null;
+  }
+ catch (  IllegalArgumentException ex) {
+    throw new TooLongFrameException(ex.getMessage(),ex);
+  }
+catch (  IllegalStateException ex) {
     return null;
   }
-  int readerIndex=buffer.readerIndex();
-  if (buffer.getByte(readerIndex) != 'E' || buffer.getByte(readerIndex + 1) != 'S') {
-    if (bufferStartsWith(buffer,readerIndex,"GET ") || bufferStartsWith(buffer,readerIndex,"POST ") || bufferStartsWith(buffer,readerIndex,"PUT ")|| bufferStartsWith(buffer,readerIndex,"HEAD ")|| bufferStartsWith(buffer,readerIndex,"DELETE ")|| bufferStartsWith(buffer,readerIndex,"OPTIONS ")|| bufferStartsWith(buffer,readerIndex,"PATCH ")|| bufferStartsWith(buffer,readerIndex,"TRACE ")) {
-      throw new HttpOnTransportException("This is not a HTTP port");
-    }
-    throw new StreamCorruptedException("invalid internal transport message format, got (" + Integer.toHexString(buffer.getByte(readerIndex) & 0xFF) + ","+ Integer.toHexString(buffer.getByte(readerIndex + 1) & 0xFF)+ ","+ Integer.toHexString(buffer.getByte(readerIndex + 2) & 0xFF)+ ","+ Integer.toHexString(buffer.getByte(readerIndex + 3) & 0xFF)+ ")");
-  }
-  int dataLen=buffer.getInt(buffer.readerIndex() + NettyHeader.MARKER_BYTES_SIZE);
-  if (dataLen == NettyHeader.PING_DATA_SIZE) {
-    buffer.skipBytes(sizeHeaderLength);
-    return null;
-  }
-  if (dataLen <= 0) {
-    throw new StreamCorruptedException("invalid data length: " + dataLen);
-  }
-  if (dataLen > NINETY_PER_HEAP_SIZE) {
-    throw new TooLongFrameException("transport content length received [" + new ByteSizeValue(dataLen) + "] exceeded ["+ new ByteSizeValue(NINETY_PER_HEAP_SIZE)+ "]");
-  }
-  if (buffer.readableBytes() < dataLen + sizeHeaderLength) {
-    return null;
-  }
-  buffer.skipBytes(sizeHeaderLength);
-  return buffer;
 }

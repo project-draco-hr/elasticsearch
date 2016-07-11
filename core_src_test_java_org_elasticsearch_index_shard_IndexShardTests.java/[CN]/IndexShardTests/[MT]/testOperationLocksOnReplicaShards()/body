@@ -9,17 +9,17 @@
   final ShardRouting newShardRouting;
 switch (randomInt(2)) {
 case 0:
-    newShardRouting=TestShardRouting.newShardRouting(temp.index(),temp.id(),temp.currentNodeId(),null,false,ShardRoutingState.STARTED,AllocationId.newRelocation(temp.allocationId()));
-  indexShard.updateRoutingEntry(newShardRouting,false);
+    newShardRouting=TestShardRouting.newShardRouting(temp.shardId(),temp.currentNodeId(),null,false,ShardRoutingState.STARTED,AllocationId.newRelocation(temp.allocationId()));
+  indexShard.updateRoutingEntry(newShardRouting);
 break;
 case 1:
 final boolean relocating=randomBoolean();
-newShardRouting=TestShardRouting.newShardRouting(temp.index(),temp.id(),temp.currentNodeId(),relocating ? "sourceNode" : null,relocating ? randomBoolean() : false,ShardRoutingState.INITIALIZING,relocating ? AllocationId.newRelocation(temp.allocationId()) : temp.allocationId());
-indexShard.updateRoutingEntry(newShardRouting,false);
+newShardRouting=TestShardRouting.newShardRouting(temp.shardId(),temp.currentNodeId(),relocating ? "sourceNode" : null,relocating ? randomBoolean() : false,ShardRoutingState.INITIALIZING,relocating ? AllocationId.newRelocation(temp.allocationId()) : temp.allocationId());
+indexShard.updateRoutingEntry(newShardRouting);
 break;
 case 2:
-newShardRouting=TestShardRouting.newShardRouting(temp.index(),temp.id(),temp.currentNodeId(),"otherNode",false,ShardRoutingState.RELOCATING,AllocationId.newRelocation(temp.allocationId()));
-indexShard.updateRoutingEntry(newShardRouting,false);
+newShardRouting=TestShardRouting.newShardRouting(temp.shardId(),temp.currentNodeId(),"otherNode",false,ShardRoutingState.RELOCATING,AllocationId.newRelocation(temp.allocationId()));
+indexShard.updateRoutingEntry(newShardRouting);
 indexShard.relocated("test");
 break;
 default :
@@ -29,25 +29,25 @@ logger.info("updated shard routing to {}",newShardRouting);
 assertEquals(0,indexShard.getActiveOperationsCount());
 if (newShardRouting.primary() == false) {
 try {
-indexShard.acquirePrimaryOperationLock();
+indexShard.acquirePrimaryOperationLock(null,ThreadPool.Names.INDEX);
 fail("shard shouldn't accept primary ops");
 }
  catch (IllegalStateException ignored) {
 }
 }
-Releasable operation1=indexShard.acquireReplicaOperationLock(primaryTerm);
+Releasable operation1=acquireReplicaOperationLockBlockingly(indexShard,primaryTerm);
 assertEquals(1,indexShard.getActiveOperationsCount());
-Releasable operation2=indexShard.acquireReplicaOperationLock(primaryTerm);
+Releasable operation2=acquireReplicaOperationLockBlockingly(indexShard,primaryTerm);
 assertEquals(2,indexShard.getActiveOperationsCount());
 try {
-indexShard.acquireReplicaOperationLock(primaryTerm - 1);
+indexShard.acquireReplicaOperationLock(primaryTerm - 1,null,ThreadPool.Names.INDEX);
 fail("you can not increment the operation counter with an older primary term");
 }
  catch (IllegalArgumentException e) {
 assertThat(e.getMessage(),containsString("operation term"));
 assertThat(e.getMessage(),containsString("too old"));
 }
-indexShard.acquireReplicaOperationLock(primaryTerm + 1 + randomInt(20)).close();
+acquireReplicaOperationLockBlockingly(indexShard,primaryTerm + 1 + randomInt(20)).close();
 Releasables.close(operation1,operation2);
 assertEquals(0,indexShard.getActiveOperationsCount());
 }

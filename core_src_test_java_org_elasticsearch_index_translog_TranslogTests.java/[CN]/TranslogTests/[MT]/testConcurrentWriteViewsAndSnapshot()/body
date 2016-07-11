@@ -7,10 +7,11 @@
   final CyclicBarrier barrier=new CyclicBarrier(writers.length + readers.length + 1);
   final Map<Translog.Operation,Translog.Location> writtenOps=ConcurrentCollections.newConcurrentMap();
   final AtomicBoolean run=new AtomicBoolean(true);
-  final List<Throwable> errors=new CopyOnWriteArrayList<>();
+  final List<Exception> errors=new CopyOnWriteArrayList<>();
   logger.debug("using [{}] readers. [{}] writers. flushing every ~[{}] ops.",readers.length,writers.length,flushEveryOps);
   for (int i=0; i < writers.length; i++) {
-    final String threadId="writer_" + i;
+    final String threadName="writer_" + i;
+    final int threadId=i;
     writers[i]=new Thread(new AbstractRunnable(){
       @Override public void doRun() throws BrokenBarrierException, InterruptedException, IOException {
         barrier.await();
@@ -34,17 +35,20 @@ Translog.Location existing=writtenOps.put(op,location);
 if (existing != null) {
   fail("duplicate op [" + op + "], old entry at "+ location);
 }
+if (id % writers.length == threadId) {
+  translog.ensureSynced(location);
+}
 writtenOpsLatch.get().countDown();
 counter++;
 }
-logger.debug("--> [{}] done. wrote [{}] ops.",threadId,counter);
+logger.debug("--> [{}] done. wrote [{}] ops.",threadName,counter);
 }
-@Override public void onFailure(Throwable t){
-logger.error("--> writer [{}] had an error",t,threadId);
-errors.add(t);
+@Override public void onFailure(Exception e){
+logger.error("--> writer [{}] had an error",e,threadName);
+errors.add(e);
 }
 }
-,threadId);
+,threadName);
 writers[i].start();
 }
 for (int i=0; i < readers.length; i++) {
@@ -52,15 +56,15 @@ final String threadId="reader_" + i;
 readers[i]=new Thread(new AbstractRunnable(){
 Translog.View view=null;
 Set<Translog.Operation> writtenOpsAtView;
-@Override public void onFailure(Throwable t){
-logger.error("--> reader [{}] had an error",t,threadId);
-errors.add(t);
+@Override public void onFailure(Exception e){
+logger.error("--> reader [{}] had an error",e,threadId);
+errors.add(e);
 try {
 closeView();
 }
- catch (IOException e) {
-logger.error("unexpected error while closing view, after failure");
-t.addSuppressed(e);
+ catch (IOException inner) {
+inner.addSuppressed(e);
+logger.error("unexpected error while closing view, after failure",inner);
 }
 }
 void closeView() throws IOException {

@@ -1,0 +1,22 @@
+{
+  createIndex(IDX_DST_END);
+  DateTimeZone timezone=DateTimeZone.forID("CET");
+  List<IndexRequestBuilder> builders=new ArrayList<>();
+  addNTimes(1,IDX_DST_END,new DateTime("2012-10-27T01:00:00",timezone),builders);
+  addNTimes(2,IDX_DST_END,new DateTime("2012-10-28T01:00:00",timezone),builders);
+  addNTimes(3,IDX_DST_END,new DateTime("2012-10-29T01:00:00",timezone),builders);
+  addNTimes(4,IDX_DST_END,new DateTime("2012-10-30T01:00:00",timezone),builders);
+  indexRandom(true,builders);
+  ensureSearchable();
+  SearchResponse response=client().prepareSearch(IDX_DST_END).addAggregation(dateHistogram("histo").field("date").dateHistogramInterval(DateHistogramInterval.DAY).timeZone(timezone).minDocCount(0).subAggregation(derivative("deriv","_count").unit(DateHistogramInterval.HOUR))).execute().actionGet();
+  assertSearchResponse(response);
+  InternalHistogram deriv=response.getAggregations().get("histo");
+  assertThat(deriv,notNullValue());
+  assertThat(deriv.getName(),equalTo("histo"));
+  List<? extends Bucket> buckets=deriv.getBuckets();
+  assertThat(buckets.size(),equalTo(4));
+  assertBucket(buckets.get(0),new DateTime("2012-10-27",timezone).toDateTime(DateTimeZone.UTC),1L,nullValue(),null,null);
+  assertBucket(buckets.get(1),new DateTime("2012-10-28",timezone).toDateTime(DateTimeZone.UTC),2L,notNullValue(),1d,1d / 24d);
+  assertBucket(buckets.get(2),new DateTime("2012-10-29",timezone).toDateTime(DateTimeZone.UTC),3L,notNullValue(),1d,1d / 25d);
+  assertBucket(buckets.get(3),new DateTime("2012-10-30",timezone).toDateTime(DateTimeZone.UTC),4L,notNullValue(),1d,1d / 24d);
+}

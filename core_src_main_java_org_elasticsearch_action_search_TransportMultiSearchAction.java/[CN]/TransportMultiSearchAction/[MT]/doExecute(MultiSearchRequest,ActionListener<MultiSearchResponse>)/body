@@ -1,27 +1,20 @@
 {
   ClusterState clusterState=clusterService.state();
   clusterState.blocks().globalBlockedRaiseException(ClusterBlockLevel.READ);
-  final AtomicArray<MultiSearchResponse.Item> responses=new AtomicArray<>(request.requests().size());
-  final AtomicInteger counter=new AtomicInteger(responses.length());
-  for (int i=0; i < responses.length(); i++) {
-    final int index=i;
-    searchAction.execute(request.requests().get(i),new ActionListener<SearchResponse>(){
-      @Override public void onResponse(      SearchResponse searchResponse){
-        responses.set(index,new MultiSearchResponse.Item(searchResponse,null));
-        if (counter.decrementAndGet() == 0) {
-          finishHim();
-        }
-      }
-      @Override public void onFailure(      Throwable e){
-        responses.set(index,new MultiSearchResponse.Item(null,e));
-        if (counter.decrementAndGet() == 0) {
-          finishHim();
-        }
-      }
-      private void finishHim(){
-        listener.onResponse(new MultiSearchResponse(responses.toArray(new MultiSearchResponse.Item[responses.length()])));
-      }
-    }
-);
+  int maxConcurrentSearches=request.maxConcurrentSearchRequests();
+  if (maxConcurrentSearches == 0) {
+    maxConcurrentSearches=defaultMaxConcurrentSearches(availableProcessors,clusterState);
+  }
+  Queue<SearchRequestSlot> searchRequestSlots=new ConcurrentLinkedQueue<>();
+  for (int i=0; i < request.requests().size(); i++) {
+    SearchRequest searchRequest=request.requests().get(i);
+    searchRequestSlots.add(new SearchRequestSlot(searchRequest,i));
+  }
+  int numRequests=request.requests().size();
+  final AtomicArray<MultiSearchResponse.Item> responses=new AtomicArray<>(numRequests);
+  final AtomicInteger responseCounter=new AtomicInteger(numRequests);
+  int numConcurrentSearches=Math.min(numRequests,maxConcurrentSearches);
+  for (int i=0; i < numConcurrentSearches; i++) {
+    executeSearch(searchRequestSlots,responses,responseCounter,listener);
   }
 }
