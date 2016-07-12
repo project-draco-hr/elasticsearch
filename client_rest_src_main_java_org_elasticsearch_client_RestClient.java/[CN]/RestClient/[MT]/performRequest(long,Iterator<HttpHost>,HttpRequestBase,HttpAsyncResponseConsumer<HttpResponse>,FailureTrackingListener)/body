@@ -1,0 +1,62 @@
+{
+  final HttpHost host=hosts.next();
+  HttpAsyncRequestProducer requestProducer=HttpAsyncMethods.create(host,request);
+  client.execute(requestProducer,responseConsumer,new FutureCallback<HttpResponse>(){
+    @Override public void completed(    HttpResponse httpResponse){
+      try {
+        RequestLogger.logResponse(logger,request,host,httpResponse);
+        int statusCode=httpResponse.getStatusLine().getStatusCode();
+        Response response=new Response(request.getRequestLine(),host,httpResponse);
+        if (isSuccessfulResponse(request.getMethod(),statusCode)) {
+          onResponse(host);
+          listener.onSuccess(response);
+        }
+ else {
+          ResponseException responseException=new ResponseException(response);
+          if (mustRetry(statusCode)) {
+            onFailure(host);
+            retryIfPossible(responseException,hosts,request);
+          }
+ else {
+            onResponse(host);
+            listener.onDefinitiveFailure(responseException);
+          }
+        }
+      }
+ catch (      Exception e) {
+        listener.onDefinitiveFailure(e);
+      }
+    }
+    @Override public void failed(    Exception failure){
+      try {
+        RequestLogger.logFailedRequest(logger,request,host,failure);
+        onFailure(host);
+        retryIfPossible(failure,hosts,request);
+      }
+ catch (      Exception e) {
+        listener.onDefinitiveFailure(e);
+      }
+    }
+    private void retryIfPossible(    Exception exception,    Iterator<HttpHost> hosts,    HttpRequestBase request){
+      if (hosts.hasNext()) {
+        long timeElapsedMillis=TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startTime);
+        long timeout=maxRetryTimeoutMillis - timeElapsedMillis;
+        if (timeout <= 0) {
+          IOException retryTimeoutException=new IOException("request retries exceeded max retry timeout [" + maxRetryTimeoutMillis + "]");
+          listener.onDefinitiveFailure(retryTimeoutException);
+        }
+ else {
+          listener.trackFailure(exception);
+          request.reset();
+          performRequest(startTime,hosts,request,responseConsumer,listener);
+        }
+      }
+ else {
+        listener.onDefinitiveFailure(exception);
+      }
+    }
+    @Override public void cancelled(){
+    }
+  }
+);
+}

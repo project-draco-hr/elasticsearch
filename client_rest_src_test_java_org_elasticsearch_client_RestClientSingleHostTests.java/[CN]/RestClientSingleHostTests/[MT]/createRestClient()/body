@@ -1,26 +1,31 @@
 {
-  httpClient=mock(CloseableHttpClient.class);
-  when(httpClient.execute(any(HttpHost.class),any(HttpRequest.class))).thenAnswer(new Answer<CloseableHttpResponse>(){
-    @Override public CloseableHttpResponse answer(    InvocationOnMock invocationOnMock) throws Throwable {
-      HttpUriRequest request=(HttpUriRequest)invocationOnMock.getArguments()[1];
+  httpClient=mock(CloseableHttpAsyncClient.class);
+  when(httpClient.<HttpResponse>execute(any(HttpAsyncRequestProducer.class),any(HttpAsyncResponseConsumer.class),any(FutureCallback.class))).thenAnswer(new Answer<Future<HttpResponse>>(){
+    @Override public Future<HttpResponse> answer(    InvocationOnMock invocationOnMock) throws Throwable {
+      HttpAsyncRequestProducer requestProducer=(HttpAsyncRequestProducer)invocationOnMock.getArguments()[0];
+      @SuppressWarnings("unchecked") FutureCallback<HttpResponse> futureCallback=(FutureCallback<HttpResponse>)invocationOnMock.getArguments()[2];
+      HttpUriRequest request=(HttpUriRequest)requestProducer.generateRequest();
       if (request.getURI().getPath().equals("/soe")) {
-        throw new SocketTimeoutException();
+        futureCallback.failed(new SocketTimeoutException());
       }
  else       if (request.getURI().getPath().equals("/coe")) {
-        throw new ConnectTimeoutException();
+        futureCallback.failed(new ConnectTimeoutException());
       }
-      int statusCode=Integer.parseInt(request.getURI().getPath().substring(1));
-      StatusLine statusLine=new BasicStatusLine(new ProtocolVersion("http",1,1),statusCode,"");
-      CloseableHttpResponse httpResponse=new CloseableBasicHttpResponse(statusLine);
-      if (request instanceof HttpEntityEnclosingRequest) {
-        HttpEntity entity=((HttpEntityEnclosingRequest)request).getEntity();
-        if (entity != null) {
-          assertTrue("the entity is not repeatable, cannot set it to the response directly",entity.isRepeatable());
-          httpResponse.setEntity(entity);
+ else {
+        int statusCode=Integer.parseInt(request.getURI().getPath().substring(1));
+        StatusLine statusLine=new BasicStatusLine(new ProtocolVersion("http",1,1),statusCode,"");
+        HttpResponse httpResponse=new BasicHttpResponse(statusLine);
+        if (request instanceof HttpEntityEnclosingRequest) {
+          HttpEntity entity=((HttpEntityEnclosingRequest)request).getEntity();
+          if (entity != null) {
+            assertTrue("the entity is not repeatable, cannot set it to the response directly",entity.isRepeatable());
+            httpResponse.setEntity(entity);
+          }
         }
+        httpResponse.setHeaders(request.getAllHeaders());
+        futureCallback.completed(httpResponse);
       }
-      httpResponse.setHeaders(request.getAllHeaders());
-      return httpResponse;
+      return null;
     }
   }
 );
