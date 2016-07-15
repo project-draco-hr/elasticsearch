@@ -1,0 +1,34 @@
+{
+  CreateIndexResponse createIndexResponse=prepareCreate("test",1,Settings.builder().put("index.number_of_shards",1).put("index.number_of_replicas",2)).get();
+  assertAcked(createIndexResponse);
+  client().prepareIndex("test","type1","1").setSource(source("1","test")).execute().actionGet();
+  ActiveShardCount activeShardCount=ActiveShardCount.from(2);
+  try {
+    client().prepareIndex("test","type1","1").setSource(source("1","test")).setWaitForActiveShards(activeShardCount).setTimeout(timeValueMillis(100)).execute().actionGet();
+    fail("can't index, does not enough active shard copies");
+  }
+ catch (  UnavailableShardsException e) {
+    assertThat(e.status(),equalTo(RestStatus.SERVICE_UNAVAILABLE));
+    assertThat(e.getMessage(),equalTo("[test][0] Not enough active copies to meet shard count of [" + activeShardCount + "] (have 1, needed 2). Timeout: [100ms], request: [index {[test][type1][1], source[{ \"type1\" : { \"id\" : \"1\", \"name\" : \"test\" } }]}]"));
+  }
+  allowNodes("test",2);
+  ClusterHealthResponse clusterHealth=client().admin().cluster().prepareHealth().setWaitForEvents(Priority.LANGUID).setWaitForActiveShards(2).setWaitForYellowStatus().execute().actionGet();
+  logger.info("Done Cluster Health, status {}",clusterHealth.getStatus());
+  assertThat(clusterHealth.isTimedOut(),equalTo(false));
+  assertThat(clusterHealth.getStatus(),equalTo(ClusterHealthStatus.YELLOW));
+  client().prepareIndex("test","type1","1").setSource(source("1","test")).setWaitForActiveShards(activeShardCount).setTimeout(timeValueSeconds(1)).execute().actionGet();
+  try {
+    client().prepareIndex("test","type1","1").setSource(source("1","test")).setWaitForActiveShards(ActiveShardCount.ALL).setTimeout(timeValueMillis(100)).execute().actionGet();
+    fail("can't index, not enough active shard copies");
+  }
+ catch (  UnavailableShardsException e) {
+    assertThat(e.status(),equalTo(RestStatus.SERVICE_UNAVAILABLE));
+    assertThat(e.getMessage(),equalTo("[test][0] Not enough active copies to meet shard count of [" + ActiveShardCount.ALL + "] (have 2, needed 3). Timeout: [100ms], request: [index {[test][type1][1], source[{ \"type1\" : { \"id\" : \"1\", \"name\" : \"test\" } }]}]"));
+  }
+  allowNodes("test",3);
+  clusterHealth=client().admin().cluster().prepareHealth().setWaitForEvents(Priority.LANGUID).setWaitForActiveShards(3).setWaitForGreenStatus().execute().actionGet();
+  logger.info("Done Cluster Health, status {}",clusterHealth.getStatus());
+  assertThat(clusterHealth.isTimedOut(),equalTo(false));
+  assertThat(clusterHealth.getStatus(),equalTo(ClusterHealthStatus.GREEN));
+  client().prepareIndex("test","type1","1").setSource(source("1","test")).setWaitForActiveShards(ActiveShardCount.ALL).setTimeout(timeValueSeconds(1)).execute().actionGet();
+}
