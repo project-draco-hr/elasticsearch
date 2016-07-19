@@ -1,0 +1,22 @@
+{
+  final String clusterName="test-cluster";
+  final AllocationService allocationService=newAllocationService(settings,allocationDeciders);
+  logger.info("Building initial routing table");
+  final int numShards=randomIntBetween(1,5);
+  MetaData metaData=MetaData.builder().put(IndexMetaData.builder(indexName).settings(settings(Version.CURRENT)).numberOfShards(numShards).numberOfReplicas(1)).build();
+  RoutingTable routingTable=RoutingTable.builder().addAsNew(metaData.index(indexName)).build();
+  ClusterState clusterState=ClusterState.builder(new ClusterName(clusterName)).metaData(metaData).routingTable(routingTable).build();
+  logger.info("--> adding nodes");
+  final DiscoveryNodes.Builder discoveryNodes=DiscoveryNodes.builder();
+  for (int i=0; i < numShards; i++) {
+    discoveryNodes.put(newNode("node" + i));
+  }
+  clusterState=ClusterState.builder(clusterState).nodes(discoveryNodes).build();
+  logger.info("--> do the reroute");
+  routingTable=allocationService.reroute(clusterState,"reroute").routingTable();
+  clusterState=ClusterState.builder(clusterState).routingTable(routingTable).build();
+  logger.info("--> assert cluster health");
+  ClusterStateHealth health=new ClusterStateHealth(clusterState);
+  assertThat(health.getStatus(),equalTo(expectedStatus));
+  return clusterState;
+}

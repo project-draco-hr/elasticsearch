@@ -1,0 +1,151 @@
+{
+  final List<String> nodeIds=new ArrayList<>();
+  final int numNodes=randomIntBetween(numberOfReplicas + 1,10);
+  for (int i=0; i < numNodes; i++) {
+    nodeIds.add(randomAsciiOfLength(8));
+  }
+  final List<ClusterState> clusterStates=new ArrayList<>();
+  clusterStates.add(originalClusterState);
+  ClusterState clusterState=originalClusterState;
+  RoutingTable routingTable=originalClusterState.routingTable();
+  IndexRoutingTable indexRoutingTable=routingTable.index(indexName);
+  IndexRoutingTable.Builder newIndexRoutingTable=IndexRoutingTable.builder(indexRoutingTable.getIndex());
+  for (  final ObjectCursor<IndexShardRoutingTable> shardEntry : indexRoutingTable.getShards().values()) {
+    final IndexShardRoutingTable shardRoutingTable=shardEntry.value;
+    for (    final ShardRouting shardRouting : shardRoutingTable.getShards()) {
+      if (shardRouting.primary()) {
+        newIndexRoutingTable.addShard(shardRouting.initialize(nodeIds.get(randomIntBetween(0,numNodes - 1)),null,shardRouting.getExpectedShardSize()));
+      }
+ else {
+        newIndexRoutingTable.addShard(shardRouting);
+      }
+    }
+  }
+  routingTable=RoutingTable.builder(routingTable).add(newIndexRoutingTable).build();
+  clusterState=ClusterState.builder(clusterState).routingTable(routingTable).build();
+  clusterStates.add(clusterState);
+  indexRoutingTable=routingTable.index(indexName);
+  newIndexRoutingTable=IndexRoutingTable.builder(indexRoutingTable.getIndex());
+  ImmutableOpenIntMap.Builder<Set<String>> allocationIds=ImmutableOpenIntMap.<Set<String>>builder();
+  for (  final ObjectCursor<IndexShardRoutingTable> shardEntry : indexRoutingTable.getShards().values()) {
+    final IndexShardRoutingTable shardRoutingTable=shardEntry.value;
+    for (    final ShardRouting shardRouting : shardRoutingTable.getShards()) {
+      if (shardRouting.primary() && randomBoolean()) {
+        final ShardRouting newShardRouting=shardRouting.moveToStarted();
+        allocationIds.fPut(newShardRouting.getId(),Sets.newHashSet(newShardRouting.allocationId().getId()));
+        newIndexRoutingTable.addShard(newShardRouting);
+      }
+ else {
+        newIndexRoutingTable.addShard(shardRouting);
+      }
+    }
+  }
+  routingTable=RoutingTable.builder(routingTable).add(newIndexRoutingTable).build();
+  IndexMetaData.Builder idxMetaBuilder=IndexMetaData.builder(clusterState.metaData().index(indexName));
+  for (  final IntObjectCursor<Set<String>> entry : allocationIds.build()) {
+    idxMetaBuilder.putActiveAllocationIds(entry.key,entry.value);
+  }
+  MetaData.Builder metaDataBuilder=MetaData.builder(clusterState.metaData()).put(idxMetaBuilder);
+  clusterState=ClusterState.builder(clusterState).routingTable(routingTable).metaData(metaDataBuilder).build();
+  clusterStates.add(clusterState);
+  if (withPrimaryAllocationFailures) {
+    boolean alreadyFailedPrimary=false;
+    indexRoutingTable=routingTable.index(indexName);
+    newIndexRoutingTable=IndexRoutingTable.builder(indexRoutingTable.getIndex());
+    for (    final ObjectCursor<IndexShardRoutingTable> shardEntry : indexRoutingTable.getShards().values()) {
+      final IndexShardRoutingTable shardRoutingTable=shardEntry.value;
+      for (      final ShardRouting shardRouting : shardRoutingTable.getShards()) {
+        if (shardRouting.primary() && (shardRouting.started() == false || alreadyFailedPrimary == false)) {
+          newIndexRoutingTable.addShard(shardRouting.moveToUnassigned(new UnassignedInfo(UnassignedInfo.Reason.ALLOCATION_FAILED,"unlucky shard")));
+          alreadyFailedPrimary=true;
+        }
+ else {
+          newIndexRoutingTable.addShard(shardRouting);
+        }
+      }
+    }
+    routingTable=RoutingTable.builder(routingTable).add(newIndexRoutingTable).build();
+    clusterStates.add(ClusterState.builder(clusterState).routingTable(routingTable).build());
+    return clusterStates;
+  }
+  indexRoutingTable=routingTable.index(indexName);
+  newIndexRoutingTable=IndexRoutingTable.builder(indexRoutingTable.getIndex());
+  allocationIds=ImmutableOpenIntMap.<Set<String>>builder();
+  for (  final ObjectCursor<IndexShardRoutingTable> shardEntry : indexRoutingTable.getShards().values()) {
+    final IndexShardRoutingTable shardRoutingTable=shardEntry.value;
+    for (    final ShardRouting shardRouting : shardRoutingTable.getShards()) {
+      if (shardRouting.primary() && shardRouting.started() == false) {
+        final ShardRouting newShardRouting=shardRouting.moveToStarted();
+        allocationIds.fPut(newShardRouting.getId(),Sets.newHashSet(newShardRouting.allocationId().getId()));
+        newIndexRoutingTable.addShard(newShardRouting);
+      }
+ else {
+        newIndexRoutingTable.addShard(shardRouting);
+      }
+    }
+  }
+  routingTable=RoutingTable.builder(routingTable).add(newIndexRoutingTable).build();
+  idxMetaBuilder=IndexMetaData.builder(clusterState.metaData().index(indexName));
+  for (  final IntObjectCursor<Set<String>> entry : allocationIds.build()) {
+    idxMetaBuilder.putActiveAllocationIds(entry.key,entry.value);
+  }
+  metaDataBuilder=MetaData.builder(clusterState.metaData()).put(idxMetaBuilder);
+  clusterState=ClusterState.builder(clusterState).routingTable(routingTable).metaData(metaDataBuilder).build();
+  clusterStates.add(clusterState);
+  indexRoutingTable=routingTable.index(indexName);
+  newIndexRoutingTable=IndexRoutingTable.builder(indexRoutingTable.getIndex());
+  for (  final ObjectCursor<IndexShardRoutingTable> shardEntry : indexRoutingTable.getShards().values()) {
+    final IndexShardRoutingTable shardRoutingTable=shardEntry.value;
+    for (    final ShardRouting shardRouting : shardRoutingTable.getShards()) {
+      if (shardRouting.primary() == false) {
+        final String primaryNodeId=shardRoutingTable.primaryShard().currentNodeId();
+        String replicaNodeId;
+        do {
+          replicaNodeId=nodeIds.get(randomIntBetween(0,numNodes - 1));
+        }
+ while (primaryNodeId.equals(replicaNodeId));
+        newIndexRoutingTable.addShard(shardRouting.initialize(replicaNodeId,null,shardRouting.getExpectedShardSize()));
+      }
+ else {
+        newIndexRoutingTable.addShard(shardRouting);
+      }
+    }
+  }
+  routingTable=RoutingTable.builder(routingTable).add(newIndexRoutingTable).build();
+  clusterStates.add(ClusterState.builder(clusterState).routingTable(routingTable).build());
+  indexRoutingTable=routingTable.index(indexName);
+  newIndexRoutingTable=IndexRoutingTable.builder(indexRoutingTable.getIndex());
+  for (  final ObjectCursor<IndexShardRoutingTable> shardEntry : indexRoutingTable.getShards().values()) {
+    final IndexShardRoutingTable shardRoutingTable=shardEntry.value;
+    for (    final ShardRouting shardRouting : shardRoutingTable.getShards()) {
+      if (shardRouting.primary() == false && randomBoolean()) {
+        newIndexRoutingTable.addShard(shardRouting.moveToStarted());
+      }
+ else {
+        newIndexRoutingTable.addShard(shardRouting);
+      }
+    }
+  }
+  routingTable=RoutingTable.builder(routingTable).add(newIndexRoutingTable).build();
+  clusterStates.add(ClusterState.builder(clusterState).routingTable(routingTable).build());
+  boolean replicaStateChanged=false;
+  indexRoutingTable=routingTable.index(indexName);
+  newIndexRoutingTable=IndexRoutingTable.builder(indexRoutingTable.getIndex());
+  for (  final ObjectCursor<IndexShardRoutingTable> shardEntry : indexRoutingTable.getShards().values()) {
+    final IndexShardRoutingTable shardRoutingTable=shardEntry.value;
+    for (    final ShardRouting shardRouting : shardRoutingTable.getShards()) {
+      if (shardRouting.primary() == false && shardRouting.started() == false) {
+        newIndexRoutingTable.addShard(shardRouting.moveToStarted());
+        replicaStateChanged=true;
+      }
+ else {
+        newIndexRoutingTable.addShard(shardRouting);
+      }
+    }
+  }
+  if (replicaStateChanged) {
+    routingTable=RoutingTable.builder(routingTable).add(newIndexRoutingTable).build();
+    clusterStates.add(ClusterState.builder(clusterState).routingTable(routingTable).build());
+  }
+  return clusterStates;
+}
