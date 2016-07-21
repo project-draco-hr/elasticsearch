@@ -1,0 +1,43 @@
+{
+  super(metadata,settings);
+  String bucket=getValue(metadata.settings(),settings,Repository.BUCKET_SETTING,Repositories.BUCKET_SETTING);
+  if (bucket == null) {
+    throw new RepositoryException(metadata.name(),"No bucket defined for s3 gateway");
+  }
+  String endpoint=getValue(metadata.settings(),settings,Repository.ENDPOINT_SETTING,Repositories.ENDPOINT_SETTING);
+  Protocol protocol=getValue(metadata.settings(),settings,Repository.PROTOCOL_SETTING,Repositories.PROTOCOL_SETTING);
+  String region=getValue(metadata.settings(),settings,Repository.REGION_SETTING,Repositories.REGION_SETTING);
+  if (Strings.isEmpty(region)) {
+    region=null;
+  }
+  boolean serverSideEncryption=getValue(metadata.settings(),settings,Repository.SERVER_SIDE_ENCRYPTION_SETTING,Repositories.SERVER_SIDE_ENCRYPTION_SETTING);
+  ByteSizeValue bufferSize=getValue(metadata.settings(),settings,Repository.BUFFER_SIZE_SETTING,Repositories.BUFFER_SIZE_SETTING);
+  Integer maxRetries=getValue(metadata.settings(),settings,Repository.MAX_RETRIES_SETTING,Repositories.MAX_RETRIES_SETTING);
+  boolean useThrottleRetries=getValue(metadata.settings(),settings,Repository.USE_THROTTLE_RETRIES_SETTING,Repositories.USE_THROTTLE_RETRIES_SETTING);
+  this.chunkSize=getValue(metadata.settings(),settings,Repository.CHUNK_SIZE_SETTING,Repositories.CHUNK_SIZE_SETTING);
+  this.compress=getValue(metadata.settings(),settings,Repository.COMPRESS_SETTING,Repositories.COMPRESS_SETTING);
+  if (this.chunkSize.getBytes() < bufferSize.getBytes()) {
+    throw new RepositoryException(metadata.name(),Repository.CHUNK_SIZE_SETTING.getKey() + " (" + this.chunkSize+ ") can't be lower than "+ Repository.BUFFER_SIZE_SETTING.getKey()+ " ("+ bufferSize+ ").");
+  }
+  String storageClass=getValue(metadata.settings(),settings,Repository.STORAGE_CLASS_SETTING,Repositories.STORAGE_CLASS_SETTING);
+  String cannedACL=getValue(metadata.settings(),settings,Repository.CANNED_ACL_SETTING,Repositories.CANNED_ACL_SETTING);
+  Boolean pathStyleAccess=null;
+  if (Repository.PATH_STYLE_ACCESS_SETTING.exists(metadata.settings()) || Repositories.PATH_STYLE_ACCESS_SETTING.exists(settings)) {
+    pathStyleAccess=getValue(metadata.settings(),settings,Repository.PATH_STYLE_ACCESS_SETTING,Repositories.PATH_STYLE_ACCESS_SETTING);
+  }
+  logger.debug("using bucket [{}], region [{}], endpoint [{}], protocol [{}], chunk_size [{}], server_side_encryption [{}], " + "buffer_size [{}], max_retries [{}], use_throttle_retries [{}], cannedACL [{}], storageClass [{}], path_style_access [{}]",bucket,region,endpoint,protocol,chunkSize,serverSideEncryption,bufferSize,maxRetries,useThrottleRetries,cannedACL,storageClass,pathStyleAccess);
+  String key=getValue(metadata.settings(),settings,Repository.KEY_SETTING,Repositories.KEY_SETTING);
+  String secret=getValue(metadata.settings(),settings,Repository.SECRET_SETTING,Repositories.SECRET_SETTING);
+  blobStore=new S3BlobStore(settings,s3Service.client(endpoint,protocol,region,key,secret,maxRetries,useThrottleRetries,pathStyleAccess),bucket,region,serverSideEncryption,bufferSize,maxRetries,cannedACL,storageClass);
+  String basePath=getValue(metadata.settings(),settings,Repository.BASE_PATH_SETTING,Repositories.BASE_PATH_SETTING);
+  if (Strings.hasLength(basePath)) {
+    BlobPath path=new BlobPath();
+    for (    String elem : basePath.split("/")) {
+      path=path.add(elem);
+    }
+    this.basePath=path;
+  }
+ else {
+    this.basePath=BlobPath.cleanPath();
+  }
+}

@@ -1,0 +1,31 @@
+{
+  final boolean useDeprecatedField=randomBoolean();
+  final boolean useNonDeprecatedSetting=randomBoolean();
+  final List<Setting<Boolean>> settings=new ArrayList<>(3);
+  settings.add(TEST_DEPRECATED_SETTING_TRUE1);
+  if (randomBoolean()) {
+    settings.add(TEST_DEPRECATED_SETTING_TRUE2);
+  }
+  if (useNonDeprecatedSetting) {
+    settings.add(TEST_NOT_DEPRECATED_SETTING);
+  }
+  Collections.shuffle(settings,random());
+  try (Response response=getRestClient().performRequest("GET","/_test_cluster/deprecated_settings",Collections.emptyMap(),buildSettingsRequest(settings,useDeprecatedField))){
+    assertThat(response.getStatusLine().getStatusCode(),equalTo(OK.getStatus()));
+    final List<String> deprecatedWarnings=getWarningHeaders(response.getHeaders());
+    final List<Matcher<String>> headerMatchers=new ArrayList<>(4);
+    headerMatchers.add(equalTo(TestDeprecationHeaderRestAction.DEPRECATED_ENDPOINT));
+    if (useDeprecatedField) {
+      headerMatchers.add(equalTo(TestDeprecationHeaderRestAction.DEPRECATED_USAGE));
+    }
+    for (    Setting<?> setting : settings) {
+      if (setting.isDeprecated()) {
+        headerMatchers.add(containsString(LoggerMessageFormat.format("[{}] setting was deprecated",(Object)setting.getKey())));
+      }
+    }
+    assertThat(deprecatedWarnings,hasSize(headerMatchers.size()));
+    for (    Matcher<String> headerMatcher : headerMatchers) {
+      assertThat(deprecatedWarnings,hasItem(headerMatcher));
+    }
+  }
+ }

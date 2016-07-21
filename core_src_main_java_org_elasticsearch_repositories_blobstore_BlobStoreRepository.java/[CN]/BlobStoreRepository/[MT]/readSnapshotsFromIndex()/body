@@ -1,0 +1,48 @@
+{
+  final long indexGen=latestIndexBlobId();
+  final String snapshotsIndexBlobName;
+  if (indexGen == -1) {
+    snapshotsIndexBlobName=SNAPSHOTS_FILE;
+  }
+ else {
+    snapshotsIndexBlobName=SNAPSHOTS_FILE_PREFIX + Long.toString(indexGen);
+  }
+  try (InputStream blob=snapshotsBlobContainer.readBlob(snapshotsIndexBlobName)){
+    BytesStreamOutput out=new BytesStreamOutput();
+    Streams.copy(blob,out);
+    ArrayList<SnapshotId> snapshots=new ArrayList<>();
+    try (XContentParser parser=XContentHelper.createParser(out.bytes())){
+      if (parser.nextToken() == XContentParser.Token.START_OBJECT) {
+        if (parser.nextToken() == XContentParser.Token.FIELD_NAME) {
+          String currentFieldName=parser.currentName();
+          if (SNAPSHOTS.equals(currentFieldName)) {
+            if (parser.nextToken() == XContentParser.Token.START_ARRAY) {
+              while (parser.nextToken() != XContentParser.Token.END_ARRAY) {
+                String name=null;
+                String uuid=null;
+                if (parser.currentToken() == XContentParser.Token.START_OBJECT) {
+                  while (parser.nextToken() != XContentParser.Token.END_OBJECT) {
+                    currentFieldName=parser.currentName();
+                    parser.nextToken();
+                    if (NAME.equals(currentFieldName)) {
+                      name=parser.text();
+                    }
+ else                     if (UUID.equals(currentFieldName)) {
+                      uuid=parser.text();
+                    }
+                  }
+                  snapshots.add(new SnapshotId(name,uuid));
+                }
+ else {
+                  name=parser.text();
+                  snapshots.add(new SnapshotId(name,SnapshotId.UNASSIGNED_UUID));
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+     return Collections.unmodifiableList(snapshots);
+  }
+ }

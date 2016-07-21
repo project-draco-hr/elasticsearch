@@ -1,0 +1,25 @@
+{
+  final DiscoveryNodes.Builder remainingNodesBuilder=DiscoveryNodes.builder(currentState.nodes());
+  boolean removed=false;
+  for (  final Task task : tasks) {
+    if (currentState.nodes().nodeExists(task.node())) {
+      remainingNodesBuilder.remove(task.node());
+      removed=true;
+    }
+ else {
+      logger.debug("node [{}] does not exist in cluster state, ignoring",task);
+    }
+  }
+  if (!removed) {
+    return BatchResult.<Task>builder().successes(tasks).build(currentState);
+  }
+  final ClusterState remainingNodesClusterState=remainingNodesClusterState(currentState,remainingNodesBuilder);
+  final BatchResult.Builder<Task> resultBuilder=BatchResult.<Task>builder().successes(tasks);
+  if (!electMasterService.hasEnoughMasterNodes(remainingNodesClusterState.nodes())) {
+    return resultBuilder.build(rejoin.apply(remainingNodesClusterState,"not enough master nodes"));
+  }
+ else {
+    final RoutingAllocation.Result routingResult=allocationService.reroute(remainingNodesClusterState,describeTasks(tasks));
+    return resultBuilder.build(ClusterState.builder(remainingNodesClusterState).routingResult(routingResult).build());
+  }
+}

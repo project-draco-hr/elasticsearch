@@ -1,0 +1,85 @@
+{
+  final int numDocs=scaledRandomIntBetween(500,5000);
+  final double[][] docs=new double[numDocs][];
+  for (int i=0; i < numDocs; ++i) {
+    final int numValues=randomInt(5);
+    docs[i]=new double[numValues];
+    for (int j=0; j < numValues; ++j) {
+      docs[i][j]=randomDouble() * 100;
+    }
+  }
+  createIndex("idx");
+  for (int i=0; i < docs.length; ++i) {
+    XContentBuilder source=jsonBuilder().startObject().startArray("values");
+    for (int j=0; j < docs[i].length; ++j) {
+      source=source.value(docs[i][j]);
+    }
+    source=source.endArray().endObject();
+    client().prepareIndex("idx","type").setSource(source).execute().actionGet();
+  }
+  assertNoFailures(client().admin().indices().prepareRefresh("idx").setIndicesOptions(IndicesOptions.lenientExpandOpen()).get());
+  final int numRanges=randomIntBetween(1,20);
+  final double[][] ranges=new double[numRanges][];
+  for (int i=0; i < ranges.length; ++i) {
+switch (randomInt(2)) {
+case 0:
+      ranges[i]=new double[]{Double.NEGATIVE_INFINITY,randomInt(100)};
+    break;
+case 1:
+  ranges[i]=new double[]{randomInt(100),Double.POSITIVE_INFINITY};
+break;
+case 2:
+ranges[i]=new double[]{randomInt(100),randomInt(100)};
+break;
+default :
+throw new AssertionError();
+}
+}
+RangeAggregationBuilder query=range("range").field("values");
+for (int i=0; i < ranges.length; ++i) {
+String key=Integer.toString(i);
+if (ranges[i][0] == Double.NEGATIVE_INFINITY) {
+query.addUnboundedTo(key,ranges[i][1]);
+}
+ else if (ranges[i][1] == Double.POSITIVE_INFINITY) {
+query.addUnboundedFrom(key,ranges[i][0]);
+}
+ else {
+query.addRange(key,ranges[i][0],ranges[i][1]);
+}
+}
+SearchRequestBuilder reqBuilder=client().prepareSearch("idx").addAggregation(query);
+for (int i=0; i < ranges.length; ++i) {
+RangeQueryBuilder filter=QueryBuilders.rangeQuery("values");
+if (ranges[i][0] != Double.NEGATIVE_INFINITY) {
+filter=filter.from(ranges[i][0]);
+}
+if (ranges[i][1] != Double.POSITIVE_INFINITY) {
+filter=filter.to(ranges[i][1]);
+}
+reqBuilder=reqBuilder.addAggregation(filter("filter" + i,filter));
+}
+SearchResponse resp=reqBuilder.execute().actionGet();
+Range range=resp.getAggregations().get("range");
+List<? extends Bucket> buckets=range.getBuckets();
+HashMap<String,Bucket> bucketMap=new HashMap<>(buckets.size());
+for (Bucket bucket : buckets) {
+bucketMap.put(bucket.getKeyAsString(),bucket);
+}
+for (int i=0; i < ranges.length; ++i) {
+long count=0;
+for (double[] values : docs) {
+for (double value : values) {
+if (value >= ranges[i][0] && value < ranges[i][1]) {
+++count;
+break;
+}
+}
+}
+final Range.Bucket bucket=bucketMap.get(Integer.toString(i));
+assertEquals(bucket.getKeyAsString(),Integer.toString(i),bucket.getKeyAsString());
+assertEquals(bucket.getKeyAsString(),count,bucket.getDocCount());
+final Filter filter=resp.getAggregations().get("filter" + i);
+assertThat(filter.getDocCount(),equalTo(count));
+}
+}

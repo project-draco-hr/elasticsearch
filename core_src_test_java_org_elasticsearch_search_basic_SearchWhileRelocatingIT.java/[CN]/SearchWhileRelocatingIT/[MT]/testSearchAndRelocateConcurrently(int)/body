@@ -12,34 +12,29 @@
   final int numIters=scaledRandomIntBetween(5,20);
   for (int i=0; i < numIters; i++) {
     final AtomicBoolean stop=new AtomicBoolean(false);
-    final List<Throwable> thrownExceptions=new CopyOnWriteArrayList<>();
-    final List<Throwable> nonCriticalExceptions=new CopyOnWriteArrayList<>();
+    final List<String> nonCriticalExceptions=new CopyOnWriteArrayList<>();
     Thread[] threads=new Thread[scaledRandomIntBetween(1,3)];
     for (int j=0; j < threads.length; j++) {
       threads[j]=new Thread(){
         @Override public void run(){
-          boolean criticalException=true;
           try {
             while (!stop.get()) {
               SearchResponse sr=client().prepareSearch().setSize(numDocs).get();
-              criticalException=sr.getTotalShards() == sr.getSuccessfulShards() || sr.getFailedShards() > 0;
-              assertHitCount(sr,(numDocs));
-              criticalException=true;
+              if (sr.getHits().totalHits() != numDocs) {
+                if (sr.getTotalShards() != sr.getSuccessfulShards() && sr.getFailedShards() == 0) {
+                  nonCriticalExceptions.add("Count is " + sr.getHits().totalHits() + " but "+ numDocs+ " was expected. "+ formatShardStatus(sr));
+                }
+ else {
+                  assertHitCount(sr,numDocs);
+                }
+              }
               final SearchHits sh=sr.getHits();
               assertThat("Expected hits to be the same size the actual hits array",sh.getTotalHits(),equalTo((long)(sh.getHits().length)));
             }
           }
  catch (          SearchPhaseExecutionException ex) {
             if (numberOfReplicas == 1 || !ex.getMessage().contains("all shards failed")) {
-              thrownExceptions.add(ex);
-            }
-          }
-catch (          Throwable t) {
-            if (!criticalException) {
-              nonCriticalExceptions.add(t);
-            }
- else {
-              thrownExceptions.add(t);
+              throw ex;
             }
           }
         }
@@ -57,20 +52,11 @@ catch (          Throwable t) {
     }
     ClusterHealthResponse resp=client().admin().cluster().prepareHealth().setWaitForYellowStatus().setWaitForRelocatingShards(0).setWaitForEvents(Priority.LANGUID).setTimeout("5m").get();
     assertNoTimeout(resp);
-    if (!thrownExceptions.isEmpty() || !nonCriticalExceptions.isEmpty()) {
-      Client client=client();
-      boolean postSearchOK=true;
-      String verified="POST SEARCH OK";
+    if (!nonCriticalExceptions.isEmpty()) {
+      logger.info("non-critical exceptions: {}",nonCriticalExceptions);
       for (int j=0; j < 10; j++) {
-        if (client.prepareSearch().get().getHits().getTotalHits() != numDocs) {
-          verified="POST SEARCH FAIL";
-          postSearchOK=false;
-          break;
-        }
+        assertHitCount(client().prepareSearch().get(),numDocs);
       }
-      assertThat("numberOfReplicas: " + numberOfReplicas + " failed in iteration "+ i+ ", verification: "+ verified,thrownExceptions,Matchers.emptyIterable());
-      logger.info("Non-CriticalExceptions: {}",nonCriticalExceptions);
-      assertThat("numberOfReplicas: " + numberOfReplicas + " failed in iteration "+ i+ ", verification: "+ verified,postSearchOK,is(true));
     }
   }
 }

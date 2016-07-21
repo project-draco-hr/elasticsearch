@@ -2,15 +2,15 @@
   long globalSubsetSize=0;
   long globalSupersetSize=0;
   for (  InternalAggregation aggregation : aggregations) {
-    InternalSignificantTerms<A,B> terms=(InternalSignificantTerms<A,B>)aggregation;
-    globalSubsetSize+=terms.subsetSize;
-    globalSupersetSize+=terms.supersetSize;
+    @SuppressWarnings("unchecked") InternalSignificantTerms<A,B> terms=(InternalSignificantTerms<A,B>)aggregation;
+    globalSubsetSize+=terms.getSubsetSize();
+    globalSupersetSize+=terms.getSupersetSize();
   }
-  Map<String,List<InternalSignificantTerms.Bucket>> buckets=new HashMap<>();
+  Map<String,List<B>> buckets=new HashMap<>();
   for (  InternalAggregation aggregation : aggregations) {
-    InternalSignificantTerms<A,B> terms=(InternalSignificantTerms<A,B>)aggregation;
-    for (    Bucket bucket : terms.buckets) {
-      List<Bucket> existingBuckets=buckets.get(bucket.getKeyAsString());
+    @SuppressWarnings("unchecked") InternalSignificantTerms<A,B> terms=(InternalSignificantTerms<A,B>)aggregation;
+    for (    B bucket : terms.getBucketsInternal()) {
+      List<B> existingBuckets=buckets.get(bucket.getKeyAsString());
       if (existingBuckets == null) {
         existingBuckets=new ArrayList<>(aggregations.size());
         buckets.put(bucket.getKeyAsString(),existingBuckets);
@@ -18,20 +18,20 @@
       existingBuckets.add(bucket.newBucket(bucket.getSubsetDf(),globalSubsetSize,bucket.getSupersetDf(),globalSupersetSize,bucket.aggregations));
     }
   }
-  significanceHeuristic.initialize(reduceContext);
+  getSignificanceHeuristic().initialize(reduceContext);
   final int size=Math.min(requiredSize,buckets.size());
-  BucketSignificancePriorityQueue ordered=new BucketSignificancePriorityQueue(size);
-  for (  Map.Entry<String,List<Bucket>> entry : buckets.entrySet()) {
-    List<Bucket> sameTermBuckets=entry.getValue();
-    final Bucket b=sameTermBuckets.get(0).reduce(sameTermBuckets,reduceContext);
-    b.updateScore(significanceHeuristic);
+  BucketSignificancePriorityQueue<B> ordered=new BucketSignificancePriorityQueue<>(size);
+  for (  Map.Entry<String,List<B>> entry : buckets.entrySet()) {
+    List<B> sameTermBuckets=entry.getValue();
+    final B b=sameTermBuckets.get(0).reduce(sameTermBuckets,reduceContext);
+    b.updateScore(getSignificanceHeuristic());
     if ((b.score > 0) && (b.subsetDf >= minDocCount)) {
       ordered.insertWithOverflow(b);
     }
   }
-  Bucket[] list=new Bucket[ordered.size()];
+  B[] list=createBucketsArray(ordered.size());
   for (int i=ordered.size() - 1; i >= 0; i--) {
-    list[i]=(Bucket)ordered.pop();
+    list[i]=ordered.pop();
   }
-  return create(globalSubsetSize,globalSupersetSize,Arrays.asList(list),this);
+  return create(globalSubsetSize,globalSupersetSize,Arrays.asList(list));
 }
