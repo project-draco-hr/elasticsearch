@@ -1,32 +1,15 @@
 {
-  this.parentFilter=null;
-  final IndexReaderContext topLevelContext=ReaderUtil.getTopLevelContext(ctx);
-  final IndexSearcher searcher=new IndexSearcher(topLevelContext);
+  IndexReaderContext topLevelContext=ReaderUtil.getTopLevelContext(ctx);
+  IndexSearcher searcher=new IndexSearcher(topLevelContext);
   searcher.setQueryCache(null);
-  final Weight weight=searcher.createNormalizedWeight(childFilter,false);
+  Weight weight=searcher.createNormalizedWeight(childFilter,false);
   Scorer childDocsScorer=weight.scorer(ctx);
-  if (childDocsScorer == null) {
-    childDocs=null;
-  }
- else {
-    childDocs=childDocsScorer.iterator();
-  }
+  final BitSet parentDocs=parentFilter.getBitSet(ctx);
+  final DocIdSetIterator childDocs=childDocsScorer != null ? childDocsScorer.iterator() : null;
   return new LeafBucketCollectorBase(sub,null){
     @Override public void collect(    int parentDoc,    long bucket) throws IOException {
-      if (parentDoc == 0 || childDocs == null) {
+      if (parentDoc == 0 || parentDocs == null || childDocs == null) {
         return;
-      }
-      if (parentFilter == null) {
-        Query parentFilterNotCached=findClosestNestedPath(parent());
-        if (parentFilterNotCached == null) {
-          parentFilterNotCached=Queries.newNonNestedFilter();
-        }
-        parentFilter=context.searchContext().bitsetFilterCache().getBitSetProducer(parentFilterNotCached);
-        parentDocs=parentFilter.getBitSet(ctx);
-        if (parentDocs == null) {
-          childDocs=null;
-          return;
-        }
       }
       final int prevParentDoc=parentDocs.prevSetBit(parentDoc - 1);
       int childDocId=childDocs.docID();
