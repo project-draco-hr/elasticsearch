@@ -1,0 +1,34 @@
+{
+  if (msg instanceof HttpPipelinedResponse) {
+    boolean channelShouldClose=false;
+synchronized (holdingQueue) {
+      if (holdingQueue.size() < maxEventsHeld) {
+        holdingQueue.add((HttpPipelinedResponse)msg);
+        while (!holdingQueue.isEmpty()) {
+          final HttpPipelinedResponse response=holdingQueue.peek();
+          if (response.sequence() != writeSequence) {
+            break;
+          }
+          holdingQueue.remove();
+          ctx.write(response.response(),response.promise());
+          writeSequence++;
+        }
+      }
+ else {
+        channelShouldClose=true;
+      }
+    }
+    if (channelShouldClose) {
+      try {
+        Netty4Utils.closeChannels(Collections.singletonList(ctx.channel()));
+      }
+  finally {
+        ((HttpPipelinedResponse)msg).release();
+        promise.setSuccess();
+      }
+    }
+  }
+ else {
+    ctx.write(msg,promise);
+  }
+}
