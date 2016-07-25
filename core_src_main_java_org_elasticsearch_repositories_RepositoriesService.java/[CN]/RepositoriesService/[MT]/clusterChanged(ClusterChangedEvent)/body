@@ -6,27 +6,28 @@
       return;
     }
     logger.trace("processing new index repositories for state version [{}]",event.state().version());
-    Map<String,RepositoryHolder> survivors=new HashMap<>();
-    for (    Map.Entry<String,RepositoryHolder> entry : repositories.entrySet()) {
+    Map<String,Repository> survivors=new HashMap<>();
+    for (    Map.Entry<String,Repository> entry : repositories.entrySet()) {
       if (newMetaData == null || newMetaData.repository(entry.getKey()) == null) {
         logger.debug("unregistering repository [{}]",entry.getKey());
-        closeRepository(entry.getKey(),entry.getValue());
+        closeRepository(entry.getValue());
       }
  else {
         survivors.put(entry.getKey(),entry.getValue());
       }
     }
-    Map<String,RepositoryHolder> builder=new HashMap<>();
+    Map<String,Repository> builder=new HashMap<>();
     if (newMetaData != null) {
       for (      RepositoryMetaData repositoryMetaData : newMetaData.repositories()) {
-        RepositoryHolder holder=survivors.get(repositoryMetaData.name());
-        if (holder != null) {
-          if (!holder.type.equals(repositoryMetaData.type()) || !holder.settings.equals(repositoryMetaData.settings())) {
+        Repository repository=survivors.get(repositoryMetaData.name());
+        if (repository != null) {
+          RepositoryMetaData previousMetadata=repository.getMetadata();
+          if (previousMetadata.type().equals(repositoryMetaData.type()) == false || previousMetadata.settings().equals(repositoryMetaData.settings()) == false) {
             logger.debug("updating repository [{}]",repositoryMetaData.name());
-            closeRepository(repositoryMetaData.name(),holder);
-            holder=null;
+            closeRepository(repository);
+            repository=null;
             try {
-              holder=createRepositoryHolder(repositoryMetaData);
+              repository=createRepository(repositoryMetaData);
             }
  catch (            RepositoryException ex) {
               logger.warn("failed to change repository [{}]",ex,repositoryMetaData.name());
@@ -35,21 +36,21 @@
         }
  else {
           try {
-            holder=createRepositoryHolder(repositoryMetaData);
+            repository=createRepository(repositoryMetaData);
           }
  catch (          RepositoryException ex) {
             logger.warn("failed to create repository [{}]",ex,repositoryMetaData.name());
           }
         }
-        if (holder != null) {
+        if (repository != null) {
           logger.debug("registering repository [{}]",repositoryMetaData.name());
-          builder.put(repositoryMetaData.name(),holder);
+          builder.put(repositoryMetaData.name(),repository);
         }
       }
     }
-    repositories=unmodifiableMap(builder);
+    repositories=Collections.unmodifiableMap(builder);
   }
- catch (  Throwable ex) {
+ catch (  Exception ex) {
     logger.warn("failure updating cluster state ",ex);
   }
 }

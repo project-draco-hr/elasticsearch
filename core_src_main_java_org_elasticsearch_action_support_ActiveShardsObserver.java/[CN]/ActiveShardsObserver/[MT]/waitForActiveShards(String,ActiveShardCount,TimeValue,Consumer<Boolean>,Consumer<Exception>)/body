@@ -1,0 +1,32 @@
+{
+  if (activeShardCount == ActiveShardCount.NONE) {
+    onResult.accept(true);
+    return;
+  }
+  final ClusterStateObserver observer=new ClusterStateObserver(clusterService,logger,threadPool.getThreadContext());
+  if (activeShardCount.enoughShardsActive(observer.observedState(),indexName)) {
+    onResult.accept(true);
+  }
+ else {
+    final ClusterStateObserver.ChangePredicate shardsAllocatedPredicate=new ClusterStateObserver.ValidationPredicate(){
+      @Override protected boolean validate(      final ClusterState newState){
+        return activeShardCount.enoughShardsActive(newState,indexName);
+      }
+    }
+;
+    final ClusterStateObserver.Listener observerListener=new ClusterStateObserver.Listener(){
+      @Override public void onNewClusterState(      ClusterState state){
+        onResult.accept(true);
+      }
+      @Override public void onClusterServiceClose(){
+        logger.debug("[{}] cluster service closed while waiting for enough shards to be started.",indexName);
+        onFailure.accept(new NodeClosedException(clusterService.localNode()));
+      }
+      @Override public void onTimeout(      TimeValue timeout){
+        onResult.accept(false);
+      }
+    }
+;
+    observer.waitForNextChange(observerListener,shardsAllocatedPredicate,timeout);
+  }
+}

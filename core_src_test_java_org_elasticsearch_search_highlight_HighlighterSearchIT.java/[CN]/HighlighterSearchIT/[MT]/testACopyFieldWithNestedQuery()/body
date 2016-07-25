@@ -1,0 +1,11 @@
+{
+  String mapping=jsonBuilder().startObject().startObject("type").startObject("properties").startObject("foo").field("type","nested").startObject("properties").startObject("text").field("type","text").field("copy_to","foo_text").endObject().endObject().endObject().startObject("foo_text").field("type","text").field("term_vector","with_positions_offsets").field("store",true).endObject().endObject().endObject().endObject().string();
+  prepareCreate("test").addMapping("type",mapping).get();
+  client().prepareIndex("test","type","1").setSource(jsonBuilder().startObject().startArray("foo").startObject().field("text","brown").endObject().startObject().field("text","cow").endObject().endArray().endObject()).setRefreshPolicy(WriteRequest.RefreshPolicy.IMMEDIATE).get();
+  SearchResponse searchResponse=client().prepareSearch().setQuery(nestedQuery("foo",matchQuery("foo.text","brown cow"),ScoreMode.None)).highlighter(new HighlightBuilder().field(new Field("foo_text").highlighterType("fvh")).requireFieldMatch(false)).get();
+  assertHitCount(searchResponse,1);
+  HighlightField field=searchResponse.getHits().getAt(0).highlightFields().get("foo_text");
+  assertThat(field.getFragments().length,equalTo(2));
+  assertThat(field.getFragments()[0].string(),equalTo("<em>brown</em>"));
+  assertThat(field.getFragments()[1].string(),equalTo("<em>cow</em>"));
+}

@@ -7,7 +7,13 @@
   PlainActionFuture<Response> listener=new PlainActionFuture<>();
   ReplicationTask task=maybeTask();
   AtomicBoolean executed=new AtomicBoolean();
-  Action.PrimaryOperationTransportHandler primaryPhase=action.new PrimaryOperationTransportHandler(){
+  ShardRouting primaryShard=state.getRoutingTable().shardRoutingTable(shardId).primaryShard();
+  boolean executeOnPrimary=true;
+  if (primaryShard.relocating() && randomBoolean()) {
+    isRelocated.set(true);
+    executeOnPrimary=false;
+  }
+  action.new AsyncPrimaryAction(request,createTransportChannel(listener),task){
     @Override protected ReplicationOperation<Request,Request,Action.PrimaryResult> createReplicatedOperation(    Request request,    ActionListener<Action.PrimaryResult> actionListener,    Action.PrimaryShardReference primaryShardReference,    boolean executeOnReplicas){
       return new NoopReplicationOperation(request,actionListener){
         public void execute() throws Exception {
@@ -19,14 +25,7 @@
 ;
     }
   }
-;
-  ShardRouting primaryShard=state.getRoutingTable().shardRoutingTable(shardId).primaryShard();
-  boolean executeOnPrimary=true;
-  if (primaryShard.relocating() && randomBoolean()) {
-    isRelocated.set(true);
-    executeOnPrimary=false;
-  }
-  primaryPhase.messageReceived(request,createTransportChannel(listener),task);
+.run();
   if (executeOnPrimary) {
     assertTrue(executed.get());
     assertTrue(listener.isDone());

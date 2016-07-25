@@ -1,0 +1,23 @@
+{
+  ch.pipeline().addLast("openChannels",transport.serverOpenChannels);
+  final HttpRequestDecoder decoder=new HttpRequestDecoder(Math.toIntExact(transport.maxInitialLineLength.bytes()),Math.toIntExact(transport.maxHeaderSize.bytes()),Math.toIntExact(transport.maxChunkSize.bytes()));
+  decoder.setCumulator(ByteToMessageDecoder.COMPOSITE_CUMULATOR);
+  ch.pipeline().addLast("decoder",decoder);
+  ch.pipeline().addLast("decoder_compress",new HttpContentDecompressor());
+  final HttpObjectAggregator aggregator=new HttpObjectAggregator(Math.toIntExact(transport.maxContentLength.bytes()));
+  if (transport.maxCompositeBufferComponents != -1) {
+    aggregator.setMaxCumulationBufferComponents(transport.maxCompositeBufferComponents);
+  }
+  ch.pipeline().addLast("aggregator",aggregator);
+  ch.pipeline().addLast("encoder",new HttpResponseEncoder());
+  if (transport.compression) {
+    ch.pipeline().addLast("encoder_compress",new HttpContentCompressor(transport.compressionLevel));
+  }
+  if (SETTING_CORS_ENABLED.get(transport.settings())) {
+    ch.pipeline().addLast("cors",new Netty4CorsHandler(transport.getCorsConfig()));
+  }
+  if (transport.pipelining) {
+    ch.pipeline().addLast("pipelining",new HttpPipeliningHandler(transport.pipeliningMaxEvents));
+  }
+  ch.pipeline().addLast("handler",requestHandler);
+}

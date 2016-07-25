@@ -2,18 +2,30 @@
   Settings build=Settings.builder().put("request.headers.default","1").build();
   ThreadContext threadContext=new ThreadContext(build);
   threadContext.putHeader("foo","bar");
-  threadContext.putTransient("ctx.foo",new Integer(1));
+  threadContext.putTransient("ctx.foo",1);
+  threadContext.addResponseHeader("Warning","123456");
+  if (rarely()) {
+    threadContext.addResponseHeader("Warning","123456");
+  }
+  threadContext.addResponseHeader("Warning","234567");
   BytesStreamOutput out=new BytesStreamOutput();
   threadContext.writeTo(out);
   try (ThreadContext.StoredContext ctx=threadContext.stashContext()){
     assertNull(threadContext.getHeader("foo"));
     assertNull(threadContext.getTransient("ctx.foo"));
+    assertTrue(threadContext.getResponseHeaders().isEmpty());
     assertEquals("1",threadContext.getHeader("default"));
-    threadContext.readHeaders(StreamInput.wrap(out.bytes()));
+    threadContext.readHeaders(out.bytes().streamInput());
     assertEquals("bar",threadContext.getHeader("foo"));
     assertNull(threadContext.getTransient("ctx.foo"));
+    final Map<String,List<String>> responseHeaders=threadContext.getResponseHeaders();
+    final List<String> warnings=responseHeaders.get("Warning");
+    assertThat(responseHeaders.keySet(),hasSize(1));
+    assertThat(warnings,hasSize(2));
+    assertThat(warnings,hasItem(equalTo("123456")));
+    assertThat(warnings,hasItem(equalTo("234567")));
   }
    assertEquals("bar",threadContext.getHeader("foo"));
-  assertEquals(new Integer(1),threadContext.getTransient("ctx.foo"));
+  assertEquals(Integer.valueOf(1),threadContext.getTransient("ctx.foo"));
   assertEquals("1",threadContext.getHeader("default"));
 }

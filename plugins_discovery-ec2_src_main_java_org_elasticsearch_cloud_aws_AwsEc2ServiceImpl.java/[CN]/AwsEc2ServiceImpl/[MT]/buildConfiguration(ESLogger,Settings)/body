@@ -1,0 +1,27 @@
+{
+  ClientConfiguration clientConfiguration=new ClientConfiguration();
+  clientConfiguration.setResponseMetadataCacheSize(0);
+  clientConfiguration.setProtocol(CLOUD_EC2.PROTOCOL_SETTING.get(settings));
+  if (PROXY_HOST_SETTING.exists(settings) || CLOUD_EC2.PROXY_HOST_SETTING.exists(settings)) {
+    String proxyHost=CLOUD_EC2.PROXY_HOST_SETTING.get(settings);
+    Integer proxyPort=CLOUD_EC2.PROXY_PORT_SETTING.get(settings);
+    String proxyUsername=CLOUD_EC2.PROXY_USERNAME_SETTING.get(settings);
+    String proxyPassword=CLOUD_EC2.PROXY_PASSWORD_SETTING.get(settings);
+    clientConfiguration.withProxyHost(proxyHost).withProxyPort(proxyPort).withProxyUsername(proxyUsername).withProxyPassword(proxyPassword);
+  }
+  String awsSigner=CLOUD_EC2.SIGNER_SETTING.get(settings);
+  if (Strings.hasText(awsSigner)) {
+    logger.debug("using AWS API signer [{}]",awsSigner);
+    AwsSigner.configureSigner(awsSigner,clientConfiguration);
+  }
+  final Random rand=Randomness.get();
+  RetryPolicy retryPolicy=new RetryPolicy(RetryPolicy.RetryCondition.NO_RETRY_CONDITION,new RetryPolicy.BackoffStrategy(){
+    @Override public long delayBeforeNextRetry(    AmazonWebServiceRequest originalRequest,    AmazonClientException exception,    int retriesAttempted){
+      logger.warn("EC2 API request failed, retry again. Reason was:",exception);
+      return 1000L * (long)(10d * Math.pow(2,retriesAttempted / 2.0d) * (1.0d + rand.nextDouble()));
+    }
+  }
+,10,false);
+  clientConfiguration.setRetryPolicy(retryPolicy);
+  return clientConfiguration;
+}

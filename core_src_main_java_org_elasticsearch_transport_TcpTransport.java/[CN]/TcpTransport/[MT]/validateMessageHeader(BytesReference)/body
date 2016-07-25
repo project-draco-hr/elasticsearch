@@ -1,0 +1,31 @@
+{
+  final int sizeHeaderLength=TcpHeader.MARKER_BYTES_SIZE + TcpHeader.MESSAGE_LENGTH_SIZE;
+  if (buffer.length() < sizeHeaderLength) {
+    throw new IllegalStateException("message size must be >= to the header size");
+  }
+  int offset=0;
+  if (buffer.get(offset) != 'E' || buffer.get(offset + 1) != 'S') {
+    if (bufferStartsWith(buffer,offset,"GET ") || bufferStartsWith(buffer,offset,"POST ") || bufferStartsWith(buffer,offset,"PUT ")|| bufferStartsWith(buffer,offset,"HEAD ")|| bufferStartsWith(buffer,offset,"DELETE ")|| bufferStartsWith(buffer,offset,"OPTIONS ")|| bufferStartsWith(buffer,offset,"PATCH ")|| bufferStartsWith(buffer,offset,"TRACE ")) {
+      throw new HttpOnTransportException("This is not a HTTP port");
+    }
+    throw new StreamCorruptedException("invalid internal transport message format, got (" + Integer.toHexString(buffer.get(offset) & 0xFF) + ","+ Integer.toHexString(buffer.get(offset + 1) & 0xFF)+ ","+ Integer.toHexString(buffer.get(offset + 2) & 0xFF)+ ","+ Integer.toHexString(buffer.get(offset + 3) & 0xFF)+ ")");
+  }
+  final int dataLen;
+  try (StreamInput input=buffer.streamInput()){
+    input.skip(TcpHeader.MARKER_BYTES_SIZE);
+    dataLen=input.readInt();
+    if (dataLen == PING_DATA_SIZE) {
+      return false;
+    }
+  }
+   if (dataLen <= 0) {
+    throw new StreamCorruptedException("invalid data length: " + dataLen);
+  }
+  if (dataLen > NINETY_PER_HEAP_SIZE) {
+    throw new IllegalArgumentException("transport content length received [" + new ByteSizeValue(dataLen) + "] exceeded ["+ new ByteSizeValue(NINETY_PER_HEAP_SIZE)+ "]");
+  }
+  if (buffer.length() < dataLen + sizeHeaderLength) {
+    throw new IllegalStateException("buffer must be >= to the message size but wasn't");
+  }
+  return true;
+}
