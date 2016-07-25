@@ -1,0 +1,25 @@
+{
+  if (noopBreakerUsed()) {
+    logger.info("--> noop breakers used, skipping test");
+    return;
+  }
+  assertAcked(prepareCreate("cb-test",1,Settings.builder().put(SETTING_NUMBER_OF_REPLICAS,between(0,1))));
+  Client client=client();
+  Settings resetSettings=Settings.builder().put(HierarchyCircuitBreakerService.REQUEST_CIRCUIT_BREAKER_LIMIT_SETTING.getKey(),"100b").build();
+  assertAcked(client.admin().cluster().prepareUpdateSettings().setTransientSettings(resetSettings));
+  int docCount=scaledRandomIntBetween(100,1000);
+  List<IndexRequestBuilder> reqs=new ArrayList<>();
+  for (long id=0; id < docCount; id++) {
+    reqs.add(client.prepareIndex("cb-test","type",Long.toString(id)).setSource("test",id));
+  }
+  indexRandom(true,reqs);
+  try {
+    SearchResponse resp=client.prepareSearch("cb-test").setQuery(matchAllQuery()).addAggregation(terms("my_terms").field("test")).get();
+    assertTrue("there should be shard failures",resp.getFailedShards() > 0);
+    fail("aggregation should have tripped the breaker");
+  }
+ catch (  Exception e) {
+    String errMsg="CircuitBreakingException[[request] " + "Data too large, data for [<agg [my_terms]>] would be larger than limit of [100/100b]]";
+    assertThat("Exception: " + e.toString() + " should contain a CircuitBreakingException",e.toString(),containsString(errMsg));
+  }
+}
