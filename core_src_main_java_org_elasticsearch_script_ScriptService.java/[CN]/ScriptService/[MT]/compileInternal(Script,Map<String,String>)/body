@@ -25,19 +25,29 @@
   }
   CacheKey cacheKey=new CacheKey(scriptEngineService,type == ScriptType.INLINE ? null : name,code,params);
   CompiledScript compiledScript=cache.get(cacheKey);
-  if (compiledScript == null) {
-    try {
-      String actualName=(type == ScriptType.INLINE) ? null : name;
-      compiledScript=new CompiledScript(type,name,lang,scriptEngineService.compile(actualName,code,params));
-    }
- catch (    ScriptException good) {
-      throw good;
-    }
-catch (    Exception exception) {
-      throw new GeneralScriptException("Failed to compile " + type + " script ["+ name+ "] using lang ["+ lang+ "]",exception);
-    }
-    scriptMetrics.onCompilation();
-    cache.put(cacheKey,compiledScript);
+  if (compiledScript != null) {
+    return compiledScript;
   }
-  return compiledScript;
+synchronized (this) {
+    compiledScript=cache.get(cacheKey);
+    if (compiledScript == null) {
+      try {
+        String actualName=(type == ScriptType.INLINE) ? null : name;
+        if (logger.isTraceEnabled()) {
+          logger.trace("compiling script, type: [{}], lang: [{}], params: [{}]",type,lang,params);
+        }
+        checkCompilationLimit();
+        compiledScript=new CompiledScript(type,name,lang,scriptEngineService.compile(actualName,code,params));
+      }
+ catch (      ScriptException good) {
+        throw good;
+      }
+catch (      Exception exception) {
+        throw new GeneralScriptException("Failed to compile " + type + " script ["+ name+ "] using lang ["+ lang+ "]",exception);
+      }
+      scriptMetrics.onCompilation();
+      cache.put(cacheKey,compiledScript);
+    }
+    return compiledScript;
+  }
 }
