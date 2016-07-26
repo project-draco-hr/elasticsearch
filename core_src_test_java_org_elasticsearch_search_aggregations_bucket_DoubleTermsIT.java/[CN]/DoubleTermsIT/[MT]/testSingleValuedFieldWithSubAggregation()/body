@@ -1,0 +1,25 @@
+{
+  SearchResponse response=client().prepareSearch("idx").setTypes("type").addAggregation(terms("terms").field(SINGLE_VALUED_FIELD_NAME).collectMode(randomFrom(SubAggCollectionMode.values())).subAggregation(sum("sum").field(MULTI_VALUED_FIELD_NAME))).execute().actionGet();
+  assertSearchResponse(response);
+  Terms terms=response.getAggregations().get("terms");
+  assertThat(terms,notNullValue());
+  assertThat(terms.getName(),equalTo("terms"));
+  assertThat(terms.getBuckets().size(),equalTo(5));
+  assertThat(terms.getProperty("_bucket_count"),equalTo(5));
+  Object[] propertiesKeys=(Object[])terms.getProperty("_key");
+  Object[] propertiesDocCounts=(Object[])terms.getProperty("_count");
+  Object[] propertiesCounts=(Object[])terms.getProperty("sum.value");
+  for (int i=0; i < 5; i++) {
+    Terms.Bucket bucket=terms.getBucketByKey("" + (double)i);
+    assertThat(bucket,notNullValue());
+    assertThat(key(bucket),equalTo("" + (double)i));
+    assertThat(bucket.getKeyAsNumber().intValue(),equalTo(i));
+    assertThat(bucket.getDocCount(),equalTo(1L));
+    Sum sum=bucket.getAggregations().get("sum");
+    assertThat(sum,notNullValue());
+    assertThat((long)sum.getValue(),equalTo(i + i + 1L));
+    assertThat((double)propertiesKeys[i],equalTo((double)i));
+    assertThat((long)propertiesDocCounts[i],equalTo(1L));
+    assertThat((double)propertiesCounts[i],equalTo((double)i + i + 1L));
+  }
+}

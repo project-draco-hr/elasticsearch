@@ -1,3 +1,23 @@
 {
-  return new ReverseNestedAggregatorFactory(name,type,path,context,parent,subFactoriesBuilder,metaData);
+  if (findNestedAggregatorFactory(parent) == null) {
+    throw new SearchParseException(context.searchContext(),"Reverse nested aggregation [" + name + "] can only be used inside a [nested] aggregation",null);
+  }
+  ObjectMapper parentObjectMapper=null;
+  if (path != null) {
+    parentObjectMapper=context.searchContext().getObjectMapper(path);
+    if (parentObjectMapper == null) {
+      return new ReverseNestedAggregatorFactory(name,type,true,null,context,parent,subFactoriesBuilder,metaData);
+    }
+    if (parentObjectMapper.nested().isNested() == false) {
+      throw new AggregationExecutionException("[reverse_nested] nested path [" + path + "] is not nested");
+    }
+  }
+  NestedScope nestedScope=context.searchContext().getQueryShardContext().nestedScope();
+  try {
+    nestedScope.nextLevel(parentObjectMapper);
+    return new ReverseNestedAggregatorFactory(name,type,false,parentObjectMapper,context,parent,subFactoriesBuilder,metaData);
+  }
+  finally {
+    nestedScope.previousLevel();
+  }
 }

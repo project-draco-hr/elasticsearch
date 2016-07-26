@@ -1,17 +1,17 @@
 {
-  super(settings);
-  this.addLockIdToCustomPath=ADD_NODE_LOCK_ID_TO_CUSTOM_PATH.get(settings);
   if (!DiscoveryNode.nodeRequiresLocalStorage(settings)) {
     nodePaths=null;
     sharedDataPath=null;
     locks=null;
     nodeLockId=-1;
     nodeMetaData=new NodeMetaData(generateNodeId(settings));
+    logger=Loggers.getLogger(getClass(),Node.addNodeNameIfNeeded(settings,this.nodeMetaData.nodeId()));
     return;
   }
   final NodePath[] nodePaths=new NodePath[environment.dataWithClusterFiles().length];
   final Lock[] locks=new Lock[nodePaths.length];
   boolean success=false;
+  ESLogger startupTraceLogger=Loggers.getLogger(getClass(),settings);
   try {
     sharedDataPath=environment.sharedDataFile();
     int nodeLockId=-1;
@@ -22,27 +22,27 @@
         Path dataDirWithClusterName=environment.dataWithClusterFiles()[dirIndex];
         Path dataDir=environment.dataFiles()[dirIndex];
         if (readFromDataPathWithClusterName(dataDirWithClusterName)) {
-          DeprecationLogger deprecationLogger=new DeprecationLogger(logger);
+          DeprecationLogger deprecationLogger=new DeprecationLogger(startupTraceLogger);
           deprecationLogger.deprecated("ES has detected the [path.data] folder using the cluster name as a folder [{}], " + "Elasticsearch 6.0 will not allow the cluster name as a folder within the data path",dataDir);
           dataDir=dataDirWithClusterName;
         }
         Path dir=dataDir.resolve(NODES_FOLDER).resolve(Integer.toString(possibleLockId));
         Files.createDirectories(dir);
         try (Directory luceneDir=FSDirectory.open(dir,NativeFSLockFactory.INSTANCE)){
-          logger.trace("obtaining node lock on {} ...",dir.toAbsolutePath());
+          startupTraceLogger.trace("obtaining node lock on {} ...",dir.toAbsolutePath());
           try {
             locks[dirIndex]=luceneDir.obtainLock(NODE_LOCK_FILENAME);
             nodePaths[dirIndex]=new NodePath(dir);
             nodeLockId=possibleLockId;
           }
  catch (          LockObtainFailedException ex) {
-            logger.trace("failed to obtain node lock on {}",dir.toAbsolutePath());
+            startupTraceLogger.trace("failed to obtain node lock on {}",dir.toAbsolutePath());
             releaseAndNullLocks(locks);
             break;
           }
         }
  catch (        IOException e) {
-          logger.trace("failed to obtain node lock on {}",e,dir.toAbsolutePath());
+          startupTraceLogger.trace("failed to obtain node lock on {}",e,dir.toAbsolutePath());
           lastException=new IOException("failed to obtain lock on " + dir.toAbsolutePath(),e);
           releaseAndNullLocks(locks);
           break;
@@ -55,6 +55,8 @@
     if (locks[0] == null) {
       throw new IllegalStateException("Failed to obtain node lock, is the following location writable?: " + Arrays.toString(environment.dataWithClusterFiles()),lastException);
     }
+    this.nodeMetaData=loadOrCreateNodeMetaData(settings,startupTraceLogger,nodePaths);
+    this.logger=Loggers.getLogger(getClass(),Node.addNodeNameIfNeeded(settings,this.nodeMetaData.nodeId()));
     this.nodeLockId=nodeLockId;
     this.locks=locks;
     this.nodePaths=nodePaths;
@@ -63,7 +65,6 @@
     }
     maybeLogPathDetails();
     maybeLogHeapDetails();
-    this.nodeMetaData=loadOrCreateNodeMetaData(settings,logger,nodePaths);
     applySegmentInfosTrace(settings);
     assertCanWrite();
     success=true;
