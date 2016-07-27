@@ -1,0 +1,20 @@
+{
+  assertAcked(prepareCreate("test").addMapping("parent-type","searchText","type=text,term_vector=with_positions_offsets,index_options=offsets").addMapping("child-type","_parent","type=parent-type","searchText","type=text,term_vector=with_positions_offsets,index_options=offsets"));
+  client().prepareIndex("test","parent-type","parent-id").setSource("searchText","quick brown fox").get();
+  client().prepareIndex("test","child-type","child-id").setParent("parent-id").setSource("searchText","quick brown fox").get();
+  refresh();
+  String[] highlightTypes=new String[]{"plain","fvh","postings"};
+  for (  String highlightType : highlightTypes) {
+    logger.info("Testing with highlight type [{}]",highlightType);
+    SearchResponse searchResponse=client().prepareSearch("test").setQuery(new BoolQueryBuilder().must(new MatchQueryBuilder("searchText","fox")).must(new HasChildQueryBuilder("child-type",new MatchAllQueryBuilder(),ScoreMode.None))).highlighter(new HighlightBuilder().field(new HighlightBuilder.Field("searchText").highlighterType(highlightType))).get();
+    assertHitCount(searchResponse,1);
+    assertThat(searchResponse.getHits().getAt(0).id(),equalTo("parent-id"));
+    HighlightField highlightField=searchResponse.getHits().getAt(0).getHighlightFields().get("searchText");
+    assertThat(highlightField.getFragments()[0].string(),equalTo("quick brown <em>fox</em>"));
+    searchResponse=client().prepareSearch("test").setQuery(new BoolQueryBuilder().must(new MatchQueryBuilder("searchText","fox")).must(new HasParentQueryBuilder("parent-type",new MatchAllQueryBuilder(),false))).highlighter(new HighlightBuilder().field(new HighlightBuilder.Field("searchText").highlighterType(highlightType))).get();
+    assertHitCount(searchResponse,1);
+    assertThat(searchResponse.getHits().getAt(0).id(),equalTo("child-id"));
+    highlightField=searchResponse.getHits().getAt(0).getHighlightFields().get("searchText");
+    assertThat(highlightField.getFragments()[0].string(),equalTo("quick brown <em>fox</em>"));
+  }
+}
