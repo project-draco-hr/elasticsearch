@@ -1,0 +1,20 @@
+{
+  createIndex("idx");
+  List<IndexRequestBuilder> builders=new ArrayList<>();
+  numDocs=randomIntBetween(10,100);
+  for (int i=0; i < numDocs; i++) {
+    builders.add(client().prepareIndex("idx","type","" + i).setSource(jsonBuilder().startObject().field("value",randomAsciiOfLengthBetween(5,15)).field("l_value",i).endObject()));
+  }
+  indexRandom(true,builders);
+  prepareCreate("empty_bucket_idx").addMapping("type","value","type=integer").execute().actionGet();
+  builders=new ArrayList<>();
+  for (int i=0; i < 2; i++) {
+    builders.add(client().prepareIndex("empty_bucket_idx","type","" + i).setSource(jsonBuilder().startObject().field("value",i * 2).endObject()));
+  }
+  assertAcked(client().admin().cluster().preparePutStoredScript().setScriptLang(CustomScriptPlugin.NAME).setId("initScript_stored").setSource(new BytesArray("{\"script\":\"vars.multiplier = 3\"}")));
+  assertAcked(client().admin().cluster().preparePutStoredScript().setScriptLang(CustomScriptPlugin.NAME).setId("mapScript_stored").setSource(new BytesArray("{\"script\":\"_agg.add(vars.multiplier)\"}")));
+  assertAcked(client().admin().cluster().preparePutStoredScript().setScriptLang(CustomScriptPlugin.NAME).setId("combineScript_stored").setSource(new BytesArray("{\"script\":\"sum agg values as a new aggregation\"}")));
+  assertAcked(client().admin().cluster().preparePutStoredScript().setScriptLang(CustomScriptPlugin.NAME).setId("reduceScript_stored").setSource(new BytesArray("{\"script\":\"sum aggs of agg values as a new aggregation\"}")));
+  indexRandom(true,builders);
+  ensureSearchable();
+}

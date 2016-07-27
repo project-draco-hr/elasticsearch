@@ -1,0 +1,25 @@
+{
+  Map<String,Object> varsMap=new HashMap<>();
+  varsMap.put("multiplier",1);
+  Map<String,Object> params=new HashMap<>();
+  params.put("_agg",new ArrayList<>());
+  params.put("vars",varsMap);
+  Script initScript=new Script("vars.multiplier = 3",ScriptType.INLINE,CustomScriptPlugin.NAME,null);
+  Script mapScript=new Script("_agg.add(vars.multiplier)",ScriptType.INLINE,CustomScriptPlugin.NAME,null);
+  Script combineScript=new Script("sum agg values as a new aggregation",ScriptType.INLINE,CustomScriptPlugin.NAME,null);
+  Script reduceScript=new Script("sum aggs of agg values as a new aggregation",ScriptType.INLINE,CustomScriptPlugin.NAME,null);
+  SearchResponse searchResponse=client().prepareSearch("empty_bucket_idx").setQuery(matchAllQuery()).addAggregation(histogram("histo").field("value").interval(1L).minDocCount(0).subAggregation(scriptedMetric("scripted").params(params).initScript(initScript).mapScript(mapScript).combineScript(combineScript).reduceScript(reduceScript))).get();
+  assertThat(searchResponse.getHits().getTotalHits(),equalTo(2L));
+  Histogram histo=searchResponse.getAggregations().get("histo");
+  assertThat(histo,notNullValue());
+  Histogram.Bucket bucket=histo.getBuckets().get(1);
+  assertThat(bucket,notNullValue());
+  ScriptedMetric scriptedMetric=bucket.getAggregations().get("scripted");
+  assertThat(scriptedMetric,notNullValue());
+  assertThat(scriptedMetric.getName(),equalTo("scripted"));
+  assertThat(scriptedMetric.aggregation(),notNullValue());
+  assertThat(scriptedMetric.aggregation(),instanceOf(List.class));
+  @SuppressWarnings("unchecked") List<Integer> aggregationResult=(List<Integer>)scriptedMetric.aggregation();
+  assertThat(aggregationResult.size(),equalTo(1));
+  assertThat(aggregationResult.get(0),equalTo(0));
+}

@@ -1,0 +1,20 @@
+{
+  initTestData();
+  final int numPrimaries=getNumShards("test").numPrimaries;
+  final String expectedError="You must call get with all required flags! " + "Instead of  _index['int_payload_field'].get('b', _FREQUENCIES) and _index['int_payload_field'].get('b', _POSITIONS)" + " call  _index['int_payload_field'].get('b', _FREQUENCIES | _POSITIONS)  once]";
+  Script script=createScript("Call with different flags twice");
+  try {
+    SearchResponse response=client().prepareSearch("test").setQuery(QueryBuilders.matchAllQuery()).addScriptField("tvtest",script).get();
+    assertThat(numPrimaries,greaterThan(1));
+    assertThat(response.getFailedShards(),greaterThanOrEqualTo(1));
+    for (    ShardSearchFailure failure : response.getShardFailures()) {
+      assertThat(failure.reason(),containsString(expectedError));
+    }
+  }
+ catch (  SearchPhaseExecutionException e) {
+    assertThat(numPrimaries,equalTo(1));
+    assertThat(e.toString(),containsString(expectedError));
+  }
+  script=createScript("Call with same flags twice");
+  assertThat(client().prepareSearch("test").setQuery(QueryBuilders.matchAllQuery()).addScriptField("tvtest",script).get().getHits().getTotalHits(),greaterThan(0L));
+}

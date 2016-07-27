@@ -1,0 +1,51 @@
+{
+  prepareCreate("test").addMapping("type1","num1","type=long").execute().actionGet();
+  int numDocs=randomIntBetween(1,30);
+  IndexRequestBuilder[] indexRequestBuilders=new IndexRequestBuilder[numDocs];
+  for (int i=0; i < numDocs; i++) {
+    indexRequestBuilders[i]=client().prepareIndex("test","type1",Integer.toString(i)).setSource(jsonBuilder().startObject().field("num1",i).endObject());
+  }
+  indexRandom(true,indexRequestBuilders);
+  SearchResponse response=client().prepareSearch().setQuery(matchAllQuery()).addSort("num1",SortOrder.ASC).setSize(numDocs).addScriptField("uid",new Script("_fields._uid.value",ScriptType.INLINE,CustomScriptPlugin.NAME,null)).get();
+  assertNoFailures(response);
+  assertThat(response.getHits().totalHits(),equalTo((long)numDocs));
+  for (int i=0; i < numDocs; i++) {
+    assertThat(response.getHits().getAt(i).id(),equalTo(Integer.toString(i)));
+    Set<String> fields=new HashSet<>(response.getHits().getAt(i).fields().keySet());
+    fields.remove(TimestampFieldMapper.NAME);
+    assertThat(fields,equalTo(singleton("uid")));
+    assertThat(response.getHits().getAt(i).fields().get("uid").value(),equalTo("type1#" + Integer.toString(i)));
+  }
+  response=client().prepareSearch().setQuery(matchAllQuery()).addSort("num1",SortOrder.ASC).setSize(numDocs).addScriptField("id",new Script("_fields._id.value",ScriptType.INLINE,CustomScriptPlugin.NAME,null)).get();
+  assertNoFailures(response);
+  assertThat(response.getHits().totalHits(),equalTo((long)numDocs));
+  for (int i=0; i < numDocs; i++) {
+    assertThat(response.getHits().getAt(i).id(),equalTo(Integer.toString(i)));
+    Set<String> fields=new HashSet<>(response.getHits().getAt(i).fields().keySet());
+    fields.remove(TimestampFieldMapper.NAME);
+    assertThat(fields,equalTo(singleton("id")));
+    assertThat(response.getHits().getAt(i).fields().get("id").value(),equalTo(Integer.toString(i)));
+  }
+  response=client().prepareSearch().setQuery(matchAllQuery()).addSort("num1",SortOrder.ASC).setSize(numDocs).addScriptField("type",new Script("_fields._type.value",ScriptType.INLINE,CustomScriptPlugin.NAME,null)).get();
+  assertNoFailures(response);
+  assertThat(response.getHits().totalHits(),equalTo((long)numDocs));
+  for (int i=0; i < numDocs; i++) {
+    assertThat(response.getHits().getAt(i).id(),equalTo(Integer.toString(i)));
+    Set<String> fields=new HashSet<>(response.getHits().getAt(i).fields().keySet());
+    fields.remove(TimestampFieldMapper.NAME);
+    assertThat(fields,equalTo(singleton("type")));
+    assertThat(response.getHits().getAt(i).fields().get("type").value(),equalTo("type1"));
+  }
+  response=client().prepareSearch().setQuery(matchAllQuery()).addSort("num1",SortOrder.ASC).setSize(numDocs).addScriptField("id",new Script("_fields._id.value",ScriptType.INLINE,CustomScriptPlugin.NAME,null)).addScriptField("uid",new Script("_fields._uid.value",ScriptType.INLINE,CustomScriptPlugin.NAME,null)).addScriptField("type",new Script("_fields._type.value",ScriptType.INLINE,CustomScriptPlugin.NAME,null)).get();
+  assertNoFailures(response);
+  assertThat(response.getHits().totalHits(),equalTo((long)numDocs));
+  for (int i=0; i < numDocs; i++) {
+    assertThat(response.getHits().getAt(i).id(),equalTo(Integer.toString(i)));
+    Set<String> fields=new HashSet<>(response.getHits().getAt(i).fields().keySet());
+    fields.remove(TimestampFieldMapper.NAME);
+    assertThat(fields,equalTo(newHashSet("uid","type","id")));
+    assertThat(response.getHits().getAt(i).fields().get("uid").value(),equalTo("type1#" + Integer.toString(i)));
+    assertThat(response.getHits().getAt(i).fields().get("type").value(),equalTo("type1"));
+    assertThat(response.getHits().getAt(i).fields().get("id").value(),equalTo(Integer.toString(i)));
+  }
+}

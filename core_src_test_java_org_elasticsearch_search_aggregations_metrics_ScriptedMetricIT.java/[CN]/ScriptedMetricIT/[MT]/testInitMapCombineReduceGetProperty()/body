@@ -1,0 +1,34 @@
+{
+  Map<String,Object> varsMap=new HashMap<>();
+  varsMap.put("multiplier",1);
+  Map<String,Object> params=new HashMap<>();
+  params.put("_agg",new ArrayList<>());
+  params.put("vars",varsMap);
+  Script initScript=new Script("vars.multiplier = 3",ScriptType.INLINE,CustomScriptPlugin.NAME,null);
+  Script mapScript=new Script("_agg.add(vars.multiplier)",ScriptType.INLINE,CustomScriptPlugin.NAME,null);
+  Script combineScript=new Script("sum agg values as a new aggregation",ScriptType.INLINE,CustomScriptPlugin.NAME,null);
+  Script reduceScript=new Script("sum aggs of agg values as a new aggregation",ScriptType.INLINE,CustomScriptPlugin.NAME,null);
+  SearchResponse searchResponse=client().prepareSearch("idx").setQuery(matchAllQuery()).addAggregation(global("global").subAggregation(scriptedMetric("scripted").params(params).initScript(initScript).mapScript(mapScript).combineScript(combineScript).reduceScript(reduceScript))).get();
+  assertSearchResponse(searchResponse);
+  assertThat(searchResponse.getHits().getTotalHits(),equalTo(numDocs));
+  Global global=searchResponse.getAggregations().get("global");
+  assertThat(global,notNullValue());
+  assertThat(global.getName(),equalTo("global"));
+  assertThat(global.getDocCount(),equalTo(numDocs));
+  assertThat(global.getAggregations(),notNullValue());
+  assertThat(global.getAggregations().asMap().size(),equalTo(1));
+  ScriptedMetric scriptedMetricAggregation=global.getAggregations().get("scripted");
+  assertThat(scriptedMetricAggregation,notNullValue());
+  assertThat(scriptedMetricAggregation.getName(),equalTo("scripted"));
+  assertThat(scriptedMetricAggregation.aggregation(),notNullValue());
+  assertThat(scriptedMetricAggregation.aggregation(),instanceOf(ArrayList.class));
+  List<?> aggregationList=(List<?>)scriptedMetricAggregation.aggregation();
+  assertThat(aggregationList.size(),equalTo(1));
+  Object object=aggregationList.get(0);
+  assertThat(object,notNullValue());
+  assertThat(object,instanceOf(Number.class));
+  assertThat(((Number)object).longValue(),equalTo(numDocs * 3));
+  assertThat((ScriptedMetric)global.getProperty("scripted"),sameInstance(scriptedMetricAggregation));
+  assertThat((List)global.getProperty("scripted.value"),sameInstance((List)aggregationList));
+  assertThat((List)scriptedMetricAggregation.getProperty("value"),sameInstance((List)aggregationList));
+}

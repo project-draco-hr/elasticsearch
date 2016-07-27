@@ -1,0 +1,37 @@
+{
+  Version version=VersionUtils.randomVersionBetween(random(),Version.V_2_0_0,Version.CURRENT);
+  Settings settings=Settings.builder().put(IndexMetaData.SETTING_VERSION_CREATED,version).build();
+  XContentBuilder xContentBuilder=XContentFactory.jsonBuilder().startObject().startObject("type1").startObject("properties").startObject("location").field("type","geo_point");
+  if (version.before(Version.V_2_2_0)) {
+    xContentBuilder.field("lat_lon",true);
+  }
+  xContentBuilder.endObject().endObject().endObject().endObject();
+  assertAcked(prepareCreate("test").setSettings(settings).addMapping("type1",xContentBuilder));
+  ensureGreen();
+  client().prepareIndex("test","type1","1").setSource(jsonBuilder().startObject().field("name","TestPosition").startObject("location").field("lat",source_lat).field("lon",source_long).endObject().endObject()).get();
+  refresh();
+  SearchResponse searchResponse1=client().prepareSearch().addStoredField("_source").addScriptField("distance",new Script("arcDistance",ScriptType.INLINE,CustomScriptPlugin.NAME,null)).get();
+  Double resultDistance1=searchResponse1.getHits().getHits()[0].getFields().get("distance").getValue();
+  assertThat(resultDistance1,closeTo(GeoDistance.ARC.calculate(source_lat,source_long,target_lat,target_long,DistanceUnit.DEFAULT),0.01d));
+  SearchResponse searchResponse2=client().prepareSearch().addStoredField("_source").addScriptField("distance",new Script("distance",ScriptType.INLINE,CustomScriptPlugin.NAME,null)).get();
+  Double resultDistance2=searchResponse2.getHits().getHits()[0].getFields().get("distance").getValue();
+  assertThat(resultDistance2,closeTo(GeoDistance.PLANE.calculate(source_lat,source_long,target_lat,target_long,DistanceUnit.DEFAULT),0.01d));
+  SearchResponse searchResponse3=client().prepareSearch().addStoredField("_source").addScriptField("distance",new Script("arcDistanceInKm",ScriptType.INLINE,CustomScriptPlugin.NAME,null)).get();
+  Double resultArcDistance3=searchResponse3.getHits().getHits()[0].getFields().get("distance").getValue();
+  assertThat(resultArcDistance3,closeTo(GeoDistance.ARC.calculate(source_lat,source_long,target_lat,target_long,DistanceUnit.KILOMETERS),0.01d));
+  SearchResponse searchResponse4=client().prepareSearch().addStoredField("_source").addScriptField("distance",new Script("distanceInKm",ScriptType.INLINE,CustomScriptPlugin.NAME,null)).get();
+  Double resultDistance4=searchResponse4.getHits().getHits()[0].getFields().get("distance").getValue();
+  assertThat(resultDistance4,closeTo(GeoDistance.PLANE.calculate(source_lat,source_long,target_lat,target_long,DistanceUnit.KILOMETERS),0.01d));
+  SearchResponse searchResponse5=client().prepareSearch().addStoredField("_source").addScriptField("distance",new Script("arcDistanceInKm(lat, lon + 360)",ScriptType.INLINE,CustomScriptPlugin.NAME,null)).get();
+  Double resultArcDistance5=searchResponse5.getHits().getHits()[0].getFields().get("distance").getValue();
+  assertThat(resultArcDistance5,closeTo(GeoDistance.ARC.calculate(source_lat,source_long,target_lat,target_long,DistanceUnit.KILOMETERS),0.01d));
+  SearchResponse searchResponse6=client().prepareSearch().addStoredField("_source").addScriptField("distance",new Script("arcDistanceInKm(lat + 360, lon)",ScriptType.INLINE,CustomScriptPlugin.NAME,null)).get();
+  Double resultArcDistance6=searchResponse6.getHits().getHits()[0].getFields().get("distance").getValue();
+  assertThat(resultArcDistance6,closeTo(GeoDistance.ARC.calculate(source_lat,source_long,target_lat,target_long,DistanceUnit.KILOMETERS),0.01d));
+  SearchResponse searchResponse7=client().prepareSearch().addStoredField("_source").addScriptField("distance",new Script("arcDistanceInMiles",ScriptType.INLINE,CustomScriptPlugin.NAME,null)).get();
+  Double resultDistance7=searchResponse7.getHits().getHits()[0].getFields().get("distance").getValue();
+  assertThat(resultDistance7,closeTo(GeoDistance.ARC.calculate(source_lat,source_long,target_lat,target_long,DistanceUnit.MILES),0.01d));
+  SearchResponse searchResponse8=client().prepareSearch().addStoredField("_source").addScriptField("distance",new Script("distanceInMiles",ScriptType.INLINE,CustomScriptPlugin.NAME,null)).get();
+  Double resultDistance8=searchResponse8.getHits().getHits()[0].getFields().get("distance").getValue();
+  assertThat(resultDistance8,closeTo(GeoDistance.PLANE.calculate(source_lat,source_long,target_lat,target_long,DistanceUnit.MILES),0.01d));
+}
