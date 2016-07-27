@@ -1,0 +1,23 @@
+{
+  ClusterState state=client().admin().cluster().prepareState().get().getState();
+  GroupShardsIterator shardIterators=state.getRoutingTable().activePrimaryShardsGrouped(new String[]{indexName},false);
+  final Index idx=state.metaData().index(indexName).getIndex();
+  List<ShardIterator> iterators=iterableAsArrayList(shardIterators);
+  ShardIterator shardIterator=RandomPicks.randomFrom(random(),iterators);
+  ShardRouting shardRouting=shardIterator.nextOrNull();
+  assertNotNull(shardRouting);
+  assertTrue(shardRouting.primary());
+  assertTrue(shardRouting.assignedToNode());
+  String nodeId=shardRouting.currentNodeId();
+  NodesStatsResponse nodeStatses=client().admin().cluster().prepareNodesStats(nodeId).setFs(true).get();
+  Set<Path> translogDirs=new TreeSet<>();
+  for (  FsInfo.Path fsPath : nodeStatses.getNodes().get(0).getFs()) {
+    String path=fsPath.getPath();
+    final String relativeDataLocationPath="indices/" + idx.getUUID() + "/"+ Integer.toString(shardRouting.getId())+ "/translog";
+    Path translogPath=PathUtils.get(path).resolve(relativeDataLocationPath);
+    if (Files.isDirectory(translogPath)) {
+      translogDirs.add(translogPath);
+    }
+  }
+  return translogDirs;
+}
