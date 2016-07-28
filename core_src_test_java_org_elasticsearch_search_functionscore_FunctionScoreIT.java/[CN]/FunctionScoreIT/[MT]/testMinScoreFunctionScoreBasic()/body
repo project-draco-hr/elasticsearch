@@ -1,0 +1,24 @@
+{
+  index(INDEX,TYPE,jsonBuilder().startObject().field("num",2).endObject());
+  refresh();
+  float score=randomFloat();
+  float minScore=randomFloat();
+  index(INDEX,TYPE,jsonBuilder().startObject().field("num",2).field("random_score",score).endObject());
+  refresh();
+  ensureYellow();
+  Script script=new Script("doc['random_score']",ScriptType.INLINE,CustomScriptPlugin.NAME,null);
+  SearchResponse searchResponse=client().search(searchRequest().source(searchSource().query(functionScoreQuery(scriptFunction(script)).setMinScore(minScore)))).actionGet();
+  if (score < minScore) {
+    assertThat(searchResponse.getHits().getTotalHits(),is(0L));
+  }
+ else {
+    assertThat(searchResponse.getHits().getTotalHits(),is(1L));
+  }
+  searchResponse=client().search(searchRequest().source(searchSource().query(functionScoreQuery(new MatchAllQueryBuilder(),new FilterFunctionBuilder[]{new FilterFunctionBuilder(scriptFunction(script)),new FilterFunctionBuilder(scriptFunction(script))}).scoreMode(FiltersFunctionScoreQuery.ScoreMode.AVG).setMinScore(minScore)))).actionGet();
+  if (score < minScore) {
+    assertThat(searchResponse.getHits().getTotalHits(),is(0L));
+  }
+ else {
+    assertThat(searchResponse.getHits().getTotalHits(),is(1L));
+  }
+}

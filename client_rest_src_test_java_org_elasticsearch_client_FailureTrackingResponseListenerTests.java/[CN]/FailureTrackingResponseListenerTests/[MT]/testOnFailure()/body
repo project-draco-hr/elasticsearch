@@ -1,0 +1,34 @@
+{
+  MockResponseListener responseListener=new MockResponseListener();
+  RestClient.FailureTrackingResponseListener listener=new RestClient.FailureTrackingResponseListener(responseListener);
+  int numIters=randomIntBetween(1,10);
+  Exception[] expectedExceptions=new Exception[numIters];
+  for (int i=0; i < numIters; i++) {
+    RuntimeException runtimeException=new RuntimeException("test" + i);
+    expectedExceptions[i]=runtimeException;
+    listener.trackFailure(runtimeException);
+    assertNull(responseListener.response.get());
+    assertNull(responseListener.exception.get());
+  }
+  if (randomBoolean()) {
+    Response response=mockResponse();
+    listener.onSuccess(response);
+    assertSame(response,responseListener.response.get());
+    assertNull(responseListener.exception.get());
+  }
+ else {
+    RuntimeException runtimeException=new RuntimeException("definitive");
+    listener.onDefinitiveFailure(runtimeException);
+    assertNull(responseListener.response.get());
+    Throwable exception=responseListener.exception.get();
+    assertSame(runtimeException,exception);
+    int i=numIters - 1;
+    do {
+      assertNotNull(exception.getSuppressed());
+      assertEquals(1,exception.getSuppressed().length);
+      assertSame(expectedExceptions[i--],exception.getSuppressed()[0]);
+      exception=exception.getSuppressed()[0];
+    }
+ while (i >= 0);
+  }
+}

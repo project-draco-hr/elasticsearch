@@ -1,0 +1,26 @@
+{
+  createIndex("test");
+  ensureGreen();
+  BulkResponse bulkResponse=client().prepareBulk().add(client().prepareIndex("test","type","1").setCreate(true).setSource("field","1")).add(client().prepareIndex("test","type","2").setCreate(true).setSource("field","1")).add(client().prepareIndex("test","type","1").setSource("field","2")).get();
+  assertTrue(((IndexResponse)bulkResponse.getItems()[0].getResponse()).isCreated());
+  assertThat(bulkResponse.getItems()[0].getResponse().getVersion(),equalTo(1L));
+  assertTrue(((IndexResponse)bulkResponse.getItems()[1].getResponse()).isCreated());
+  assertThat(bulkResponse.getItems()[1].getResponse().getVersion(),equalTo(1L));
+  assertFalse(((IndexResponse)bulkResponse.getItems()[2].getResponse()).isCreated());
+  assertThat(bulkResponse.getItems()[2].getResponse().getVersion(),equalTo(2L));
+  bulkResponse=client().prepareBulk().add(client().prepareUpdate("test","type","1").setVersion(4L).setDoc("field","2")).add(client().prepareUpdate("test","type","2").setDoc("field","2")).add(client().prepareUpdate("test","type","1").setVersion(2L).setDoc("field","3")).get();
+  assertThat(bulkResponse.getItems()[0].getFailureMessage(),containsString("version conflict"));
+  assertThat(bulkResponse.getItems()[1].getResponse().getVersion(),equalTo(2L));
+  assertThat(bulkResponse.getItems()[2].getResponse().getVersion(),equalTo(3L));
+  bulkResponse=client().prepareBulk().add(client().prepareIndex("test","type","e1").setSource("field","1").setVersion(10).setVersionType(VersionType.EXTERNAL)).add(client().prepareIndex("test","type","e2").setSource("field","1").setVersion(10).setVersionType(VersionType.EXTERNAL)).add(client().prepareIndex("test","type","e1").setSource("field","2").setVersion(12).setVersionType(VersionType.EXTERNAL)).get();
+  assertTrue(((IndexResponse)bulkResponse.getItems()[0].getResponse()).isCreated());
+  assertThat(bulkResponse.getItems()[0].getResponse().getVersion(),equalTo(10L));
+  assertTrue(((IndexResponse)bulkResponse.getItems()[1].getResponse()).isCreated());
+  assertThat(bulkResponse.getItems()[1].getResponse().getVersion(),equalTo(10L));
+  assertFalse(((IndexResponse)bulkResponse.getItems()[2].getResponse()).isCreated());
+  assertThat(bulkResponse.getItems()[2].getResponse().getVersion(),equalTo(12L));
+  bulkResponse=client().prepareBulk().add(client().prepareUpdate("test","type","e1").setDoc("field","2").setVersion(10)).add(client().prepareUpdate("test","type","e1").setDoc("field","3").setVersion(20).setVersionType(VersionType.FORCE)).add(client().prepareUpdate("test","type","e1").setDoc("field","4").setVersion(20).setVersionType(VersionType.INTERNAL)).get();
+  assertThat(bulkResponse.getItems()[0].getFailureMessage(),containsString("version conflict"));
+  assertThat(bulkResponse.getItems()[1].getResponse().getVersion(),equalTo(20L));
+  assertThat(bulkResponse.getItems()[2].getResponse().getVersion(),equalTo(21L));
+}
