@@ -14,14 +14,14 @@
       if (updateResult.writeResult != null) {
         location=locationToSync(location,updateResult.writeResult.getLocation());
       }
-switch (updateResult.result.operation()) {
-case CREATE:
-case INDEX:
+switch (updateResult.result.getResponseResult()) {
+case CREATED:
+case UPDATED:
         @SuppressWarnings("unchecked") WriteResult<IndexResponse> result=updateResult.writeResult;
       IndexRequest indexRequest=updateResult.request();
     BytesReference indexSourceAsBytes=indexRequest.source();
   IndexResponse indexResponse=result.getResponse();
-UpdateResponse updateResponse=new UpdateResponse(indexResponse.getShardInfo(),indexResponse.getShardId(),indexResponse.getType(),indexResponse.getId(),indexResponse.getVersion(),indexResponse.getOperation());
+UpdateResponse updateResponse=new UpdateResponse(indexResponse.getShardInfo(),indexResponse.getShardId(),indexResponse.getType(),indexResponse.getId(),indexResponse.getVersion(),indexResponse.getResult());
 if (updateRequest.fields() != null && updateRequest.fields().length > 0) {
 Tuple<XContentType,Map<String,Object>> sourceAndContent=XContentHelper.convertToMap(indexSourceAsBytes,true);
 updateResponse.setGetResult(updateHelper.extractGetResult(updateRequest,request.index(),indexResponse.getVersion(),sourceAndContent.v2(),sourceAndContent.v1(),indexSourceAsBytes));
@@ -29,11 +29,11 @@ updateResponse.setGetResult(updateHelper.extractGetResult(updateRequest,request.
 item=request.items()[requestIndex]=new BulkItemRequest(request.items()[requestIndex].id(),indexRequest);
 setResponse(item,new BulkItemResponse(item.id(),OP_TYPE_UPDATE,updateResponse));
 break;
-case DELETE:
+case DELETED:
 @SuppressWarnings("unchecked") WriteResult<DeleteResponse> writeResult=updateResult.writeResult;
 DeleteResponse response=writeResult.getResponse();
 DeleteRequest deleteRequest=updateResult.request();
-updateResponse=new UpdateResponse(response.getShardInfo(),response.getShardId(),response.getType(),response.getId(),response.getVersion(),response.getOperation());
+updateResponse=new UpdateResponse(response.getShardInfo(),response.getShardId(),response.getType(),response.getId(),response.getVersion(),response.getResult());
 updateResponse.setGetResult(updateHelper.extractGetResult(updateRequest,request.index(),response.getVersion(),updateResult.result.updatedSourceAsMap(),updateResult.result.updateSourceContentType(),null));
 item=request.items()[requestIndex]=new BulkItemRequest(request.items()[requestIndex].id(),deleteRequest);
 setResponse(item,new BulkItemResponse(item.id(),OP_TYPE_UPDATE,updateResponse));
@@ -42,6 +42,8 @@ case NOOP:
 setResponse(item,new BulkItemResponse(item.id(),OP_TYPE_UPDATE,updateResult.noopResult));
 item.setIgnoreOnReplica();
 break;
+default :
+throw new IllegalStateException("Illegal operation " + updateResult.result.getResponseResult());
 }
 break;
 }
@@ -66,18 +68,20 @@ setResponse(item,item.getPrimaryResponse());
 setResponse(item,new BulkItemResponse(item.id(),OP_TYPE_UPDATE,new BulkItemResponse.Failure(request.index(),updateRequest.type(),updateRequest.id(),e)));
 }
  else {
-switch (updateResult.result.operation()) {
-case CREATE:
-case INDEX:
+switch (updateResult.result.getResponseResult()) {
+case CREATED:
+case UPDATED:
 IndexRequest indexRequest=updateResult.request();
 logFailure(e,"index",request.shardId(),indexRequest);
 setResponse(item,new BulkItemResponse(item.id(),OP_TYPE_UPDATE,new BulkItemResponse.Failure(request.index(),indexRequest.type(),indexRequest.id(),e)));
 break;
-case DELETE:
+case DELETED:
 DeleteRequest deleteRequest=updateResult.request();
 logFailure(e,"delete",request.shardId(),deleteRequest);
 setResponse(item,new BulkItemResponse(item.id(),OP_TYPE_DELETE,new BulkItemResponse.Failure(request.index(),deleteRequest.type(),deleteRequest.id(),e)));
 break;
+default :
+throw new IllegalStateException("Illegal operation " + updateResult.result.getResponseResult());
 }
 }
 break;
