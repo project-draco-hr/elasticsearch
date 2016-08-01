@@ -1,2 +1,62 @@
 {
+  if (isReadOnly()) {
+    throw new RepositoryException(metadata.name(),"cannot delete snapshot from a readonly repository");
+  }
+  final RepositoryData repositoryData=getRepositoryData();
+  List<String> indices=Collections.emptyList();
+  SnapshotInfo snapshot=null;
+  try {
+    snapshot=getSnapshotInfo(snapshotId);
+    indices=snapshot.indices();
+  }
+ catch (  SnapshotMissingException ex) {
+    throw ex;
+  }
+catch (  IllegalStateException|SnapshotException|ElasticsearchParseException ex) {
+    logger.warn("cannot read snapshot file [{}]",ex,snapshotId);
+  }
+  MetaData metaData=null;
+  try {
+    if (snapshot != null) {
+      metaData=readSnapshotMetaData(snapshotId,snapshot.version(),repositoryData.resolveIndices(indices),true);
+    }
+ else {
+      metaData=readSnapshotMetaData(snapshotId,null,repositoryData.resolveIndices(indices),true);
+    }
+  }
+ catch (  IOException|SnapshotException ex) {
+    logger.warn("cannot read metadata for snapshot [{}]",ex,snapshotId);
+  }
+  try {
+    writeIndexGen(repositoryData.removeSnapshot(snapshotId));
+    safeSnapshotBlobDelete(snapshot,snapshotId.getUUID());
+    safeGlobalMetaDataBlobDelete(snapshot,snapshotId.getUUID());
+    for (    String index : indices) {
+      final IndexId indexId=repositoryData.resolveIndexId(index);
+      BlobPath indexPath=basePath().add("indices").add(indexId.getId());
+      BlobContainer indexMetaDataBlobContainer=blobStore().blobContainer(indexPath);
+      try {
+        indexMetaDataFormat(snapshot.version()).delete(indexMetaDataBlobContainer,snapshotId.getUUID());
+      }
+ catch (      IOException ex) {
+        logger.warn("[{}] failed to delete metadata for index [{}]",ex,snapshotId,index);
+      }
+      if (metaData != null) {
+        IndexMetaData indexMetaData=metaData.index(index);
+        if (indexMetaData != null) {
+          for (int shardId=0; shardId < indexMetaData.getNumberOfShards(); shardId++) {
+            try {
+              delete(snapshotId,snapshot.version(),indexId,new ShardId(indexMetaData.getIndex(),shardId));
+            }
+ catch (            SnapshotException ex) {
+              logger.warn("[{}] failed to delete shard data for shard [{}][{}]",ex,snapshotId,index,shardId);
+            }
+          }
+        }
+      }
+    }
+  }
+ catch (  IOException ex) {
+    throw new RepositoryException(metadata.name(),"failed to update snapshot in repository",ex);
+  }
 }
