@@ -7,23 +7,34 @@
   if (linux_libc == null) {
     throw new UnsupportedOperationException("seccomp unavailable: could not link methods. requires kernel 3.5+ with CONFIG_SECCOMP and CONFIG_SECCOMP_FILTER compiled in");
   }
-  if (linux_syscall(999) >= 0 || Native.getLastError() != ENOSYS) {
+  if (linux_syscall(999) >= 0) {
     throw new UnsupportedOperationException("seccomp unavailable: your kernel is buggy and you should upgrade");
   }
-  final int bogusArg=0xf7a46a5c;
-  long ret=linux_syscall(arch.seccomp,bogusArg);
-  if (ret != -1) {
-    throw new UnsupportedOperationException("seccomp unavailable: seccomp(BOGUS_OPERATION) returned " + ret);
+switch (Native.getLastError()) {
+case ENOSYS:
+    break;
+case EPERM:
+  if (logger.isDebugEnabled()) {
+    logger.debug("syscall(BOGUS) bogusly gets EPERM instead of ENOSYS");
   }
+break;
+default :
+throw new UnsupportedOperationException("seccomp unavailable: your kernel is buggy and you should upgrade");
+}
+final int bogusArg=0xf7a46a5c;
+long ret=linux_syscall(arch.seccomp,bogusArg);
+if (ret != -1) {
+throw new UnsupportedOperationException("seccomp unavailable: seccomp(BOGUS_OPERATION) returned " + ret);
+}
  else {
-    int errno=Native.getLastError();
+int errno=Native.getLastError();
 switch (errno) {
 case ENOSYS:
-      break;
+break;
 case EINVAL:
-    break;
+break;
 default :
-  throw new UnsupportedOperationException("seccomp(BOGUS_OPERATION): " + JNACLibrary.strerror(errno));
+throw new UnsupportedOperationException("seccomp(BOGUS_OPERATION): " + JNACLibrary.strerror(errno));
 }
 }
 ret=linux_syscall(arch.seccomp,SECCOMP_SET_MODE_FILTER,bogusArg);
