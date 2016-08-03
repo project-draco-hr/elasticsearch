@@ -1,2 +1,134 @@
 {
+  XContentParser parser=parseContext.parser();
+  XContentParser.Token token;
+  float boost=AbstractQueryBuilder.DEFAULT_BOOST;
+  String queryName=null;
+  String currentFieldName=null;
+  GeoPoint point=new GeoPoint(Double.NaN,Double.NaN);
+  String fieldName=null;
+  Object vDistance=null;
+  DistanceUnit unit=GeoDistanceQueryBuilder.DEFAULT_DISTANCE_UNIT;
+  GeoDistance geoDistance=GeoDistanceQueryBuilder.DEFAULT_GEO_DISTANCE;
+  String optimizeBbox=GeoDistanceQueryBuilder.DEFAULT_OPTIMIZE_BBOX;
+  boolean coerce=GeoValidationMethod.DEFAULT_LENIENT_PARSING;
+  boolean ignoreMalformed=GeoValidationMethod.DEFAULT_LENIENT_PARSING;
+  GeoValidationMethod validationMethod=null;
+  boolean ignoreUnmapped=DEFAULT_IGNORE_UNMAPPED;
+  while ((token=parser.nextToken()) != XContentParser.Token.END_OBJECT) {
+    if (token == XContentParser.Token.FIELD_NAME) {
+      currentFieldName=parser.currentName();
+    }
+ else     if (parseContext.isDeprecatedSetting(currentFieldName)) {
+    }
+ else     if (token == XContentParser.Token.START_ARRAY) {
+      fieldName=currentFieldName;
+      GeoUtils.parseGeoPoint(parser,point);
+    }
+ else     if (token == XContentParser.Token.START_OBJECT) {
+      if (fieldName != null) {
+        throw new ParsingException(parser.getTokenLocation(),"[geo_distance] query doesn't support multiple fields, found [" + fieldName + "] and ["+ currentFieldName+ "]");
+      }
+      String currentName=parser.currentName();
+      fieldName=currentFieldName;
+      while ((token=parser.nextToken()) != XContentParser.Token.END_OBJECT) {
+        if (token == XContentParser.Token.FIELD_NAME) {
+          currentName=parser.currentName();
+        }
+ else         if (token.isValue()) {
+          if (currentName.equals(GeoPointFieldMapper.Names.LAT)) {
+            point.resetLat(parser.doubleValue());
+          }
+ else           if (currentName.equals(GeoPointFieldMapper.Names.LON)) {
+            point.resetLon(parser.doubleValue());
+          }
+ else           if (currentName.equals(GeoPointFieldMapper.Names.GEOHASH)) {
+            point.resetFromGeoHash(parser.text());
+          }
+ else {
+            throw new ParsingException(parser.getTokenLocation(),"[geo_distance] query does not support [" + currentFieldName + "]");
+          }
+        }
+      }
+    }
+ else     if (token.isValue()) {
+      if (parseContext.getParseFieldMatcher().match(currentFieldName,DISTANCE_FIELD)) {
+        if (token == XContentParser.Token.VALUE_STRING) {
+          vDistance=parser.text();
+        }
+ else {
+          vDistance=parser.numberValue();
+        }
+      }
+ else       if (parseContext.getParseFieldMatcher().match(currentFieldName,UNIT_FIELD)) {
+        unit=DistanceUnit.fromString(parser.text());
+      }
+ else       if (parseContext.getParseFieldMatcher().match(currentFieldName,DISTANCE_TYPE_FIELD)) {
+        geoDistance=GeoDistance.fromString(parser.text());
+      }
+ else       if (currentFieldName.endsWith(GeoPointFieldMapper.Names.LAT_SUFFIX)) {
+        point.resetLat(parser.doubleValue());
+        fieldName=currentFieldName.substring(0,currentFieldName.length() - GeoPointFieldMapper.Names.LAT_SUFFIX.length());
+      }
+ else       if (currentFieldName.endsWith(GeoPointFieldMapper.Names.LON_SUFFIX)) {
+        point.resetLon(parser.doubleValue());
+        fieldName=currentFieldName.substring(0,currentFieldName.length() - GeoPointFieldMapper.Names.LON_SUFFIX.length());
+      }
+ else       if (parseContext.getParseFieldMatcher().match(currentFieldName,AbstractQueryBuilder.NAME_FIELD)) {
+        queryName=parser.text();
+      }
+ else       if (parseContext.getParseFieldMatcher().match(currentFieldName,AbstractQueryBuilder.BOOST_FIELD)) {
+        boost=parser.floatValue();
+      }
+ else       if (parseContext.getParseFieldMatcher().match(currentFieldName,OPTIMIZE_BBOX_FIELD)) {
+        optimizeBbox=parser.textOrNull();
+      }
+ else       if (parseContext.getParseFieldMatcher().match(currentFieldName,COERCE_FIELD)) {
+        coerce=parser.booleanValue();
+        if (coerce == true) {
+          ignoreMalformed=true;
+        }
+      }
+ else       if (parseContext.getParseFieldMatcher().match(currentFieldName,IGNORE_MALFORMED_FIELD)) {
+        ignoreMalformed=parser.booleanValue();
+      }
+ else       if (parseContext.getParseFieldMatcher().match(currentFieldName,IGNORE_UNMAPPED_FIELD)) {
+        ignoreUnmapped=parser.booleanValue();
+      }
+ else       if (parseContext.getParseFieldMatcher().match(currentFieldName,VALIDATION_METHOD_FIELD)) {
+        validationMethod=GeoValidationMethod.fromString(parser.text());
+      }
+ else {
+        if (fieldName == null) {
+          point.resetFromString(parser.text());
+          fieldName=currentFieldName;
+        }
+ else {
+          throw new ParsingException(parser.getTokenLocation(),"[" + GeoDistanceQueryBuilder.NAME + "] field name already set to ["+ fieldName+ "] but found ["+ currentFieldName+ "]");
+        }
+      }
+    }
+  }
+  if (vDistance == null) {
+    throw new ParsingException(parser.getTokenLocation(),"geo_distance requires 'distance' to be specified");
+  }
+  GeoDistanceQueryBuilder qb=new GeoDistanceQueryBuilder(fieldName);
+  if (vDistance instanceof Number) {
+    qb.distance(((Number)vDistance).doubleValue(),unit);
+  }
+ else {
+    qb.distance((String)vDistance,unit);
+  }
+  qb.point(point);
+  if (validationMethod != null) {
+    qb.setValidationMethod(validationMethod);
+  }
+ else {
+    qb.setValidationMethod(GeoValidationMethod.infer(coerce,ignoreMalformed));
+  }
+  qb.optimizeBbox(optimizeBbox);
+  qb.geoDistance(geoDistance);
+  qb.boost(boost);
+  qb.queryName(queryName);
+  qb.ignoreUnmapped(ignoreUnmapped);
+  return Optional.of(qb);
 }
