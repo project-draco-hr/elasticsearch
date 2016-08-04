@@ -1,21 +1,22 @@
 {
-  boolean fullId=req.paramAsBoolean("full_id",false);
-  DiscoveryNodes nodes=state.getState().nodes();
-  Table table=getTableWithHeader(req);
-  for (  DiscoveryNode node : nodes) {
-    NodeInfo info=nodesInfo.getNodesMap().get(node.getId());
-    NodeStats stats=nodesStats.getNodesMap().get(node.getId());
-    table.startRow();
-    table.addCell(fullId ? node.getId() : Strings.substring(node.getId(),0,4));
-    table.addCell(info == null ? null : info.getProcess().getId());
-    table.addCell(node.getHostName());
-    table.addCell(node.getHostAddress());
-    if (node.getAddress() instanceof InetSocketTransportAddress) {
-      table.addCell(((InetSocketTransportAddress)node.getAddress()).address().getPort());
+  final String[] threadPools=req.paramAsStringArray("thread_pool_patterns",new String[]{"*"});
+  final DiscoveryNodes nodes=state.getState().nodes();
+  final Table table=getTableWithHeader(req);
+  final Set<String> candidates=new HashSet<>();
+  for (  final NodeStats nodeStats : nodesStats.getNodes()) {
+    for (    final ThreadPoolStats.Stats threadPoolStats : nodeStats.getThreadPool()) {
+      candidates.add(threadPoolStats.getName());
     }
- else {
-      table.addCell("-");
+  }
+  final Set<String> included=new HashSet<>();
+  for (  final String candidate : candidates) {
+    if (Regex.simpleMatch(threadPools,candidate)) {
+      included.add(candidate);
     }
+  }
+  for (  final DiscoveryNode node : nodes) {
+    final NodeInfo info=nodesInfo.getNodesMap().get(node.getId());
+    final NodeStats stats=nodesStats.getNodesMap().get(node.getId());
     final Map<String,ThreadPoolStats.Stats> poolThreadStats;
     final Map<String,ThreadPool.Info> poolThreadInfo;
     if (stats == null) {
@@ -23,8 +24,8 @@
       poolThreadInfo=Collections.emptyMap();
     }
  else {
-      poolThreadStats=new HashMap<>(14);
-      poolThreadInfo=new HashMap<>(14);
+      poolThreadStats=new TreeMap<>();
+      poolThreadInfo=new HashMap<>();
       ThreadPoolStats threadPoolStats=stats.getThreadPool();
       for (      ThreadPoolStats.Stats threadPoolStat : threadPoolStats) {
         poolThreadStats.put(threadPoolStat.getName(),threadPoolStat);
@@ -35,9 +36,23 @@
         }
       }
     }
-    for (    String pool : SUPPORTED_NAMES) {
-      ThreadPoolStats.Stats poolStats=poolThreadStats.get(pool);
-      ThreadPool.Info poolInfo=poolThreadInfo.get(pool);
+    for (    Map.Entry<String,ThreadPoolStats.Stats> entry : poolThreadStats.entrySet()) {
+      if (!included.contains(entry.getKey()))       continue;
+      table.startRow();
+      table.addCell(node.getName());
+      table.addCell(node.getId());
+      table.addCell(node.getEphemeralId());
+      table.addCell(info == null ? null : info.getProcess().getId());
+      table.addCell(node.getHostName());
+      table.addCell(node.getHostAddress());
+      if (node.getAddress() instanceof InetSocketTransportAddress) {
+        table.addCell(((InetSocketTransportAddress)node.getAddress()).address().getPort());
+      }
+ else {
+        table.addCell("-");
+      }
+      final ThreadPoolStats.Stats poolStats=entry.getValue();
+      final ThreadPool.Info poolInfo=poolThreadInfo.get(entry.getKey());
       Long maxQueueSize=null;
       String keepAlive=null;
       Integer minThreads=null;
@@ -56,6 +71,7 @@
           maxThreads=poolInfo.getMax();
         }
       }
+      table.addCell(entry.getKey());
       table.addCell(poolInfo == null ? null : poolInfo.getThreadPoolType().getType());
       table.addCell(poolStats == null ? null : poolStats.getActive());
       table.addCell(poolStats == null ? null : poolStats.getThreads());
@@ -67,8 +83,8 @@
       table.addCell(minThreads);
       table.addCell(maxThreads);
       table.addCell(keepAlive);
+      table.endRow();
     }
-    table.endRow();
   }
   return table;
 }
