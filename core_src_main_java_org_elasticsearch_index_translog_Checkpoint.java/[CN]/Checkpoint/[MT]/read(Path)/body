@@ -1,5 +1,12 @@
 {
-  try (InputStream in=Files.newInputStream(path)){
-    return new Checkpoint(new InputStreamDataInput(in));
-  }
+  try (Directory dir=new SimpleFSDirectory(path.getParent())){
+    try (final IndexInput indexInput=dir.openInput(path.getFileName().toString(),IOContext.DEFAULT)){
+      if (indexInput.length() == LEGACY_NON_CHECKSUMMED_FILE_LENGTH) {
+        return Checkpoint.readNonChecksummed(indexInput);
+      }
+      CodecUtil.checksumEntireFile(indexInput);
+      final int fileVersion=CodecUtil.checkHeader(indexInput,CHECKPOINT_CODEC,INITIAL_VERSION,INITIAL_VERSION);
+      return Checkpoint.readChecksummedV1(indexInput);
+    }
+   }
  }
