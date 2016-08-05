@@ -1,0 +1,42 @@
+{
+  AtomicArray<QuerySearchResultProvider> queryResults=new AtomicArray<>(nShards);
+  for (int shardIndex=0; shardIndex < nShards; shardIndex++) {
+    QuerySearchResult querySearchResult=new QuerySearchResult(shardIndex,new SearchShardTarget("",new Index("",""),shardIndex));
+    TopDocs topDocs=new TopDocs(0,new ScoreDoc[0],0);
+    if (searchHitsSize > 0) {
+      int nDocs=randomIntBetween(0,searchHitsSize);
+      ScoreDoc[] scoreDocs=new ScoreDoc[nDocs];
+      float maxScore=0F;
+      for (int i=0; i < nDocs; i++) {
+        float score=Math.abs(randomFloat());
+        scoreDocs[i]=new ScoreDoc(i,score);
+        if (score > maxScore) {
+          maxScore=score;
+        }
+      }
+      topDocs=new TopDocs(scoreDocs.length,scoreDocs,maxScore);
+    }
+    List<CompletionSuggestion> shardSuggestion=new ArrayList<>();
+    for (    CompletionSuggestion completionSuggestion : suggestions) {
+      CompletionSuggestion suggestion=new CompletionSuggestion(completionSuggestion.getName(),completionSuggestion.getSize());
+      final CompletionSuggestion.Entry completionEntry=new CompletionSuggestion.Entry(new Text(""),0,5);
+      suggestion.addTerm(completionEntry);
+      int optionSize=randomIntBetween(1,suggestion.getSize());
+      float maxScore=randomIntBetween(suggestion.getSize(),(int)Float.MAX_VALUE);
+      for (int i=0; i < optionSize; i++) {
+        completionEntry.addOption(new CompletionSuggestion.Entry.Option(i,new Text(""),maxScore,Collections.emptyMap(),Collections.emptyMap()));
+        float dec=randomIntBetween(0,optionSize);
+        if (dec <= maxScore) {
+          maxScore-=dec;
+        }
+      }
+      suggestion.setShardIndex(shardIndex);
+      shardSuggestion.add(suggestion);
+    }
+    querySearchResult.topDocs(topDocs,null);
+    querySearchResult.size(searchHitsSize);
+    querySearchResult.suggest(new Suggest(new ArrayList<>(shardSuggestion)));
+    queryResults.set(shardIndex,querySearchResult);
+  }
+  return queryResults;
+}

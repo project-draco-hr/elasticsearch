@@ -1,0 +1,34 @@
+{
+  AtomicArray<FetchSearchResultProvider> fetchResults=new AtomicArray<>(nShards);
+  for (int shardIndex=0; shardIndex < nShards; shardIndex++) {
+    float maxScore=-1F;
+    SearchShardTarget shardTarget=new SearchShardTarget("",new Index("",""),shardIndex);
+    FetchSearchResult fetchSearchResult=new FetchSearchResult(shardIndex,shardTarget);
+    List<InternalSearchHit> internalSearchHits=new ArrayList<>();
+    for (    ScoreDoc scoreDoc : mergedSearchDocs) {
+      if (scoreDoc.shardIndex == shardIndex) {
+        internalSearchHits.add(new InternalSearchHit(scoreDoc.doc,"",new Text(""),Collections.emptyMap()));
+        if (scoreDoc.score > maxScore) {
+          maxScore=scoreDoc.score;
+        }
+      }
+    }
+    for (    Suggest.Suggestion<?> suggestion : mergedSuggest) {
+      if (suggestion instanceof CompletionSuggestion) {
+        for (        CompletionSuggestion.Entry.Option option : ((CompletionSuggestion)suggestion).getOptions()) {
+          ScoreDoc doc=option.getDoc();
+          if (doc.shardIndex == shardIndex) {
+            internalSearchHits.add(new InternalSearchHit(doc.doc,"",new Text(""),Collections.emptyMap()));
+            if (doc.score > maxScore) {
+              maxScore=doc.score;
+            }
+          }
+        }
+      }
+    }
+    InternalSearchHit[] hits=internalSearchHits.toArray(new InternalSearchHit[internalSearchHits.size()]);
+    fetchSearchResult.hits(new InternalSearchHits(hits,hits.length,maxScore));
+    fetchResults.set(shardIndex,fetchSearchResult);
+  }
+  return fetchResults;
+}
