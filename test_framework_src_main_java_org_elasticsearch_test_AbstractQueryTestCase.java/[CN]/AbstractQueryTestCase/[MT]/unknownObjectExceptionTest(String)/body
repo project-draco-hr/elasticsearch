@@ -1,0 +1,87 @@
+{
+  assertThat(validQuery,containsString("{"));
+  int level=0;
+  boolean withinQuotes=false;
+  boolean expectedException=true;
+  int objectHoldingArbitraryContentLevel=0;
+  for (int insertionPosition=0; insertionPosition < validQuery.length(); insertionPosition++) {
+    if (validQuery.charAt(insertionPosition) == '"') {
+      withinQuotes=withinQuotes == false;
+    }
+ else     if (withinQuotes == false && validQuery.charAt(insertionPosition) == '}') {
+      level--;
+      if (expectedException == false) {
+        objectHoldingArbitraryContentLevel--;
+      }
+      if (objectHoldingArbitraryContentLevel == 0) {
+        expectedException=true;
+      }
+    }
+ else     if (withinQuotes == false && validQuery.charAt(insertionPosition) == '{') {
+      level++;
+      if (expectedException) {
+        int start=-1;
+        int end=-1;
+        for (int i=insertionPosition; i >= 0; i--) {
+          if (validQuery.charAt(i) == '}') {
+            break;
+          }
+ else           if (validQuery.charAt(i) == '"') {
+            if (end == -1) {
+              end=i;
+            }
+ else             if (start == -1) {
+              start=i + 1;
+            }
+ else {
+              break;
+            }
+          }
+        }
+        if (start >= 0 && end > 0) {
+          String objectName=validQuery.substring(start,end);
+          expectedException=getObjectsHoldingArbitraryContent().contains(objectName) == false;
+        }
+      }
+      if (expectedException == false) {
+        objectHoldingArbitraryContentLevel++;
+      }
+      String testQuery=validQuery.substring(0,insertionPosition) + "{ \"newField\" : ";
+      String secondPart=validQuery.substring(insertionPosition);
+      int currentLevel=level;
+      boolean quotes=false;
+      for (int i=0; i < secondPart.length(); i++) {
+        if (secondPart.charAt(i) == '"') {
+          quotes=quotes == false;
+        }
+ else         if (quotes == false && secondPart.charAt(i) == '{') {
+          currentLevel++;
+        }
+ else         if (quotes == false && secondPart.charAt(i) == '}') {
+          currentLevel--;
+          if (currentLevel == level) {
+            testQuery+=secondPart.substring(0,i - 1) + "}" + secondPart.substring(i);
+            break;
+          }
+        }
+      }
+      try {
+        parseQuery(testQuery);
+        if (expectedException) {
+          fail("some parsing exception expected for query: " + testQuery);
+        }
+      }
+ catch (      ParsingException|ElasticsearchParseException e) {
+        if (expectedException == false) {
+          throw new AssertionError("unexpected exception when parsing query:\n" + testQuery,e);
+        }
+      }
+catch (      IllegalArgumentException e) {
+        assertThat(e.getMessage(),containsString("unknown field [newField], parser not found"));
+        if (expectedException == false) {
+          throw new AssertionError("unexpected exception when parsing query:\n" + testQuery,e);
+        }
+      }
+    }
+  }
+}
