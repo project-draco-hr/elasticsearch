@@ -8,7 +8,7 @@
   logger.info("Adding {} nodes and performing rerouting",numberOfReplicas + 1);
   DiscoveryNodes.Builder nodeBuilder=DiscoveryNodes.builder();
   for (int i=0; i < numberOfReplicas + 1; i++) {
-    nodeBuilder.put(newNode("node" + Integer.toString(i)));
+    nodeBuilder.add(newNode("node" + Integer.toString(i)));
   }
   clusterState=ClusterState.builder(clusterState).nodes(nodeBuilder).build();
   while (!clusterState.routingTable().shardsWithState(UNASSIGNED).isEmpty()) {
@@ -18,18 +18,29 @@
   int shardsToFail=randomIntBetween(1,numberOfReplicas);
   ArrayList<FailedRerouteAllocation.FailedShard> failedShards=new ArrayList<>();
   RoutingNodes routingNodes=clusterState.getRoutingNodes();
+  Set<String> failedNodes=new HashSet<>();
+  Set<ShardRouting> shardRoutingsToFail=new HashSet<>();
   for (int i=0; i < shardsToFail; i++) {
-    String n="node" + Integer.toString(randomInt(numberOfReplicas));
-    logger.info("failing shard on node [{}]",n);
-    ShardRouting shardToFail=routingNodes.node(n).iterator().next();
-    failedShards.add(new FailedRerouteAllocation.FailedShard(shardToFail,null,null));
+    String failedNode="node" + Integer.toString(randomInt(numberOfReplicas));
+    logger.info("failing shard on node [{}]",failedNode);
+    ShardRouting shardToFail=routingNodes.node(failedNode).iterator().next();
+    if (shardRoutingsToFail.contains(shardToFail) == false) {
+      failedShards.add(new FailedRerouteAllocation.FailedShard(shardToFail,null,null));
+      failedNodes.add(failedNode);
+      shardRoutingsToFail.add(shardToFail);
+    }
   }
   routingTable=strategy.applyFailedShards(clusterState,failedShards).routingTable();
   clusterState=ClusterState.builder(clusterState).routingTable(routingTable).build();
   routingNodes=clusterState.getRoutingNodes();
   for (  FailedRerouteAllocation.FailedShard failedShard : failedShards) {
-    if (!routingNodes.node(failedShard.shard.currentNodeId()).isEmpty()) {
-      fail("shard " + failedShard + " was re-assigned to it's node");
+    if (routingNodes.getByAllocationId(failedShard.routingEntry.shardId(),failedShard.routingEntry.allocationId().getId()) != null) {
+      fail("shard " + failedShard + " was not failed");
+    }
+  }
+  for (  String failedNode : failedNodes) {
+    if (!routingNodes.node(failedNode).isEmpty()) {
+      fail("shard was re-assigned to failed node " + failedNode);
     }
   }
 }

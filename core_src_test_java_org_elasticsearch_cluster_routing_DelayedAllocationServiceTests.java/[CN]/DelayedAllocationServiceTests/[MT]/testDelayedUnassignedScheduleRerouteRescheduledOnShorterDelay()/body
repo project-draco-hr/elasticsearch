@@ -3,7 +3,7 @@
   TimeValue shorterDelaySetting=timeValueMillis(100);
   MetaData metaData=MetaData.builder().put(IndexMetaData.builder("foo").settings(settings(Version.CURRENT).put(UnassignedInfo.INDEX_DELAYED_NODE_LEFT_TIMEOUT_SETTING.getKey(),delaySetting)).numberOfShards(1).numberOfReplicas(1)).put(IndexMetaData.builder("bar").settings(settings(Version.CURRENT).put(UnassignedInfo.INDEX_DELAYED_NODE_LEFT_TIMEOUT_SETTING.getKey(),shorterDelaySetting)).numberOfShards(1).numberOfReplicas(1)).build();
   ClusterState clusterState=ClusterState.builder(ClusterName.CLUSTER_NAME_SETTING.getDefault(Settings.EMPTY)).metaData(metaData).routingTable(RoutingTable.builder().addAsNew(metaData.index("foo")).addAsNew(metaData.index("bar")).build()).build();
-  clusterState=ClusterState.builder(clusterState).nodes(DiscoveryNodes.builder().put(newNode("node1")).put(newNode("node2")).put(newNode("node3")).put(newNode("node4")).localNodeId("node1").masterNodeId("node1")).build();
+  clusterState=ClusterState.builder(clusterState).nodes(DiscoveryNodes.builder().add(newNode("node1")).add(newNode("node2")).add(newNode("node3")).add(newNode("node4")).localNodeId("node1").masterNodeId("node1")).build();
   final long nodeLeftTimestampNanos=System.nanoTime();
   allocationService.setNanoTimeOverride(nodeLeftTimestampNanos);
   clusterState=ClusterState.builder(clusterState).routingResult(allocationService.reroute(clusterState,"reroute")).build();
@@ -19,7 +19,7 @@
   }
   assertNotNull(nodeIdOfFooReplica);
   clusterState=ClusterState.builder(clusterState).nodes(DiscoveryNodes.builder(clusterState.nodes()).remove(nodeIdOfFooReplica)).build();
-  clusterState=ClusterState.builder(clusterState).routingResult(allocationService.reroute(clusterState,"fake node left")).build();
+  clusterState=ClusterState.builder(clusterState).routingResult(allocationService.deassociateDeadNodes(clusterState,true,"fake node left")).build();
   ClusterState stateWithDelayedShard=clusterState;
   assertEquals(1,UnassignedInfo.getNumberOfDelayedUnassigned(stateWithDelayedShard));
   ShardRouting delayedShard=stateWithDelayedShard.getRoutingNodes().unassigned().iterator().next();
@@ -49,7 +49,7 @@
     }
     assertNotNull(nodeIdOfBarReplica);
     clusterState=ClusterState.builder(stateWithDelayedShard).nodes(DiscoveryNodes.builder(stateWithDelayedShard.nodes()).remove(nodeIdOfBarReplica)).build();
-    ClusterState stateWithShorterDelay=ClusterState.builder(clusterState).routingResult(allocationService.reroute(clusterState,"fake node left")).build();
+    ClusterState stateWithShorterDelay=ClusterState.builder(clusterState).routingResult(allocationService.deassociateDeadNodes(clusterState,true,"fake node left")).build();
     delayedAllocationService.setNanoTimeOverride(clusterChangeEventTimestampNanos);
     delayedAllocationService.clusterChanged(new ClusterChangedEvent("fake node left",stateWithShorterDelay,stateWithDelayedShard));
   }

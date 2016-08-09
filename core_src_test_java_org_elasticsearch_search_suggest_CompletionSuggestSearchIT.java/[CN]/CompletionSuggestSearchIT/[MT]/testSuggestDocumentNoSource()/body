@@ -1,0 +1,23 @@
+{
+  final CompletionMappingBuilder mapping=new CompletionMappingBuilder();
+  createIndexAndMapping(mapping);
+  int numDocs=randomIntBetween(10,100);
+  List<IndexRequestBuilder> indexRequestBuilders=new ArrayList<>();
+  for (int i=1; i <= numDocs; i++) {
+    indexRequestBuilders.add(client().prepareIndex(INDEX,TYPE,"" + i).setSource(jsonBuilder().startObject().startObject(FIELD).field("input","suggestion" + i).field("weight",i).endObject().endObject()));
+  }
+  indexRandom(true,indexRequestBuilders);
+  CompletionSuggestionBuilder prefix=SuggestBuilders.completionSuggestion(FIELD).prefix("sugg").size(numDocs);
+  SearchResponse searchResponse=client().prepareSearch(INDEX).suggest(new SuggestBuilder().addSuggestion("foo",prefix)).setFetchSource(false).get();
+  CompletionSuggestion completionSuggestion=searchResponse.getSuggest().getSuggestion("foo");
+  CompletionSuggestion.Entry options=completionSuggestion.getEntries().get(0);
+  assertThat(options.getOptions().size(),equalTo(numDocs));
+  int id=numDocs;
+  for (  CompletionSuggestion.Entry.Option option : options) {
+    assertThat(option.getText().toString(),equalTo("suggestion" + id));
+    assertSearchHit(option.getHit(),hasId("" + id));
+    assertSearchHit(option.getHit(),hasScore(((float)id)));
+    assertNull(option.getHit().source());
+    id--;
+  }
+}

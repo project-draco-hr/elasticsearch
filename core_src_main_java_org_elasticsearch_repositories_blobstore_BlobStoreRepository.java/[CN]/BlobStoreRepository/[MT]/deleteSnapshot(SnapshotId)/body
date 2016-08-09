@@ -28,7 +28,8 @@ catch (  IllegalStateException|SnapshotException|ElasticsearchParseException ex)
     logger.warn("cannot read metadata for snapshot [{}]",ex,snapshotId);
   }
   try {
-    writeIndexGen(repositoryData.removeSnapshot(snapshotId));
+    final RepositoryData updatedRepositoryData=repositoryData.removeSnapshot(snapshotId);
+    writeIndexGen(updatedRepositoryData);
     safeSnapshotBlobDelete(snapshot,snapshotId.getUUID());
     safeGlobalMetaDataBlobDelete(snapshot,snapshotId.getUUID());
     for (    String index : indices) {
@@ -53,6 +54,20 @@ catch (  IllegalStateException|SnapshotException|ElasticsearchParseException ex)
             }
           }
         }
+      }
+    }
+    final Collection<IndexId> indicesToCleanUp=Sets.newHashSet(repositoryData.getIndices().values());
+    indicesToCleanUp.removeAll(updatedRepositoryData.getIndices().values());
+    final BlobContainer indicesBlobContainer=blobStore().blobContainer(basePath().add("indices"));
+    for (    final IndexId indexId : indicesToCleanUp) {
+      try {
+        indicesBlobContainer.deleteBlob(indexId.getId());
+      }
+ catch (      DirectoryNotEmptyException dnee) {
+        logger.debug("[{}] index [{}] no longer part of any snapshots in the repository, but failed to clean up " + "its index folder due to the directory not being empty.",dnee,metadata.name(),indexId);
+      }
+catch (      IOException ioe) {
+        logger.debug("[{}] index [{}] no longer part of any snapshots in the repository, but failed to clean up " + "its index folder.",ioe,metadata.name(),indexId);
       }
     }
   }
