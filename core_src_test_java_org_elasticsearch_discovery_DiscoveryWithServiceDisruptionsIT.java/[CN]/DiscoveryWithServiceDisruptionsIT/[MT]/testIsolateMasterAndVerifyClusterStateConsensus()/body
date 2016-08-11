@@ -3,14 +3,15 @@
   assertAcked(prepareCreate("test").setSettings(Settings.builder().put(IndexMetaData.SETTING_NUMBER_OF_SHARDS,1 + randomInt(2)).put(IndexMetaData.SETTING_NUMBER_OF_REPLICAS,randomInt(2))));
   ensureGreen();
   String isolatedNode=internalCluster().getMasterName();
-  NetworkPartition networkPartition=addRandomIsolation(isolatedNode);
-  networkPartition.startDisrupting();
-  String nonIsolatedNode=networkPartition.getMajoritySide().iterator().next();
+  TwoPartitions partitions=isolateNode(isolatedNode);
+  NetworkDisruption networkDisruption=addRandomDisruptionType(partitions);
+  networkDisruption.startDisrupting();
+  String nonIsolatedNode=partitions.getMajoritySide().iterator().next();
   ensureStableCluster(2,nonIsolatedNode);
   assertNoMaster(isolatedNode,TimeValue.timeValueSeconds(40));
-  networkPartition.stopDisrupting();
+  networkDisruption.stopDisrupting();
   for (  String node : nodes) {
-    ensureStableCluster(3,new TimeValue(DISRUPTION_HEALING_OVERHEAD.millis() + networkPartition.expectedTimeToHeal().millis()),true,node);
+    ensureStableCluster(3,new TimeValue(DISRUPTION_HEALING_OVERHEAD.millis() + networkDisruption.expectedTimeToHeal().millis()),true,node);
   }
   logger.info("issue a reroute");
   assertAcked(client().admin().cluster().prepareReroute());
