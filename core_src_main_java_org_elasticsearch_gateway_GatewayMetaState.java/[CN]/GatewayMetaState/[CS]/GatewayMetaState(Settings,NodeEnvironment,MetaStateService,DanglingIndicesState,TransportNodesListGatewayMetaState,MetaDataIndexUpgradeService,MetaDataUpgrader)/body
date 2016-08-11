@@ -3,7 +3,6 @@
   this.nodeEnv=nodeEnv;
   this.metaStateService=metaStateService;
   this.danglingIndicesState=danglingIndicesState;
-  this.metaDataIndexUpgradeService=metaDataIndexUpgradeService;
   nodesListGatewayMetaState.init(this);
   if (DiscoveryNode.isDataNode(settings)) {
     ensureNoPre019ShardState(nodeEnv);
@@ -15,7 +14,18 @@
     try {
       ensureNoPre019State();
       IndexFolderUpgrader.upgradeIndicesIfNeeded(settings,nodeEnv);
-      upgradeMetaData();
+      final MetaData metaData=metaStateService.loadFullState();
+      final MetaData upgradedMetaData=upgradeMetaData(metaData,metaDataIndexUpgradeService,metaDataUpgrader);
+      if (metaData != upgradedMetaData) {
+        if (MetaData.isGlobalStateEquals(metaData,upgradedMetaData) == false) {
+          metaStateService.writeGlobalState("upgrade",upgradedMetaData);
+        }
+        for (        IndexMetaData indexMetaData : upgradedMetaData) {
+          if (metaData.hasIndexMetaData(indexMetaData) == false) {
+            metaStateService.writeIndex("upgrade",indexMetaData);
+          }
+        }
+      }
       long startNS=System.nanoTime();
       metaStateService.loadFullState();
       logger.debug("took {} to load state",TimeValue.timeValueMillis(TimeValue.nsecToMSec(System.nanoTime() - startNS)));
