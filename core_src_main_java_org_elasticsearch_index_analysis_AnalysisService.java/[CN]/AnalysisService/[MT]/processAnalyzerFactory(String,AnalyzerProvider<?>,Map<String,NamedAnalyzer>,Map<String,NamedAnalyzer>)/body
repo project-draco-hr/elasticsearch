@@ -22,15 +22,17 @@
     throw new IllegalStateException("already registered analyzer with name: " + name);
   }
   analyzers.put(name,analyzer);
-  String strAliases=this.indexSettings.getSettings().get("index.analysis.analyzer." + analyzerFactory.name() + ".alias");
-  Set<String> aliases=new HashSet<>();
-  if (strAliases != null) {
-    aliases.addAll(Strings.commaDelimitedListToSet(strAliases));
-  }
-  aliases.addAll(Arrays.asList(this.indexSettings.getSettings().getAsArray("index.analysis.analyzer." + analyzerFactory.name() + ".alias")));
-  for (  String alias : aliases) {
-    if (analyzerAliases.putIfAbsent(alias,analyzer) != null) {
-      throw new IllegalStateException("alias [" + alias + "] is already used by ["+ analyzerAliases.get(alias).name()+ "]");
+  final String analyzerAliasKey="index.analysis.analyzer." + analyzerFactory.name() + ".alias";
+  if (indexSettings.getSettings().get(analyzerAliasKey) != null) {
+    if (indexSettings.getIndexVersionCreated().onOrAfter(Version.V_5_0_0_alpha6)) {
+      throw new IllegalArgumentException("setting [" + analyzerAliasKey + "] is not supported");
+    }
+    deprecationLogger.deprecated("setting [{}] is only allowed on index [{}] because it was created before 5.x; " + "analyzer aliases can no longer be created on new indices.",analyzerAliasKey,index().getName());
+    Set<String> aliases=Sets.newHashSet(indexSettings.getSettings().getAsArray(analyzerAliasKey));
+    for (    String alias : aliases) {
+      if (analyzerAliases.putIfAbsent(alias,analyzer) != null) {
+        throw new IllegalStateException("alias [" + alias + "] is already used by ["+ analyzerAliases.get(alias).name()+ "]");
+      }
     }
   }
 }
