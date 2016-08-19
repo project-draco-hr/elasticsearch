@@ -11,20 +11,18 @@
   for (int i=0; i < numberOfIndices; i++) {
     routingTableBuilder.addAsNew(metaData.index("test" + i));
   }
-  RoutingTable routingTable=routingTableBuilder.build();
-  ClusterState clusterState=ClusterState.builder(org.elasticsearch.cluster.ClusterName.CLUSTER_NAME_SETTING.getDefault(Settings.EMPTY)).metaData(metaData).routingTable(routingTable).build();
-  assertThat(routingTable.indicesRouting().size(),equalTo(numberOfIndices));
+  ClusterState clusterState=ClusterState.builder(org.elasticsearch.cluster.ClusterName.CLUSTER_NAME_SETTING.getDefault(Settings.EMPTY)).metaData(metaData).routingTable(routingTableBuilder.build()).build();
+  assertThat(clusterState.routingTable().indicesRouting().size(),equalTo(numberOfIndices));
   logger.info("Starting 3 nodes and rerouting");
   clusterState=ClusterState.builder(clusterState).nodes(DiscoveryNodes.builder().add(newNode("node1")).add(newNode("node2")).add(newNode("node3"))).build();
-  RoutingTable prevRoutingTable=routingTable;
-  routingTable=strategy.reroute(clusterState,"reroute").routingTable();
-  clusterState=ClusterState.builder(clusterState).routingTable(routingTable).build();
-  assertThat(prevRoutingTable != routingTable,equalTo(true));
+  RoutingAllocation.Result routingResult=strategy.reroute(clusterState,"reroute");
+  clusterState=ClusterState.builder(clusterState).routingResult(routingResult).build();
+  assertThat(routingResult.changed(),equalTo(true));
   for (int i=0; i < numberOfIndices; i++) {
-    assertThat(routingTable.index("test" + i).shards().size(),equalTo(1));
-    assertThat(routingTable.index("test" + i).shard(0).size(),equalTo(1));
-    assertThat(routingTable.index("test" + i).shard(0).shards().size(),equalTo(1));
-    assertThat(routingTable.index("test" + i).shard(0).shards().get(0).state(),equalTo(INITIALIZING));
+    assertThat(clusterState.routingTable().index("test" + i).shards().size(),equalTo(1));
+    assertThat(clusterState.routingTable().index("test" + i).shard(0).size(),equalTo(1));
+    assertThat(clusterState.routingTable().index("test" + i).shard(0).shards().size(),equalTo(1));
+    assertThat(clusterState.routingTable().index("test" + i).shard(0).shards().get(0).state(),equalTo(INITIALIZING));
   }
   RoutingNodes routingNodes=clusterState.getRoutingNodes();
   assertThat(numberOfShardsOfType(routingNodes,INITIALIZING),equalTo(numberOfIndices));
@@ -33,34 +31,30 @@
   assertThat(routingNodes.node("node2").numberOfShardsWithState(INITIALIZING),anyOf(equalTo(3),equalTo(4)));
   logger.info("Start two more nodes, things should remain the same");
   clusterState=ClusterState.builder(clusterState).nodes(DiscoveryNodes.builder(clusterState.nodes()).add(newNode("node4")).add(newNode("node5"))).build();
-  clusterState=ClusterState.builder(clusterState).routingTable(routingTable).build();
-  prevRoutingTable=routingTable;
-  routingTable=strategy.reroute(clusterState,"reroute").routingTable();
-  assertThat(prevRoutingTable == routingTable,equalTo(true));
+  routingResult=strategy.reroute(clusterState,"reroute");
+  assertThat(routingResult.changed(),equalTo(false));
   routingNodes=clusterState.getRoutingNodes();
-  prevRoutingTable=routingTable;
-  routingTable=strategy.applyStartedShards(clusterState,routingNodes.shardsWithState(INITIALIZING)).routingTable();
-  clusterState=ClusterState.builder(clusterState).routingTable(routingTable).build();
-  assertThat(prevRoutingTable != routingTable,equalTo(true));
+  routingResult=strategy.applyStartedShards(clusterState,routingNodes.shardsWithState(INITIALIZING));
+  clusterState=ClusterState.builder(clusterState).routingResult(routingResult).build();
+  assertThat(routingResult.changed(),equalTo(true));
   for (int i=0; i < numberOfIndices; i++) {
-    assertThat(routingTable.index("test" + i).shards().size(),equalTo(1));
-    assertThat(routingTable.index("test" + i).shard(0).size(),equalTo(1));
-    assertThat(routingTable.index("test" + i).shard(0).shards().size(),equalTo(1));
-    assertThat(routingTable.index("test" + i).shard(0).shards().get(0).state(),anyOf(equalTo(RELOCATING),equalTo(STARTED)));
+    assertThat(clusterState.routingTable().index("test" + i).shards().size(),equalTo(1));
+    assertThat(clusterState.routingTable().index("test" + i).shard(0).size(),equalTo(1));
+    assertThat(clusterState.routingTable().index("test" + i).shard(0).shards().size(),equalTo(1));
+    assertThat(clusterState.routingTable().index("test" + i).shard(0).shards().get(0).state(),anyOf(equalTo(RELOCATING),equalTo(STARTED)));
   }
   routingNodes=clusterState.getRoutingNodes();
   assertThat("4 source shard routing are relocating",numberOfShardsOfType(routingNodes,RELOCATING),equalTo(4));
   assertThat("4 target shard routing are initializing",numberOfShardsOfType(routingNodes,INITIALIZING),equalTo(4));
   logger.info("Now, mark the relocated as started");
-  prevRoutingTable=routingTable;
-  routingTable=strategy.applyStartedShards(clusterState,routingNodes.shardsWithState(INITIALIZING)).routingTable();
-  clusterState=ClusterState.builder(clusterState).routingTable(routingTable).build();
-  assertThat(prevRoutingTable != routingTable,equalTo(true));
+  routingResult=strategy.applyStartedShards(clusterState,routingNodes.shardsWithState(INITIALIZING));
+  clusterState=ClusterState.builder(clusterState).routingResult(routingResult).build();
+  assertThat(routingResult.changed(),equalTo(true));
   for (int i=0; i < numberOfIndices; i++) {
-    assertThat(routingTable.index("test" + i).shards().size(),equalTo(1));
-    assertThat(routingTable.index("test" + i).shard(0).size(),equalTo(1));
-    assertThat(routingTable.index("test" + i).shard(0).shards().size(),equalTo(1));
-    assertThat(routingTable.index("test" + i).shard(0).shards().get(0).state(),anyOf(equalTo(RELOCATING),equalTo(STARTED)));
+    assertThat(clusterState.routingTable().index("test" + i).shards().size(),equalTo(1));
+    assertThat(clusterState.routingTable().index("test" + i).shard(0).size(),equalTo(1));
+    assertThat(clusterState.routingTable().index("test" + i).shard(0).shards().size(),equalTo(1));
+    assertThat(clusterState.routingTable().index("test" + i).shard(0).shards().get(0).state(),anyOf(equalTo(RELOCATING),equalTo(STARTED)));
   }
   routingNodes=clusterState.getRoutingNodes();
   assertThat(numberOfShardsOfType(routingNodes,STARTED),equalTo(numberOfIndices));

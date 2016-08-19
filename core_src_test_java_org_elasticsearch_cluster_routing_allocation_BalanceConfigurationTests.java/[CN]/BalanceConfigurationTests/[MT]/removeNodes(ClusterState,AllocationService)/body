@@ -10,27 +10,17 @@
   if (removed) {
     clusterState=ClusterState.builder(clusterState).routingResult(strategy.deassociateDeadNodes(clusterState,randomBoolean(),"removed nodes")).build();
   }
-  RoutingNodes routingNodes=clusterState.getRoutingNodes();
   logger.info("start all the primary shards, replicas will start initializing");
-  RoutingTable routingTable=strategy.applyStartedShards(clusterState,routingNodes.shardsWithState(INITIALIZING)).routingTable();
-  clusterState=ClusterState.builder(clusterState).routingTable(routingTable).build();
-  routingNodes=clusterState.getRoutingNodes();
+  RoutingNodes routingNodes=clusterState.getRoutingNodes();
+  RoutingAllocation.Result routingResult=strategy.applyStartedShards(clusterState,routingNodes.shardsWithState(INITIALIZING));
+  clusterState=ClusterState.builder(clusterState).routingResult(routingResult).build();
   logger.info("start the replica shards");
-  routingTable=strategy.applyStartedShards(clusterState,routingNodes.shardsWithState(INITIALIZING)).routingTable();
-  clusterState=ClusterState.builder(clusterState).routingTable(routingTable).build();
   routingNodes=clusterState.getRoutingNodes();
+  routingResult=strategy.applyStartedShards(clusterState,routingNodes.shardsWithState(INITIALIZING));
+  clusterState=ClusterState.builder(clusterState).routingResult(routingResult).build();
   logger.info("rebalancing");
-  routingTable=strategy.reroute(clusterState,"reroute").routingTable();
-  clusterState=ClusterState.builder(clusterState).routingTable(routingTable).build();
-  routingNodes=clusterState.getRoutingNodes();
+  routingResult=strategy.reroute(clusterState,"reroute");
+  clusterState=ClusterState.builder(clusterState).routingResult(routingResult).build();
   logger.info("complete rebalancing");
-  RoutingTable prev=routingTable;
-  while (true) {
-    routingTable=strategy.applyStartedShards(clusterState,routingNodes.shardsWithState(INITIALIZING)).routingTable();
-    clusterState=ClusterState.builder(clusterState).routingTable(routingTable).build();
-    routingNodes=clusterState.getRoutingNodes();
-    if (routingTable == prev)     break;
-    prev=routingTable;
-  }
-  return clusterState;
+  return applyStartedShardsUntilNoChange(clusterState,strategy);
 }
