@@ -7,42 +7,39 @@
   Settings indexSettings=useClusterSetting ? Settings.EMPTY : Settings.builder().put(EnableAllocationDecider.INDEX_ROUTING_REBALANCE_ENABLE_SETTING.getKey(),Rebalance.NONE).build();
   logger.info("Building initial routing table");
   MetaData metaData=MetaData.builder().put(IndexMetaData.builder("test").settings(settings(Version.CURRENT).put(indexSettings)).numberOfShards(3).numberOfReplicas(1)).put(IndexMetaData.builder("always_disabled").settings(settings(Version.CURRENT).put(EnableAllocationDecider.INDEX_ROUTING_REBALANCE_ENABLE_SETTING.getKey(),Rebalance.NONE)).numberOfShards(1).numberOfReplicas(1)).build();
-  RoutingTable routingTable=RoutingTable.builder().addAsNew(metaData.index("test")).addAsNew(metaData.index("always_disabled")).build();
-  ClusterState clusterState=ClusterState.builder(org.elasticsearch.cluster.ClusterName.CLUSTER_NAME_SETTING.getDefault(Settings.EMPTY)).metaData(metaData).routingTable(routingTable).build();
+  RoutingTable initialRoutingTable=RoutingTable.builder().addAsNew(metaData.index("test")).addAsNew(metaData.index("always_disabled")).build();
+  ClusterState clusterState=ClusterState.builder(org.elasticsearch.cluster.ClusterName.CLUSTER_NAME_SETTING.getDefault(Settings.EMPTY)).metaData(metaData).routingTable(initialRoutingTable).build();
   logger.info("--> adding one nodes and do rerouting");
   clusterState=ClusterState.builder(clusterState).nodes(DiscoveryNodes.builder().add(newNode("node1")).add(newNode("node2"))).build();
-  routingTable=strategy.reroute(clusterState,"reroute").routingTable();
-  clusterState=ClusterState.builder(clusterState).routingTable(routingTable).build();
+  RoutingAllocation.Result routingResult=strategy.reroute(clusterState,"reroute");
+  clusterState=ClusterState.builder(clusterState).routingResult(routingResult).build();
   assertThat(clusterState.getRoutingNodes().shardsWithState(INITIALIZING).size(),equalTo(4));
   logger.info("--> start the shards (primaries)");
-  routingTable=strategy.applyStartedShards(clusterState,clusterState.getRoutingNodes().shardsWithState(INITIALIZING)).routingTable();
-  clusterState=ClusterState.builder(clusterState).routingTable(routingTable).build();
+  routingResult=strategy.applyStartedShards(clusterState,clusterState.getRoutingNodes().shardsWithState(INITIALIZING));
+  clusterState=ClusterState.builder(clusterState).routingResult(routingResult).build();
   assertThat(clusterState.getRoutingNodes().shardsWithState(STARTED).size(),equalTo(4));
   assertThat(clusterState.getRoutingNodes().shardsWithState(INITIALIZING).size(),equalTo(4));
-  routingTable=strategy.applyStartedShards(clusterState,clusterState.getRoutingNodes().shardsWithState(INITIALIZING)).routingTable();
-  clusterState=ClusterState.builder(clusterState).routingTable(routingTable).build();
+  routingResult=strategy.applyStartedShards(clusterState,clusterState.getRoutingNodes().shardsWithState(INITIALIZING));
+  clusterState=ClusterState.builder(clusterState).routingResult(routingResult).build();
   assertThat(clusterState.getRoutingNodes().shardsWithState(STARTED).size(),equalTo(8));
   assertThat(clusterState.getRoutingNodes().shardsWithState(INITIALIZING).size(),equalTo(0));
   logger.info("--> adding one nodes and do rerouting");
   clusterState=ClusterState.builder(clusterState).nodes(DiscoveryNodes.builder().add(newNode("node1")).add(newNode("node2")).add(newNode("node3"))).build();
-  ClusterState prevState=clusterState;
-  routingTable=strategy.reroute(clusterState,"reroute").routingTable();
-  clusterState=ClusterState.builder(clusterState).routingTable(routingTable).build();
+  routingResult=strategy.reroute(clusterState,"reroute");
+  clusterState=ClusterState.builder(clusterState).routingResult(routingResult).build();
   assertThat(clusterState.getRoutingNodes().shardsWithState(STARTED).size(),equalTo(8));
   assertThat(clusterState.getRoutingNodes().shardsWithState(RELOCATING).size(),equalTo(0));
   if (useClusterSetting) {
-    prevState=clusterState;
-    clusterState=ClusterState.builder(clusterState).metaData(MetaData.builder(metaData).transientSettings(Settings.builder().put(CLUSTER_ROUTING_REBALANCE_ENABLE_SETTING.getKey(),allowedOnes).build())).build();
+    clusterState=ClusterState.builder(clusterState).metaData(MetaData.builder(clusterState.metaData()).transientSettings(Settings.builder().put(CLUSTER_ROUTING_REBALANCE_ENABLE_SETTING.getKey(),allowedOnes).build())).build();
   }
  else {
-    prevState=clusterState;
     IndexMetaData meta=clusterState.getMetaData().index("test");
     IndexMetaData meta1=clusterState.getMetaData().index("always_disabled");
-    clusterState=ClusterState.builder(clusterState).metaData(MetaData.builder(metaData).removeAllIndices().put(IndexMetaData.builder(meta1)).put(IndexMetaData.builder(meta).settings(Settings.builder().put(meta.getSettings()).put(EnableAllocationDecider.INDEX_ROUTING_REBALANCE_ENABLE_SETTING.getKey(),allowedOnes).build()))).build();
+    clusterState=ClusterState.builder(clusterState).metaData(MetaData.builder(clusterState.metaData()).removeAllIndices().put(IndexMetaData.builder(meta1)).put(IndexMetaData.builder(meta).settings(Settings.builder().put(meta.getSettings()).put(EnableAllocationDecider.INDEX_ROUTING_REBALANCE_ENABLE_SETTING.getKey(),allowedOnes).build()))).build();
   }
   clusterSettings.applySettings(clusterState.metaData().settings());
-  routingTable=strategy.reroute(clusterState,"reroute").routingTable();
-  clusterState=ClusterState.builder(clusterState).routingTable(routingTable).build();
+  routingResult=strategy.reroute(clusterState,"reroute");
+  clusterState=ClusterState.builder(clusterState).routingResult(routingResult).build();
   assertThat("expected 6 shards to be started 2 to relocate useClusterSettings: " + useClusterSetting,clusterState.getRoutingNodes().shardsWithState(STARTED).size(),equalTo(6));
   assertThat("expected 2 shards to relocate useClusterSettings: " + useClusterSetting,clusterState.getRoutingNodes().shardsWithState(RELOCATING).size(),equalTo(2));
   List<ShardRouting> mutableShardRoutings=clusterState.getRoutingNodes().shardsWithState(RELOCATING);
@@ -67,8 +64,8 @@ break;
 default :
 fail("only replicas, primaries or all are allowed");
 }
-routingTable=strategy.applyStartedShards(clusterState,clusterState.getRoutingNodes().shardsWithState(INITIALIZING)).routingTable();
-clusterState=ClusterState.builder(clusterState).routingTable(routingTable).build();
+routingResult=strategy.applyStartedShards(clusterState,clusterState.getRoutingNodes().shardsWithState(INITIALIZING));
+clusterState=ClusterState.builder(clusterState).routingResult(routingResult).build();
 assertThat(clusterState.getRoutingNodes().shardsWithState(STARTED).size(),equalTo(8));
 assertThat(clusterState.getRoutingNodes().shardsWithState(INITIALIZING).size(),equalTo(0));
 }
