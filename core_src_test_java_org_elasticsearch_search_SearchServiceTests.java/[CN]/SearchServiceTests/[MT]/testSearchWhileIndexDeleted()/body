@@ -1,0 +1,64 @@
+{
+  createIndex("index");
+  client().prepareIndex("index","type","1").setSource("field","value").setRefreshPolicy(IMMEDIATE).get();
+  SearchService service=getInstanceFromNode(SearchService.class);
+  IndicesService indicesService=getInstanceFromNode(IndicesService.class);
+  IndexService indexService=indicesService.indexServiceSafe(resolveIndex("index"));
+  IndexShard indexShard=indexService.getShard(0);
+  AtomicBoolean running=new AtomicBoolean(true);
+  CountDownLatch startGun=new CountDownLatch(1);
+  Semaphore semaphore=new Semaphore(Integer.MAX_VALUE);
+  final Thread thread=new Thread(){
+    @Override public void run(){
+      startGun.countDown();
+      while (running.get()) {
+        service.afterIndexDeleted(indexService.index(),indexService.getIndexSettings().getSettings());
+        if (randomBoolean()) {
+          try {
+            semaphore.acquire();
+          }
+ catch (          InterruptedException e) {
+            throw new AssertionError(e);
+          }
+          client().prepareIndex("index","type").setSource("field","value").setRefreshPolicy(randomFrom(WriteRequest.RefreshPolicy.values())).execute(new ActionListener<IndexResponse>(){
+            @Override public void onResponse(            IndexResponse indexResponse){
+              semaphore.release();
+            }
+            @Override public void onFailure(            Exception e){
+              semaphore.release();
+            }
+          }
+);
+        }
+      }
+    }
+  }
+;
+  thread.start();
+  startGun.await();
+  try {
+    final int rounds=scaledRandomIntBetween(100,10000);
+    for (int i=0; i < rounds; i++) {
+      try {
+        QuerySearchResultProvider querySearchResultProvider=service.executeQueryPhase(new ShardSearchLocalRequest(indexShard.shardId(),1,SearchType.DEFAULT,new SearchSourceBuilder(),new String[0],false));
+        IntArrayList intCursors=new IntArrayList(1);
+        intCursors.add(0);
+        ShardFetchRequest req=new ShardFetchRequest(querySearchResultProvider.id(),intCursors,null);
+        service.executeFetchPhase(req);
+      }
+ catch (      AlreadyClosedException ex) {
+        throw ex;
+      }
+catch (      IllegalStateException ex) {
+        assertEquals("search context is already closed can't increment refCount current count [0]",ex.getMessage());
+      }
+catch (      SearchContextMissingException ex) {
+      }
+    }
+  }
+  finally {
+    running.set(false);
+    thread.join();
+    semaphore.acquire(Integer.MAX_VALUE);
+  }
+}
