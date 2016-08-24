@@ -1,18 +1,10 @@
 {
   for (  String method : getHttpMethods()) {
-    Map<String,String> expectedHeaders=new HashMap<>();
-    for (    Header defaultHeader : defaultHeaders) {
-      expectedHeaders.put(defaultHeader.getName(),defaultHeader.getValue());
-    }
-    int numHeaders=RandomInts.randomIntBetween(getRandom(),1,5);
-    Header[] headers=new Header[numHeaders];
-    for (int i=0; i < numHeaders; i++) {
-      String headerName="Header" + (getRandom().nextBoolean() ? i : "");
-      String headerValue=RandomStrings.randomAsciiOfLengthBetween(getRandom(),3,10);
-      headers[i]=new BasicHeader(headerName,headerValue);
-      expectedHeaders.put(headerName,headerValue);
-    }
-    int statusCode=randomStatusCode(getRandom());
+    final int numHeaders=randomIntBetween(1,5);
+    final Header[] headers=generateHeaders("Header",null,numHeaders);
+    final Map<String,List<String>> expectedHeaders=new HashMap<>();
+    addHeaders(expectedHeaders,defaultHeaders,headers);
+    final int statusCode=randomStatusCode(getRandom());
     Response esResponse;
     try {
       esResponse=restClient.performRequest(method,"/" + statusCode,headers);
@@ -22,9 +14,15 @@
     }
     assertThat(esResponse.getStatusLine().getStatusCode(),equalTo(statusCode));
     for (    Header responseHeader : esResponse.getHeaders()) {
-      String headerValue=expectedHeaders.remove(responseHeader.getName());
-      assertNotNull("found response header [" + responseHeader.getName() + "] that wasn't originally sent",headerValue);
+      final String name=responseHeader.getName();
+      final String value=responseHeader.getValue();
+      final List<String> values=expectedHeaders.get(name);
+      assertNotNull("found response header [" + name + "] that wasn't originally sent: "+ value,values);
+      assertTrue("found incorrect response header [" + name + "]: "+ value,values.remove(value));
+      if (values.isEmpty()) {
+        expectedHeaders.remove(name);
+      }
     }
-    assertEquals("some headers that were sent weren't returned " + expectedHeaders,0,expectedHeaders.size());
+    assertTrue("some headers that were sent weren't returned " + expectedHeaders,expectedHeaders.isEmpty());
   }
 }
