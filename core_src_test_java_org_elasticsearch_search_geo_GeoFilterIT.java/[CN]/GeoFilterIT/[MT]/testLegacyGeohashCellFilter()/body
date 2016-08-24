@@ -1,0 +1,51 @@
+{
+  String geohash=randomhash(10);
+  logger.info("Testing geohash_cell filter for [{}]",geohash);
+  Collection<? extends CharSequence> neighbors=GeoHashUtils.neighbors(geohash);
+  Collection<? extends CharSequence> parentNeighbors=GeoHashUtils.neighbors(geohash.substring(0,geohash.length() - 1));
+  logger.info("Neighbors {}",neighbors);
+  logger.info("Parent Neighbors {}",parentNeighbors);
+  ensureYellow();
+  Version version=VersionUtils.randomVersionBetween(random(),Version.V_2_0_0,Version.V_5_0_0_alpha5);
+  Settings settings=Settings.builder().put(IndexMetaData.SETTING_VERSION_CREATED,version).build();
+  client().admin().indices().prepareCreate("locations").setSettings(settings).addMapping("location","pin","type=geo_point,geohash_prefix=true,lat_lon=false").execute().actionGet();
+  client().prepareIndex("locations","location","1").setCreate(true).setSource("pin",geohash).execute().actionGet();
+  Iterator<? extends CharSequence> iterator=neighbors.iterator();
+  for (int i=0; iterator.hasNext(); i++) {
+    client().prepareIndex("locations","location","N" + i).setCreate(true).setSource("pin",iterator.next()).execute().actionGet();
+  }
+  client().prepareIndex("locations","location","p").setCreate(true).setSource("pin",geohash.substring(0,geohash.length() - 1)).execute().actionGet();
+  iterator=parentNeighbors.iterator();
+  for (int i=0; iterator.hasNext(); i++) {
+    client().prepareIndex("locations","location","p" + i).setCreate(true).setSource("pin",iterator.next()).execute().actionGet();
+  }
+  client().admin().indices().prepareRefresh("locations").execute().actionGet();
+  Map<GeohashCellQuery.Builder,Long> expectedCounts=new HashMap<>();
+  Map<GeohashCellQuery.Builder,String[]> expectedResults=new HashMap<>();
+  expectedCounts.put(geoHashCellQuery("pin",geohash,false),1L);
+  expectedCounts.put(geoHashCellQuery("pin",geohash.substring(0,geohash.length() - 1),true),2L + neighbors.size() + parentNeighbors.size());
+  GeoPoint point=GeoPoint.fromGeohash(geohash);
+  int precision=geohash.length();
+  expectedCounts.put(geoHashCellQuery("pin",point).neighbors(true).precision(precision),1L + neighbors.size());
+  List<GeohashCellQuery.Builder> filterBuilders=new ArrayList<>(expectedCounts.keySet());
+  for (  GeohashCellQuery.Builder builder : filterBuilders) {
+    try {
+      long expectedCount=expectedCounts.get(builder);
+      SearchResponse response=client().prepareSearch("locations").setQuery(QueryBuilders.matchAllQuery()).setPostFilter(builder).setSize((int)expectedCount).get();
+      assertHitCount(response,expectedCount);
+      String[] expectedIds=expectedResults.get(builder);
+      if (expectedIds == null) {
+        ArrayList<String> ids=new ArrayList<>();
+        for (        SearchHit hit : response.getHits()) {
+          ids.add(hit.id());
+        }
+        expectedResults.put(builder,ids.toArray(Strings.EMPTY_ARRAY));
+        continue;
+      }
+      assertSearchHits(response,expectedIds);
+    }
+ catch (    AssertionError error) {
+      throw new AssertionError(error.getMessage() + "\n geohash_cell filter:" + builder,error);
+    }
+  }
+}
