@@ -1,0 +1,47 @@
+{
+  SearchResponse response=client().prepareSearch("idx").setProfile(true).addAggregation(diversifiedSampler("diversify").shardSize(10).field(STRING_FIELD).maxDocsPerValue(2).subAggregation(max("max").field(NUMBER_FIELD))).get();
+  assertSearchResponse(response);
+  Map<String,ProfileShardResult> profileResults=response.getProfileResults();
+  assertThat(profileResults,notNullValue());
+  assertThat(profileResults.size(),equalTo(getNumShards("idx").numPrimaries));
+  for (  ProfileShardResult profileShardResult : profileResults.values()) {
+    assertThat(profileShardResult,notNullValue());
+    AggregationProfileShardResult aggProfileResults=profileShardResult.getAggregationProfileResults();
+    assertThat(aggProfileResults,notNullValue());
+    List<ProfileResult> aggProfileResultsList=aggProfileResults.getProfileResults();
+    assertThat(aggProfileResultsList,notNullValue());
+    assertThat(aggProfileResultsList.size(),equalTo(1));
+    ProfileResult diversifyAggResult=aggProfileResultsList.get(0);
+    assertThat(diversifyAggResult,notNullValue());
+    assertThat(diversifyAggResult.getQueryName(),equalTo(DiversifiedOrdinalsSamplerAggregator.class.getName()));
+    assertThat(diversifyAggResult.getLuceneDescription(),equalTo("diversify"));
+    assertThat(diversifyAggResult.getTime(),greaterThan(0L));
+    Map<String,Long> histoBreakdown=diversifyAggResult.getTimeBreakdown();
+    assertThat(histoBreakdown,notNullValue());
+    assertThat(histoBreakdown.get(AggregationTimingType.INITIALIZE.toString()),notNullValue());
+    assertThat(histoBreakdown.get(AggregationTimingType.INITIALIZE.toString()),greaterThan(0L));
+    assertThat(histoBreakdown.get(AggregationTimingType.COLLECT.toString()),notNullValue());
+    assertThat(histoBreakdown.get(AggregationTimingType.COLLECT.toString()),greaterThan(0L));
+    assertThat(histoBreakdown.get(AggregationTimingType.BUILD_AGGREGATION.toString()),notNullValue());
+    assertThat(histoBreakdown.get(AggregationTimingType.BUILD_AGGREGATION.toString()),greaterThan(0L));
+    assertThat(histoBreakdown.get(AggregationTimingType.REDUCE.toString()),notNullValue());
+    assertThat(histoBreakdown.get(AggregationTimingType.REDUCE.toString()),equalTo(0L));
+    assertThat(diversifyAggResult.getProfiledChildren().size(),equalTo(1));
+    ProfileResult maxAggResult=diversifyAggResult.getProfiledChildren().get(0);
+    assertThat(maxAggResult,notNullValue());
+    assertThat(maxAggResult.getQueryName(),equalTo(MaxAggregator.class.getName()));
+    assertThat(maxAggResult.getLuceneDescription(),equalTo("max"));
+    assertThat(maxAggResult.getTime(),greaterThan(0L));
+    Map<String,Long> termsBreakdown=maxAggResult.getTimeBreakdown();
+    assertThat(termsBreakdown,notNullValue());
+    assertThat(termsBreakdown.get(AggregationTimingType.INITIALIZE.toString()),notNullValue());
+    assertThat(termsBreakdown.get(AggregationTimingType.INITIALIZE.toString()),greaterThan(0L));
+    assertThat(termsBreakdown.get(AggregationTimingType.COLLECT.toString()),notNullValue());
+    assertThat(termsBreakdown.get(AggregationTimingType.COLLECT.toString()),greaterThan(0L));
+    assertThat(termsBreakdown.get(AggregationTimingType.BUILD_AGGREGATION.toString()),notNullValue());
+    assertThat(termsBreakdown.get(AggregationTimingType.BUILD_AGGREGATION.toString()),greaterThan(0L));
+    assertThat(termsBreakdown.get(AggregationTimingType.REDUCE.toString()),notNullValue());
+    assertThat(termsBreakdown.get(AggregationTimingType.REDUCE.toString()),equalTo(0L));
+    assertThat(maxAggResult.getProfiledChildren().size(),equalTo(0));
+  }
+}
