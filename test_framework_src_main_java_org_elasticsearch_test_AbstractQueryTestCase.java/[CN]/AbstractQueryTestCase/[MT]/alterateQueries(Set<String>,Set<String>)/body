@@ -4,7 +4,7 @@
   for (  String query : queries) {
     int mutation=0;
     while (true) {
-      boolean expectedException=true;
+      Deque<String> hierarchy=new LinkedList<>();
       BytesStreamOutput out=new BytesStreamOutput();
       try (XContentGenerator generator=XContentType.JSON.xContent().createGenerator(out);XContentParser parser=XContentHelper.createParser(new BytesArray(query))){
         int objectIndex=-1;
@@ -12,8 +12,8 @@
         while ((token=parser.nextToken()) != null) {
           if (token == XContentParser.Token.START_OBJECT) {
             objectIndex++;
-            if (hasArbitraryContent) {
-              expectedException=arbitraryMarkers.contains(parser.currentName()) == false;
+            if (objectIndex <= mutation) {
+              hierarchy.push(parser.currentName());
             }
             if (objectIndex == mutation) {
               generator.writeStartObject();
@@ -26,14 +26,23 @@
           XContentHelper.copyCurrentEvent(generator,parser);
         }
         assertThat(token,nullValue());
-        if (objectIndex == mutation) {
-          mutation++;
-        }
- else {
+        if (objectIndex < mutation) {
           break;
         }
+ else {
+          mutation++;
+        }
       }
-       results.add(new Tuple<>(out.bytes().utf8ToString(),expectedException));
+       boolean expectException=true;
+      if (hasArbitraryContent) {
+        for (        String marker : arbitraryMarkers) {
+          if (hierarchy.contains(marker)) {
+            expectException=false;
+            break;
+          }
+        }
+      }
+      results.add(new Tuple<>(out.bytes().utf8ToString(),expectException));
     }
   }
   return results;
