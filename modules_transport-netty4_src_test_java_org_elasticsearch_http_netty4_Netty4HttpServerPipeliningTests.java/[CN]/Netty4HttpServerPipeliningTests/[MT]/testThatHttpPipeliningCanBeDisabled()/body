@@ -4,21 +4,33 @@
     httpServerTransport.start();
     final InetSocketTransportAddress transportAddress=(InetSocketTransportAddress)randomFrom(httpServerTransport.boundAddress().boundAddresses());
     final int numberOfRequests=randomIntBetween(4,16);
-    final int numberOfSlowRequests=scaledRandomIntBetween(1,numberOfRequests);
+    final Set<Integer> slowIds=new HashSet<>();
     final List<String> requests=new ArrayList<>(numberOfRequests);
-    for (int i=0; i < numberOfRequests - numberOfSlowRequests; i++) {
-      requests.add("/" + i);
-    }
-    for (int i=0; i < numberOfSlowRequests; i++) {
-      requests.add("/slow?sleep=" + sleep(i));
+    int numberOfSlowRequests=0;
+    for (int i=0; i < numberOfRequests; i++) {
+      if (rarely()) {
+        requests.add("/slow/" + i);
+        slowIds.add(i);
+        numberOfSlowRequests++;
+      }
+ else {
+        requests.add("/" + i);
+      }
     }
     try (Netty4HttpClient nettyHttpClient=new Netty4HttpClient()){
       Collection<FullHttpResponse> responses=nettyHttpClient.get(transportAddress.address(),requests.toArray(new String[]{}));
       List<String> responseBodies=new ArrayList<>(Netty4HttpClient.returnHttpResponseBodies(responses));
       assertThat(responseBodies,hasSize(numberOfRequests));
-      for (int i=0; i < numberOfSlowRequests; i++) {
-        assertThat(responseBodies.get(numberOfRequests - numberOfSlowRequests + i),equalTo("/slow?sleep=" + sleep(i)));
+      for (int i=0; i < numberOfRequests - numberOfSlowRequests; i++) {
+        assertThat(responseBodies.get(i),matches("/\\d+"));
       }
+      final Set<Integer> ids=new HashSet<>();
+      for (int i=0; i < numberOfSlowRequests; i++) {
+        final String response=responseBodies.get(numberOfRequests - numberOfSlowRequests + i);
+        assertThat(response,matches("/slow/\\d+"));
+        assertTrue(ids.add(Integer.parseInt(response.split("/")[2])));
+      }
+      assertThat(slowIds,equalTo(ids));
     }
    }
  }
