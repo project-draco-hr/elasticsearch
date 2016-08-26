@@ -1,0 +1,16 @@
+{
+  ClusterState clusterState=createOnePrimaryOneReplicaClusterState(allocation);
+  logger.info("remove replica node");
+  IndexShardRoutingTable shardRoutingTable=clusterState.routingTable().index("test").shard(0);
+  ShardRouting replicaShard=shardRoutingTable.replicaShards().get(0);
+  clusterState=ClusterState.builder(clusterState).nodes(DiscoveryNodes.builder(clusterState.nodes()).remove(replicaShard.currentNodeId())).build();
+  RoutingAllocation.Result rerouteResult=allocation.deassociateDeadNodes(clusterState,true,"reroute");
+  clusterState=ClusterState.builder(clusterState).routingResult(rerouteResult).build();
+  assertThat(clusterState.metaData().index("test").inSyncAllocationIds(0).size(),equalTo(2));
+  logger.info("fail replica (for which there is no shard routing in the CS anymore)");
+  assertNull(clusterState.getRoutingNodes().getByAllocationId(replicaShard.shardId(),replicaShard.allocationId().getId()));
+  ShardStateAction.ShardFailedClusterStateTaskExecutor failedClusterStateTaskExecutor=new ShardStateAction.ShardFailedClusterStateTaskExecutor(allocation,null,logger);
+  long primaryTerm=clusterState.metaData().index("test").primaryTerm(0);
+  clusterState=failedClusterStateTaskExecutor.execute(clusterState,Arrays.asList(new ShardEntry(shardRoutingTable.shardId(),replicaShard.allocationId().getId(),primaryTerm,"dummy",null))).resultingState;
+  assertThat(clusterState.metaData().index("test").inSyncAllocationIds(0).size(),equalTo(1));
+}

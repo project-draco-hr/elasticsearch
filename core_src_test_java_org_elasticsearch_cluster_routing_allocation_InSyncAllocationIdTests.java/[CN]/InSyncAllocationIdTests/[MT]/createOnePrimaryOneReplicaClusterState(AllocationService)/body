@@ -1,0 +1,22 @@
+{
+  logger.info("creating an index with 1 shard, 1 replica");
+  MetaData metaData=MetaData.builder().put(IndexMetaData.builder("test").settings(settings(Version.CURRENT)).numberOfShards(1).numberOfReplicas(1)).build();
+  RoutingTable routingTable=RoutingTable.builder().addAsNew(metaData.index("test")).build();
+  ClusterState clusterState=ClusterState.builder(org.elasticsearch.cluster.ClusterName.CLUSTER_NAME_SETTING.getDefault(Settings.EMPTY)).metaData(metaData).routingTable(routingTable).build();
+  logger.info("adding two nodes and performing rerouting");
+  clusterState=ClusterState.builder(clusterState).nodes(DiscoveryNodes.builder().add(newNode("node1")).add(newNode("node2"))).build();
+  RoutingAllocation.Result rerouteResult=allocation.reroute(clusterState,"reroute");
+  clusterState=ClusterState.builder(clusterState).routingResult(rerouteResult).build();
+  assertThat(clusterState.metaData().index("test").inSyncAllocationIds(0).size(),equalTo(0));
+  logger.info("start primary shard");
+  rerouteResult=allocation.applyStartedShards(clusterState,clusterState.getRoutingNodes().shardsWithState(INITIALIZING));
+  clusterState=ClusterState.builder(clusterState).routingResult(rerouteResult).build();
+  assertThat(clusterState.getRoutingTable().shardsWithState(STARTED).size(),equalTo(1));
+  assertThat(clusterState.metaData().index("test").inSyncAllocationIds(0).size(),equalTo(1));
+  assertThat(clusterState.getRoutingTable().shardsWithState(STARTED).get(0).allocationId().getId(),equalTo(clusterState.metaData().index("test").inSyncAllocationIds(0).iterator().next()));
+  logger.info("start replica shard");
+  rerouteResult=allocation.applyStartedShards(clusterState,clusterState.getRoutingNodes().shardsWithState(INITIALIZING));
+  clusterState=ClusterState.builder(clusterState).routingResult(rerouteResult).build();
+  assertThat(clusterState.metaData().index("test").inSyncAllocationIds(0).size(),equalTo(2));
+  return clusterState;
+}

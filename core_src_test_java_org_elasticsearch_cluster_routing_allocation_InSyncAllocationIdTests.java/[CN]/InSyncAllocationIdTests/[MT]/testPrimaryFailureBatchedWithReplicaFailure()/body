@@ -1,0 +1,16 @@
+{
+  ClusterState clusterState=createOnePrimaryOneReplicaClusterState(allocation);
+  IndexShardRoutingTable shardRoutingTable=clusterState.routingTable().index("test").shard(0);
+  ShardRouting primaryShard=shardRoutingTable.primaryShard();
+  ShardRouting replicaShard=shardRoutingTable.replicaShards().get(0);
+  long primaryTerm=clusterState.metaData().index("test").primaryTerm(0);
+  List<ShardEntry> failureEntries=new ArrayList<>();
+  failureEntries.add(new ShardEntry(shardRoutingTable.shardId(),primaryShard.allocationId().getId(),0L,"dummy",null));
+  failureEntries.add(new ShardEntry(shardRoutingTable.shardId(),replicaShard.allocationId().getId(),primaryTerm,"dummy",null));
+  Collections.shuffle(failureEntries,random());
+  logger.info("Failing {}",failureEntries);
+  clusterState=failedClusterStateTaskExecutor.execute(clusterState,failureEntries).resultingState;
+  assertThat(clusterState.metaData().index("test").inSyncAllocationIds(0),equalTo(Collections.singleton(primaryShard.allocationId().getId())));
+  clusterState=failedClusterStateTaskExecutor.execute(clusterState,failureEntries).resultingState;
+  assertThat(clusterState.metaData().index("test").inSyncAllocationIds(0),equalTo(Collections.singleton(primaryShard.allocationId().getId())));
+}

@@ -1,0 +1,30 @@
+{
+  ClusterState clusterState=createOnePrimaryOneReplicaClusterState(allocation);
+  Set<String> inSyncSet=clusterState.metaData().index("test").inSyncAllocationIds(0);
+  assertThat(inSyncSet.size(),equalTo(2));
+  IndexShardRoutingTable shardRoutingTable=clusterState.routingTable().index("test").shard(0);
+  ShardRouting primaryShard=shardRoutingTable.primaryShard();
+  ShardRouting replicaShard=shardRoutingTable.replicaShards().get(0);
+  logger.info("remove a node");
+  clusterState=ClusterState.builder(clusterState).nodes(DiscoveryNodes.builder(clusterState.nodes()).remove(replicaShard.currentNodeId())).build();
+  RoutingAllocation.Result rerouteResult=allocation.deassociateDeadNodes(clusterState,true,"reroute");
+  clusterState=ClusterState.builder(clusterState).routingResult(rerouteResult).build();
+  assertEquals(inSyncSet,clusterState.metaData().index("test").inSyncAllocationIds(0));
+  for (int i=0; i < 5; i++) {
+    logger.info("add back node");
+    clusterState=ClusterState.builder(clusterState).nodes(DiscoveryNodes.builder(clusterState.nodes()).add(newNode(replicaShard.currentNodeId()))).build();
+    rerouteResult=allocation.reroute(clusterState,"reroute");
+    clusterState=ClusterState.builder(clusterState).routingResult(rerouteResult).build();
+    logger.info("start replica shards");
+    rerouteResult=allocation.applyStartedShards(clusterState,clusterState.getRoutingNodes().shardsWithState(INITIALIZING));
+    clusterState=ClusterState.builder(clusterState).routingResult(rerouteResult).build();
+    logger.info("remove the node");
+    clusterState=ClusterState.builder(clusterState).nodes(DiscoveryNodes.builder(clusterState.nodes()).remove(replicaShard.currentNodeId())).build();
+    rerouteResult=allocation.deassociateDeadNodes(clusterState,true,"reroute");
+    clusterState=ClusterState.builder(clusterState).routingResult(rerouteResult).build();
+  }
+  Set<String> newInSyncSet=clusterState.metaData().index("test").inSyncAllocationIds(0);
+  assertThat(newInSyncSet.size(),equalTo(2));
+  assertFalse(Sets.haveEmptyIntersection(inSyncSet,newInSyncSet));
+  assertThat(newInSyncSet,hasItem(primaryShard.allocationId().getId()));
+}
