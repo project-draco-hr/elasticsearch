@@ -1,0 +1,68 @@
+{
+  final RecoveryState recoveryState=indexShard.recoveryState();
+  final boolean indexShouldExists=recoveryState.getRecoverySource().getType() != RecoverySource.Type.EMPTY_STORE;
+  indexShard.prepareForIndexRecovery();
+  long version=-1;
+  SegmentInfos si=null;
+  final Store store=indexShard.store();
+  store.incRef();
+  try {
+    try {
+      store.failIfCorrupted();
+      try {
+        si=store.readLastCommittedSegmentsInfo();
+      }
+ catch (      Exception e) {
+        String files="_unknown_";
+        try {
+          files=Arrays.toString(store.directory().listAll());
+        }
+ catch (        Exception inner) {
+          inner.addSuppressed(e);
+          files+=" (failure=" + ExceptionsHelper.detailedMessage(inner) + ")";
+        }
+        if (indexShouldExists) {
+          throw new IndexShardRecoveryException(shardId,"shard allocated for local recovery (post api), should exist, but doesn't, current files: " + files,e);
+        }
+      }
+      if (si != null) {
+        if (indexShouldExists) {
+          version=si.getVersion();
+        }
+ else {
+          logger.trace("cleaning existing shard, shouldn't exists");
+          Lucene.cleanLuceneIndex(store.directory());
+          si=null;
+        }
+      }
+    }
+ catch (    Exception e) {
+      throw new IndexShardRecoveryException(shardId,"failed to fetch index version after copying it over",e);
+    }
+    recoveryState.getIndex().updateVersion(version);
+    if (recoveryState.getRecoverySource().getType() == RecoverySource.Type.LOCAL_SHARDS) {
+      assert indexShouldExists;
+      indexShard.skipTranslogRecovery();
+    }
+ else {
+      try {
+        final RecoveryState.Index index=recoveryState.getIndex();
+        if (si != null) {
+          addRecoveredFileDetails(si,store,index);
+        }
+      }
+ catch (      IOException e) {
+        logger.debug("failed to list file details",e);
+      }
+      indexShard.performTranslogRecovery(indexShouldExists);
+    }
+    indexShard.finalizeRecovery();
+    indexShard.postRecovery("post recovery from shard_store");
+  }
+ catch (  EngineException|IOException e) {
+    throw new IndexShardRecoveryException(shardId,"failed to recovery from gateway",e);
+  }
+ finally {
+    store.decRef();
+  }
+}
