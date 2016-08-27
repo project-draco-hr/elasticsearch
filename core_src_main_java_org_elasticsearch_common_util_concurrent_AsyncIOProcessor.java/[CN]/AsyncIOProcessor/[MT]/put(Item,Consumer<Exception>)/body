@@ -1,0 +1,35 @@
+{
+  Objects.requireNonNull(item,"item must not be null");
+  Objects.requireNonNull(listener,"listener must not be null");
+  final boolean promised=promiseSemaphore.tryAcquire();
+  final Tuple<Item,Consumer<Exception>> itemTuple=new Tuple<>(item,listener);
+  if (promised == false) {
+    try {
+      queue.put(new Tuple<>(item,listener));
+    }
+ catch (    InterruptedException e) {
+      Thread.currentThread().interrupt();
+      listener.accept(e);
+    }
+  }
+  if (promised || promiseSemaphore.tryAcquire()) {
+    final List<Tuple<Item,Consumer<Exception>>> candidates=new ArrayList<>();
+    try {
+      if (promised) {
+        candidates.add(itemTuple);
+      }
+      drainAndProcess(candidates);
+    }
+  finally {
+      promiseSemaphore.release();
+    }
+    while (queue.isEmpty() == false && promiseSemaphore.tryAcquire()) {
+      try {
+        drainAndProcess(candidates);
+      }
+  finally {
+        promiseSemaphore.release();
+      }
+    }
+  }
+}
