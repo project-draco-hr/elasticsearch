@@ -1,2 +1,28 @@
 {
+  final long procSysVmMaxMapCount=randomIntBetween(1,Integer.MAX_VALUE);
+  final BufferedReader reader=mock(BufferedReader.class);
+  when(reader.readLine()).thenReturn(Long.toString(procSysVmMaxMapCount));
+  final Path procSysVmMaxMapCountPath=PathUtils.get("/proc/sys/vm/max_map_count");
+  BootstrapCheck.MaxMapCountCheck check=new BootstrapCheck.MaxMapCountCheck(){
+    @Override BufferedReader getBufferedReader(    Path path) throws IOException {
+      assertEquals(path,procSysVmMaxMapCountPath);
+      return reader;
+    }
+  }
+;
+  assertThat(check.getMaxMapCount(),equalTo(procSysVmMaxMapCount));
+  verify(reader).close();
+  reset(reader);
+  final IOException ioException=new IOException("fatal");
+  when(reader.readLine()).thenThrow(ioException);
+  final Logger logger=mock(Logger.class);
+  assertThat(check.getMaxMapCount(logger),equalTo(-1L));
+  verify(logger).warn(argThat(argumentMatcher("I/O exception while trying to read [/proc/sys/vm/max_map_count]")),eq(ioException));
+  verify(reader).close();
+  reset(reader);
+  reset(logger);
+  when(reader.readLine()).thenReturn("eof");
+  assertThat(check.getMaxMapCount(logger),equalTo(-1L));
+  verify(logger).warn(argThat(argumentMatcher("unable to parse vm.max_map_count [eof]")),any(NumberFormatException.class));
+  verify(reader).close();
 }
