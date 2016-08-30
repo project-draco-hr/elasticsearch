@@ -1,3 +1,21 @@
 {
-  testOnConflictPrefer(randomBoolean() ? "t1" : "t2");
-}
+  final String preference=randomFrom(cluster1,cluster2).getClusterName();
+  Settings additionalSettings=Settings.builder().put("tribe.on_conflict","prefer_" + preference).build();
+  try (Releasable tribeNode=startTribeNode(ALL,additionalSettings)){
+    assertAcked(cluster1.client().admin().indices().prepareCreate("test1"));
+    assertAcked(cluster1.client().admin().indices().prepareCreate("shared"));
+    ensureGreen(cluster1.client());
+    assertAcked(cluster2.client().admin().indices().prepareCreate("test2"));
+    assertAcked(cluster2.client().admin().indices().prepareCreate("shared"));
+    ensureGreen(cluster2.client());
+    assertNodes(ALL);
+    assertIndicesExist(client(),"test1","test2","shared");
+    ClusterState clusterState=client().admin().cluster().prepareState().get().getState();
+    assertThat(clusterState.getMetaData().hasIndex("test1"),is(true));
+    assertThat(clusterState.getMetaData().index("test1").getSettings().get("tribe.name"),equalTo(cluster1.getClusterName()));
+    assertThat(clusterState.getMetaData().hasIndex("test2"),is(true));
+    assertThat(clusterState.getMetaData().index("test2").getSettings().get("tribe.name"),equalTo(cluster2.getClusterName()));
+    assertThat(clusterState.getMetaData().hasIndex("shared"),is(true));
+    assertThat(clusterState.getMetaData().index("shared").getSettings().get("tribe.name"),equalTo(preference));
+  }
+ }

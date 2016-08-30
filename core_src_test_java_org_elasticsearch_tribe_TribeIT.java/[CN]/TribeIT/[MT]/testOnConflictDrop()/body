@@ -1,15 +1,19 @@
 {
-  logger.info("create 2 indices, test1 on t1, and test2 on t2");
-  assertAcked(cluster().client().admin().indices().prepareCreate("conflict"));
-  assertAcked(cluster2.client().admin().indices().prepareCreate("conflict"));
-  assertAcked(cluster().client().admin().indices().prepareCreate("test1"));
-  assertAcked(cluster2.client().admin().indices().prepareCreate("test2"));
-  setupTribeNode(Settings.builder().put("tribe.on_conflict","drop").build());
-  logger.info("wait till tribe has the same nodes as the 2 clusters");
-  awaitSameNodeCounts();
-  logger.info("wait till test1 and test2 exists in the tribe node state");
-  awaitIndicesInClusterState("test1","test2");
-  assertThat(tribeClient.admin().cluster().prepareState().get().getState().getMetaData().index("test1").getSettings().get("tribe.name"),equalTo("t1"));
-  assertThat(tribeClient.admin().cluster().prepareState().get().getState().getMetaData().index("test2").getSettings().get("tribe.name"),equalTo("t2"));
-  assertThat(tribeClient.admin().cluster().prepareState().get().getState().getMetaData().hasIndex("conflict"),equalTo(false));
-}
+  Settings additionalSettings=Settings.builder().put("tribe.on_conflict","drop").build();
+  try (Releasable tribeNode=startTribeNode(ALL,additionalSettings)){
+    assertAcked(cluster1.client().admin().indices().prepareCreate("test1"));
+    assertAcked(cluster1.client().admin().indices().prepareCreate("conflict"));
+    ensureGreen(cluster1.client());
+    assertAcked(cluster2.client().admin().indices().prepareCreate("test2"));
+    assertAcked(cluster2.client().admin().indices().prepareCreate("conflict"));
+    ensureGreen(cluster2.client());
+    assertNodes(ALL);
+    assertIndicesExist(client(),"test1","test2");
+    ClusterState clusterState=client().admin().cluster().prepareState().get().getState();
+    assertThat(clusterState.getMetaData().hasIndex("test1"),is(true));
+    assertThat(clusterState.getMetaData().index("test1").getSettings().get("tribe.name"),equalTo(cluster1.getClusterName()));
+    assertThat(clusterState.getMetaData().hasIndex("test2"),is(true));
+    assertThat(clusterState.getMetaData().index("test2").getSettings().get("tribe.name"),equalTo(cluster2.getClusterName()));
+    assertThat(clusterState.getMetaData().hasIndex("conflict"),is(false));
+  }
+ }

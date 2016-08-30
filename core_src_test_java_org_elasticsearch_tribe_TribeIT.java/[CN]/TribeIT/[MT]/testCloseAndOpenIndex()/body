@@ -1,20 +1,20 @@
 {
-  assertAcked(internalCluster().client().admin().indices().prepareCreate("test1"));
-  ensureGreen(internalCluster());
-  assertAcked(internalCluster().client().admin().indices().prepareClose("test1"));
-  setupTribeNode(Settings.EMPTY);
-  awaitSameNodeCounts();
-  ClusterState tribeState=tribeNode.client().admin().cluster().prepareState().get().getState();
-  assertThat(tribeState.getMetaData().hasIndex("test1"),equalTo(false));
-  assertAcked(internalCluster().client().admin().indices().prepareOpen("test1"));
-  awaitIndicesInClusterState("test1");
-  ensureGreen(internalCluster());
-  assertAcked(cluster2.client().admin().indices().prepareCreate("test2"));
-  awaitIndicesInClusterState("test1","test2");
-  ensureGreen(cluster2);
-  assertAcked(cluster2.client().admin().indices().prepareClose("test2"));
-  awaitIndicesNotInClusterState("test2");
-  assertAcked(cluster2.client().admin().indices().prepareOpen("test2"));
-  awaitIndicesInClusterState("test1","test2");
-  ensureGreen(cluster2);
-}
+  assertTrue(cluster1.client().admin().indices().prepareCreate("first").get().isAcknowledged());
+  ensureGreen(cluster1.client());
+  assertTrue(cluster1.client().admin().indices().prepareClose("first").get().isAcknowledged());
+  try (Releasable tribeNode=startTribeNode()){
+    assertNodes(ALL);
+    ClusterState clusterState=client().admin().cluster().prepareState().get().getState();
+    assertFalse(clusterState.getMetaData().hasIndex("first"));
+    assertTrue(cluster1.client().admin().indices().prepareOpen("first").get().isAcknowledged());
+    assertIndicesExist(client(),"first");
+    assertTrue(cluster2.client().admin().indices().prepareCreate("second").get().isAcknowledged());
+    assertIndicesExist(client(),"first","second");
+    ensureGreen(cluster2.client());
+    assertTrue(cluster2.client().admin().indices().prepareClose("second").get().isAcknowledged());
+    assertIndicesExist(client(),"first");
+    assertTrue(cluster2.client().admin().indices().prepareOpen("second").get().isAcknowledged());
+    assertIndicesExist(client(),"first","second");
+    ensureGreen(cluster2.client());
+  }
+ }
