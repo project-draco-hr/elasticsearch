@@ -7,11 +7,12 @@
   ImmutableOpenMap.Builder<String,Long> shardSizesBuilder=ImmutableOpenMap.builder();
   shardSizesBuilder.put("[test][0][p]",40L);
   shardSizesBuilder.put("[test][1][p]",40L);
+  shardSizesBuilder.put("[foo][0][p]",10L);
   ImmutableOpenMap<String,Long> shardSizes=shardSizesBuilder.build();
   final ClusterInfo clusterInfo=new DevNullClusterInfo(usages,usages,shardSizes);
   DiskThresholdDecider diskThresholdDecider=makeDecider(diskSettings);
-  MetaData metaData=MetaData.builder().put(IndexMetaData.builder("test").settings(settings(Version.CURRENT)).numberOfShards(2).numberOfReplicas(0)).build();
-  RoutingTable initialRoutingTable=RoutingTable.builder().addAsNew(metaData.index("test")).build();
+  MetaData metaData=MetaData.builder().put(IndexMetaData.builder("test").settings(settings(Version.CURRENT)).numberOfShards(2).numberOfReplicas(0)).put(IndexMetaData.builder("foo").settings(settings(Version.CURRENT)).numberOfShards(1).numberOfReplicas(0)).build();
+  RoutingTable initialRoutingTable=RoutingTable.builder().addAsNew(metaData.index("test")).addAsNew(metaData.index("foo")).build();
   DiscoveryNode discoveryNode1=new DiscoveryNode("node1",new LocalTransportAddress("1"),emptyMap(),MASTER_DATA_ROLES,Version.CURRENT);
   DiscoveryNode discoveryNode2=new DiscoveryNode("node2",new LocalTransportAddress("2"),emptyMap(),MASTER_DATA_ROLES,Version.CURRENT);
   DiscoveryNodes discoveryNodes=DiscoveryNodes.builder().add(discoveryNode1).add(discoveryNode2).build();
@@ -26,12 +27,15 @@
   assertThat(decision.type(),equalTo(Decision.Type.NO));
   firstRouting=TestShardRouting.newShardRouting("test",0,"node1",null,true,ShardRoutingState.STARTED);
   secondRouting=TestShardRouting.newShardRouting("test",1,"node1","node2",true,ShardRoutingState.RELOCATING);
+  ShardRouting fooRouting=TestShardRouting.newShardRouting("foo",0,"node1",null,true,ShardRoutingState.UNASSIGNED);
   firstRoutingNode=new RoutingNode("node1",discoveryNode1,firstRouting,secondRouting);
   builder=RoutingTable.builder().add(IndexRoutingTable.builder(firstRouting.index()).addIndexShard(new IndexShardRoutingTable.Builder(firstRouting.shardId()).addShard(firstRouting).build()).addIndexShard(new IndexShardRoutingTable.Builder(secondRouting.shardId()).addShard(secondRouting).build()));
   clusterState=ClusterState.builder(baseClusterState).routingTable(builder.build()).build();
   routingAllocation=new RoutingAllocation(null,new RoutingNodes(clusterState),clusterState,clusterInfo,System.nanoTime(),false);
   decision=diskThresholdDecider.canRemain(firstRouting,firstRoutingNode,routingAllocation);
   assertThat(decision.type(),equalTo(Decision.Type.YES));
+  decision=diskThresholdDecider.canAllocate(fooRouting,firstRoutingNode,routingAllocation);
+  assertThat(decision.type(),equalTo(Decision.Type.NO));
   ClusterInfoService cis=new ClusterInfoService(){
     @Override public ClusterInfo getClusterInfo(){
       logger.info("--> calling fake getClusterInfo");
