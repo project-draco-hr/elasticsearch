@@ -2,6 +2,7 @@
   internalCluster().ensureAtLeastNumDataNodes(randomIntBetween(2,3));
   client().admin().indices().prepareCreate("test").setSettings(Settings.builder().put("index.number_of_shards",1).put("index.number_of_replicas",0)).addMapping("type","field","type=text").get();
   ensureGreen("test");
+  AtomicInteger numAutoGenDocs=new AtomicInteger();
   final AtomicBoolean finished=new AtomicBoolean(false);
   Thread indexingThread=new Thread(){
     @Override public void run(){
@@ -10,6 +11,8 @@
         assertEquals(DocWriteResponse.Result.CREATED,indexResponse.getResult());
         DeleteResponse deleteResponse=client().prepareDelete("test","type","id").get();
         assertEquals(DocWriteResponse.Result.DELETED,deleteResponse.getResult());
+        client().prepareIndex("test","type").setSource("auto",true).get();
+        numAutoGenDocs.incrementAndGet();
       }
     }
   }
@@ -35,4 +38,7 @@
   }
   finished.set(true);
   indexingThread.join();
+  refresh("test");
+  ElasticsearchAssertions.assertHitCount(client().prepareSearch("test").get(),numAutoGenDocs.get());
+  ElasticsearchAssertions.assertHitCount(client().prepareSearch("test").setQuery(QueryBuilders.termQuery("auto",true)).get(),numAutoGenDocs.get());
 }
