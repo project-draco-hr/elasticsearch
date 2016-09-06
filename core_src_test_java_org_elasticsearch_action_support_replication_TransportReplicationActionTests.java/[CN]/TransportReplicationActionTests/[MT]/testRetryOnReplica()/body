@@ -1,0 +1,40 @@
+{
+  final ShardId shardId=new ShardId("test","_na_",0);
+  ClusterState state=state(shardId.getIndexName(),true,ShardRoutingState.STARTED,ShardRoutingState.STARTED);
+  final ShardRouting replica=state.getRoutingTable().shardRoutingTable(shardId).replicaShards().get(0);
+  state=ClusterState.builder(state).nodes(DiscoveryNodes.builder(state.nodes()).localNodeId(replica.currentNodeId())).build();
+  setState(clusterService,state);
+  AtomicBoolean throwException=new AtomicBoolean(true);
+  final ReplicationTask task=maybeTask();
+  Action action=new Action(Settings.EMPTY,"testActionWithExceptions",transportService,clusterService,threadPool){
+    @Override protected ReplicaResult shardOperationOnReplica(    Request request){
+      assertPhase(task,"replica");
+      if (throwException.get()) {
+        throw new RetryOnReplicaException(shardId,"simulation");
+      }
+      return new ReplicaResult();
+    }
+  }
+;
+  final Action.ReplicaOperationTransportHandler replicaOperationTransportHandler=action.new ReplicaOperationTransportHandler();
+  final PlainActionFuture<Response> listener=new PlainActionFuture<>();
+  final Request request=new Request().setShardId(shardId);
+  request.primaryTerm(state.metaData().getIndexSafe(shardId.getIndex()).primaryTerm(shardId.id()));
+  replicaOperationTransportHandler.messageReceived(new TransportReplicationAction.ConcreteShardRequest<>(request,replica.allocationId().getId()),createTransportChannel(listener),task);
+  if (listener.isDone()) {
+    listener.get();
+    fail("listener shouldn't be done");
+  }
+  List<CapturingTransport.CapturedRequest> capturedRequests=transport.getCapturedRequestsByTargetNodeAndClear().get(replica.currentNodeId());
+  assertThat(capturedRequests,nullValue());
+  throwException.set(false);
+  setState(clusterService,state);
+  capturedRequests=transport.getCapturedRequestsByTargetNodeAndClear().get(replica.currentNodeId());
+  assertThat(capturedRequests,notNullValue());
+  assertThat(capturedRequests.size(),equalTo(1));
+  final CapturingTransport.CapturedRequest capturedRequest=capturedRequests.get(0);
+  assertThat(capturedRequest.action,equalTo("testActionWithExceptions[r]"));
+  assertThat(capturedRequest.request,instanceOf(TransportReplicationAction.ConcreteShardRequest.class));
+  assertThat(((TransportReplicationAction.ConcreteShardRequest<?>)capturedRequest.request).getRequest(),equalTo(request));
+  assertThat(((TransportReplicationAction.ConcreteShardRequest<?>)capturedRequest.request).getTargetAllocationID(),equalTo(replica.allocationId().getId()));
+}

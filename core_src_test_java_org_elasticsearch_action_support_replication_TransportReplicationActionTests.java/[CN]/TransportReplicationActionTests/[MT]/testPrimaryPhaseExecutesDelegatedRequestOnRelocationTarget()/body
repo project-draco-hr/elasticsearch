@@ -2,14 +2,15 @@
   final String index="test";
   final ShardId shardId=new ShardId(index,"_na_",0);
   ClusterState state=state(index,true,ShardRoutingState.RELOCATING);
-  String primaryTargetNodeId=state.getRoutingTable().shardRoutingTable(shardId).primaryShard().relocatingNodeId();
+  final ShardRouting primaryShard=state.getRoutingTable().shardRoutingTable(shardId).primaryShard();
+  String primaryTargetNodeId=primaryShard.relocatingNodeId();
   state=ClusterState.builder(state).nodes(DiscoveryNodes.builder(state.nodes()).localNodeId(primaryTargetNodeId)).build();
   setState(clusterService,state);
   Request request=new Request(shardId).timeout("1ms");
   PlainActionFuture<Response> listener=new PlainActionFuture<>();
   ReplicationTask task=maybeTask();
   AtomicBoolean executed=new AtomicBoolean();
-  action.new AsyncPrimaryAction(request,createTransportChannel(listener),task){
+  action.new AsyncPrimaryAction(request,primaryShard.allocationId().getRelocationId(),createTransportChannel(listener),task){
     @Override protected ReplicationOperation<Request,Request,Action.PrimaryResult> createReplicatedOperation(    Request request,    ActionListener<Action.PrimaryResult> actionListener,    Action.PrimaryShardReference primaryShardReference,    boolean executeOnReplicas){
       return new NoopReplicationOperation(request,actionListener){
         public void execute() throws Exception {
@@ -20,8 +21,12 @@
       }
 ;
     }
+    @Override public void onFailure(    Exception e){
+      throw new RuntimeException(e);
+    }
   }
 .run();
   assertThat(executed.get(),equalTo(true));
   assertPhase(task,"finished");
+  assertFalse(request.isRetrySet.get());
 }

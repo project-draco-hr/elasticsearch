@@ -1,0 +1,45 @@
+{
+  Thread[] thread=new Thread[randomIntBetween(3,5)];
+  int numDocs=randomIntBetween(1000,10000);
+  List<Engine.Index> docs=new ArrayList<>();
+  for (int i=0; i < numDocs; i++) {
+    final ParsedDocument doc=testParsedDocument(Integer.toString(i),Integer.toString(i),"test",null,i,-1,testDocumentWithTextField(),new BytesArray("{}".getBytes(Charset.defaultCharset())),null);
+    Engine.Index originalIndex=randomAppendOnly(i,doc,false);
+    Engine.Index retryIndex=randomAppendOnly(i,doc,true);
+    docs.add(originalIndex);
+    docs.add(retryIndex);
+  }
+  Collections.shuffle(docs,random());
+  CountDownLatch startGun=new CountDownLatch(thread.length);
+  AtomicInteger offset=new AtomicInteger(-1);
+  for (int i=0; i < thread.length; i++) {
+    thread[i]=new Thread(){
+      @Override public void run(){
+        startGun.countDown();
+        try {
+          startGun.await();
+        }
+ catch (        InterruptedException e) {
+          throw new AssertionError(e);
+        }
+        int docOffset;
+        while ((docOffset=offset.incrementAndGet()) < docs.size()) {
+          engine.index(docs.get(docOffset));
+        }
+      }
+    }
+;
+    thread[i].start();
+  }
+  for (int i=0; i < thread.length; i++) {
+    thread[i].join();
+  }
+  assertEquals(0,engine.getNumVersionLookups());
+  assertEquals(0,engine.getNumIndexVersionsLookups());
+  engine.refresh("test");
+  try (Engine.Searcher searcher=engine.acquireSearcher("test")){
+    TopDocs topDocs=searcher.searcher().search(new MatchAllDocsQuery(),10);
+    assertEquals(numDocs,topDocs.totalHits);
+  }
+   assertTrue(engine.indexWriterHasDeletions());
+}

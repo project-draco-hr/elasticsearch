@@ -1,0 +1,22 @@
+{
+  final String index="test";
+  final ShardId shardId=new ShardId(index,"_na_",0);
+  ClusterState state=state(index,false,ShardRoutingState.STARTED,ShardRoutingState.STARTED);
+  final ShardRouting replica=state.routingTable().shardRoutingTable(shardId).replicaShards().get(0);
+  state=ClusterState.builder(state).nodes(DiscoveryNodes.builder(state.nodes()).localNodeId(replica.currentNodeId())).build();
+  setState(clusterService,state);
+  PlainActionFuture<Response> listener=new PlainActionFuture<>();
+  Request request=new Request(shardId).timeout("1ms");
+  action.new ReplicaOperationTransportHandler().messageReceived(new TransportReplicationAction.ConcreteShardRequest<>(request,"_not_a_valid_aid_"),createTransportChannel(listener),maybeTask());
+  try {
+    listener.get();
+    fail("using a wrong aid didn't fail the operation");
+  }
+ catch (  ExecutionException execException) {
+    Throwable throwable=execException.getCause();
+    if (action.retryPrimaryException(throwable) == false) {
+      throw new AssertionError("thrown exception is not retriable",throwable);
+    }
+    assertThat(throwable.getMessage(),containsString("_not_a_valid_aid_"));
+  }
+}
