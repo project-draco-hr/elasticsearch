@@ -5,15 +5,42 @@
   Version actualVersionCreated=Version.indexCreated(getIndexResponse.getSettings().get(indexName));
   assertEquals(indexCreated,actualVersionCreated);
   ensureYellow(indexName);
-  IndicesSegmentResponse segmentsResponse=client().admin().indices().prepareSegments(indexName).get();
-  IndexSegments segments=segmentsResponse.getIndices().get(indexName);
-  for (  IndexShardSegments indexShardSegments : segments) {
-    for (    ShardSegments shardSegments : indexShardSegments) {
-      for (      Segment segment : shardSegments) {
-        assertEquals(indexCreated.luceneVersion,segment.version);
+  RecoveryResponse recoveryResponse=client().admin().indices().prepareRecoveries(indexName).setDetailed(true).setActiveOnly(false).get();
+  boolean foundTranslog=false;
+  for (  List<RecoveryState> states : recoveryResponse.shardRecoveryStates().values()) {
+    for (    RecoveryState state : states) {
+      if (state.getStage() == RecoveryState.Stage.DONE && state.getPrimary() && state.getRecoverySource().getType() == RecoverySource.Type.EXISTING_STORE) {
+        assertFalse("more than one primary recoverd?",foundTranslog);
+        assertNotEquals(0,state.getTranslog().recoveredOperations());
+        foundTranslog=true;
       }
     }
   }
+  assertTrue("expected translog but nothing was recovered",foundTranslog);
+  IndicesSegmentResponse segmentsResponse=client().admin().indices().prepareSegments(indexName).get();
+  IndexSegments segments=segmentsResponse.getIndices().get(indexName);
+  int numCurrent=0;
+  int numBWC=0;
+  for (  IndexShardSegments indexShardSegments : segments) {
+    for (    ShardSegments shardSegments : indexShardSegments) {
+      for (      Segment segment : shardSegments) {
+        if (indexCreated.luceneVersion.equals(segment.version)) {
+          numBWC++;
+          if (Version.CURRENT.luceneVersion.equals(segment.version)) {
+            numCurrent++;
+          }
+        }
+ else         if (Version.CURRENT.luceneVersion.equals(segment.version)) {
+          numCurrent++;
+        }
+ else {
+          fail("unexpected version " + segment.version);
+        }
+      }
+    }
+  }
+  assertNotEquals("expected at least 1 current segment after translog recovery",0,numCurrent);
+  assertNotEquals("expected at least 1 old segment",0,numBWC);
   SearchResponse test=client().prepareSearch(indexName).get();
   assertThat(test.getHits().getTotalHits(),greaterThanOrEqualTo(1L));
 }
