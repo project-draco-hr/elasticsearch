@@ -13,12 +13,16 @@ def generate_index(client, version, index_name):
         mappings['meta_fields'] = {'_routing': {'required': 'false', }, }
         mappings['custom_formats'] = {'properties': {'string_with_custom_postings': {'type': 'string', 'postings_format': 'Lucene41', }, 'long_with_custom_doc_values': {'type': 'long', 'doc_values_format': 'Lucene42', }, }, }
         mappings['auto_boost'] = {'_all': {'auto_boost': True, }, }
+    mappings['doc'] = {'properties': {}, }
+    supports_dots_in_field_names = (parse_version(version) >= parse_version('2.4.0'))
+    if supports_dots_in_field_names:
+        mappings['doc']['properties'].update({'field.with.dots': {'type': 'string', 'boost': 4, }, })
     if (parse_version(version) < parse_version('5.0.0-alpha1')):
         mappings['norms'] = {'properties': {'string_with_norms_disabled': {'type': 'string', 'norms': {'enabled': False, }, }, 'string_with_norms_enabled': {'type': 'string', 'index': 'not_analyzed', 'norms': {'enabled': True, 'loading': 'eager', }, }, }, }
         mappings['doc'] = {'properties': {'string': {'type': 'string', 'boost': 4, }, }, }
     else:
         mappings['norms'] = {'properties': {'string_with_norms_disabled': {'type': 'text', 'norms': False, }, 'string_with_norms_enabled': {'type': 'keyword', 'index': 'not_analyzed', 'norms': True, 'eager_global_ordinals': True, }, }, }
-        mappings['doc'] = {'properties': {'string': {'type': 'text', 'boost': 4, }, }, }
+        mappings['doc']['properties'].update({'string': {'type': 'text', 'boost': 4, }, })
     settings = {'number_of_shards': 1, 'number_of_replicas': 0, }
     if (version.startswith('0.') or version.startswith('1.')):
         settings['gc_deletes'] = ('60000',)
@@ -32,7 +36,7 @@ def generate_index(client, version, index_name):
     num_docs = random.randint(2000, 3000)
     if (version == '1.1.0'):
         num_docs = int((num_docs / 10))
-    index_documents(client, index_name, 'doc', num_docs)
+    index_documents(client, index_name, 'doc', num_docs, supports_dots_in_field_names)
     logging.info('Running basic asserts on the data added')
     run_basic_asserts(client, index_name, 'doc', num_docs)
-    return num_docs
+    return (num_docs, supports_dots_in_field_names)
