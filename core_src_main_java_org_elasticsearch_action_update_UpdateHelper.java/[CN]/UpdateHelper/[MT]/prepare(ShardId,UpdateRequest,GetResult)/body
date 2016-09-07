@@ -1,2 +1,115 @@
 {
+  long getDateNS=System.nanoTime();
+  if (!getResult.isExists()) {
+    if (request.upsertRequest() == null && !request.docAsUpsert()) {
+      throw new DocumentMissingException(shardId,request.type(),request.id());
+    }
+    IndexRequest indexRequest=request.docAsUpsert() ? request.doc() : request.upsertRequest();
+    TimeValue ttl=indexRequest.ttl();
+    if (request.scriptedUpsert() && request.script() != null) {
+      IndexRequest upsert=request.upsertRequest();
+      Map<String,Object> upsertDoc=upsert.sourceAsMap();
+      Map<String,Object> ctx=new HashMap<>(2);
+      ctx.put("op","create");
+      ctx.put("_source",upsertDoc);
+      ctx=executeScript(request.script,ctx);
+      if (ttl == null) {
+        ttl=getTTLFromScriptContext(ctx);
+      }
+      String scriptOpChoice=(String)ctx.get("op");
+      if (!"create".equals(scriptOpChoice)) {
+        if (!"none".equals(scriptOpChoice)) {
+          logger.warn("Used upsert operation [{}] for script [{}], doing nothing...",scriptOpChoice,request.script.getScript());
+        }
+        UpdateResponse update=new UpdateResponse(shardId,getResult.getType(),getResult.getId(),getResult.getVersion(),DocWriteResponse.Result.NOOP);
+        update.setGetResult(getResult);
+        return new Result(update,DocWriteResponse.Result.NOOP,upsertDoc,XContentType.JSON);
+      }
+      indexRequest.source((Map)ctx.get("_source"));
+    }
+    indexRequest.index(request.index()).type(request.type()).id(request.id()).create(true).ttl(ttl).setRefreshPolicy(request.getRefreshPolicy()).routing(request.routing()).parent(request.parent()).waitForActiveShards(request.waitForActiveShards());
+    if (request.versionType() != VersionType.INTERNAL) {
+      indexRequest.version(request.version()).versionType(request.versionType());
+    }
+    return new Result(indexRequest,DocWriteResponse.Result.CREATED,null,null);
+  }
+  final long updateVersion=getResult.getVersion();
+  if (getResult.internalSourceRef() == null) {
+    throw new DocumentSourceMissingException(shardId,request.type(),request.id());
+  }
+  Tuple<XContentType,Map<String,Object>> sourceAndContent=XContentHelper.convertToMap(getResult.internalSourceRef(),true);
+  String operation=null;
+  String timestamp=null;
+  TimeValue ttl=null;
+  final Map<String,Object> updatedSourceAsMap;
+  final XContentType updateSourceContentType=sourceAndContent.v1();
+  String routing=getResult.getFields().containsKey(RoutingFieldMapper.NAME) ? getResult.field(RoutingFieldMapper.NAME).getValue().toString() : null;
+  String parent=getResult.getFields().containsKey(ParentFieldMapper.NAME) ? getResult.field(ParentFieldMapper.NAME).getValue().toString() : null;
+  if (request.script() == null && request.doc() != null) {
+    IndexRequest indexRequest=request.doc();
+    updatedSourceAsMap=sourceAndContent.v2();
+    if (indexRequest.ttl() != null) {
+      ttl=indexRequest.ttl();
+    }
+    timestamp=indexRequest.timestamp();
+    if (indexRequest.routing() != null) {
+      routing=indexRequest.routing();
+    }
+    if (indexRequest.parent() != null) {
+      parent=indexRequest.parent();
+    }
+    boolean noop=!XContentHelper.update(updatedSourceAsMap,indexRequest.sourceAsMap(),request.detectNoop());
+    if (request.detectNoop() && noop) {
+      operation="none";
+    }
+  }
+ else {
+    Map<String,Object> ctx=new HashMap<>(16);
+    Long originalTtl=getResult.getFields().containsKey(TTLFieldMapper.NAME) ? (Long)getResult.field(TTLFieldMapper.NAME).getValue() : null;
+    Long originalTimestamp=getResult.getFields().containsKey(TimestampFieldMapper.NAME) ? (Long)getResult.field(TimestampFieldMapper.NAME).getValue() : null;
+    ctx.put("_index",getResult.getIndex());
+    ctx.put("_type",getResult.getType());
+    ctx.put("_id",getResult.getId());
+    ctx.put("_version",getResult.getVersion());
+    ctx.put("_routing",routing);
+    ctx.put("_parent",parent);
+    ctx.put("_timestamp",originalTimestamp);
+    ctx.put("_ttl",originalTtl);
+    ctx.put("_source",sourceAndContent.v2());
+    ctx=executeScript(request.script,ctx);
+    operation=(String)ctx.get("op");
+    Object fetchedTimestamp=ctx.get("_timestamp");
+    if (fetchedTimestamp != null) {
+      timestamp=fetchedTimestamp.toString();
+    }
+ else     if (originalTimestamp != null) {
+      timestamp=originalTimestamp.toString();
+    }
+    ttl=getTTLFromScriptContext(ctx);
+    updatedSourceAsMap=(Map<String,Object>)ctx.get("_source");
+  }
+  if (ttl == null) {
+    Long ttlAsLong=getResult.getFields().containsKey(TTLFieldMapper.NAME) ? (Long)getResult.field(TTLFieldMapper.NAME).getValue() : null;
+    if (ttlAsLong != null) {
+      ttl=new TimeValue(ttlAsLong - TimeValue.nsecToMSec(System.nanoTime() - getDateNS));
+    }
+  }
+  if (operation == null || "index".equals(operation)) {
+    final IndexRequest indexRequest=Requests.indexRequest(request.index()).type(request.type()).id(request.id()).routing(routing).parent(parent).source(updatedSourceAsMap,updateSourceContentType).version(updateVersion).versionType(request.versionType()).waitForActiveShards(request.waitForActiveShards()).timestamp(timestamp).ttl(ttl).setRefreshPolicy(request.getRefreshPolicy());
+    return new Result(indexRequest,DocWriteResponse.Result.UPDATED,updatedSourceAsMap,updateSourceContentType);
+  }
+ else   if ("delete".equals(operation)) {
+    DeleteRequest deleteRequest=Requests.deleteRequest(request.index()).type(request.type()).id(request.id()).routing(routing).parent(parent).version(updateVersion).versionType(request.versionType()).waitForActiveShards(request.waitForActiveShards()).setRefreshPolicy(request.getRefreshPolicy());
+    return new Result(deleteRequest,DocWriteResponse.Result.DELETED,updatedSourceAsMap,updateSourceContentType);
+  }
+ else   if ("none".equals(operation)) {
+    UpdateResponse update=new UpdateResponse(shardId,getResult.getType(),getResult.getId(),getResult.getVersion(),DocWriteResponse.Result.NOOP);
+    update.setGetResult(extractGetResult(request,request.index(),getResult.getVersion(),updatedSourceAsMap,updateSourceContentType,getResult.internalSourceRef()));
+    return new Result(update,DocWriteResponse.Result.NOOP,updatedSourceAsMap,updateSourceContentType);
+  }
+ else {
+    logger.warn("Used update operation [{}] for script [{}], doing nothing...",operation,request.script.getScript());
+    UpdateResponse update=new UpdateResponse(shardId,getResult.getType(),getResult.getId(),getResult.getVersion(),DocWriteResponse.Result.NOOP);
+    return new Result(update,DocWriteResponse.Result.NOOP,updatedSourceAsMap,updateSourceContentType);
+  }
 }
