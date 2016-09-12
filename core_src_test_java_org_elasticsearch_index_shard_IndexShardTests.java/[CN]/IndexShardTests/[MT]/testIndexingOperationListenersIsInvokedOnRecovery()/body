@@ -1,0 +1,41 @@
+{
+  IndexShard shard=newStartedShard(true);
+  indexDoc(shard,"test","0","{\"foo\" : \"bar\"}");
+  deleteDoc(shard,"test","0");
+  indexDoc(shard,"test","1","{\"foo\" : \"bar\"}");
+  shard.refresh("test");
+  final AtomicInteger preIndex=new AtomicInteger();
+  final AtomicInteger postIndex=new AtomicInteger();
+  final AtomicInteger preDelete=new AtomicInteger();
+  final AtomicInteger postDelete=new AtomicInteger();
+  IndexingOperationListener listener=new IndexingOperationListener(){
+    @Override public Engine.Index preIndex(    Engine.Index operation){
+      preIndex.incrementAndGet();
+      return operation;
+    }
+    @Override public void postIndex(    Engine.Index index,    boolean created){
+      postIndex.incrementAndGet();
+    }
+    @Override public Engine.Delete preDelete(    Engine.Delete delete){
+      preDelete.incrementAndGet();
+      return delete;
+    }
+    @Override public void postDelete(    Engine.Delete delete){
+      postDelete.incrementAndGet();
+    }
+  }
+;
+  final IndexShard newShard=reinitShard(shard,listener);
+  recoveryShardFromStore(newShard);
+  IndexingStats indexingStats=newShard.indexingStats();
+  assertEquals(0,indexingStats.getTotal().getDeleteCount());
+  assertEquals(0,indexingStats.getTotal().getDeleteCurrent());
+  assertEquals(0,indexingStats.getTotal().getIndexCount());
+  assertEquals(0,indexingStats.getTotal().getIndexCurrent());
+  assertEquals(0,indexingStats.getTotal().getIndexFailedCount());
+  assertEquals(2,preIndex.get());
+  assertEquals(2,postIndex.get());
+  assertEquals(1,preDelete.get());
+  assertEquals(1,postDelete.get());
+  closeShards(newShard);
+}

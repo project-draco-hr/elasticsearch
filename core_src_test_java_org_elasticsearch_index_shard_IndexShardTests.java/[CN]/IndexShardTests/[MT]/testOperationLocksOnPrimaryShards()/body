@@ -1,28 +1,22 @@
 {
-  assertAcked(client().admin().indices().prepareCreate("test").setSettings(Settings.builder().put("index.number_of_shards",1).put("index.number_of_replicas",0)).get());
-  ensureGreen("test");
-  IndicesService indicesService=getInstanceFromNode(IndicesService.class);
-  IndexService indexService=indicesService.indexServiceSafe(resolveIndex("test"));
-  IndexShard indexShard=indexService.getShardOrNull(0);
-  long primaryTerm=indexShard.getPrimaryTerm();
-  ShardRouting temp=indexShard.routingEntry();
-  final ShardRouting newPrimaryShardRouting;
+  final ShardId shardId=new ShardId("test","_na_",0);
+  final IndexShard indexShard;
   if (randomBoolean()) {
-    newPrimaryShardRouting=TestShardRouting.newShardRouting(temp.shardId(),temp.currentNodeId(),"other node",true,ShardRoutingState.INITIALIZING,AllocationId.newRelocation(temp.allocationId()));
+    indexShard=newShard(TestShardRouting.newShardRouting(shardId,"local_node","other node",true,ShardRoutingState.INITIALIZING,AllocationId.newRelocation(AllocationId.newInitializing())));
   }
  else   if (randomBoolean()) {
-    ShardRouting newReplicaShardRouting=TestShardRouting.newShardRouting(temp.shardId(),temp.currentNodeId(),null,false,ShardRoutingState.STARTED,temp.allocationId());
-    indexShard.updateRoutingEntry(newReplicaShardRouting);
-    primaryTerm=primaryTerm + 1;
-    indexShard.updatePrimaryTerm(primaryTerm);
-    newPrimaryShardRouting=TestShardRouting.newShardRouting(temp.shardId(),temp.currentNodeId(),null,true,ShardRoutingState.STARTED,temp.allocationId());
+    indexShard=newShard(shardId,false);
+    ShardRouting replicaRouting=indexShard.routingEntry();
+    indexShard.updatePrimaryTerm(indexShard.getPrimaryTerm() + 1);
+    ShardRouting primaryRouting=TestShardRouting.newShardRouting(replicaRouting.shardId(),replicaRouting.currentNodeId(),null,true,ShardRoutingState.STARTED,replicaRouting.allocationId());
+    indexShard.updateRoutingEntry(primaryRouting);
   }
  else {
-    newPrimaryShardRouting=temp;
+    indexShard=newStartedShard(true);
   }
-  indexShard.updateRoutingEntry(newPrimaryShardRouting);
+  final long primaryTerm=indexShard.getPrimaryTerm();
   assertEquals(0,indexShard.getActiveOperationsCount());
-  if (newPrimaryShardRouting.isRelocationTarget() == false) {
+  if (indexShard.routingEntry().isRelocationTarget() == false) {
     try {
       indexShard.acquireReplicaOperationLock(primaryTerm,null,ThreadPool.Names.INDEX);
       fail("shard shouldn't accept operations as replica");
@@ -36,4 +30,5 @@
   assertEquals(2,indexShard.getActiveOperationsCount());
   Releasables.close(operation1,operation2);
   assertEquals(0,indexShard.getActiveOperationsCount());
+  closeShards(indexShard);
 }

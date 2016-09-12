@@ -1,28 +1,24 @@
 {
-  createIndex("test");
-  createIndex("test_target");
-  ensureGreen();
-  IndicesService indicesService=getInstanceFromNode(IndicesService.class);
-  IndexService test=indicesService.indexService(resolveIndex("test"));
-  IndexService test_target=indicesService.indexService(resolveIndex("test_target"));
-  final IndexShard test_shard=test.getShardOrNull(0);
-  client().prepareIndex("test","test","0").setSource("{}").setRefreshPolicy(randomBoolean() ? IMMEDIATE : NONE).get();
-  client().prepareIndex("test_target","test","1").setSource("{}").setRefreshPolicy(IMMEDIATE).get();
-  assertHitCount(client().prepareSearch("test_target").get(),1);
-  assertSearchHits(client().prepareSearch("test_target").get(),"1");
-  client().admin().indices().prepareFlush("test").get();
-  final ShardRouting origRouting=test_target.getShardOrNull(0).routingEntry();
+  final IndexShard source=newStartedShard(true);
+  IndexShard target=newStartedShard(true);
+  indexDoc(source,"test","0");
+  if (randomBoolean()) {
+    source.refresh("test");
+  }
+  indexDoc(target,"test","1");
+  target.refresh("test");
+  assertDocs(target,new Uid("test","1"));
+  flushShard(source);
+  final ShardRouting origRouting=target.routingEntry();
   ShardRouting routing=ShardRoutingHelper.reinitPrimary(origRouting);
   final Snapshot snapshot=new Snapshot("foo",new SnapshotId("bar",UUIDs.randomBase64UUID()));
-  routing=ShardRoutingHelper.newWithRestoreSource(routing,new SnapshotRecoverySource(snapshot,Version.CURRENT,"test"));
-  test_target.removeShard(0,"just do it man!");
-  final IndexShard test_target_shard=test_target.createShard(routing);
-  Store sourceStore=test_shard.store();
-  Store targetStore=test_target_shard.store();
-  test_target_shard.updateRoutingEntry(routing);
+  routing=ShardRoutingHelper.newWithRestoreSource(routing,new RecoverySource.SnapshotRecoverySource(snapshot,Version.CURRENT,"test"));
+  target=reinitShard(target,routing);
+  Store sourceStore=source.store();
+  Store targetStore=target.store();
   DiscoveryNode localNode=new DiscoveryNode("foo",LocalTransportAddress.buildUnique(),emptyMap(),emptySet(),Version.CURRENT);
-  test_target_shard.markAsRecovering("store",new RecoveryState(routing,localNode,null));
-  assertTrue(test_target_shard.restoreFromRepository(new RestoreOnlyRepository("test"){
+  target.markAsRecovering("store",new RecoveryState(routing,localNode,null));
+  assertTrue(target.restoreFromRepository(new RestoreOnlyRepository("test"){
     @Override public void restoreShard(    IndexShard shard,    SnapshotId snapshotId,    Version version,    IndexId indexId,    ShardId snapshotShardId,    RecoveryState recoveryState){
       try {
         cleanLuceneIndex(targetStore.directory());
@@ -39,7 +35,7 @@
     }
   }
 ));
-  test_target_shard.updateRoutingEntry(routing.moveToStarted());
-  assertHitCount(client().prepareSearch("test_target").get(),1);
-  assertSearchHits(client().prepareSearch("test_target").get(),"0");
+  target.updateRoutingEntry(routing.moveToStarted());
+  assertDocs(target,new Uid("test","0"));
+  closeShards(source,target);
 }

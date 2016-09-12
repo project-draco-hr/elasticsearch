@@ -1,13 +1,14 @@
 {
   Version versionCreated=VersionUtils.randomVersion(random());
-  assertAcked(client().admin().indices().prepareCreate("test").setSettings(SETTING_NUMBER_OF_SHARDS,1,SETTING_NUMBER_OF_REPLICAS,0,SETTING_VERSION_CREATED,versionCreated.id));
-  client().prepareIndex("test","test").setSource("{}").get();
-  ensureGreen("test");
-  IndicesService indicesService=getInstanceFromNode(IndicesService.class);
-  IndexShard test=indicesService.indexService(resolveIndex("test")).getShardOrNull(0);
+  Settings settings=Settings.builder().put(IndexMetaData.SETTING_VERSION_CREATED,versionCreated.id).put(IndexMetaData.SETTING_NUMBER_OF_REPLICAS,0).put(IndexMetaData.SETTING_NUMBER_OF_SHARDS,1).build();
+  IndexMetaData metaData=IndexMetaData.builder("test").settings(settings).primaryTerm(0,1).build();
+  IndexShard test=newShard(new ShardId(metaData.getIndex(),0),true,"n1",metaData,null);
+  recoveryShardFromStore(test);
+  indexDoc(test,"test","test");
   assertEquals(versionCreated.luceneVersion,test.minimumCompatibleVersion());
-  client().prepareIndex("test","test").setSource("{}").get();
+  indexDoc(test,"test","test");
   assertEquals(versionCreated.luceneVersion,test.minimumCompatibleVersion());
   test.getEngine().flush();
   assertEquals(Version.CURRENT.luceneVersion,test.minimumCompatibleVersion());
+  closeShards(test);
 }
