@@ -1,0 +1,46 @@
+{
+  final IndexShard shard=newStartedShard(true);
+  final ShardRouting originalRouting=shard.routingEntry();
+  shard.updateRoutingEntry(ShardRoutingHelper.relocate(originalRouting,"other_node"));
+  CyclicBarrier cyclicBarrier=new CyclicBarrier(3);
+  AtomicReference<Exception> relocationException=new AtomicReference<>();
+  Thread relocationThread=new Thread(new AbstractRunnable(){
+    @Override public void onFailure(    Exception e){
+      relocationException.set(e);
+    }
+    @Override protected void doRun() throws Exception {
+      cyclicBarrier.await();
+      shard.relocated("test");
+    }
+  }
+);
+  relocationThread.start();
+  AtomicReference<Exception> cancellingException=new AtomicReference<>();
+  Thread cancellingThread=new Thread(new AbstractRunnable(){
+    @Override public void onFailure(    Exception e){
+      cancellingException.set(e);
+    }
+    @Override protected void doRun() throws Exception {
+      cyclicBarrier.await();
+      shard.updateRoutingEntry(originalRouting);
+    }
+  }
+);
+  cancellingThread.start();
+  cyclicBarrier.await();
+  relocationThread.join();
+  cancellingThread.join();
+  if (shard.state() == IndexShardState.RELOCATED) {
+    logger.debug("shard was relocated successfully");
+    assertThat(cancellingException.get(),instanceOf(IllegalIndexShardStateException.class));
+    assertThat("current routing:" + shard.routingEntry(),shard.routingEntry().relocating(),equalTo(true));
+    assertThat(relocationException.get(),nullValue());
+  }
+ else {
+    logger.debug("shard relocation was cancelled");
+    assertThat(relocationException.get(),instanceOf(IllegalIndexShardStateException.class));
+    assertThat("current routing:" + shard.routingEntry(),shard.routingEntry().relocating(),equalTo(false));
+    assertThat(cancellingException.get(),nullValue());
+  }
+  closeShards(shard);
+}
