@@ -1,26 +1,19 @@
 {
-  createIndex("test");
-  ensureGreen();
-  IndicesService indicesService=getInstanceFromNode(IndicesService.class);
-  IndexService test=indicesService.indexService(resolveIndex("test"));
-  final IndexShard shard=test.getShardOrNull(0);
-  client().prepareIndex("test","test","0").setSource("{}").setRefreshPolicy(randomBoolean() ? IMMEDIATE : NONE).get();
+  final IndexShard shard=newStartedShard(true);
+  indexDoc(shard,"test","0");
   if (randomBoolean()) {
-    client().admin().indices().prepareFlush().get();
+    flushShard(shard);
   }
-  ShardRouting routing=shard.routingEntry();
-  test.removeShard(0,"b/c simon says so");
-  routing=ShardRoutingHelper.reinitPrimary(routing,UnassignedInfo.Reason.INDEX_CREATED,StoreRecoverySource.EMPTY_STORE_INSTANCE);
-  IndexShard newShard=test.createShard(routing);
-  newShard.updateRoutingEntry(routing);
+  final ShardRouting shardRouting=shard.routingEntry();
+  IndexShard newShard=reinitShard(shard,ShardRoutingHelper.initWithSameId(shardRouting,RecoverySource.StoreRecoverySource.EMPTY_STORE_INSTANCE));
   DiscoveryNode localNode=new DiscoveryNode("foo",LocalTransportAddress.buildUnique(),emptyMap(),emptySet(),Version.CURRENT);
-  newShard.markAsRecovering("store",new RecoveryState(routing,localNode,null));
+  newShard.markAsRecovering("store",new RecoveryState(newShard.routingEntry(),localNode,null));
   assertTrue(newShard.recoverFromStore());
   assertEquals(0,newShard.recoveryState().getTranslog().recoveredOperations());
   assertEquals(0,newShard.recoveryState().getTranslog().totalOperations());
   assertEquals(0,newShard.recoveryState().getTranslog().totalOperationsOnStart());
   assertEquals(100.0f,newShard.recoveryState().getTranslog().recoveredPercent(),0.01f);
-  newShard.updateRoutingEntry(getInitializingShardRouting(routing).moveToStarted());
-  SearchResponse response=client().prepareSearch().get();
-  assertHitCount(response,0);
+  newShard.updateRoutingEntry(newShard.routingEntry().moveToStarted());
+  assertDocCount(newShard,0);
+  closeShards(newShard);
 }

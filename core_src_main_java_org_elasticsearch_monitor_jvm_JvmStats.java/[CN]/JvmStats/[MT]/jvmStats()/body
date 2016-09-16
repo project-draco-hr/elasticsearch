@@ -1,18 +1,15 @@
 {
-  JvmStats stats=new JvmStats(System.currentTimeMillis(),runtimeMXBean.getUptime());
-  stats.mem=new Mem();
   MemoryUsage memUsage=memoryMXBean.getHeapMemoryUsage();
-  stats.mem.heapUsed=memUsage.getUsed() < 0 ? 0 : memUsage.getUsed();
-  stats.mem.heapCommitted=memUsage.getCommitted() < 0 ? 0 : memUsage.getCommitted();
-  stats.mem.heapMax=memUsage.getMax() < 0 ? 0 : memUsage.getMax();
+  long heapUsed=memUsage.getUsed() < 0 ? 0 : memUsage.getUsed();
+  long heapCommitted=memUsage.getCommitted() < 0 ? 0 : memUsage.getCommitted();
+  long heapMax=memUsage.getMax() < 0 ? 0 : memUsage.getMax();
   memUsage=memoryMXBean.getNonHeapMemoryUsage();
-  stats.mem.nonHeapUsed=memUsage.getUsed() < 0 ? 0 : memUsage.getUsed();
-  stats.mem.nonHeapCommitted=memUsage.getCommitted() < 0 ? 0 : memUsage.getCommitted();
+  long nonHeapUsed=memUsage.getUsed() < 0 ? 0 : memUsage.getUsed();
+  long nonHeapCommitted=memUsage.getCommitted() < 0 ? 0 : memUsage.getCommitted();
   List<MemoryPoolMXBean> memoryPoolMXBeans=ManagementFactory.getMemoryPoolMXBeans();
   List<MemoryPool> pools=new ArrayList<>();
-  for (int i=0; i < memoryPoolMXBeans.size(); i++) {
+  for (  MemoryPoolMXBean memoryPoolMXBean : memoryPoolMXBeans) {
     try {
-      MemoryPoolMXBean memoryPoolMXBean=memoryPoolMXBeans.get(i);
       MemoryUsage usage=memoryPoolMXBean.getUsage();
       MemoryUsage peakUsage=memoryPoolMXBean.getPeakUsage();
       String name=GcNames.getByMemoryPoolName(memoryPoolMXBean.getName(),null);
@@ -24,32 +21,25 @@
  catch (    Exception ex) {
     }
   }
-  stats.mem.pools=pools.toArray(new MemoryPool[pools.size()]);
-  stats.threads=new Threads();
-  stats.threads.count=threadMXBean.getThreadCount();
-  stats.threads.peakCount=threadMXBean.getPeakThreadCount();
+  Mem mem=new Mem(heapCommitted,heapUsed,heapMax,nonHeapCommitted,nonHeapUsed,Collections.unmodifiableList(pools));
+  Threads threads=new Threads(threadMXBean.getThreadCount(),threadMXBean.getPeakThreadCount());
   List<GarbageCollectorMXBean> gcMxBeans=ManagementFactory.getGarbageCollectorMXBeans();
-  stats.gc=new GarbageCollectors();
-  stats.gc.collectors=new GarbageCollector[gcMxBeans.size()];
-  for (int i=0; i < stats.gc.collectors.length; i++) {
+  GarbageCollector[] collectors=new GarbageCollector[gcMxBeans.size()];
+  for (int i=0; i < collectors.length; i++) {
     GarbageCollectorMXBean gcMxBean=gcMxBeans.get(i);
-    stats.gc.collectors[i]=new GarbageCollector();
-    stats.gc.collectors[i].name=GcNames.getByGcName(gcMxBean.getName(),gcMxBean.getName());
-    stats.gc.collectors[i].collectionCount=gcMxBean.getCollectionCount();
-    stats.gc.collectors[i].collectionTime=gcMxBean.getCollectionTime();
+    collectors[i]=new GarbageCollector(GcNames.getByGcName(gcMxBean.getName(),gcMxBean.getName()),gcMxBean.getCollectionCount(),gcMxBean.getCollectionTime());
   }
+  GarbageCollectors garbageCollectors=new GarbageCollectors(collectors);
+  List<BufferPool> bufferPoolsList=Collections.emptyList();
   try {
     List<BufferPoolMXBean> bufferPools=ManagementFactory.getPlatformMXBeans(BufferPoolMXBean.class);
-    stats.bufferPools=new ArrayList<>(bufferPools.size());
+    bufferPoolsList=new ArrayList<>(bufferPools.size());
     for (    BufferPoolMXBean bufferPool : bufferPools) {
-      stats.bufferPools.add(new BufferPool(bufferPool.getName(),bufferPool.getCount(),bufferPool.getTotalCapacity(),bufferPool.getMemoryUsed()));
+      bufferPoolsList.add(new BufferPool(bufferPool.getName(),bufferPool.getCount(),bufferPool.getTotalCapacity(),bufferPool.getMemoryUsed()));
     }
   }
  catch (  Exception e) {
   }
-  stats.classes=new Classes();
-  stats.classes.loadedClassCount=classLoadingMXBean.getLoadedClassCount();
-  stats.classes.totalLoadedClassCount=classLoadingMXBean.getTotalLoadedClassCount();
-  stats.classes.unloadedClassCount=classLoadingMXBean.getUnloadedClassCount();
-  return stats;
+  Classes classes=new Classes(classLoadingMXBean.getLoadedClassCount(),classLoadingMXBean.getTotalLoadedClassCount(),classLoadingMXBean.getUnloadedClassCount());
+  return new JvmStats(System.currentTimeMillis(),runtimeMXBean.getUptime(),mem,threads,garbageCollectors,bufferPoolsList,classes);
 }

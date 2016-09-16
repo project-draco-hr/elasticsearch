@@ -1,5 +1,5 @@
 {
-  Settings settings=Settings.builder().put("discovery.type","zen").put(FaultDetection.PING_TIMEOUT_SETTING.getKey(),"1h").put(ZenDiscovery.PING_TIMEOUT_SETTING.getKey(),"200ms").put(ElectMasterService.DISCOVERY_ZEN_MINIMUM_MASTER_NODES_SETTING.getKey(),2).put(DiscoverySettings.COMMIT_TIMEOUT_SETTING.getKey(),"100ms").build();
+  Settings settings=Settings.builder().put("discovery.type","zen").put(ZenDiscovery.PING_TIMEOUT_SETTING.getKey(),"200ms").put(ElectMasterService.DISCOVERY_ZEN_MINIMUM_MASTER_NODES_SETTING.getKey(),2).put(DiscoverySettings.COMMIT_TIMEOUT_SETTING.getKey(),"100ms").build();
   internalCluster().startNodesAsync(3,settings).get();
   ensureGreen();
   final String master=internalCluster().getMasterName();
@@ -7,7 +7,6 @@
   otherNodes.remove(master);
   NetworkDisruption partition=new NetworkDisruption(new TwoPartitions(Collections.singleton(master),otherNodes),new NetworkDelay(TimeValue.timeValueMinutes(1)));
   internalCluster().setDisruptionScheme(partition);
-  partition.startDisrupting();
   final CountDownLatch latch=new CountDownLatch(1);
   final AtomicReference<Exception> failure=new AtomicReference<>();
   logger.debug("--> submitting for cluster state to be rejected");
@@ -17,6 +16,8 @@
       latch.countDown();
     }
     @Override public ClusterState execute(    ClusterState currentState) throws Exception {
+      logger.debug("--> starting the disruption, preventing cluster state publishing");
+      partition.startDisrupting();
       MetaData.Builder metaData=MetaData.builder(currentState.metaData()).persistentSettings(Settings.builder().put(currentState.metaData().persistentSettings()).put("_SHOULD_NOT_BE_THERE_",true).build());
       return ClusterState.builder(currentState).metaData(metaData).build();
     }

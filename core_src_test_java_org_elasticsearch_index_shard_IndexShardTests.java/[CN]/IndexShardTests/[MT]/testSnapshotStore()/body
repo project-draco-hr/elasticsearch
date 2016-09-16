@@ -1,15 +1,8 @@
 {
-  createIndex("test");
-  ensureGreen();
-  IndicesService indicesService=getInstanceFromNode(IndicesService.class);
-  IndexService test=indicesService.indexService(resolveIndex("test"));
-  final IndexShard shard=test.getShardOrNull(0);
-  client().prepareIndex("test","test","0").setSource("{}").setRefreshPolicy(randomBoolean() ? IMMEDIATE : NONE).get();
-  client().admin().indices().prepareFlush().get();
-  ShardRouting routing=shard.routingEntry();
-  test.removeShard(0,"b/c simon says so");
-  routing=routing.reinitializePrimaryShard();
-  IndexShard newShard=test.createShard(routing);
+  final IndexShard shard=newStartedShard(true);
+  indexDoc(shard,"test","0");
+  flushShard(shard);
+  final IndexShard newShard=reinitShard(shard);
   DiscoveryNode localNode=new DiscoveryNode("foo",LocalTransportAddress.buildUnique(),emptyMap(),emptySet(),Version.CURRENT);
   Store.MetadataSnapshot snapshot=newShard.snapshotStoreMetadata();
   assertThat(snapshot.getSegmentsFile().name(),equalTo("segments_2"));
@@ -19,10 +12,11 @@
   assertTrue(newShard.recoverFromStore());
   snapshot=newShard.snapshotStoreMetadata();
   assertThat(snapshot.getSegmentsFile().name(),equalTo("segments_2"));
-  newShard.updateRoutingEntry(getInitializingShardRouting(routing).moveToStarted());
+  newShard.updateRoutingEntry(newShard.routingEntry().moveToStarted());
   snapshot=newShard.snapshotStoreMetadata();
   assertThat(snapshot.getSegmentsFile().name(),equalTo("segments_2"));
   newShard.close("test",false);
   snapshot=newShard.snapshotStoreMetadata();
   assertThat(snapshot.getSegmentsFile().name(),equalTo("segments_2"));
+  closeShards(newShard);
 }

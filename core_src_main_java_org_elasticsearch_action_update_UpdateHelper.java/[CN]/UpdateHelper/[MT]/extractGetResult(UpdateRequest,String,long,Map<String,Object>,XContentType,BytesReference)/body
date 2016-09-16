@@ -1,12 +1,12 @@
 {
-  if (request.fields() == null || request.fields().length == 0) {
+  if ((request.fields() == null || request.fields().length == 0) && (request.fetchSource() == null || request.fetchSource().fetchSource() == false)) {
     return null;
   }
+  SourceLookup sourceLookup=new SourceLookup();
+  sourceLookup.setSource(source);
   boolean sourceRequested=false;
   Map<String,GetField> fields=null;
   if (request.fields() != null && request.fields().length > 0) {
-    SourceLookup sourceLookup=new SourceLookup();
-    sourceLookup.setSource(source);
     for (    String field : request.fields()) {
       if (field.equals("_source")) {
         sourceRequested=true;
@@ -26,5 +26,23 @@
       }
     }
   }
-  return new GetResult(concreteIndex,request.type(),request.id(),version,true,sourceRequested ? sourceAsBytes : null,fields);
+  BytesReference sourceFilteredAsBytes=sourceAsBytes;
+  if (request.fetchSource() != null && request.fetchSource().fetchSource()) {
+    sourceRequested=true;
+    if (request.fetchSource().includes().length > 0 || request.fetchSource().excludes().length > 0) {
+      Object value=sourceLookup.filter(request.fetchSource().includes(),request.fetchSource().excludes());
+      try {
+        final int initialCapacity=Math.min(1024,sourceAsBytes.length());
+        BytesStreamOutput streamOutput=new BytesStreamOutput(initialCapacity);
+        try (XContentBuilder builder=new XContentBuilder(sourceContentType.xContent(),streamOutput)){
+          builder.value(value);
+          sourceFilteredAsBytes=builder.bytes();
+        }
+       }
+ catch (      IOException e) {
+        throw new ElasticsearchException("Error filtering source",e);
+      }
+    }
+  }
+  return new GetResult(concreteIndex,request.type(),request.id(),version,true,sourceRequested ? sourceFilteredAsBytes : null,fields);
 }

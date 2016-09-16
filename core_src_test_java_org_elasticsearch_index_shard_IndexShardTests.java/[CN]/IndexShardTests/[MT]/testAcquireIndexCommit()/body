@@ -1,24 +1,21 @@
 {
-  createIndex("test");
-  ensureGreen();
-  IndicesService indicesService=getInstanceFromNode(IndicesService.class);
-  IndexService test=indicesService.indexService(resolveIndex("test"));
-  final IndexShard shard=test.getShardOrNull(0);
+  final IndexShard shard=newStartedShard();
   int numDocs=randomInt(20);
   for (int i=0; i < numDocs; i++) {
-    client().prepareIndex("test","type","id_" + i).setSource("{}").get();
+    indexDoc(shard,"type","id_" + i);
   }
   final boolean flushFirst=randomBoolean();
   IndexCommit commit=shard.acquireIndexCommit(flushFirst);
   int moreDocs=randomInt(20);
   for (int i=0; i < moreDocs; i++) {
-    client().prepareIndex("test","type","id_" + numDocs + i).setSource("{}").get();
+    indexDoc(shard,"type","id_" + numDocs + i);
   }
-  shard.flush(new FlushRequest("index"));
+  flushShard(shard);
   try (IndexReader reader=DirectoryReader.open(commit)){
     assertThat(reader.numDocs(),equalTo(flushFirst ? numDocs : 0));
   }
    shard.releaseIndexCommit(commit);
-  shard.flush(new FlushRequest("index").force(true));
+  flushShard(shard,true);
   assertThat(DirectoryReader.listCommits(shard.store().directory()),hasSize(1));
+  closeShards(shard);
 }

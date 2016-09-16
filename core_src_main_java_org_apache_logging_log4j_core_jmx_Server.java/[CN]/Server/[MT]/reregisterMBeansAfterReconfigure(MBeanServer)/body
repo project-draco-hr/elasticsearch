@@ -1,0 +1,35 @@
+{
+  if (isJmxDisabled()) {
+    LOGGER.debug("JMX disabled for log4j2. Not registering MBeans.");
+    return;
+  }
+  try {
+    final ContextSelector selector=getContextSelector();
+    if (selector == null) {
+      LOGGER.debug("Could not register MBeans: no ContextSelector found.");
+      return;
+    }
+    LOGGER.trace("Reregistering MBeans after reconfigure. Selector={}",selector);
+    final List<LoggerContext> contexts=selector.getLoggerContexts();
+    int i=0;
+    for (    final LoggerContext ctx : contexts) {
+      LOGGER.trace("Reregistering context ({}/{}): '{}' {}",++i,contexts.size(),ctx.getName(),ctx);
+      unregisterLoggerContext(ctx.getName(),mbs);
+      final LoggerContextAdmin mbean=new LoggerContextAdmin(ctx,executor);
+      register(mbs,mbean,mbean.getObjectName());
+      if (ctx instanceof AsyncLoggerContext) {
+        final RingBufferAdmin rbmbean=((AsyncLoggerContext)ctx).createRingBufferAdmin();
+        if (rbmbean.getBufferSize() > 0) {
+          register(mbs,rbmbean,rbmbean.getObjectName());
+        }
+      }
+      registerStatusLogger(ctx.getName(),mbs,executor);
+      registerContextSelector(ctx.getName(),selector,mbs,executor);
+      registerLoggerConfigs(ctx,mbs,executor);
+      registerAppenders(ctx,mbs,executor);
+    }
+  }
+ catch (  final Exception ex) {
+    LOGGER.error("Could not register mbeans",ex);
+  }
+}

@@ -1,11 +1,13 @@
 {
-  try (TransportClient client=new MockTransportClient(Settings.builder().put("client.transport.sniff",true).put("cluster.name","cluster1").put("node.name","transport_client_" + this.getTestName() + "_1").put("client.transport.nodes_sampler_interval","1s").put(HEADER_SETTINGS).put(Environment.PATH_HOME_SETTING.getKey(),createTempDir().toString()).build(),InternalTransportService.TestPlugin.class)){
-    client.addTransportAddress(address);
-    InternalTransportService service=(InternalTransportService)client.injector.getInstance(TransportService.class);
-    if (!service.clusterStateLatch.await(5,TimeUnit.SECONDS)) {
+  try (TransportClient client=new MockTransportClient(Settings.builder().put("client.transport.sniff",true).put("cluster.name","cluster1").put("node.name","transport_client_" + this.getTestName() + "_1").put("client.transport.nodes_sampler_interval","1s").put(HEADER_SETTINGS).put(Environment.PATH_HOME_SETTING.getKey(),createTempDir().toString()).build(),InternalTransportServiceInterceptor.TestPlugin.class)){
+    InternalTransportServiceInterceptor.TestPlugin plugin=client.injector.getInstance(PluginsService.class).filterPlugins(InternalTransportServiceInterceptor.TestPlugin.class).stream().findFirst().get();
+    plugin.instance.threadPool=client.threadPool();
+    plugin.instance.address=transportService.boundAddress().publishAddress();
+    client.addTransportAddress(transportService.boundAddress().publishAddress());
+    if (!plugin.instance.clusterStateLatch.await(5,TimeUnit.SECONDS)) {
       fail("takes way too long to get the cluster state");
     }
     assertThat(client.connectedNodes().size(),is(1));
-    assertThat(client.connectedNodes().get(0).getAddress(),is((TransportAddress)address));
+    assertThat(client.connectedNodes().get(0).getAddress(),is(transportService.boundAddress().publishAddress()));
   }
  }
