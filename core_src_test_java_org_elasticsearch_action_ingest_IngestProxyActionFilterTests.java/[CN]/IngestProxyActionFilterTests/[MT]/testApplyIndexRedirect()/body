@@ -1,2 +1,27 @@
 {
+  Task task=mock(Task.class);
+  ActionListener actionListener=mock(ActionListener.class);
+  ActionFilterChain actionFilterChain=mock(ActionFilterChain.class);
+  int totalNodes=randomIntBetween(2,5);
+  AtomicBoolean run=new AtomicBoolean(false);
+  IngestProxyActionFilter filter=buildFilter(randomIntBetween(1,totalNodes - 1),totalNodes,new TransportInterceptor(){
+    @Override public AsyncSender interceptSender(    AsyncSender sender){
+      return new AsyncSender(){
+        @Override public <T extends TransportResponse>void sendRequest(        DiscoveryNode node,        String action,        TransportRequest request,        TransportRequestOptions options,        TransportResponseHandler<T> handler){
+          assertTrue(run.compareAndSet(false,true));
+          assertTrue(node.isIngestNode());
+          assertEquals(action,IndexAction.NAME);
+          handler.handleResponse((T)new IndexResponse());
+        }
+      }
+;
+    }
+  }
+);
+  IndexRequest indexRequest=new IndexRequest().setPipeline("_id");
+  filter.apply(task,IndexAction.NAME,indexRequest,actionListener,actionFilterChain);
+  verifyZeroInteractions(actionFilterChain);
+  assertTrue(run.get());
+  verify(actionListener).onResponse(any(IndexResponse.class));
+  verify(actionListener,never()).onFailure(any(TransportException.class));
 }

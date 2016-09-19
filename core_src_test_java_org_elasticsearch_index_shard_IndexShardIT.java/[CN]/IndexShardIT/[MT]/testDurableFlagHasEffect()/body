@@ -1,0 +1,26 @@
+{
+  createIndex("test");
+  ensureGreen();
+  client().prepareIndex("test","bar","1").setSource("{}").get();
+  IndicesService indicesService=getInstanceFromNode(IndicesService.class);
+  IndexService test=indicesService.indexService(resolveIndex("test"));
+  IndexShard shard=test.getShardOrNull(0);
+  setDurability(shard,Translog.Durability.REQUEST);
+  assertFalse(ShardUtilsTests.getShardEngine(shard).getTranslog().syncNeeded());
+  setDurability(shard,Translog.Durability.ASYNC);
+  client().prepareIndex("test","bar","2").setSource("{}").get();
+  assertTrue(ShardUtilsTests.getShardEngine(shard).getTranslog().syncNeeded());
+  setDurability(shard,Translog.Durability.REQUEST);
+  client().prepareDelete("test","bar","1").get();
+  assertFalse(ShardUtilsTests.getShardEngine(shard).getTranslog().syncNeeded());
+  setDurability(shard,Translog.Durability.ASYNC);
+  client().prepareDelete("test","bar","2").get();
+  assertTrue(ShardUtilsTests.getShardEngine(shard).getTranslog().syncNeeded());
+  setDurability(shard,Translog.Durability.REQUEST);
+  assertNoFailures(client().prepareBulk().add(client().prepareIndex("test","bar","3").setSource("{}")).add(client().prepareDelete("test","bar","1")).get());
+  assertFalse(ShardUtilsTests.getShardEngine(shard).getTranslog().syncNeeded());
+  setDurability(shard,Translog.Durability.ASYNC);
+  assertNoFailures(client().prepareBulk().add(client().prepareIndex("test","bar","4").setSource("{}")).add(client().prepareDelete("test","bar","3")).get());
+  setDurability(shard,Translog.Durability.REQUEST);
+  assertTrue(ShardUtilsTests.getShardEngine(shard).getTranslog().syncNeeded());
+}

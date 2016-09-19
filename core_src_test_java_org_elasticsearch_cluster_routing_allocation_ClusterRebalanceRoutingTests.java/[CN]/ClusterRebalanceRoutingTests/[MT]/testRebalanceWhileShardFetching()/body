@@ -14,16 +14,14 @@
   ClusterState clusterState=ClusterState.builder(org.elasticsearch.cluster.ClusterName.CLUSTER_NAME_SETTING.getDefault(Settings.EMPTY)).metaData(metaData).routingTable(initialRoutingTable).build();
   logger.info("start two nodes");
   clusterState=ClusterState.builder(clusterState).nodes(DiscoveryNodes.builder().add(newNode("node1"))).build();
-  RoutingAllocation.Result routingResult=strategy.reroute(clusterState,"reroute");
-  clusterState=ClusterState.builder(clusterState).routingResult(routingResult).build();
+  clusterState=strategy.reroute(clusterState,"reroute");
   for (int i=0; i < clusterState.routingTable().index("test").shards().size(); i++) {
     assertThat(clusterState.routingTable().index("test").shard(i).shards().size(),equalTo(1));
     assertThat(clusterState.routingTable().index("test").shard(i).primaryShard().state(),equalTo(INITIALIZING));
   }
   logger.debug("start all the primary shards for test");
   RoutingNodes routingNodes=clusterState.getRoutingNodes();
-  routingResult=strategy.applyStartedShards(clusterState,routingNodes.shardsWithState("test",INITIALIZING));
-  clusterState=ClusterState.builder(clusterState).routingResult(routingResult).build();
+  clusterState=strategy.applyStartedShards(clusterState,routingNodes.shardsWithState("test",INITIALIZING));
   for (int i=0; i < clusterState.routingTable().index("test").shards().size(); i++) {
     assertThat(clusterState.routingTable().index("test").shard(i).shards().size(),equalTo(1));
     assertThat(clusterState.routingTable().index("test").shard(i).primaryShard().state(),equalTo(STARTED));
@@ -31,8 +29,8 @@
   logger.debug("now, start 1 more node, check that rebalancing will not happen since we have shard sync going on");
   clusterState=ClusterState.builder(clusterState).nodes(DiscoveryNodes.builder(clusterState.nodes()).add(newNode("node2"))).build();
   logger.debug("reroute and check that nothing has changed");
-  routingResult=strategy.reroute(clusterState,"reroute");
-  assertFalse(routingResult.changed());
+  ClusterState resultState=strategy.reroute(clusterState,"reroute");
+  assertThat(resultState,equalTo(clusterState));
   for (int i=0; i < clusterState.routingTable().index("test").shards().size(); i++) {
     assertThat(clusterState.routingTable().index("test").shard(i).shards().size(),equalTo(1));
     assertThat(clusterState.routingTable().index("test").shard(i).primaryShard().state(),equalTo(STARTED));
@@ -43,9 +41,9 @@
   }
   logger.debug("now set hasFetches to true and reroute we should now see exactly one relocating shard");
   hasFetches.set(false);
-  routingResult=strategy.reroute(clusterState,"reroute");
-  assertTrue(routingResult.changed());
-  clusterState=ClusterState.builder(clusterState).routingResult(routingResult).build();
+  resultState=strategy.reroute(clusterState,"reroute");
+  assertThat(resultState,not(equalTo(clusterState)));
+  clusterState=resultState;
   int numStarted=0;
   int numRelocating=0;
   for (int i=0; i < clusterState.routingTable().index("test").shards().size(); i++) {

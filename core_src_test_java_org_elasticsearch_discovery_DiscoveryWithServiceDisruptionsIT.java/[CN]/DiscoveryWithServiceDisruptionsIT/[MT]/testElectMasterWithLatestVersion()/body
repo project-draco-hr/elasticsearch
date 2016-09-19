@@ -1,0 +1,39 @@
+{
+  configureCluster(3,null,2);
+  final Set<String> nodes=new HashSet<>(internalCluster().startNodesAsync(3).get());
+  ensureStableCluster(3);
+  ServiceDisruptionScheme isolateAllNodes=new NetworkDisruption(new NetworkDisruption.IsolateAllNodes(nodes),new NetworkDisconnect());
+  internalCluster().setDisruptionScheme(isolateAllNodes);
+  logger.info("--> forcing a complete election to make sure \"preferred\" master is elected");
+  isolateAllNodes.startDisrupting();
+  for (  String node : nodes) {
+    assertNoMaster(node);
+  }
+  isolateAllNodes.stopDisrupting();
+  ensureStableCluster(3);
+  final String preferredMasterName=internalCluster().getMasterName();
+  final DiscoveryNode preferredMaster=internalCluster().clusterService(preferredMasterName).localNode();
+  for (  String node : nodes) {
+    DiscoveryNode discoveryNode=internalCluster().clusterService(node).localNode();
+    assertThat(discoveryNode.getId(),greaterThanOrEqualTo(preferredMaster.getId()));
+  }
+  logger.info("--> preferred master is {}",preferredMaster);
+  final Set<String> nonPreferredNodes=new HashSet<>(nodes);
+  nonPreferredNodes.remove(preferredMasterName);
+  final ServiceDisruptionScheme isolatePreferredMaster=new NetworkDisruption(new NetworkDisruption.TwoPartitions(Collections.singleton(preferredMasterName),nonPreferredNodes),new NetworkDisconnect());
+  internalCluster().setDisruptionScheme(isolatePreferredMaster);
+  isolatePreferredMaster.startDisrupting();
+  assertAcked(client(randomFrom(nonPreferredNodes)).admin().indices().prepareCreate("test").setSettings(INDEX_NUMBER_OF_SHARDS_SETTING.getKey(),1,INDEX_NUMBER_OF_REPLICAS_SETTING.getKey(),0));
+  internalCluster().clearDisruptionScheme(false);
+  internalCluster().setDisruptionScheme(isolateAllNodes);
+  logger.info("--> forcing a complete election again");
+  isolateAllNodes.startDisrupting();
+  for (  String node : nodes) {
+    assertNoMaster(node);
+  }
+  isolateAllNodes.stopDisrupting();
+  final ClusterState state=client().admin().cluster().prepareState().get().getState();
+  if (state.metaData().hasIndex("test") == false) {
+    fail("index 'test' was lost. current cluster state: " + state.prettyPrint());
+  }
+}

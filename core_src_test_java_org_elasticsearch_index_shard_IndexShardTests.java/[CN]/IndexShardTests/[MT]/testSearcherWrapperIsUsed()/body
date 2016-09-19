@@ -1,11 +1,8 @@
 {
-  createIndex("test");
-  ensureGreen();
-  IndicesService indicesService=getInstanceFromNode(IndicesService.class);
-  IndexService indexService=indicesService.indexService(resolveIndex("test"));
-  IndexShard shard=indexService.getShardOrNull(0);
-  client().prepareIndex("test","test","0").setSource("{\"foo\" : \"bar\"}").setRefreshPolicy(IMMEDIATE).get();
-  client().prepareIndex("test","test","1").setSource("{\"foobar\" : \"bar\"}").setRefreshPolicy(IMMEDIATE).get();
+  IndexShard shard=newStartedShard(true);
+  indexDoc(shard,"test","0","{\"foo\" : \"bar\"}");
+  indexDoc(shard,"test","1","{\"foobar\" : \"bar\"}");
+  shard.refresh("test");
   Engine.GetResult getResult=shard.get(new Engine.Get(false,new Term(UidFieldMapper.NAME,Uid.createUid("test","1"))));
   assertTrue(getResult.exists());
   assertNotNull(getResult.searcher());
@@ -25,22 +22,19 @@
     }
   }
 ;
-  shard.close("simon says",true);
-  IndexShard newShard=reinitWithWrapper(indexService,shard,wrapper);
-  try {
-    try (Engine.Searcher searcher=newShard.acquireSearcher("test")){
-      TopDocs search=searcher.searcher().search(new TermQuery(new Term("foo","bar")),10);
-      assertEquals(search.totalHits,0);
-      search=searcher.searcher().search(new TermQuery(new Term("foobar","bar")),10);
-      assertEquals(search.totalHits,1);
-    }
-     getResult=newShard.get(new Engine.Get(false,new Term(UidFieldMapper.NAME,Uid.createUid("test","1"))));
-    assertTrue(getResult.exists());
-    assertNotNull(getResult.searcher());
-    assertTrue(getResult.searcher().reader() instanceof FieldMaskingReader);
-    getResult.release();
+  closeShards(shard);
+  IndexShard newShard=newShard(ShardRoutingHelper.reinitPrimary(shard.routingEntry()),shard.shardPath(),shard.indexSettings().getIndexMetaData(),wrapper);
+  recoveryShardFromStore(newShard);
+  try (Engine.Searcher searcher=newShard.acquireSearcher("test")){
+    TopDocs search=searcher.searcher().search(new TermQuery(new Term("foo","bar")),10);
+    assertEquals(search.totalHits,0);
+    search=searcher.searcher().search(new TermQuery(new Term("foobar","bar")),10);
+    assertEquals(search.totalHits,1);
   }
-  finally {
-    newShard.close("just do it",randomBoolean());
-  }
+   getResult=newShard.get(new Engine.Get(false,new Term(UidFieldMapper.NAME,Uid.createUid("test","1"))));
+  assertTrue(getResult.exists());
+  assertNotNull(getResult.searcher());
+  assertTrue(getResult.searcher().reader() instanceof FieldMaskingReader);
+  getResult.release();
+  closeShards(newShard);
 }

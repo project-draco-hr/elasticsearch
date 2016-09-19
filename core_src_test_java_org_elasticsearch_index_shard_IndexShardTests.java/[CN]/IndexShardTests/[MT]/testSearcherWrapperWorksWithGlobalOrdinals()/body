@@ -1,0 +1,38 @@
+{
+  IndexSearcherWrapper wrapper=new IndexSearcherWrapper(){
+    @Override public DirectoryReader wrap(    DirectoryReader reader) throws IOException {
+      return new FieldMaskingReader("foo",reader);
+    }
+    @Override public IndexSearcher wrap(    IndexSearcher searcher) throws EngineException {
+      return searcher;
+    }
+  }
+;
+  Settings settings=Settings.builder().put(IndexMetaData.SETTING_VERSION_CREATED,Version.CURRENT).put(IndexMetaData.SETTING_NUMBER_OF_REPLICAS,0).put(IndexMetaData.SETTING_NUMBER_OF_SHARDS,1).build();
+  IndexMetaData metaData=IndexMetaData.builder("test").putMapping("test","{ \"properties\": { \"foo\":  { \"type\": \"text\", \"fielddata\": true }}}").settings(settings).primaryTerm(0,1).build();
+  IndexShard shard=newShard(new ShardId(metaData.getIndex(),0),true,"n1",metaData,wrapper);
+  recoveryShardFromStore(shard);
+  indexDoc(shard,"test","0","{\"foo\" : \"bar\"}");
+  shard.refresh("created segment 1");
+  indexDoc(shard,"test","1","{\"foobar\" : \"bar\"}");
+  shard.refresh("created segment 2");
+  MappedFieldType foo=shard.mapperService().fullName("foo");
+  IndexFieldData.Global ifd=shard.indexFieldDataService().getForField(foo);
+  FieldDataStats before=shard.fieldData().stats("foo");
+  assertThat(before.getMemorySizeInBytes(),equalTo(0L));
+  FieldDataStats after=null;
+  try (Engine.Searcher searcher=shard.acquireSearcher("test")){
+    assertThat("we have to have more than one segment",searcher.getDirectoryReader().leaves().size(),greaterThan(1));
+    ifd.loadGlobal(searcher.getDirectoryReader());
+    after=shard.fieldData().stats("foo");
+    assertEquals(after.getEvictions(),before.getEvictions());
+    assertThat(after.getMemorySizeInBytes(),equalTo(0L));
+  }
+   assertEquals(shard.fieldData().stats("foo").getEvictions(),before.getEvictions());
+  assertEquals(shard.fieldData().stats("foo").getMemorySizeInBytes(),after.getMemorySizeInBytes());
+  shard.flush(new FlushRequest().force(true).waitIfOngoing(true));
+  shard.refresh("test");
+  assertEquals(shard.fieldData().stats("foo").getMemorySizeInBytes(),before.getMemorySizeInBytes());
+  assertEquals(shard.fieldData().stats("foo").getEvictions(),before.getEvictions());
+  closeShards(shard);
+}

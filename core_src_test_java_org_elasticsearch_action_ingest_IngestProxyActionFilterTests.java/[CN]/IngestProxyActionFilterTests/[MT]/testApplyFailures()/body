@@ -1,2 +1,36 @@
 {
+  Task task=mock(Task.class);
+  ActionListener actionListener=mock(ActionListener.class);
+  ActionFilterChain actionFilterChain=mock(ActionFilterChain.class);
+  int totalNodes=randomIntBetween(2,5);
+  String requestAction;
+  ActionRequest request;
+  if (randomBoolean()) {
+    requestAction=IndexAction.NAME;
+    request=new IndexRequest().setPipeline("_id");
+  }
+ else {
+    requestAction=BulkAction.NAME;
+    request=new BulkRequest().add(new IndexRequest().setPipeline("_id"));
+  }
+  AtomicBoolean run=new AtomicBoolean(false);
+  IngestProxyActionFilter filter=buildFilter(randomIntBetween(1,totalNodes - 1),totalNodes,new TransportInterceptor(){
+    @Override public AsyncSender interceptSender(    AsyncSender sender){
+      return new AsyncSender(){
+        @Override public <T extends TransportResponse>void sendRequest(        DiscoveryNode node,        String action,        TransportRequest request,        TransportRequestOptions options,        TransportResponseHandler<T> handler){
+          assertTrue(run.compareAndSet(false,true));
+          assertTrue(node.isIngestNode());
+          assertEquals(action,requestAction);
+          handler.handleException(new TransportException(new IllegalArgumentException()));
+        }
+      }
+;
+    }
+  }
+);
+  filter.apply(task,requestAction,request,actionListener,actionFilterChain);
+  verifyZeroInteractions(actionFilterChain);
+  verify(actionListener).onFailure(any(TransportException.class));
+  verify(actionListener,never()).onResponse(any(TransportResponse.class));
+  assertTrue(run.get());
 }
