@@ -1,2 +1,41 @@
 {
+  final ReleasableBytesStreamOutput out=new ReleasableBytesStreamOutput(bigArrays);
+  try {
+    final BufferedChecksumStreamOutput checksumStreamOutput=new BufferedChecksumStreamOutput(out);
+    final long start=out.position();
+    out.skip(Integer.BYTES);
+    writeOperationNoSize(checksumStreamOutput,operation);
+    final long end=out.position();
+    final int operationSize=(int)(end - Integer.BYTES - start);
+    out.seek(start);
+    out.writeInt(operationSize);
+    out.seek(end);
+    final ReleasablePagedBytesReference bytes=out.bytes();
+    try (ReleasableLock lock=readLock.acquire()){
+      ensureOpen();
+      Location location=current.add(bytes);
+      return location;
+    }
+   }
+ catch (  AlreadyClosedException|IOException ex) {
+    try {
+      closeOnTragicEvent(ex);
+    }
+ catch (    Exception inner) {
+      ex.addSuppressed(inner);
+    }
+    throw ex;
+  }
+catch (  Exception e) {
+    try {
+      closeOnTragicEvent(e);
+    }
+ catch (    Exception inner) {
+      e.addSuppressed(inner);
+    }
+    throw new TranslogException(shardId,"Failed to write operation [" + operation + "]",e);
+  }
+ finally {
+    Releasables.close(out.bytes());
+  }
 }

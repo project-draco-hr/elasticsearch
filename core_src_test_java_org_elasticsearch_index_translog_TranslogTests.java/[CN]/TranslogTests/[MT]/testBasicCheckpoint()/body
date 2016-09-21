@@ -10,31 +10,23 @@
     }
   }
   assertEquals(translogOperations,translog.totalOperations());
-  final Translog.Location lastLocation=translog.add(new Translog.Index("test","" + translogOperations,Integer.toString(translogOperations).getBytes(Charset.forName("UTF-8"))));
+  translog.add(new Translog.Index("test","" + translogOperations,Integer.toString(translogOperations).getBytes(Charset.forName("UTF-8"))));
   final Checkpoint checkpoint=Checkpoint.read(translog.location().resolve(Translog.CHECKPOINT_FILE_NAME));
   try (final TranslogReader reader=translog.openReader(translog.location().resolve(Translog.getFilename(translog.currentFileGeneration())),checkpoint)){
     assertEquals(lastSynced + 1,reader.totalOperations());
+    Translog.Snapshot snapshot=reader.newSnapshot();
     for (int op=0; op < translogOperations; op++) {
-      Translog.Location location=locations.get(op);
       if (op <= lastSynced) {
-        final Translog.Operation read=reader.read(location);
+        final Translog.Operation read=snapshot.next();
         assertEquals(Integer.toString(op),read.getSource().source.utf8ToString());
       }
  else {
-        try {
-          reader.read(location);
-          fail("read past checkpoint");
-        }
- catch (        EOFException ex) {
-        }
+        Translog.Operation next=snapshot.next();
+        assertNull(next);
       }
     }
-    try {
-      reader.read(lastLocation);
-      fail("read past checkpoint");
-    }
- catch (    EOFException ex) {
-    }
+    Translog.Operation next=snapshot.next();
+    assertNull(next);
   }
    assertEquals(translogOperations + 1,translog.totalOperations());
   translog.close();
