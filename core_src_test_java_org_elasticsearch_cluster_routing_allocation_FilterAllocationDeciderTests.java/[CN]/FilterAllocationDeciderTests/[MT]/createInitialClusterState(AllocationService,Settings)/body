@@ -1,13 +1,32 @@
 {
-  MetaData.Builder metaBuilder=MetaData.builder();
-  metaBuilder.put(IndexMetaData.builder("idx").settings(settings(Version.CURRENT).put(settings)).numberOfShards(1).numberOfReplicas(0));
-  MetaData metaData=metaBuilder.build();
+  boolean shrinkIndex=randomBoolean();
+  MetaData.Builder metaData=MetaData.builder();
+  final Settings.Builder indexSettings=settings(Version.CURRENT).put(settings);
+  final IndexMetaData sourceIndex;
+  if (shrinkIndex) {
+    sourceIndex=IndexMetaData.builder("sourceIndex").settings(settings(Version.CURRENT)).numberOfShards(2).numberOfReplicas(0).build();
+    metaData.put(sourceIndex,false);
+    indexSettings.put(INDEX_SHRINK_SOURCE_UUID.getKey(),sourceIndex.getIndexUUID());
+    indexSettings.put(INDEX_SHRINK_SOURCE_NAME.getKey(),sourceIndex.getIndex().getName());
+  }
+ else {
+    sourceIndex=null;
+  }
+  final IndexMetaData indexMetaData=IndexMetaData.builder("idx").settings(indexSettings).numberOfShards(1).numberOfReplicas(1).build();
+  metaData.put(indexMetaData,false);
   RoutingTable.Builder routingTableBuilder=RoutingTable.builder();
-  routingTableBuilder.addAsNew(metaData.index("idx"));
+  if (shrinkIndex) {
+    routingTableBuilder.addAsFromCloseToOpen(sourceIndex);
+    routingTableBuilder.addAsNew(indexMetaData);
+  }
+  if (randomBoolean()) {
+    routingTableBuilder.addAsNew(indexMetaData);
+  }
+ else {
+    routingTableBuilder.addAsRestore(indexMetaData,new RecoverySource.SnapshotRecoverySource(new Snapshot("repository",new SnapshotId("snapshot_name","snapshot_uuid")),Version.CURRENT,indexMetaData.getIndex().getName()));
+  }
   RoutingTable routingTable=routingTableBuilder.build();
   ClusterState clusterState=ClusterState.builder(org.elasticsearch.cluster.ClusterName.CLUSTER_NAME_SETTING.getDefault(Settings.EMPTY)).metaData(metaData).routingTable(routingTable).build();
   clusterState=ClusterState.builder(clusterState).nodes(DiscoveryNodes.builder().add(newNode("node1")).add(newNode("node2"))).build();
-  routingTable=service.reroute(clusterState,"reroute",false).routingTable();
-  clusterState=ClusterState.builder(clusterState).routingTable(routingTable).build();
-  return clusterState;
+  return service.reroute(clusterState,"reroute",false);
 }

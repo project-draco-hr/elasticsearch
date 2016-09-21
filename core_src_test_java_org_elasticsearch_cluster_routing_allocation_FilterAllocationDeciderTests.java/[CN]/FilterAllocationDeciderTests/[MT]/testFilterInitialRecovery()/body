@@ -1,6 +1,6 @@
 {
   FilterAllocationDecider filterAllocationDecider=new FilterAllocationDecider(Settings.EMPTY,new ClusterSettings(Settings.EMPTY,ClusterSettings.BUILT_IN_CLUSTER_SETTINGS));
-  AllocationDeciders allocationDeciders=new AllocationDeciders(Settings.EMPTY,Collections.singleton(filterAllocationDecider));
+  AllocationDeciders allocationDeciders=new AllocationDeciders(Settings.EMPTY,Arrays.asList(filterAllocationDecider,new ReplicaAfterPrimaryActiveAllocationDecider(Settings.EMPTY)));
   AllocationService service=new AllocationService(Settings.builder().build(),allocationDeciders,NoopGatewayAllocator.INSTANCE,new BalancedShardsAllocator(Settings.EMPTY),EmptyClusterInfoService.INSTANCE);
   ClusterState state=createInitialClusterState(service,Settings.builder().put("index.routing.allocation.initial_recovery._id","node2").build());
   RoutingTable routingTable=state.routingTable();
@@ -11,16 +11,18 @@
   assertEquals(routingTable.index("idx").shard(0).shards().get(0).state(),UNASSIGNED);
   assertNull(routingTable.index("idx").shard(0).shards().get(0).currentNodeId());
   RoutingAllocation allocation=new RoutingAllocation(allocationDeciders,state.getRoutingNodes(),state,null,0,false);
-  assertEquals(filterAllocationDecider.canAllocate(routingTable.index("idx").shard(0).shards().get(0),state.getRoutingNodes().node("node2"),allocation),Decision.YES);
-  assertEquals(filterAllocationDecider.canAllocate(routingTable.index("idx").shard(0).shards().get(0),state.getRoutingNodes().node("node1"),allocation),Decision.NO);
+  assertEquals(filterAllocationDecider.canAllocate(routingTable.index("idx").shard(0).primaryShard(),state.getRoutingNodes().node("node2"),allocation),Decision.YES);
+  assertEquals(filterAllocationDecider.canAllocate(routingTable.index("idx").shard(0).primaryShard(),state.getRoutingNodes().node("node1"),allocation),Decision.NO);
   state=service.reroute(state,"try allocate again");
   routingTable=state.routingTable();
-  assertEquals(routingTable.index("idx").shard(0).shards().get(0).state(),INITIALIZING);
-  assertEquals(routingTable.index("idx").shard(0).shards().get(0).currentNodeId(),"node2");
-  state=service.applyStartedShards(state,routingTable.index("idx").shard(0).shards());
+  assertEquals(routingTable.index("idx").shard(0).primaryShard().state(),INITIALIZING);
+  assertEquals(routingTable.index("idx").shard(0).primaryShard().currentNodeId(),"node2");
+  state=service.applyStartedShards(state,routingTable.index("idx").shard(0).shardsWithState(INITIALIZING));
   routingTable=state.routingTable();
-  assertEquals(routingTable.index("idx").shard(0).shards().get(0).state(),STARTED);
-  assertEquals(routingTable.index("idx").shard(0).shards().get(0).currentNodeId(),"node2");
+  assertEquals(routingTable.index("idx").shard(0).primaryShard().state(),STARTED);
+  assertEquals(routingTable.index("idx").shard(0).primaryShard().currentNodeId(),"node2");
+  assertEquals(routingTable.index("idx").shard(0).replicaShards().get(0).state(),INITIALIZING);
+  assertEquals(routingTable.index("idx").shard(0).replicaShards().get(0).currentNodeId(),"node1");
   state=service.applyFailedShard(state,routingTable.index("idx").shard(0).shards().get(0));
   routingTable=state.routingTable();
   assertEquals(routingTable.index("idx").shard(0).shards().get(0).state(),INITIALIZING);
