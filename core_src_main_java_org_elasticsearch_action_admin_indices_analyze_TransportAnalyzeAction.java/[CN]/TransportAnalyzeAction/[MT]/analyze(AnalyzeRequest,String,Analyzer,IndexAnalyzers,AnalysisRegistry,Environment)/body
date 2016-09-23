@@ -1,0 +1,50 @@
+{
+  boolean closeAnalyzer=false;
+  if (analyzer == null && request.analyzer() != null) {
+    if (indexAnalyzers == null) {
+      analyzer=analysisRegistry.getAnalyzer(request.analyzer());
+      if (analyzer == null) {
+        throw new IllegalArgumentException("failed to find global analyzer [" + request.analyzer() + "]");
+      }
+    }
+ else {
+      analyzer=indexAnalyzers.get(request.analyzer());
+      if (analyzer == null) {
+        throw new IllegalArgumentException("failed to find analyzer [" + request.analyzer() + "]");
+      }
+    }
+  }
+ else   if (request.tokenizer() != null) {
+    final IndexSettings indexSettings=indexAnalyzers == null ? null : indexAnalyzers.getIndexSettings();
+    TokenizerFactory tokenizerFactory=parseTokenizerFactory(request,indexAnalyzers,analysisRegistry,environment);
+    TokenFilterFactory[] tokenFilterFactories=new TokenFilterFactory[0];
+    tokenFilterFactories=getTokenFilterFactories(request,indexSettings,analysisRegistry,environment,tokenFilterFactories);
+    CharFilterFactory[] charFilterFactories=new CharFilterFactory[0];
+    charFilterFactories=getCharFilterFactories(request,indexSettings,analysisRegistry,environment,charFilterFactories);
+    analyzer=new CustomAnalyzer(tokenizerFactory,charFilterFactories,tokenFilterFactories);
+    closeAnalyzer=true;
+  }
+ else   if (analyzer == null) {
+    if (indexAnalyzers == null) {
+      analyzer=analysisRegistry.getAnalyzer("standard");
+    }
+ else {
+      analyzer=indexAnalyzers.getDefaultIndexAnalyzer();
+    }
+  }
+  if (analyzer == null) {
+    throw new IllegalArgumentException("failed to find analyzer");
+  }
+  List<AnalyzeResponse.AnalyzeToken> tokens=null;
+  DetailAnalyzeResponse detail=null;
+  if (request.explain()) {
+    detail=detailAnalyze(request,analyzer,field);
+  }
+ else {
+    tokens=simpleAnalyze(request,analyzer,field);
+  }
+  if (closeAnalyzer) {
+    analyzer.close();
+  }
+  return new AnalyzeResponse(tokens,detail);
+}
